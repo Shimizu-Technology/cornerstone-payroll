@@ -38,21 +38,45 @@ for (const width of [390, 1440]) {
     const { year, reviews } = await setup(page);
     await page.goto('/companies/1/employees/31/pay-setup');
     await expect(page.getByText('$35,750.00', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Review annual evidence', exact: true }).click();
-    await page.getByRole('combobox', { name: `${year - 1} sponsoring-employer wages`, exact: true }).selectOption('verified');
-    await page.getByRole('textbox', { name: /^Verified employer Social Security wages/ }).fill('175000');
+    await page.getByRole('button', { name: 'Review yearly records', exact: true }).click();
+    await page.getByRole('combobox', { name: `${year - 1} wages from this employer`, exact: true }).selectOption('verified');
+    await page.getByRole('textbox', { name: /^Verified prior-year employer Social Security wages/ }).fill('175000');
     await page.getByRole('textbox', { name: 'Employer wage evidence reference', exact: true }).fill('Synthetic W-2GU verification');
     await page.getByRole('textbox', { name: 'Evidence reference', exact: true }).fill('Synthetic administrator review');
     await page.getByRole('textbox', { name: 'Review note', exact: true }).fill('Verified wages and outside deferrals');
-    await page.getByRole('button', { name: 'Save annual evidence', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('retirement evidence saved');
+    await page.getByRole('button', { name: 'Save verified records', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('retirement records saved');
     await expect(page.getByText(/Roth catch-up is required for this employer/)).toBeVisible();
     expect(reviews[0]).toMatchObject({ prior_year_wage_status: 'verified', prior_year_fica_wages: 175000, tax_year: year });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.getByRole('button', { name: 'Record a new review', exact: true }).click();
     await page.getByRole('textbox', { name: 'Review note', exact: true }).fill('Second verification retained');
-    await page.getByRole('button', { name: 'Save annual evidence', exact: true }).click();
+    await page.getByRole('button', { name: 'Save verified records', exact: true }).click();
     await expect(page.getByText('Previous evidence reviews', { exact: true })).toBeVisible();
     expect(reviews).toHaveLength(2);
+  });
+}
+
+for (const width of [390, 1440]) {
+  test(`keeps a contribution error visible at the top after submitting a long form at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await setup(page);
+    await page.goto('/companies/1/employees/31/pay-setup');
+    await page.getByRole('button', { name: 'Record contribution change', exact: true }).click();
+    await page.getByRole('button', { name: 'Save contribution change', exact: true }).click();
+    const toast = page.locator('[data-feedback-portal] [role="alert"]');
+    await expect(toast).toContainText('Choose the first pay date');
+    await expect(toast).toBeVisible();
+    expect(await page.evaluate(() => Math.max(window.scrollY, ...Array.from(document.querySelectorAll("*"), (element) => element.scrollTop)))).toBeGreaterThan(500);
+    const position = await toast.boundingBox();
+    expect(position?.y).toBeGreaterThanOrEqual(0);
+    expect((position?.y || 0) + (position?.height || 0)).toBeLessThan(900);
+    await page.getByRole('button', { name: /Dismiss notification: Choose the first pay date/ }).click();
+    await expect(toast).toHaveCount(0);
+    await page.getByRole('button', { name: 'Save contribution change', exact: true }).click();
+    await expect(toast).toContainText('Choose the first pay date');
+    await expect(toast).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Save contribution change', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   });
 }

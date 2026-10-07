@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
@@ -16,7 +17,7 @@ type Step = 'upload' | 'review' | 'done';
 export function TimecardImportModal({ open, onClose, payPeriodId, onImportComplete }: TimecardImportModalProps) {
   const [step, setStep] = useState<Step>('upload');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [preview, setPreview] = useState<TimecardImportPreviewRow[]>([]);
   const [allEmployees, setAllEmployees] = useState<{ id: number; name: string }[]>([]);
   const [mappings, setMappings] = useState<Map<number, number | null>>(new Map());
@@ -32,7 +33,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
     setMappings(new Map());
     setResult(null);
     if (fileRef.current) fileRef.current.value = '';
-  }, []);
+  }, [setError]);
 
   const handleClose = () => {
     reset();
@@ -127,7 +128,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {error && (
-            <ActionFeedback tone="error" message={error} />
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
 
           {step === 'upload' && (

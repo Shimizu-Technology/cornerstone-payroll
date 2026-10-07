@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
@@ -48,7 +49,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   const [newDepartments, setNewDepartments] = useState<string[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [result, setResult] = useState<BulkImportApplyResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +63,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
     setResult(null);
     setError(null);
     setLoading(false);
-  }, []);
+  }, [setError]);
 
   const handleClose = () => {
     if (step === 'done') onComplete();
@@ -264,7 +265,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {error && (
-            <ActionFeedback tone="error" message={error}><AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
               <p className="text-sm text-red-700">{error}</p></ActionFeedback>
           )}
 

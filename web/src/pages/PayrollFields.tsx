@@ -1,5 +1,6 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -61,9 +62,9 @@ export function PayrollFields() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
-  const loadFields = async () => {
+  const loadFields = useCallback(async () => {
     setLoading(true);
     try {
       const res = await payrollFieldsApi.list();
@@ -74,11 +75,11 @@ export function PayrollFields() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setError]);
 
   useEffect(() => {
-    loadFields();
-  }, []);
+    void loadFields();
+  }, [loadFields]);
 
   const setKind = (kind: PayrollFieldKind) => {
     setDraft((prev) => ({
@@ -150,7 +151,7 @@ export function PayrollFields() {
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <Card>
           <CardContent className="space-y-4 py-5">

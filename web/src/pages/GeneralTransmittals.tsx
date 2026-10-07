@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -138,7 +139,7 @@ export function GeneralTransmittals() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const autoOpenedRef = useRef<string | null>(null);
@@ -160,7 +161,7 @@ export function GeneralTransmittals() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     setForm(emptyForm());
@@ -184,7 +185,7 @@ export function GeneralTransmittals() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [setError]);
 
   const startFromPayPeriod = useCallback(async (payPeriodId: number) => {
     setBusy(true);
@@ -200,7 +201,7 @@ export function GeneralTransmittals() {
     } finally {
       setBusy(false);
     }
-  }, [loadLists]);
+  }, [loadLists, setError]);
 
   useEffect(() => {
     if (loading) return;
@@ -478,7 +479,7 @@ export function GeneralTransmittals() {
         </section>
 
         {(error || success) && (
-          <ActionFeedback tone={error ? "error" : "success"} message={error || success || ""} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone={error ? "error" : "success"} message={error || success || ""} />
         )}
 
         <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">

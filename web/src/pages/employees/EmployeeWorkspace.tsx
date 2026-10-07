@@ -1,3 +1,5 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -106,7 +108,7 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewSourceReferences, setReviewSourceReferences] = useState<Record<string, string>>({});
   const [reviewEffectiveDates, setReviewEffectiveDates] = useState<Record<string, string>>({});
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
-  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewError, setReviewError, reviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   useEffect(() => {
     if (loading || !employee || activeTab !== 'pay-setup') return;
@@ -182,7 +184,7 @@ export function EmployeeWorkspace(): ReactElement {
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [load]);
+  }, [load, setReviewError]);
 
   const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
@@ -307,7 +309,7 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {(reviewError || reviewNotice) && <div className={`rounded-2xl border px-4 py-3 text-sm ${reviewError ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-800'}`} role={reviewError ? 'alert' : 'status'}>{reviewError || reviewNotice}</div>}
+        {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
             <span>{payHistoryError}</span>

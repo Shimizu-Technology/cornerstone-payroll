@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, History, Scale } from 'lucide-react';
@@ -69,7 +70,7 @@ export function PayScheduleSettings() {
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -84,7 +85,7 @@ export function PayScheduleSettings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -172,7 +173,7 @@ export function PayScheduleSettings() {
     <div>
       <Header title="Pay Schedule & Workweek" description="Define payroll cadence separately from the employer’s legal overtime workweek" />
       <div className="space-y-6 p-4 pb-36 sm:p-6 sm:pb-32 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
 
         <Card className={needsConfirmation ? 'border-warning-300 bg-warning-50/40' : 'border-success-200 bg-success-50/30'}>

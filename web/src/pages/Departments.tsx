@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Building, Users, Check, X, AlertCircle } from 'lucide-react';
@@ -33,7 +34,7 @@ export function Departments() {
 
   const [departments, setDepartments] = useState<DepartmentWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   
   // New department form
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -61,7 +62,7 @@ export function Departments() {
     } finally {
       setIsLoading(false);
     }
-  }, [companyId, isClient]);
+  }, [companyId, isClient, setError]);
 
   useEffect(() => {
     fetchDepartments();
@@ -177,7 +178,7 @@ export function Departments() {
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Error State */}
         {error && (
-          <ActionFeedback tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
             <p className="text-danger-700">{error}</p></ActionFeedback>
         )}
 

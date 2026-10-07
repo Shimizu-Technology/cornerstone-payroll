@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
@@ -141,13 +142,13 @@ export function Clients() {
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
   const [workspaceBuilderOpen, setWorkspaceBuilderOpen] = useState(false);
   const [workspaceBuilderSourceId, setWorkspaceBuilderSourceId] = useState<number | null>(null);
@@ -161,7 +162,7 @@ export function Clients() {
   const [workspaceConfirmed, setWorkspaceConfirmed] = useState(false);
   const [loadingWorkspacePreview, setLoadingWorkspacePreview] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError, workspaceErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const workspacePreviewRequestIdRef = useRef(0);
   const [showArchivedWorkspaces, setShowArchivedWorkspaces] = useState(false);
   const [archiveWorkspace, setArchiveWorkspace] = useState<CompanyListItem | null>(null);
@@ -172,7 +173,7 @@ export function Clients() {
   const [loadingRehearsal, setLoadingRehearsal] = useState(false);
   const [creatingRehearsal, setCreatingRehearsal] = useState(false);
   const [rehearsalConfirmed, setRehearsalConfirmed] = useState(false);
-  const [rehearsalError, setRehearsalError] = useState<string | null>(null);
+  const [rehearsalError, setRehearsalError, rehearsalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
   const [promotionRehearsalId, setPromotionRehearsalId] = useState<number | null>(null);
   const [promotionPreview, setPromotionPreview] = useState<MigrationPromotionPreview | null>(null);
@@ -180,7 +181,7 @@ export function Clients() {
   const [promotionAction, setPromotionAction] = useState<'backup' | 'apply' | null>(null);
   const [promotionConfirmed, setPromotionConfirmed] = useState(false);
   const [promotionDispositions, setPromotionDispositions] = useState<Record<number, PromotionPaymentDisposition>>({});
-  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionError, setPromotionError, promotionErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [promotionNotice, setPromotionNotice] = useState<string | null>(null);
   const promotionPreviewRequestIdRef = useRef(0);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
@@ -208,7 +209,7 @@ export function Clients() {
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -246,7 +247,7 @@ export function Clients() {
     }).finally(() => {
       if (workspacePreviewRequestIdRef.current === requestId) setLoadingWorkspacePreview(false);
     });
-  }, [workspaceBuilderOpen, workspaceBuilderSourceId, workspaceCopyMode, workspaceExcludedPayrolls, workspaceCutoffPayPeriodId]);
+  }, [workspaceBuilderOpen, workspaceBuilderSourceId, workspaceCopyMode, workspaceExcludedPayrolls, workspaceCutoffPayPeriodId, setWorkspaceError]);
 
   const refreshPromotionPreview = useCallback(async (rehearsalId: number, quiet = false) => {
     const requestId = ++promotionPreviewRequestIdRef.current;
@@ -270,7 +271,7 @@ export function Clients() {
     } finally {
       if (!quiet && promotionPreviewRequestIdRef.current === requestId) setLoadingPromotion(false);
     }
-  }, []);
+  }, [setPromotionError]);
 
   useEffect(() => {
     if (!promotionRehearsalId || promotionPreview?.backup?.status !== 'pending') return;
@@ -611,7 +612,7 @@ export function Clients() {
       <div className="space-y-6 p-4 sm:p-6">
         {/* Error */}
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {promotionNotice && (
           <ActionFeedback tone="success" message={promotionNotice}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
@@ -777,7 +778,7 @@ export function Clients() {
                   </div>
 
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
-                  {workspaceError && <ActionFeedback tone="error" message={workspaceError} />}
+                  {workspaceError && <ActionFeedback retryKey={workspaceErrorFeedbackAttempt} tone="error" message={workspaceError} />}
 
                   <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
                     <button type="button" onClick={() => void handleOpenRehearsal(workspaceBuilderSource)} className="text-left text-sm font-semibold text-warning-800 hover:text-warning-900">Need an exact migration rehearsal and verified promotion instead?</button>
@@ -850,7 +851,7 @@ export function Clients() {
               </div>
             )}
 
-            {rehearsalError && <ActionFeedback tone="error" message={rehearsalError} />}
+            {rehearsalError && <ActionFeedback retryKey={rehearsalErrorFeedbackAttempt} tone="error" message={rehearsalError} />}
             <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
               <Button variant="outline" onClick={handleCloseRehearsal}>Cancel</Button>
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
@@ -1022,7 +1023,7 @@ export function Clients() {
                 </div>
               )}
 
-              {promotionError && <ActionFeedback tone="error" message={promotionError} />}
+              {promotionError && <ActionFeedback retryKey={promotionErrorFeedbackAttempt} tone="error" message={promotionError} />}
               <div className="mt-6 flex flex-col-reverse gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:justify-between">
                 <Button variant="outline" onClick={handleClosePromotion}>Cancel</Button>
                 <div className="flex flex-col gap-3 sm:flex-row">
@@ -1053,7 +1054,7 @@ export function Clients() {
             </h3>
 
             {formError && (
-              <ActionFeedback tone="error" message={formError} />
+              <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />
             )}
 
             {/* Basic Info */}

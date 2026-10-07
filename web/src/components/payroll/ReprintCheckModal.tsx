@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ReprintCheckModal
@@ -28,7 +29,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
   const [reason, setReason] = useState('');
   const [replacementCheckNumber, setReplacementCheckNumber] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const trimmedReason = reason.trim();
   const trimmedReplacementCheckNumber = replacementCheckNumber.trim();
@@ -141,7 +142,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
         </div>
 
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <div className="flex justify-end gap-2 pt-1">

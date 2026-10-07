@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Copy, History, LockKeyhole, ShieldCheck, XCircle } from 'lucide-react';
@@ -93,7 +94,7 @@ export function EmployeeClassificationTransitionDialog({
   onTransitioned,
 }: EmployeeClassificationTransitionDialogProps) {
   const [form, setForm] = useState<TransitionForm>(() => initialTransitionForm(employee));
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [saving, setSaving] = useState(false);
 
@@ -102,7 +103,7 @@ export function EmployeeClassificationTransitionDialog({
     setForm(initialTransitionForm(employee));
     setError(null);
     setFieldErrors({});
-  }, [employee, open]);
+  }, [employee, open, setError]);
 
   const movingToW2 = form.employment_type !== 'contractor';
   const targetLabel = movingToW2
@@ -220,7 +221,7 @@ export function EmployeeClassificationTransitionDialog({
           </div>
 
           {error && (
-            <ActionFeedback tone="error" message={error} />
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

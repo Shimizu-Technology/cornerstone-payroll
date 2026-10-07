@@ -1146,31 +1146,32 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
     ...pendingBatch,
     cutover_review: cutoverReview('verified', false),
   };
-  let listRequestCount = 0;
+  let pollingEnabled = false;
+  let heldRefresh = false;
   let fulfilledListResponseCount = 0;
-  let detailRequestCount = 0;
   let releasePoll: (() => void) | undefined;
   let markPollStarted: (() => void) | undefined;
   const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
   const pollStarted = new Promise<void>((resolve) => { markPollStarted = resolve; });
 
   await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
-    listRequestCount += 1;
-    if (listRequestCount === 2) {
+    // Gate the actual verification refresh after initial loading, rather than
+    // assuming its ordinal among StrictMode/startup requests.
+    if (pollingEnabled && !heldRefresh) {
+      heldRefresh = true;
       markPollStarted?.();
       await pollGate;
     }
     await fulfillJson(route, {
-      data: [withoutCutoverEvidence(listRequestCount >= 2 ? verifiedBatch : pendingBatch), withoutDetailCollections(otherBatch)],
+      data: [withoutCutoverEvidence(heldRefresh ? verifiedBatch : pendingBatch), withoutDetailCollections(otherBatch)],
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
     });
     fulfilledListResponseCount += 1;
   });
   await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
-    if (id === 1) detailRequestCount += 1;
     await fulfillJson(route, {
-      data: id === 1 ? (detailRequestCount >= 2 ? verifiedBatch : pendingBatch) : otherBatch,
+      data: id === 1 ? (pollingEnabled ? verifiedBatch : pendingBatch) : otherBatch,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
   });
@@ -1178,6 +1179,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await page.goto('/historical-payroll');
   const batchSelector = page.locator('#historical-batch');
   await expect(batchSelector).toHaveValue('1');
+  pollingEnabled = true;
   await pollStarted;
 
   await batchSelector.selectOption('2');
@@ -1523,7 +1525,7 @@ test('previews and creates a clean current-payroll roster after history is appli
   expect(submittedAcknowledgement).toEqual({ acknowledgement: 'PREPARE CLEAN CLIENT EMPLOYEES' });
 });
 
-test('keeps a failed employee-preparation request visible in its confirmation dialog', async ({ page }): Promise<void> => {
+test('keeps a failed employee-preparation request visible above its open confirmation dialog', async ({ page }): Promise<void> => {
   await mockApplicationShell(page);
   const current: HistoricalImportDetail = {
     ...detailWithVerifiedSource(1),
@@ -1551,7 +1553,7 @@ test('keeps a failed employee-preparation request visible in its confirmation di
   await dialog.getByRole('button', { name: 'Create employees' }).click();
 
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('alert')).toHaveText('The clean-client preview changed. Refresh and review it again.');
+  await expect(page.locator('[data-feedback-portal] [role=alert]')).toContainText('The clean-client preview changed. Refresh and review it again.');
 });
 
 test('previews and activates exact historical YTD before the first live payroll', async ({ page }): Promise<void> => {
@@ -1645,7 +1647,7 @@ test('keeps a failed historical YTD activation reviewable and ready to retry', a
   await dialog.getByRole('button', { name: 'Activate historical YTD' }).click();
 
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('alert')).toHaveText('The historical YTD preview changed. Build a new preview and review it again.');
+  await expect(page.locator('[data-feedback-portal] [role=alert]')).toContainText('The historical YTD preview changed. Build a new preview and review it again.');
   await expect(acknowledgement).toHaveValue('ACTIVATE VERIFIED HISTORICAL YTD');
 });
 

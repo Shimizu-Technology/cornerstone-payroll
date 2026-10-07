@@ -97,7 +97,7 @@ function FeedbackToast({ entry, dismiss }: { entry: FeedbackEntry; dismiss: (id:
 }
 
 /** Explicit replacement for transient action banners; rich details are preserved. */
-export function ActionFeedback({ tone, message, children }: FeedbackInput) {
+export function ActionFeedback({ tone, message, children, retryKey }: FeedbackInput & { retryKey?: number }) {
   const feedback = useContext(FeedbackContext);
   const owner = useId();
   const content = useRef(children);
@@ -108,7 +108,7 @@ export function ActionFeedback({ tone, message, children }: FeedbackInput) {
     if (!message.trim() || !publish || !release) return;
     publish({ tone, message }, owner, () => content.current);
     return () => release(owner);
-  }, [message, owner, publish, release, tone]);
+  }, [message, owner, publish, release, tone, retryKey]);
   if (feedback || !message.trim()) return null;
   // Standalone tests and server-rendered components retain readable feedback.
   return <div role={tone === 'error' ? 'alert' : 'status'}>{children || message}</div>;

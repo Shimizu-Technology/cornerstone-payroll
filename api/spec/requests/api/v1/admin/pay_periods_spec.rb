@@ -1162,6 +1162,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ variable.id ] }
       expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ variable.id ])
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(variable.full_name)
     end
 
     it "rejects a post-cutover live calculation without changing payroll state" do
@@ -1195,6 +1196,33 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.status).to eq("draft")
       expect(pay_period.payroll_items.pluck(:id)).to eq([ existing_item.id ])
       expect(existing_item.reload.attributes).to eq(original_attributes)
+    end
+
+    it "invalidates an earlier complete calculation and review when recalculation fails, including after reload" do
+      employee.update!(retirement_rate: 0.03)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 0 } }
+      }
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      expect(pay_period.reload).to be_calculated
+      review = pay_period.payroll_review_packages.current.first!
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      original_amounts = item.attributes.slice("gross_pay", "net_pay", "retirement_payment", "roth_retirement_payment")
+      AnnualRetirementLimit.find_by!(tax_year: pay_period.pay_date.year).destroy!
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(employee.full_name)
+      expect(response.parsed_body.dig("pay_period", "status")).to eq("draft")
+      expect(pay_period.reload).to have_attributes(status: "draft", calculated_at: nil, calculated_by_id: nil)
+      expect(review.reload.status).to eq("superseded")
+      expect(item.reload.attributes.slice(*original_amounts.keys)).to eq(original_amounts)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Can only approve a calculated pay period")
+      expect(pay_period.reload).to be_draft
     end
 
     it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
@@ -1557,6 +1585,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("results", "errors", 0, "error")).to eq("Payroll field ID is invalid")
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(employee.full_name)
       expect(pay_period.reload).to be_draft
     end
 

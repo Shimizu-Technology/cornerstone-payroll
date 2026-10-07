@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useLayoutEffect } from 'react';
 import {
@@ -124,7 +125,7 @@ export function PayrollItemEditModal({
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   useLayoutEffect(() => {
     if (item && open) {
@@ -185,7 +186,7 @@ export function PayrollItemEditModal({
       setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
-  }, [item, wageRates, open]);
+  }, [item, wageRates, open, setError]);
 
   if (!item) return null;
 
@@ -383,7 +384,7 @@ export function PayrollItemEditModal({
         </DialogHeader>
 
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <div className="space-y-4 mt-4">

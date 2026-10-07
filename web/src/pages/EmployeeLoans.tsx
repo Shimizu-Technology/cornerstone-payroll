@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, CircleDollarSign, Link2, Plus, ShieldCheck } from 'lucide-react';
@@ -47,7 +48,7 @@ export default function EmployeeLoans() {
     schedule_key: 'new',
     notes: '',
   });
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [additionAmount, setAdditionAmount] = useState('');
   const [additionNotes, setAdditionNotes] = useState('');
@@ -56,7 +57,7 @@ export default function EmployeeLoans() {
   const [recordingAddition, setRecordingAddition] = useState(false);
   const [expandingId, setExpandingId] = useState<number | null>(null);
   const [loanActionId, setLoanActionId] = useState<number | null>(null);
-  const [loanActionError, setLoanActionError] = useState<string | null>(null);
+  const [loanActionError, setLoanActionError, loanActionErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [stopReason, setStopReason] = useState('');
 
   const loadLoans = useCallback(async () => {
@@ -434,7 +435,7 @@ export default function EmployeeLoans() {
                 <button type="button" className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${formData.balance_setup_mode === 'new_loan' ? 'bg-neutral-100 text-primary-800' : 'text-neutral-600'}`} onClick={() => setFormData((previous) => ({ ...previous, balance_setup_mode: 'new_loan' }))}>Start a new loan</button>
               </div>
             )}
-            {formError && <ActionFeedback tone="error" message={formError} />}
+            {formError && <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="space-y-1.5 text-sm font-semibold text-neutral-800">
                 Employee <span className="text-danger-600">*</span>
@@ -573,7 +574,7 @@ export default function EmployeeLoans() {
                     ) : (
                     <>
                     {loanActionError && (
-                      <ActionFeedback tone="error" message={loanActionError} />
+                      <ActionFeedback retryKey={loanActionErrorFeedbackAttempt} tone="error" message={loanActionError} />
                     )}
 
                     <div className={`mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${expandedLoan.tracking_mode === 'balance_tracked' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-blue-200 bg-blue-50 text-blue-950'}`}>

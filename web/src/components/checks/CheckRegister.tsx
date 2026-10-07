@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
@@ -57,7 +58,7 @@ export function CheckRegister({ companyId }: CheckRegisterProps) {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [target, setTarget] = useState<CheckRegisterRow | null>(null);
   const [action, setAction] = useState<ReconciliationAction>('cleared');
 
@@ -72,7 +73,7 @@ export function CheckRegister({ companyId }: CheckRegisterProps) {
     } finally {
       setLoading(false);
     }
-  }, [from, status, to]);
+  }, [from, setError, status, to]);
 
   useEffect(() => {
     void companyId; // Re-fetch after the shared API client switches its company header.
@@ -141,7 +142,7 @@ export function CheckRegister({ companyId }: CheckRegisterProps) {
           </div>
         </div>
 
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {loading ? (
           <div className="py-8 text-center text-sm text-neutral-500">Loading check register…</div>
         ) : rows.length === 0 ? (
@@ -212,7 +213,7 @@ function ReconciliationDialog({ row, action, onClose, onSaved }: { row: CheckReg
   const [evidenceReference, setEvidenceReference] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const title = action === 'cleared' ? 'Record cleared check' : action === 'clearing_reversed' ? 'Correct cleared status' : 'Record replacement needed';
 
   const submit = async (): Promise<void> => {
@@ -265,7 +266,7 @@ function ReconciliationDialog({ row, action, onClose, onSaved }: { row: CheckReg
             This does not issue a second payment. Reissue the employee check from its payroll period, or void and recreate an other payment, so the original history stays intact.
           </div>
         )}
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={() => void submit()} disabled={saving || !valid}>{saving ? 'Saving…' : 'Save Evidence'}</Button>

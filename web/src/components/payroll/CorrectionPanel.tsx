@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-71 / CPR-73: Payroll Correction Panel
@@ -143,7 +144,7 @@ export function CorrectionPanel({
   // ---------- History ----------
   const [historyEvents, setHistoryEvents] = useState<PayPeriodCorrectionEvent[] | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyError, setHistoryError, historyErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   // Whether any modal action is in-flight (used to globally disable all action buttons)
@@ -154,14 +155,7 @@ export function CorrectionPanel({
     setHistoryEvents(null);
     setHistoryOpen(false);
     setHistoryError(null);
-  }, [
-    payPeriod.id,
-    payPeriod.pay_date,
-    payPeriod.updated_at,
-    payPeriod.correction_status,
-    payPeriod.superseded_by_id,
-    payPeriod.voided_at,
-  ]);
+  }, [payPeriod.id, payPeriod.pay_date, payPeriod.updated_at, payPeriod.correction_status, payPeriod.superseded_by_id, payPeriod.voided_at, setHistoryError]);
 
   // ----------------------------------------------------------------
   // Void source period / void correction run
@@ -461,7 +455,7 @@ export function CorrectionPanel({
       </div>
 
       {historyError && (
-        <ActionFeedback tone="error" message={historyError} />
+        <ActionFeedback retryKey={historyErrorFeedbackAttempt} tone="error" message={historyError} />
       )}
 
       {/* ---- Correction History ---- */}

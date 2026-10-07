@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useFeedbackState } from '@/lib/use-feedback-state';
+import { ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { FileCheck2, Pencil } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +37,7 @@ function isCurrentReview(review: HistoricalRetirementReview | undefined, source:
 
 export function EmployeeRetirementYearPanel({ employee, initialYear }: { employee: Employee; initialYear?: number }): ReactElement {
   const { hasCapability } = useAuth();
+  const { notify } = useFeedback();
   const canManage = hasCapability('manage_client_configuration');
   const [year, setYear] = useState(() => initialYear != null && Number.isInteger(initialYear) && initialYear >= 2000 && initialYear <= 2200 ? initialYear : new Date().getFullYear());
   const [records, setRecords] = useState<EmployeeRetirementYearInput[]>([]);
@@ -47,9 +50,10 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const wageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -64,7 +68,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : 'Could not load retirement evidence.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [employee.id, reload]);
+  }, [employee.id, reload, setError]);
 
   const current = records.find((record) => Number(record.tax_year) === year);
   const historicalSource = historicalSources.find((source) => Number(source.tax_year) === year && source.classifications.length > 0);
@@ -79,8 +83,10 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
     .filter((entry) => entry.effective_on <= `${year}-12-31`).sort((a, b) => b.effective_on.localeCompare(a.effective_on))[0];
   const birthYear = employee.date_of_birth ? Number(employee.date_of_birth.slice(0, 4)) : null;
   const age = birthYear ? year - birthYear : null;
-  const wageEvidencePending = !current || current.prior_year_wage_status === 'unknown';
-  const rothUnavailable = annual && current?.prior_year_wage_status === 'verified' && Number(current.prior_year_fica_wages) > Number(annual.roth_catch_up_wage_threshold) && !election?.roth_available;
+  const catchUpAgeEligible = Boolean(election?.eligible !== false && election?.participating !== false && election?.catch_up_enabled && age != null && age >= 50);
+  const wageEvidencePending = year >= 2026 && catchUpAgeEligible && (!current || current.prior_year_wage_status === 'unknown');
+  const rothRequired = year >= 2026 && catchUpAgeEligible && annual && current?.prior_year_wage_status === 'verified' && Number(current.prior_year_fica_wages) > Number(annual.roth_catch_up_wage_threshold);
+  const rothUnavailable = rothRequired && !election?.roth_available;
   const catchUp = annual && election?.catch_up_enabled && age != null && age >= 50 && !rothUnavailable
     ? Number(age >= 60 && age <= 63 ? annual.enhanced_catch_up_limit : annual.catch_up_limit) : 0;
   const ceiling = annual ? Number(annual.elective_deferral_limit) + catchUp : null;
@@ -97,6 +103,11 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
   const save = async (): Promise<void> => {
     if (!draft.source_reference.trim() || !draft.reason.trim()) {
       setError('Add the evidence reference and a review note before saving.');
+      return;
+    }
+    if (draft.prior_year_wage_status === 'verified' && (draft.prior_year_fica_wages == null || !Number.isFinite(draft.prior_year_fica_wages))) {
+      setError('Enter the verified prior-year Social Security wages. A blank amount is unknown; enter zero only if you verified there were no covered wages.');
+      wageInputRef.current?.focus();
       return;
     }
     if (draft.prior_year_wage_status !== 'unknown' && !draft.prior_year_wage_source.trim()) {
@@ -125,6 +136,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
       setRecords((old) => [result.data, ...old]);
       setEditing(false);
       setNotice(`${year} retirement records saved. Recalculate affected draft payroll to use them.`);
+      notify({ tone: 'success', message: `${year} retirement records saved. Recalculate affected draft payroll to use them.` });
     } catch (caught) {
       setError(retirementErrorMessage(caught, 'Could not save retirement evidence.'));
     } finally { setSaving(false); }
@@ -140,14 +152,15 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
     </CardHeader>
     <CardContent className="space-y-5 p-5 sm:p-6">
       {loading ? <p role="status" className="text-sm text-neutral-600">Loading annual evidence…</p> : <>
-        {notice && <p role="status" className="rounded-xl bg-success-50 p-4 text-sm text-success-800">{notice}</p>}
-        {error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"><p>{error}</p>{!editing && <Button className="mt-3" variant="outline" onClick={() => setReload((value) => value + 1)}>Retry loading evidence</Button>}</div>}
+        {notice && <ActionFeedback tone="success" message={notice} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>{!editing && <Button className="mt-3" variant="outline" onClick={() => setReload((value) => value + 1)}>Retry loading evidence</Button>}</ActionFeedback>}
         {!annual && !error && <p className="rounded-xl bg-warning-50 p-4 text-sm leading-6 text-warning-900">Verified annual limits are missing for {year}. A platform administrator must add them in Tax Configuration before retirement payroll can run.</p>}
         {annual && <div className="grid gap-3 sm:grid-cols-3">
           <Value label="IRS regular employee limit" value={formatCurrency(Number(annual.elective_deferral_limit))} />
           <Value label={wageEvidencePending && catchUp > 0 ? 'Potential catch-up — evidence pending' : 'Permitted age-based catch-up'} value={formatCurrency(catchUp)} />
           <Value label={wageEvidencePending && catchUp > 0 ? 'Potential IRS employee ceiling' : 'IRS employee ceiling'} value={formatCurrency(ceiling || 0)} />
         </div>}
+        {!catchUpAgeEligible && <p className="text-sm leading-6 text-neutral-600">Prior-year wages need verification only before age-based catch-up is used. Check yearly records when there are imported contributions, outside-employer contributions, or additional opening balances to account for.</p>}
         <p className="text-sm leading-6 text-neutral-600"><a href="#retirement-plan" className="font-semibold text-primary-700 underline underline-offset-2">Review contribution settings</a> to change the amounts deducted each payroll. Saving yearly records does not change those amounts.</p>
         {annual && <p className="text-xs leading-5 text-neutral-500">Age at year end: {age == null ? 'DOB needs verification' : age}. This preview uses {election ? `the election effective ${election.effective_on}` : 'legacy settings'} at year end; each paycheck uses its actual pay-date election. The ceiling combines Traditional and Roth. Plan restrictions, outside contributions, and available compensation may reduce it.</p>}
         {historicalSource && <fieldset disabled={saving} className={`min-w-0 rounded-xl border p-4 ${historicalReviewed ? 'border-neutral-200 bg-neutral-50' : 'border-warning-200 bg-warning-50'}`} aria-label="Retained historical retirement contributions">
@@ -168,26 +181,26 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
           {!editing && !historicalReviewed && !error && canManage && <Button className="mt-3" variant="outline" onClick={edit}>Review yearly records</Button>}
         </fieldset>}
         {!editing ? <>
-          <div className={`rounded-xl border p-4 text-sm leading-6 ${current && current.prior_year_wage_status !== 'unknown' ? 'border-success-200 bg-success-50 text-success-900' : 'border-warning-200 bg-warning-50 text-warning-900'}`}>
-            <p className="font-semibold">{current?.prior_year_wage_status === 'verified' ? `${year - 1} employer Social Security wages verified: ${formatCurrency(Number(current.prior_year_fica_wages))}` : current?.prior_year_wage_status === 'no_prior_employer_wages' ? `Verified: no covered wages from this employer in ${year - 1}` : `${year - 1} employer wages need verification before catch-up`}</p>
+          <div className={`rounded-xl border p-4 text-sm leading-6 ${current && current.prior_year_wage_status !== 'unknown' ? 'border-success-200 bg-success-50 text-success-900' : wageEvidencePending ? 'border-warning-200 bg-warning-50 text-warning-900' : 'border-neutral-200 bg-neutral-50 text-neutral-700'}`}>
+            <p className="font-semibold">{current?.prior_year_wage_status === 'verified' ? `${year - 1} employer Social Security wages verified: ${formatCurrency(Number(current.prior_year_fica_wages))}` : current?.prior_year_wage_status === 'no_prior_employer_wages' ? `Verified: no covered wages from this employer in ${year - 1}` : wageEvidencePending ? `${year - 1} employer wages need verification before catch-up` : 'Prior-year wages are not recorded. Catch-up wage verification is not needed for this setup.'}</p>
             <p>{current?.prior_year_wage_source || 'Missing history is not treated as zero. Use the sponsoring employer’s wage evidence, including any applicable administrator-directed aggregation.'}</p>
-            {annual && current?.prior_year_wage_status === 'verified' && Number(current.prior_year_fica_wages) > Number(annual.roth_catch_up_wage_threshold) && <p className="mt-2 font-semibold">Roth catch-up is required for this employer. Earlier designated Roth deferrals may satisfy the requirement; ordinary pre-tax deferrals remain permitted.</p>}
+            {rothRequired && <p className="mt-2 font-semibold">Roth catch-up is required for this employer. Earlier designated Roth deferrals may satisfy the requirement; ordinary pre-tax deferrals remain permitted.</p>}
             {rothUnavailable && <p className="mt-2 font-semibold">Catch-up is unavailable until designated Roth support is verified in the retirement election. The regular employee limit still applies.</p>}
-            {annual && <p className="mt-2">For {year}, prior-year covered employer wages above {formatCurrency(Number(annual.roth_catch_up_wage_threshold))} require Roth catch-up treatment.</p>}
+            {annual && year >= 2026 && <p className="mt-2">For {year}, prior-year covered employer wages above {formatCurrency(Number(annual.roth_catch_up_wage_threshold))} require Roth catch-up treatment.</p>}
           </div>
           {current && <><div className="grid gap-3 sm:grid-cols-2"><Value label="Other-employer Traditional deferrals" value={formatCurrency(Number(current.external_traditional_deferrals))} /><Value label="Other-employer Roth deferrals" value={formatCurrency(Number(current.external_roth_deferrals))} /></div>
             <details className="rounded-xl border border-neutral-200 p-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Additional recorded balances</summary><div className="mt-4 grid gap-3 sm:grid-cols-3"><Value label="Eligible compensation" value={formatCurrency(Number(current.eligible_compensation_before_system))} /><Value label="Employer additions" value={formatCurrency(Number(current.employer_additions_before_system))} /><Value label="Non-Roth after-tax" value={formatCurrency(Number(current.non_roth_after_tax_before_system))} /></div><p className="mt-3 text-sm text-neutral-600">Opening balance verification: {current.opening_balances_verified ? 'Confirmed' : 'Not recorded'}.</p></details>
             <p className="break-words text-sm leading-6 text-neutral-600">Evidence: {current.source_reference}<br />Review note: {current.reason}{current.created_at && <><br />Recorded {formatGuamDateTime(current.created_at)}{current.created_by_name ? ` by ${current.created_by_name}` : ''}</>}</p></>}
-          {!error && canManage && (!historicalSource || historicalReviewed) && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record updated yearly records' : 'Review yearly records'}</Button>}
+          {!error && canManage && (!historicalSource || historicalReviewed) && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record a new review' : 'Review yearly records'}</Button>}
         </> : <fieldset disabled={saving} className="space-y-5">
-          <div><p className="text-sm font-semibold text-neutral-900">Prior-year employer wages for catch-up</p><p className="mt-1 text-sm leading-6 text-neutral-600">Verify these wages before catch-up payroll. If they exceed the IRS threshold, catch-up must satisfy the Roth requirement. Ordinary Traditional contributions remain permitted.</p></div>
+          <div><p className="text-sm font-semibold text-neutral-900">Prior-year employer wages for catch-up</p><p className="mt-1 text-sm leading-6 text-neutral-600">Verify these wages before catch-up payroll from 2026 onward. If they exceed the applicable IRS threshold, catch-up must satisfy the Roth requirement. Ordinary Traditional contributions remain permitted.</p></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={`${year - 1} wages from this employer`}><Select value={draft.prior_year_wage_status} onChange={(event) => {
               const status = event.target.value as EmployeeRetirementYearInputDraft['prior_year_wage_status'];
               set('prior_year_wage_status', status);
               if (status !== 'verified') set('prior_year_fica_wages', status === 'unknown' ? null : 0);
             }}><option value="unknown">Not yet verified</option><option value="verified">Verified covered Social Security wages</option><option value="no_prior_employer_wages">Verified no prior-year covered employer wages</option></Select></Field>
-            {draft.prior_year_wage_status === 'verified' && <Field label="Verified prior-year employer Social Security wages" helper="Use the applicable prior-year employer wage record, not household income or Medicare wages."><NumericInput value={draft.prior_year_fica_wages} onValueChange={(value) => set('prior_year_fica_wages', value || 0)} min={0} fixedDecimalsOnBlur={2} /></Field>}
+            {draft.prior_year_wage_status === 'verified' && <Field label="Verified prior-year employer Social Security wages" helper="Use the applicable prior-year employer wage record, not household income or Medicare wages."><NumericInput ref={wageInputRef} emptyValue={null} notifyEmptyOnChange value={draft.prior_year_fica_wages} onValueChange={(value) => set('prior_year_fica_wages', value)} min={0} fixedDecimalsOnBlur={2} /></Field>}
             {draft.prior_year_wage_status !== 'unknown' && <Field label="Employer wage evidence reference"><Input value={draft.prior_year_wage_source} onChange={(event) => set('prior_year_wage_source', event.target.value)} placeholder="W-2GU / administrator verification reference" /></Field>}
           </div>
           <details className="rounded-xl border border-neutral-200 p-4">

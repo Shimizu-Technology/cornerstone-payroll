@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
@@ -274,7 +275,7 @@ export function HistoricalPayroll(): ReactElement {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<HistoricalAction | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
   const [paycheck, setPaycheck] = useState<HistoricalPaycheck | null>(null);
@@ -289,11 +290,11 @@ export function HistoricalPayroll(): ReactElement {
   const [bootstrapApplyOpen, setBootstrapApplyOpen] = useState(false);
   const [bootstrapApplyBatchId, setBootstrapApplyBatchId] = useState<number | null>(null);
   const [bootstrapAcknowledgement, setBootstrapAcknowledgement] = useState('');
-  const [bootstrapApplyError, setBootstrapApplyError] = useState<string | null>(null);
+  const [bootstrapApplyError, setBootstrapApplyError, bootstrapApplyErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [ytdApplyOpen, setYtdApplyOpen] = useState(false);
   const [ytdApplyBatchId, setYtdApplyBatchId] = useState<number | null>(null);
   const [ytdAcknowledgement, setYtdAcknowledgement] = useState('');
-  const [ytdApplyError, setYtdApplyError] = useState<string | null>(null);
+  const [ytdApplyError, setYtdApplyError, ytdApplyErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reportType, setReportType] = useState<HistoricalReportType>('register');
   const [reportYear, setReportYear] = useState<number | undefined>();
   const [reportWorker, setReportWorker] = useState<string | undefined>();
@@ -301,7 +302,7 @@ export function HistoricalPayroll(): ReactElement {
   const [report, setReport] = useState<HistoricalReport | null>(null);
   const [reportMeta, setReportMeta] = useState<PaginationMeta>(EMPTY_META);
   const [reportLoading, setReportLoading] = useState(false);
-  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportError, setReportError, reportErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reportExporting, setReportExporting] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
   const [cutoverDispositions, setCutoverDispositions] = useState<Record<string, string>>({});
   const [cutoverAttestations, setCutoverAttestations] = useState<Record<string, boolean>>({});
@@ -323,7 +324,7 @@ export function HistoricalPayroll(): ReactElement {
 
     setValidationErrors({});
     setError(errorMessage(err, fallback));
-  }, []);
+  }, [setError]);
 
   const selectBatch = useCallback((batchId: number | null): void => {
     const selectionChanged = selectedBatchIdRef.current !== batchId;
@@ -417,7 +418,7 @@ export function HistoricalPayroll(): ReactElement {
     } finally {
       setBatchListLoading(false);
     }
-  }, [handleError, loadList]);
+  }, [handleError, loadList, setError]);
 
   useEffect(() => {
     listRequestIdRef.current += 1;
@@ -459,7 +460,7 @@ export function HistoricalPayroll(): ReactElement {
       detailRequestIdRef.current += 1;
       reportRequestIdRef.current += 1;
     };
-  }, [activeCompanyId, refresh, selectBatch, selectBatchPage]);
+  }, [activeCompanyId, refresh, selectBatch, selectBatchPage, setBootstrapApplyError, setReportError, setYtdApplyError]);
 
   useEffect(() => {
     if (!archive?.applied_batch_count) {
@@ -492,7 +493,7 @@ export function HistoricalPayroll(): ReactElement {
     });
 
     return () => controller.abort();
-  }, [activeCompanyId, archive?.applied_batch_count, reportPage, reportType, reportWorker, reportYear]);
+  }, [activeCompanyId, archive?.applied_batch_count, reportPage, reportType, reportWorker, reportYear, setReportError]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1211,7 +1212,8 @@ export function HistoricalPayroll(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && (
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {error && Object.keys(validationErrors).length > 0 && (
           <div role="alert" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
@@ -1783,7 +1785,7 @@ export function HistoricalPayroll(): ReactElement {
                 </div>
               </div>
 
-              {reportError && <ActionFeedback tone="error" message={reportError} />}
+              {reportError && <ActionFeedback retryKey={reportErrorFeedbackAttempt} tone="error" message={reportError} />}
 
               {reportLoading && !report ? (
                 <div className="grid animate-pulse gap-4 sm:grid-cols-2 xl:grid-cols-4"><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /><div className="h-20 rounded-xl bg-neutral-100" /></div>
@@ -2045,7 +2047,7 @@ export function HistoricalPayroll(): ReactElement {
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">Incorrect Nevada addresses, unverified hire dates, legacy W-4 allowances, unknown obligation balances, and time-off policy are not guessed. They remain clearly flagged for review.</div>
-            {bootstrapApplyError && <ActionFeedback tone="error" message={bootstrapApplyError} />}
+            {bootstrapApplyError && <ActionFeedback retryKey={bootstrapApplyErrorFeedbackAttempt} tone="error" message={bootstrapApplyError} />}
             <div>
               <label htmlFor="bootstrap-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
               <p className="mt-1 font-mono text-xs text-neutral-600">{clientBootstrap?.acknowledgement}</p>
@@ -2067,7 +2069,7 @@ export function HistoricalPayroll(): ReactElement {
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">This does not create historical payroll runs or recalculate QuickBooks checks. Future payroll and pay stubs will include these source-backed balances.</div>
-            {ytdApplyError && <ActionFeedback tone="error" message={ytdApplyError} />}
+            {ytdApplyError && <ActionFeedback retryKey={ytdApplyErrorFeedbackAttempt} tone="error" message={ytdApplyError} />}
             <div>
               <label htmlFor="ytd-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
               <p className="mt-1 font-mono text-xs text-neutral-600">{ytdBridge?.acknowledgement}</p>

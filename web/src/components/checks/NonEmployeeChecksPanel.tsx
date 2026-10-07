@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -101,7 +102,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     reference_number: '',
     check_number: '',
   });
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -111,14 +112,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
   const [generatingFit, setGeneratingFit] = useState(false);
-  const [fitError, setFitError] = useState<string | null>(null);
+  const [fitError, setFitError, fitErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
   const [form500Open, setForm500Open] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
   const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
   const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
-  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
+  const [checkNumberSaveError, setCheckNumberSaveError, checkNumberSaveErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -444,11 +445,11 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           </div>
         </div>
       )}
-      {checkNumberSaveError && <ActionFeedback tone="error" message={checkNumberSaveError} />}
+      {checkNumberSaveError && <ActionFeedback retryKey={checkNumberSaveErrorFeedbackAttempt} tone="error" message={checkNumberSaveError} />}
 
       {showForm && (
         <div className="p-4 border-b bg-blue-50/30">
-          {formError && <ActionFeedback tone="error" message={formError} />}
+          {formError && <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
             <NumericInput
@@ -493,7 +494,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       )}
 
       {fitError && (
-        <ActionFeedback tone="error" message={fitError} />
+        <ActionFeedback retryKey={fitErrorFeedbackAttempt} tone="error" message={fitError} />
       )}
 
       {/* Form 500 callout — anchored to auto_generated_type so renaming the

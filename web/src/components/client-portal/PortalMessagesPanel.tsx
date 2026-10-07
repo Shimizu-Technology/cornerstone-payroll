@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle2, MessageSquare, Paperclip, Send, Wifi } from 'lucide-react';
@@ -48,7 +49,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
   const [selectedThread, setSelectedThread] = useState<ClientPortalThread | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
@@ -71,7 +72,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, setError]);
 
   useEffect(() => {
     void loadThreads();
@@ -120,7 +121,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
     return () => {
       active = false;
     };
-  }, [api, selectedId]);
+  }, [api, selectedId, setError]);
 
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -203,7 +204,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
         </div>
       </CardHeader>
       <CardContent>
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className={`${mobileConversationOpen ? 'hidden lg:block' : 'block'} min-w-0 space-y-4`}>

@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -57,7 +58,7 @@ export function Dashboard(): ReactElement {
     || Boolean(activeCompany?.test_workspace_sealed_at);
   const [loading, setLoading] = useState(true);
   const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
 
   useEffect((): (() => void) => {
@@ -84,7 +85,7 @@ export function Dashboard(): ReactElement {
 
     void loadDashboard();
     return (): void => { cancelled = true; };
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setError]);
 
   const currentPayPeriod = stats?.current_pay_period;
   const statusConfig = currentPayPeriod ? payPeriodStatusConfig[currentPayPeriod.status as PayPeriodStatus] : null;
@@ -120,7 +121,7 @@ export function Dashboard(): ReactElement {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {error && (
-          <ActionFeedback tone="error" message={error} />
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <Card className="mb-8 overflow-hidden border-primary-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4f8ff_52%,#fff8eb_100%)]">

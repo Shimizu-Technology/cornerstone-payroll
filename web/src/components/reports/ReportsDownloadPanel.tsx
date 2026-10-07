@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
@@ -1117,7 +1118,7 @@ function PdfPreviewModal({
 export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState<Record<string, boolean>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [payrollPreviewState, setPayrollPreviewState] = useState<{
     open: boolean;
     loading: boolean;
@@ -1429,7 +1430,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         </div>
         <div className="p-4">
           {error && (
-            <ActionFeedback tone="error" message={error} />
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {REPORTS.map(report => {

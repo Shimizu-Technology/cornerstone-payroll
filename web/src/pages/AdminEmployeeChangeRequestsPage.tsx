@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/layout/Header';
@@ -17,7 +18,7 @@ export function AdminEmployeeChangeRequestsPage() {
   const [reviewNotes, setReviewNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const currentStatusRef = useRef(status);
   const listRequestIdRef = useRef(0);
@@ -43,7 +44,7 @@ export function AdminEmployeeChangeRequestsPage() {
         setError(err instanceof Error ? err.message : 'Failed to load request details');
       }
     }
-  }, []);
+  }, [setError]);
 
   const load = useCallback(async () => {
     const requestId = ++listRequestIdRef.current;
@@ -68,7 +69,7 @@ export function AdminEmployeeChangeRequestsPage() {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [selectRequest]);
+  }, [selectRequest, setError]);
 
   useEffect(() => {
     void load();
@@ -98,7 +99,7 @@ export function AdminEmployeeChangeRequestsPage() {
       <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="max-w-xs">
           <Select value={status} onChange={(e) => {

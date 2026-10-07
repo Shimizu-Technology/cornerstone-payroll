@@ -1,3 +1,4 @@
+import { useFeedbackState } from '@/lib/use-feedback-state';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
@@ -21,7 +22,7 @@ export function ClientReports() {
   const currentYear = new Date().getFullYear();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string>('');
   const [payrollRegister, setPayrollRegister] = useState<Awaited<ReturnType<typeof clientReportsApi.payrollRegister>>['report'] | null>(null);
   const [ytdSummary, setYtdSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.ytdSummary>>['report'] | null>(null);
@@ -54,7 +55,7 @@ export function ClientReports() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   const loadPayrollRegister = useCallback(async () => {
     try {
@@ -63,7 +64,7 @@ export function ClientReports() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load payroll register');
     }
-  }, [selectedPayPeriodId]);
+  }, [selectedPayPeriodId, setError]);
 
   const loadYtdSummary = useCallback(async () => {
     const requestSequence = ++ytdRequestSequence.current;
@@ -75,7 +76,7 @@ export function ClientReports() {
     } catch (err) {
       if (requestSequence === ytdRequestSequence.current) setError(err instanceof Error ? err.message : 'Failed to load report data');
     }
-  }, [startDate, endDate, includeZeroPay]);
+  }, [setError, startDate, endDate, includeZeroPay]);
 
   const loadAnnualSummary = useCallback(async () => {
     try {
@@ -84,7 +85,7 @@ export function ClientReports() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load annual payroll totals');
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     void loadBaseData();
@@ -258,7 +259,7 @@ export function ClientReports() {
       <Header title="Reports" description="Read-only payroll reports for finalized payroll periods." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
-        {error && <ActionFeedback tone="error" message={error} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         {loading ? (
           <div className="py-12 text-center text-sm text-gray-500">Loading reports...</div>
