@@ -38,17 +38,24 @@ module Api
         end
 
         def update_payment_method
-          updated = PayrollPaymentMethodService.new(
+          payment_service = PayrollPaymentMethodService.new(
             payroll_item: @payroll_item,
             method: params[:payment_delivery_method],
             actor: current_user,
             reason: params[:reason],
             confirm_not_paid: params[:confirm_not_paid],
+            update_employee_default: params[:update_employee_default],
+            retire_existing_check: params[:retire_existing_check],
+            confirm_check_cancelled: params[:confirm_check_cancelled],
+            cancellation_evidence_reference: params[:cancellation_evidence_reference],
+            expected_check_number: params[:expected_check_number],
             ip_address: request.remote_ip
-          ).call
+          )
+          updated = payment_service.call
           render json: {
             payroll_item: payroll_item_json(updated, detailed: true),
-            pay_period_status: updated.pay_period.status
+            pay_period_status: updated.pay_period.status,
+            payment_method_review: { reapproval_pay_period_ids: payment_service.reapproval_pay_period_ids }
           }
         rescue PayrollPaymentMethodService::Error, ActiveRecord::RecordInvalid, PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -377,6 +384,8 @@ module Api
             check_number: item.check_number,
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
+            employee_payment_delivery_method: item.employee.payment_delivery_method,
+            payment_method_change: PayrollPaymentMethodEligibility.new(item).call,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_date: item.check_date,

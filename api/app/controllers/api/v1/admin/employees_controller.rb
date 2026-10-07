@@ -96,6 +96,13 @@ module Api
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
 
           Employee.transaction do
+            if attributes.key?(:payment_delivery_method)
+              @payment_default_service = EmployeePaymentDefaultService.new(
+                employee: @employee, method: attributes.delete(:payment_delivery_method),
+                actor: current_user, ip_address: request.remote_ip, record_audit: false
+              )
+              @payment_default_service.call
+            end
             @employee.update!(attributes.merge(w4_attributes))
             EmployeeW4ElectionChangeService.new(
               employee: @employee,
@@ -106,7 +113,10 @@ module Api
             ).call!
           end
 
-          render json: { data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true) }
+          render json: {
+            data: serialize_employee(@employee, include_sensitive: true, include_w4_history: true),
+            payment_method_review: { reapproval_pay_period_ids: @payment_default_service&.reapproval_pay_period_ids || [] }
+          }
         rescue ActiveRecord::RecordInvalid => e
           render json: {
             error: "Validation failed",
@@ -114,6 +124,8 @@ module Api
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e
           render json: { error: "Validation failed", details: { w4_change_reason: [ e.message ] } }, status: :unprocessable_entity
+        rescue PayrollReview::RevisionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
         end
