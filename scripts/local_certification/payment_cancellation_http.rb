@@ -70,7 +70,7 @@ assert.call(held.dig("manual", "status") == "committed" && held.dig("manual", "r
 assert.call(held.dig("direct", "row_digest") == before_source.dig("direct", "row_digest"), "frozen source facts changed")
 assert.call(held.dig("manual", "regular") == before_source.dig("manual", "regular") && held.dig("manual", "overtime") == before_source.dig("manual", "overtime"), "manual source split changed")
 selection.each do |kind, row|
-  api.call("post", "/api/v1/admin/payroll_items/#{row.fetch('id')}/check/confirm_direct_deposit_payment", 200,
+  api.call("post", "/api/v1/admin/payroll_items/#{row.fetch('id')}/direct_deposit/confirm_payment", 200,
     { settled_on: policy.fetch("delivery_date"), bank_reference: "SYNTHETIC-BANK-#{kind}", attestation: true })
 end
 checkpoint.call("payroll", "flush")
