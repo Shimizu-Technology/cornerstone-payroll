@@ -33,6 +33,8 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
   const [reload, setReload] = useState(0);
   const itemId = item?.id;
   const scope = `${payPeriod.company_id}:${payPeriod.id}:${itemId || ''}`;
+  const activeRef = useRef(false);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
 
@@ -72,21 +74,24 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
     const savingScope = scope;
     setSaving(true);
     setError(null);
+    let saved: Awaited<ReturnType<typeof payrollItemsApi.updatePaymentMethod>>;
     try {
-      await payrollItemsApi.updatePaymentMethod(payPeriod.id, record.id, method, {
+      saved = await payrollItemsApi.updatePaymentMethod(payPeriod.id, record.id, method, {
         update_employee_default: futureDefault,
         ...(committed ? { reason: reason.trim(), confirm_not_paid: unpaid, expected_check_number: record.check_number || null } : {}),
         ...(retiresCheck ? { retire_existing_check: true, confirm_check_cancelled: cancelled, cancellation_evidence_reference: evidence.trim() } : {}),
       }, payPeriod.company_id);
     } catch (caught) {
-      if (scopeRef.current === savingScope) {
+      if (activeRef.current && scopeRef.current === savingScope) {
         setError(caught instanceof Error ? caught.message : 'Could not change the payment method.');
         setSaving(false);
       }
       return;
     }
-    if (scopeRef.current !== savingScope) return;
-    notify({ tone: 'success', message: `${record.employee_name}: ${paymentMethodLabel(method)} for ${formatDate(payPeriod.pay_date)}. ${futureDefault ? 'Future payroll default also updated.' : 'Future payroll default unchanged.'} No bank transfer was sent.${payPeriod.status === 'approved' ? ' Review and approve this payroll again.' : ''}` });
+    if (!activeRef.current || scopeRef.current !== savingScope) return;
+    notify({ tone: 'success', message: `${record.employee_name}: ${paymentMethodLabel(method)} for ${formatDate(payPeriod.pay_date)}. ${futureDefault ? 'Future payroll default also updated.' : 'Future payroll default unchanged.'} No bank transfer was sent.${payPeriod.status === 'approved' && saved.pay_period_status === 'calculated' ? ' Review and approve this payroll again.' : ''}` });
+    const reapprovals = saved.payment_method_review?.reapproval_pay_period_ids || [];
+    if (reapprovals.length) notify({ tone: 'warning', message: `Review and approve pay runs ${reapprovals.map(id => `#${id}`).join(', ')} again before processing. Their recorded delivery choices were preserved.` });
     setSaving(false);
     onClose();
     try { await onSaved(); }
@@ -118,7 +123,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
           <p className="text-xs leading-5 text-neutral-600">Confirm direct-deposit enrollment with the employer or bank. Selecting Direct deposit or printing an earnings statement does not send money.</p>
         </>}
       </fieldset>}
-      <DialogFooter><Button variant="outline" disabled={saving} onClick={onClose}>Cancel</Button><Button disabled={!ready} onClick={() => void save()}>{saving ? 'Saving…' : retiresCheck ? 'Record check cancellation and change method' : 'Save payment method'}</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" disabled={saving} onClick={onClose}>Cancel</Button><Button disabled={!ready} onClick={() => void save()}>{saving ? 'Saving…' : retiresCheck ? 'Record cancellation and save' : 'Save payment method'}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }

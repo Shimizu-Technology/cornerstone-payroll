@@ -43,7 +43,7 @@ export default defineConfig({
     : [
         ...(releaseLane
           ? [{
-              command: `cd ../api && bundle exec rails server --environment test --binding 127.0.0.1 --port ${apiPort}`,
+              command: `cd ../api && bundle exec rails server --environment test --binding 127.0.0.1 --port ${apiPort} --pid tmp/pids/e2e-${apiPort}.pid`,
               url: `${localApiUrl}/up`,
               reuseExistingServer: false,
               timeout: 120_000,

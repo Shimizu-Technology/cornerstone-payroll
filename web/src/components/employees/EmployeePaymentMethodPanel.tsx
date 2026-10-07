@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { employeesApi } from '@/services/api';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
@@ -16,21 +16,26 @@ export function EmployeePaymentMethodPanel({ employee, onEmployeeReload }: { emp
   const [saving, setSaving] = useState(false);
   const [error, setError, errorAttempt] = useFeedbackState<string | null>(null);
   const scope = `${employee.company_id}:${employee.id}`;
+  const activeRef = useRef(false);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
-  const canChange = hasCapability('manage_client_configuration');
+  const canChange = hasCapability('payroll_operations');
 
   const save = async (): Promise<void> => {
     const savingScope = scope;
     setSaving(true);
     setError(null);
-    try { await employeesApi.update(employee.id, { payment_delivery_method: method }, employee.company_id); }
+    let saved: Awaited<ReturnType<typeof employeesApi.update>>;
+    try { saved = await employeesApi.update(employee.id, { payment_delivery_method: method }, employee.company_id); }
     catch (caught) {
-      if (scopeRef.current === savingScope) { setError(caught instanceof Error ? caught.message : 'Could not save the future payment method.'); setSaving(false); }
+      if (activeRef.current && scopeRef.current === savingScope) { setError(caught instanceof Error ? caught.message : 'Could not save the future payment method.'); setSaving(false); }
       return;
     }
-    if (scopeRef.current !== savingScope) return;
+    if (!activeRef.current || scopeRef.current !== savingScope) return;
     notify({ tone: 'success', message: `${[employee.first_name, employee.middle_name, employee.last_name].filter(Boolean).join(' ')}: future payroll default saved as ${method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'}. Existing payroll delivery choices were preserved. No bank transfer was sent.` });
+    const reapprovals = saved.payment_method_review?.reapproval_pay_period_ids || [];
+    if (reapprovals.length) notify({ tone: 'warning', message: `The delivery choices were preserved. Review and approve pay runs ${reapprovals.map(id => `#${id}`).join(', ')} again before processing; their older payment-method snapshots were updated.` });
     setSaving(false);
     setEditing(false);
     try { await onEmployeeReload(); }
