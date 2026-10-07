@@ -1,10 +1,33 @@
 # frozen_string_literal: true
 
+require "set"
+
 # Shared by the read-only UI preview and the mutation's locked validation.
 # A delivery preference does not prove that money was transferred.
 class PayrollPaymentMethodEligibility
-  def initialize(item)
+  ACTIVITY_EVENTS = %w[prepared printed batch_downloaded delivered].freeze
+
+  # Read-only serializers share this lookup. The locked mutation builds fresh
+  # activity when it has no shared snapshot. A nil number protects legacy runs.
+  def self.print_activity_for_period(period)
+    activity = Hash.new { |hash, id| hash[id] = Set.new }
+    period.check_print_runs.pluck(:manifest).each do |manifest|
+      manifest.each do |entry|
+        ids = []
+        key = entry["key"].to_s.match(/\Apayroll_item:([1-9]\d*)\z/)
+        ids << key[1].to_i if key
+        id = entry["source_id"].to_s
+        ids << id.to_i if entry["source_type"] == "payroll_item" && id.match?(/\A[1-9]\d*\z/)
+        number = entry["check_number"].blank? ? nil : entry["check_number"].to_s
+        ids.uniq.each { |item_id| activity[item_id] << number }
+      end
+    end
+    activity
+  end
+
+  def initialize(item, print_activity: nil)
     @item = item
+    @print_activity = print_activity
   end
 
   def call
@@ -38,17 +61,21 @@ class PayrollPaymentMethodEligibility
   end
 
   def check_has_activity?
-    item.check_prepared? ||
-      item.check_events.where(event_type: %w[prepared printed batch_downloaded delivered],
-        check_number: [ nil, "", item.check_number ]).exists? ||
-      item.pay_period.check_print_runs.any? do |run|
-        run.manifest.any? do |entry|
-          references_item = entry["key"] == "payroll_item:#{item.id}" ||
-            (entry["source_type"] == "payroll_item" && entry["source_id"].to_s == item.id.to_s)
-          references_item &&
-            (entry["check_number"].blank? || entry["check_number"].to_s == item.check_number.to_s)
-        end
+    return true if item.check_prepared?
+
+    events = item.check_events
+    event_activity = if events.loaded?
+      events.any? do |event|
+        ACTIVITY_EVENTS.include?(event.event_type) && [ nil, "", item.check_number ].include?(event.check_number)
       end
+    else
+      events.where(event_type: ACTIVITY_EVENTS, check_number: [ nil, "", item.check_number ]).exists?
+    end
+    return true if event_activity
+
+    activity = @print_activity || self.class.print_activity_for_period(item.pay_period)
+    numbers = activity.fetch(item.id, nil)
+    numbers && (numbers.include?(nil) || numbers.include?(item.check_number.to_s)) || false
   end
 
   private

@@ -1279,8 +1279,12 @@ module Api
           end
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.reportable.includes(:check_events, :payroll_item_field_entries, :time_tracking_entry_allocations, employee: :department).map do |item|
-              payroll_item_json(item)
+            print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period) if pay_period.committed?
+            json[:payroll_items] = pay_period.payroll_items.reportable.includes(
+              :check_events, :check_reconciliation_events, :payroll_item_field_entries,
+              :time_tracking_entry_allocations, employee: :department
+            ).map do |item|
+              payroll_item_json(item, print_activity: print_activity)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
           end
@@ -1301,7 +1305,7 @@ module Api
           user
         end
 
-        def payroll_item_json(item)
+        def payroll_item_json(item, print_activity: nil)
           {
             id: item.id,
             employee_id: item.employee_id,
@@ -1374,7 +1378,7 @@ module Api
             effective_payment_delivery_method: item.effective_payment_delivery_method,
             earnings_statement_eligible: EarningsStatementEligibility.printable?(item),
             employee_payment_delivery_method: item.employee&.payment_delivery_method,
-            payment_method_change: PayrollPaymentMethodEligibility.new(item).call,
+            payment_method_change: PayrollPaymentMethodEligibility.new(item, print_activity: print_activity).call,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
