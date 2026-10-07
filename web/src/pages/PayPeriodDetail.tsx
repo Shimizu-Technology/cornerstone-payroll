@@ -1667,7 +1667,7 @@ export function PayPeriodDetail({
           <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {payableItems.map((item) => (
-              <label key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+              <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
                   {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
@@ -1676,7 +1676,7 @@ export function PayPeriodDetail({
                   <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
                   <Button size="sm" variant="outline" className="min-h-11" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
                 </div>
-              </label>
+              </div>
             ))}
           </div>
         </section>

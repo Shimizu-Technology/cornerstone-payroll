@@ -34,6 +34,13 @@ describe('scoped payment method changes', () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(screen.getByText(/Future payroll default also updated/)).toBeTruthy();
   });
+  it('sends an explicit empty check identity before commitment', async () => {
+    const { user } = setup({ ...item, check_number: null }, { ...period, status: 'approved' });
+    await screen.findByText(/Current method:/);
+    await user.click(screen.getByRole('button', { name: 'Save payment method' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(12, 31, 'direct_deposit', expect.objectContaining({ expected_check_number: null }), 6));
+    expect(mocks.save.mock.calls[0][3]).not.toHaveProperty('confirm_not_paid');
+  });
   it('requires explicit cancelled-check evidence for a prepared check replacement', async () => {
     const record = { ...item, payment_method_change: { ...item.payment_method_change!, mode: 'retire_check' as const, requires_check_cancellation: true } };
     const { user } = setup(record);

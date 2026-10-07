@@ -1131,7 +1131,7 @@ function W2GuPanel() {
 
 // ─── Employee Pay History Panel ────────────────────────────────────────────
 
-export function EmployeePayHistoryPanel() {
+export function EmployeePayHistoryPanel(): ReactNode {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const [employees, setEmployees] = useState<Employee[]>([]);
