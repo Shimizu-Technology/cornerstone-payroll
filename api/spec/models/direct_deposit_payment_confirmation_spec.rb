@@ -29,4 +29,22 @@ RSpec.describe DirectDepositPaymentConfirmation do
     expect { DirectDepositPaymentConfirmation.where(id: confirmation.id).update_all(bank_reference: "changed") }
       .to raise_error(ActiveRecord::StatementInvalid, /append-only/)
   end
+  it "rejects a bank reference the connected payment protocol cannot retain before recording a payment" do
+    company = create(:company)
+    actor = create(:user, company: company, organization: company.organization)
+    employee = create(:employee, company: company)
+    period = create(:pay_period, :committed, company: company)
+    item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+      payment_delivery_method: "direct_deposit", check_number: nil, net_pay: 100)
+    expect {
+      expect {
+        item.create_direct_deposit_payment_confirmation!(user: actor,
+          settled_on: PayrollBusinessClock.today, bank_reference: "x" * 201)
+      }.to raise_error(ActiveRecord::RecordInvalid, /too long/)
+    }.not_to change(DirectDepositPaymentConfirmation, :count)
+    expect(item.reload.direct_deposit_payment_confirmation).to be_nil
+    expect(item.aire_payroll_entry_acknowledgements).to be_empty
+    expect(item.net_pay).to eq(100)
+  end
+
 end

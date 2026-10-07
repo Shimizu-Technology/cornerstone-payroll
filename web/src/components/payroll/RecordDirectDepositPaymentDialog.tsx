@@ -54,7 +54,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
       </DialogHeader>
       <div className="grid gap-4">
         <Input label="Bank settlement date" type="date" value={settledOn} onChange={(event) => setSettledOn(event.target.value)} />
-        <Input label="Bank confirmation or transaction reference" value={bankReference} onChange={(event) => setBankReference(event.target.value)} helperText="Required evidence from your bank or payment provider." />
+        <Input label="Bank confirmation or transaction reference" maxLength={200} value={bankReference} onChange={(event) => setBankReference(event.target.value)} helperText="Use the bank or payment provider’s reference, up to 200 characters." />
         <Input label="Note (optional)" value={note} onChange={(event) => setNote(event.target.value)} />
       </div>
       <label className="flex items-start gap-2 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-5 text-primary-900">

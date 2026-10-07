@@ -76,7 +76,7 @@ function eventLabel(eventType: string): string {
 
 function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
-  if (item.payment_confirmation) return <span className="col-span-2 text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
+  if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
   return <Button size="sm" variant="outline" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }
 
@@ -574,7 +574,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                           </label>
                           <p className="ml-8 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
-                        <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end">
+                        <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end [&>button]:min-h-11">
                           <BankPaymentEvidence item={depositsById.get(item.id)} onConfirm={setDepositTarget} />
                           {!item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
                           <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
