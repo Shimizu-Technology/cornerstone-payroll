@@ -230,6 +230,8 @@ describe('AireManualPaymentReconciliation', () => {
     expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
     expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.getByText(/These hours stay reserved while the cancellation syncs/)).toBeTruthy();
+    expect(screen.getByText(/Time tracking has not confirmed the cancellation or replacement yet/)).toBeTruthy();
+    expect(screen.queryByText(/a replacement is not paid yet/)).toBeNull();
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry sync for entry 40' }));
     await waitFor(() => expect(mocks.retry).toHaveBeenCalledWith(67, 9));
