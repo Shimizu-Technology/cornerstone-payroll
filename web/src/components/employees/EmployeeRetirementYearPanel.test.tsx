@@ -151,6 +151,7 @@ describe('annual retirement evidence', () => {
     mocks.inputs.mockResolvedValue({ data: [{ id: 1, tax_year: year, prior_year_wage_status: 'unknown', historical_retirement_review: staleReview }], historical_retirement_sources: [historicalSource] });
     render(<EmployeeRetirementYearPanel employee={employee} />);
     expect(await screen.findByText('Confirm imported contribution types')).toBeTruthy();
+    expect(screen.getAllByText('Review needed')).toHaveLength(historicalSource.classifications.length);
     await user.click(screen.getByRole('button', { name: 'Review yearly records' }));
     expect((screen.getByLabelText('Contribution type for 401(k) After Tax (Pre-tax deductions)') as HTMLSelectElement).value).toBe('');
   });

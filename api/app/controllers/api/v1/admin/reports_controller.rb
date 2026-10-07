@@ -2309,6 +2309,7 @@ module Api
             net_pay: item.net_pay.to_f,
             check_number: item.check_number,
             payment_delivery_method: item.effective_payment_delivery_method,
+            payment_method_label: PayrollPaymentLabel.for(item),
             payroll_field_entries: payroll_field_entry_rows(item),
             payroll_field_totals: payroll_field_totals(item),
             source: {
@@ -3764,7 +3765,7 @@ module Api
           rows = [ [
             "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
-            "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number"
+            "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
@@ -3772,7 +3773,7 @@ module Api
               item[:holiday_hours], item[:pto_hours], item[:reported_tips], item[:tips_paid_out],
               item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
               item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
-              item[:check_number]
+              item[:check_number], PayrollPaymentLabel.history_row(item)
             ]
           end
           [

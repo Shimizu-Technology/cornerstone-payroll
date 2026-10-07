@@ -243,7 +243,7 @@ class QuickbooksPayrollReportData
         total_pay: item.gross_pay.to_f + other_pay_lines_for(item).sum { |line| line.amount.to_f },
         gross_pay: item.gross_pay.to_f,
         net_pay: item.net_pay.to_f,
-        pay_method: item.check_number.present? ? "Check" : "No check issued",
+        pay_method: PayrollPaymentLabel.for(item),
         check_number: item.check_number,
         status: item.check_status || "—",
         taxes: employee_tax_total(item),

@@ -169,6 +169,7 @@ class UnifiedPayrollReporting
       total_deductions: totals[:total_deductions],
       net_pay: paycheck.net_pay.to_f,
       check_number: paycheck.check_number,
+      payment_method: paycheck.payment_method,
       payroll_field_entries: [],
       payroll_field_totals: {},
       source: {
@@ -210,6 +211,7 @@ class UnifiedPayrollReporting
       total_deductions: totals[:total_deductions],
       net_pay: adjustment.net_pay.to_f,
       check_number: nil,
+      payment_method_label: PayrollPaymentLabel::ADJUSTMENT,
       reason: adjustment.reason,
       payroll_field_entries: [],
       payroll_field_totals: {},

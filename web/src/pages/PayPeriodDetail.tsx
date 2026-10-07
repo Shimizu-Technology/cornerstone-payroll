@@ -1,4 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
+import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
@@ -32,7 +34,7 @@ import {
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { parsePayRunId } from '@/lib/pay-run-filters';
-import { ApiError, payPeriodsApi, employeesApi, payrollItemsApi } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -52,7 +54,7 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, PaymentDeliveryMethod } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -358,7 +360,7 @@ export function PayPeriodDetail({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
+  const [paymentMethodItem, setPaymentMethodItem] = useState<PayrollItem | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
   const [clientApprovalLoading, setClientApprovalLoading] = useState(false);
   const [clientApprovers, setClientApprovers] = useState<Array<{ id: number; name: string; email: string }>>([]);
@@ -1061,21 +1063,6 @@ export function PayPeriodDetail({
     if (payPeriod) void loadPayPeriod(payPeriod.id, true);
   };
 
-  const handlePaymentMethodChange = async (item: PayrollItem, method: PaymentDeliveryMethod) => {
-    if (!payPeriod || method === item.effective_payment_delivery_method) return;
-    if (payPeriod.status === 'approved' && !window.confirm('Changing payment method rolls this run back to calculated so it can be approved again. Continue?')) return;
-    setPaymentMethodBusyId(item.id);
-    setError(null);
-    try {
-      await payrollItemsApi.updatePaymentMethod(payPeriod.id, item.id, method);
-      await loadPayPeriod(payPeriod.id, true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change payment method');
-    } finally {
-      setPaymentMethodBusyId(null);
-    }
-  };
-
   const handlePayrollItemApplied = (updated?: PayrollItem) => {
     if (!updated) return;
 
@@ -1658,6 +1645,7 @@ export function PayPeriodDetail({
 
   return (
     <div>
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={() => loadPayPeriod(payPeriod.id, true)} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -1679,22 +1667,16 @@ export function PayPeriodDetail({
           <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {payableItems.map((item) => (
-              <label key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+              <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
                   {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
                 </span>
-                <select
-                  aria-label={`Payment method for ${item.employee_name}`}
-                  className="h-10 shrink-0 rounded-md border border-neutral-300 bg-white px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                  value={item.effective_payment_delivery_method || 'paper_check'}
-                  disabled={paymentMethodBusyId !== null}
-                  onChange={(event) => void handlePaymentMethodChange(item, event.target.value as PaymentDeliveryMethod)}
-                >
-                  <option value="paper_check">Paper check</option>
-                  <option value="direct_deposit">Direct deposit</option>
-                </select>
-              </label>
+                <div className="shrink-0 text-right">
+                  <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
+                  <Button size="sm" variant="outline" className="min-h-11" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
+                </div>
+              </div>
             ))}
           </div>
         </section>

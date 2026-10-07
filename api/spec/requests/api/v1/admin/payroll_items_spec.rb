@@ -178,6 +178,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/payment_method" do
     let(:path) { "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/payment_method" }
+    before { payroll_item.update!(gross_pay: 600, net_pay: 500) }
 
     it "changes only this calculated run through the HTTP endpoint" do
       original_net = payroll_item.net_pay
@@ -189,6 +190,31 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response.parsed_body.fetch("pay_period_status")).to eq("calculated")
       expect(payroll_item.reload).to have_attributes(payment_delivery_method: "direct_deposit", net_pay: original_net)
       expect(employee.reload.payment_delivery_method).to be_nil
+      expect(response.parsed_body.dig("payroll_item", "payment_method_change")).to include(
+        "eligible" => true, "mode" => "simple", "target_method" => "paper_check"
+      )
+    end
+
+    it "saves this run and its future default in one request" do
+      pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: Time.current)
+      patch path, params: { payment_delivery_method: "direct_deposit", update_employee_default: true }
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(response.parsed_body.dig("payroll_item", "employee_payment_delivery_method")).to eq("direct_deposit")
+      expect(response.parsed_body.dig("payment_method_review", "reapproval_pay_period_ids")).to eq([ pay_period.id ])
+    end
+
+    it "requires an explicit retirement mode and cancellation evidence for a prepared check" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+      payroll_item.mark_package_prepared!(user: admin_user)
+      patch path, params: {
+        payment_delivery_method: "direct_deposit", reason: "Original check retained and destroyed",
+        confirm_not_paid: true, retire_existing_check: true, expected_check_number: "2000",
+        confirm_check_cancelled: true, cancellation_evidence_reference: "Payroll cancellation log 2"
+      }
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload).to have_attributes(check_number: nil, payment_delivery_method: "direct_deposit", voided: false)
     end
 
     it "rejects an unsupported method without changing the run" do
@@ -197,6 +223,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Choose paper check or direct deposit")
       expect(payroll_item.reload.payment_delivery_method).to be_nil
+    end
+
+    it "retains explicit JSON null as an optimistic expectation of no assigned check" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+      patch path, params: {
+        payment_delivery_method: "direct_deposit", reason: "Payment was not issued",
+        confirm_not_paid: true, expected_check_number: nil
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("number changed")
+      expect(payroll_item.reload).to have_attributes(payment_delivery_method: "paper_check", check_number: "2000")
     end
 
     it "rejects a committed switch without a no-payment attestation" do

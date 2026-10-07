@@ -136,6 +136,10 @@ class ReplaceCheckService
     validate_for_replace!
 
     PayrollItem.transaction do
+      # Match commit and payment-delivery changes to avoid item/company lock
+      # inversion when an accountant corrects a check concurrently.
+      Company.lock.find(@payroll_item.company_id)
+      PayPeriod.lock.find(@payroll_item.pay_period_id)
       @payroll_item.lock!
       assert_replaceable!
 

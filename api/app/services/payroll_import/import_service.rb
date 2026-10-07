@@ -167,6 +167,7 @@ module PayrollImport
             PayrollItem.transaction(requires_new: true) do
               # Set employment info
               payroll_item.employment_type = employee.employment_type
+              payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
               payroll_item.pay_rate = employee.pay_rate
               payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
               apply_period_pay!(payroll_item, employee, row)

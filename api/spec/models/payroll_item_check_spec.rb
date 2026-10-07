@@ -180,6 +180,41 @@ RSpec.describe PayrollItem, type: :model do
       )
     end
 
+    it "acknowledges cancellation of an original check when delivery changes, while payroll remains committed and payable" do
+      committed_acks = AirePayrollEntryAcknowledgement.record_for_import!(
+        time_tracking_import: time_tracking_import, status: "committed", occurred_at: Time.current,
+        payroll_item_id: item.id
+      )
+      item.mark_printed!(user: admin_user)
+      item.mark_delivered!(user: admin_user, delivered_on: Date.current.iso8601,
+        delivery_method: "hand_delivery", attestation: true)
+      money = item.attributes.slice("gross_pay", "net_pay", "withholding_tax", "social_security_tax", "medicare_tax", "loan_payment")
+      expect(PayrollCalculator).not_to receive(:for)
+      PayrollPaymentMethodService.new(payroll_item: item, method: "direct_deposit", actor: admin_user,
+        reason: "Returned check destroyed before payment", confirm_not_paid: true,
+        retire_existing_check: true, confirm_check_cancelled: true,
+        cancellation_evidence_reference: "Signed cancellation log 54", expected_check_number: "5001").call
+
+      expect(item.reload).to have_attributes(payment_delivery_method: "direct_deposit", check_number: nil, voided: false)
+      expect(item.attributes.slice(*money.keys)).to eq(money)
+      expect(pay_period.reload).to be_committed
+      expect(committed_acks.map { |ack| ack.reload.status }).to eq([ "committed" ])
+      cancellation = item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_voided")
+      expect(cancellation).to have_attributes(payment_method: "paper_check", payment_reference: "5001")
+      expect(cancellation.check_event.details).to include("original_check_cancelled" => true)
+      expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
+        "committed", "payment_prepared", "payment_issued", "payment_voided"
+      )
+      expect(item.aire_payroll_entry_acknowledgements.where(payment_method: "direct_deposit", status: "payment_issued")).to be_empty
+    end
+
+    it "does not treat ordinary physical-check retirement as cancellation of the payroll obligation" do
+      item.check_events.create!(user: admin_user, event_type: "voided", check_number: "5001",
+        reason: "Unissued check retired for another delivery method", details: { "payment_delivery_change" => true, "original_check_cancelled" => false })
+      expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided")).to be_empty
+      expect(item.reload).not_to be_voided
+    end
+
     it "rolls back the check action if its durable AIRE outbox record cannot be created" do
       allow(AirePayrollEntryAcknowledgement).to receive(:record_for_check_event!).and_raise(ActiveRecord::RecordInvalid.new)
 
