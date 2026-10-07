@@ -38,17 +38,24 @@ module Api
         end
 
         def update_payment_method
-          updated = PayrollPaymentMethodService.new(
+          payment_service = PayrollPaymentMethodService.new(
             payroll_item: @payroll_item,
             method: params[:payment_delivery_method],
             actor: current_user,
             reason: params[:reason],
             confirm_not_paid: params[:confirm_not_paid],
-            ip_address: request.remote_ip
-          ).call
+            update_employee_default: params[:update_employee_default],
+            retire_existing_check: params[:retire_existing_check],
+            confirm_check_cancelled: params[:confirm_check_cancelled],
+            cancellation_evidence_reference: params[:cancellation_evidence_reference],
+            ip_address: request.remote_ip,
+            **(params.key?(:expected_check_number) ? { expected_check_number: params[:expected_check_number] } : {})
+          )
+          updated = payment_service.call
           render json: {
             payroll_item: payroll_item_json(updated, detailed: true),
-            pay_period_status: updated.pay_period.status
+            pay_period_status: updated.pay_period.status,
+            payment_method_review: { reapproval_pay_period_ids: payment_service.reapproval_pay_period_ids }
           }
         rescue PayrollPaymentMethodService::Error, ActiveRecord::RecordInvalid, PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -216,7 +223,7 @@ module Api
             payroll_field_entries: [
               :id, :payroll_field_definition_id, :label, :kind, :tax_treatment,
               :category, :reporting_group, :amount, :source, :employee_paid, :employer_paid,
-              :active, :notes
+              :active, :notes, :replace_request
             ]
           )
 
@@ -233,8 +240,11 @@ module Api
         end
 
         def normalize_payroll_field_entries(entries)
-          Array(entries).filter_map do |entry|
-            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+          rows = Array(entries).map { |entry| entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h }
+          # Reject invalid request flags before the legacy malformed-row rescue;
+          # an invalid explicit instruction must not silently disappear.
+          rows.each { |data| PayrollFieldRequestIntent.replace_request?(data) }
+          rows.filter_map do |data|
             amount = BigDecimal(data["amount"].to_s)
             label = data["label"].to_s.strip
             next if label.blank? || amount.negative? || !amount.finite?
@@ -272,7 +282,9 @@ module Api
             }
             payload = payload.compact.merge(notes: payload[:notes])
             if source == "manual" && existing_entry&.metadata.is_a?(Hash)
-              payload[:metadata] = amount == existing_entry.amount ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount")
+              replace_request = PayrollFieldRequestIntent.replace_request?(data)
+              preserve_request = !replace_request && PayrollFieldRequestIntent.unchanged_echo?(existing_entry, amount.round(2))
+              payload[:metadata] = preserve_request ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount", "loan_requested_amount")
             end
             payload
           rescue ArgumentError, FloatDomainError
@@ -372,6 +384,9 @@ module Api
             check_number: item.check_number,
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
+            earnings_statement_eligible: EarningsStatementEligibility.printable?(item),
+            employee_payment_delivery_method: item.employee.payment_delivery_method,
+            payment_method_change: PayrollPaymentMethodEligibility.new(item).call,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_date: item.check_date,

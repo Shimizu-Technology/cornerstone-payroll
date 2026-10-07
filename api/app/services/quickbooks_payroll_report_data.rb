@@ -243,7 +243,7 @@ class QuickbooksPayrollReportData
         total_pay: item.gross_pay.to_f + other_pay_lines_for(item).sum { |line| line.amount.to_f },
         gross_pay: item.gross_pay.to_f,
         net_pay: item.net_pay.to_f,
-        pay_method: item.check_number.present? ? "Check" : "No check issued",
+        pay_method: PayrollPaymentLabel.for(item),
         check_number: item.check_number,
         status: item.check_status || "—",
         taxes: employee_tax_total(item),
@@ -297,7 +297,7 @@ class QuickbooksPayrollReportData
     }
 
     item.payroll_item_deductions.each do |deduction|
-      next if legacy_employer_retirement_deduction?(item, deduction)
+      next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if payroll_field_mirrored_deduction?(deduction, field_entries_by_treatment[deduction.category] || [])
 
       group = reporting_group_for_deduction(deduction)
@@ -529,14 +529,6 @@ class QuickbooksPayrollReportData
       PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
   end
 
-  def legacy_employer_retirement_deduction?(item, deduction)
-    return false unless deduction.employer_contribution?
-    return false unless deduction.deduction_type&.sub_category == "retirement"
-
-    label = deduction.label.to_s
-    (label == "401(k) Employer Match" && item.employer_retirement_match.to_f.positive?) ||
-      (label == "Roth 401(k) Employer Match" && item.employer_roth_retirement_match.to_f.positive?)
-  end
 
   def reporting_group_for_deduction(deduction)
     PayrollReportingGroups.infer_retirement_group(

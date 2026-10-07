@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,7 +46,7 @@ export function ClientDocuments() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<ClientDocument | null>(null);
@@ -61,10 +62,6 @@ export function ClientDocuments() {
     files: [] as File[],
   });
 
-  useEffect(() => {
-    void load();
-  }, []);
-
   const employeeOptions = useMemo(
     () => employees.map((employee) => ({ value: String(employee.id), label: `${employee.first_name} ${employee.last_name}` })),
     [employees]
@@ -79,7 +76,7 @@ export function ClientDocuments() {
   const totalSelectedFileSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
   const supportsSingleTitle = selectedFileCount <= 1;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -94,7 +91,9 @@ export function ClientDocuments() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setError]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const handleUpload = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -193,8 +192,8 @@ export function ClientDocuments() {
       <Header title="Documents" description="Securely upload and manage client documents." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
-        {error && <Banner tone="error" message={error} />}
-        {success && <Banner tone="success" message={success} />}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="grid gap-4 md:grid-cols-3">
           <MiniStat
@@ -494,15 +493,6 @@ export function ClientDocuments() {
       />
     </div>
   );
-}
-
-function Banner({ tone, message }: { tone: 'error' | 'success'; message: string }) {
-  const classes =
-    tone === 'error'
-      ? 'border-danger-200 bg-danger-50 text-danger-700'
-      : 'border-emerald-200 bg-emerald-50 text-emerald-700';
-
-  return <div className={`rounded-lg border px-4 py-3 text-sm ${classes}`}>{message}</div>;
 }
 
 function MiniStat({

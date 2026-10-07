@@ -333,6 +333,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]).to have_key("payroll_items")
     end
 
+    it "batches payment activity across the whole run while preserving cancellation guards" do
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      items = 4.times.map do |index|
+        create(:payroll_item, company: company, pay_period: pay_period,
+          employee: create(:employee, company: company), payment_delivery_method: "paper_check",
+          check_number: (8301 + index).to_s, gross_pay: 600, net_pay: 500)
+      end
+      items[0].check_events.create!(user: admin_user, event_type: "printed", check_number: "8301")
+      items[1].check_events.create!(user: admin_user, event_type: "printed", check_number: "old-8302")
+      pay_period.check_print_runs.create!(company: company, created_by: admin_user,
+        check_stock_type: "standard", storage_key: "synthetic-#{SecureRandom.uuid}",
+        filename: "synthetic-checks.pdf", sha256: "a" * 64, byte_size: 100,
+        selected_count: 2, generated_at: Time.current,
+        manifest: [
+          { "source_type" => "payroll_item", "source_id" => items[2].id },
+          { "source_type" => "payroll_item", "source_id" => items[3].id, "check_number" => "old-8304" }
+        ])
+      queries = []
+      callback = ->(_name, _start, _finish, _id, payload) { queries << payload[:sql] unless payload[:name] == "SCHEMA" }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+        get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      end
+      expect(response).to have_http_status(:ok)
+      modes = response.parsed_body.dig("pay_period", "payroll_items").to_h do |row|
+        [ row["id"], row.dig("payment_method_change", "mode") ]
+      end
+      expect(modes).to include(items[0].id => "retire_check", items[1].id => "simple",
+        items[2].id => "retire_check", items[3].id => "simple")
+      expect(queries.grep(/FROM "check_events"/).size).to eq(1)
+      expect(queries.grep(/FROM "check_print_runs"/).size).to eq(1)
+      expect(queries.grep(/FROM "check_reconciliation_events"/).size).to eq(1)
+    end
+
     it "returns audit-backed lifecycle events" do
       AuditLog.create!(
         user: admin_user,
@@ -1162,6 +1195,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { employee_ids: [ variable.id ] }
       expect(response.parsed_body.dig("results", "errors").pluck("employee_id")).to eq([ variable.id ])
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(variable.full_name)
     end
 
     it "rejects a post-cutover live calculation without changing payroll state" do
@@ -1195,6 +1229,33 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.status).to eq("draft")
       expect(pay_period.payroll_items.pluck(:id)).to eq([ existing_item.id ])
       expect(existing_item.reload.attributes).to eq(original_attributes)
+    end
+
+    it "invalidates an earlier complete calculation and review when recalculation fails, including after reload" do
+      employee.update!(retirement_rate: 0.03)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 80, overtime: 0 } }
+      }
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      expect(pay_period.reload).to be_calculated
+      review = pay_period.payroll_review_packages.current.first!
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      original_amounts = item.attributes.slice("gross_pay", "net_pay", "retirement_payment", "roth_retirement_payment")
+      AnnualRetirementLimit.find_by!(tax_year: pay_period.pay_date.year).destroy!
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(employee.full_name)
+      expect(response.parsed_body.dig("pay_period", "status")).to eq("draft")
+      expect(pay_period.reload).to have_attributes(status: "draft", calculated_at: nil, calculated_by_id: nil)
+      expect(review.reload.status).to eq("superseded")
+      expect(item.reload.attributes.slice(*original_amounts.keys)).to eq(original_amounts)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Can only approve a calculated pay period")
+      expect(pay_period.reload).to be_draft
     end
 
     it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
@@ -1364,6 +1425,39 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.gross_pay.to_f).to eq(190.0)
     end
 
+    it "accepts an explicit JSON request replacement when a manual deduction was capped to zero" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic request replacement", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "rent", default_amount: 500)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 500)
+      item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period, pay_rate: 15, hours_worked: 10)
+      entry = create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: field,
+        source: "manual", amount: 0, metadata: { "uncapped_amount" => "500" })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: { employee.id.to_s => { field.id.to_s => { mode: "override", amount: 0, replace_request: true } } }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      expect(entry.reload.amount).to eq(0)
+      expect(entry.metadata).not_to have_key("uncapped_amount")
+    end
+
+    it "rejects a string request-replacement flag and leaves the saved request intact" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic boolean check", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "rent", default_amount: 500)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 500)
+      item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period, pay_rate: 15, hours_worked: 10)
+      entry = create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: field,
+        source: "manual", amount: 0, metadata: { "uncapped_amount" => "500" })
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: { employee.id.to_s => { field.id.to_s => { mode: "override", amount: 0, replace_request: "false" } } }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors").map { |error| error["error"] }.join(" ")).to match(/must be a JSON boolean/)
+      expect(entry.reload).to have_attributes(amount: 0.to_d, metadata: { "uncapped_amount" => "500" })
+    end
+
     it "calculates a default percentage payroll field from first-run base gross" do
       field = PayrollFieldDefinition.create!(
         company: company,
@@ -1524,6 +1618,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("results", "errors", 0, "error")).to eq("Payroll field ID is invalid")
+      expect(response.parsed_body.dig("results", "errors", 0, "name")).to eq(employee.full_name)
       expect(pay_period.reload).to be_draft
     end
 

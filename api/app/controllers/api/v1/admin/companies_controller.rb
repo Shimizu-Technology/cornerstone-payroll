@@ -267,15 +267,29 @@ module Api
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
-          normalize_company_check_layout_config!(update_params, company)
-          company.assign_attributes(update_params)
-          clear_active_printer_profile_if_calibration_changed(company)
-
-          if company.save
-            render json: { company: company_payload(company, detailed: true) }
-          else
-            render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
+          company.with_lock do
+            before_updated_at = company.updated_at
+            normalize_company_check_layout_config!(update_params, company)
+            company.assign_attributes(update_params)
+            clear_active_printer_profile_if_calibration_changed(company)
+            company.save!
+            actual_fields = company.saved_changes.keys - [ "updated_at" ]
+            name_only = actual_fields == [ "name" ]
+            safe_changes = AuditRecordSnapshot.changes_for(company)
+            AuditLog.record!(
+              user: current_user, company_id: company.id, organization_id: company.organization_id,
+              action: name_only ? "company#name_changed" : "companies#update",
+              record_type: "Company", record_id: company.id, subject_name: company.name,
+              metadata: safe_changes.merge(
+                changed_fields: actual_fields, actual_changes: true, name_only: name_only,
+                company_updated_at_before: before_updated_at&.utc&.iso8601(6),
+                company_updated_at_after: company.updated_at.utc.iso8601(6)
+              ), ip_address: request.remote_ip
+            )
           end
+          render json: { company: company_payload(company, detailed: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
           render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
         end

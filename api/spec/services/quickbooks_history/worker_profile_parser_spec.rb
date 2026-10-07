@@ -27,8 +27,8 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     parsed = described_class.new(
       worker: worker(
         pay_info: "Hourly rate: $11.25/hr Joint Kitchen: $11.25/hr Pay method: Check " \
-                  "Deductions: Health Insurance: $126.00 401(k) After Tax: 4.00% " \
-                  "Loan (review): $75.00 Contributions: 401(k) After Tax: 4.00% Time off: None"
+                  "Deductions: Health Insurance: $126.00 Roth 401(k): 4.00% " \
+                  "Loan (review): $75.00 Contributions: Roth 401(k): 4.00% Time off: None"
       ),
       pay_frequency: "biweekly"
     ).call
@@ -58,6 +58,14 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
       "quickbooks_nevada_address_suppressed",
       "obligation_terms_missing"
     )
+  end
+
+  it "requires verification instead of inferring designated Roth from an after-tax label" do
+    parsed = described_class.new(worker: worker(pay_info: "Hourly rate: $11.25/hr Pay method: Check " \
+      "Deductions: 401(k) After Tax: 4.00% Contributions: 401(k) After Tax: 4.00% Time off: None"),
+      pay_frequency: "biweekly").call
+    expect(parsed.errors.join(" ")).to match(/verification of designated Roth/)
+    expect(parsed.employee_attributes).to include(roth_retirement_rate: 0.to_d, employer_roth_match_rate: 0.to_d)
   end
 
   it "retains explicit advanced W-4 inputs and signed-document provenance without choosing an effective date" do

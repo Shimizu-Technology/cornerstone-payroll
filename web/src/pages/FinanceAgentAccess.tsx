@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeft, Copy, KeyRound } from 'lucide-react';
@@ -19,7 +20,7 @@ export function FinanceAgentAccess() {
   const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [retryLoad, setRetryLoad] = useState(0);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function FinanceAgentAccess() {
       if (current) setError(loadError instanceof Error ? loadError.message : 'Unable to load access keys');
     }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [activeBook.id, retryLoad]);
+  }, [activeBook.id, retryLoad, setError]);
 
   async function createToken(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +107,7 @@ export function FinanceAgentAccess() {
           </div>
         </div>}
       </section>
-      {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><span>{error}</span>{loadedBookId !== activeBook.id && <Button type="button" variant="outline" onClick={() => setRetryLoad((value) => value + 1)}>Retry loading keys</Button>}</div>}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>{loadedBookId !== activeBook.id && <Button type="button" variant="outline" onClick={() => setRetryLoad((value) => value + 1)}>Retry loading keys</Button>}</ActionFeedback>}
       <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="text-lg font-semibold">Keys for this book</h2>
         {loading || loadedBookId !== activeBook.id ? <p role="status" className="mt-4 text-sm text-neutral-600">{loading ? 'Loading keys…' : 'Keys could not be loaded.'}</p>

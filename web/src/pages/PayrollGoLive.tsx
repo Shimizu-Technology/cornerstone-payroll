@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
@@ -81,7 +82,7 @@ export function PayrollGoLive(): ReactElement {
   const [payload, setPayload] = useState<PayrollGoLivePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [sourceCompanyId, setSourceCompanyId] = useState('');
   const [batchId, setBatchId] = useState('');
@@ -111,7 +112,7 @@ export function PayrollGoLive(): ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [activeCompanyId, companyId]);
+  }, [activeCompanyId, companyId, setError]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -211,7 +212,7 @@ export function PayrollGoLive(): ReactElement {
         <Guardrail icon={<ShieldCheck className="h-5 w-5" />} title="Two people approve" text="Technical and payroll-operations signoffs must come from different authorized people." />
       </div>
 
-      {(error || notice) && <div className={`rounded-2xl border px-5 py-4 text-sm ${error ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-700'}`} role={error ? 'alert' : 'status'}>{error || notice}</div>}
+      {(error || notice) && <ActionFeedback retryKey={errorFeedbackAttempt} tone={error ? "error" : "success"} message={error || notice || ""} />}
 
       <Card>
         <CardHeader><div className="flex flex-wrap items-start justify-between gap-4"><div><CardTitle>1. Transfer reviewed setup</CardTitle><CardDescription className="mt-1">Match predecessor employees to the successor roster, preview every count, then copy only live configuration.</CardDescription></div>{review?.setup_applied_at && <Badge variant="success">Applied {formatDate(review.setup_applied_at)}</Badge>}</div></CardHeader>

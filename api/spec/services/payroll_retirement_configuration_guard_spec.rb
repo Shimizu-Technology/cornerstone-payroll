@@ -177,7 +177,7 @@ RSpec.describe PayrollRetirementConfigurationGuard do
     employee.update!(retirement_rate: 0)
     field_assignment(reporting_group: "401k_after_tax")
 
-    expect { guard.validate! }.to raise_error(ArgumentError, /reported as 401\(k\) After Tax but deducts before taxes/)
+    expect { guard.validate! }.to raise_error(ArgumentError, /reported as Roth 401\(k\) but deducts before taxes/)
   end
 
   it "rejects pre-tax reporting on a post-tax legacy deduction even without built-in rates" do
@@ -211,6 +211,17 @@ RSpec.describe PayrollRetirementConfigurationGuard do
     entry = explicit_entry(assignment, amount: 100)
     entry.reporting_group = nil
 
-    expect { guard.validate! }.to raise_error(ArgumentError, /reported as 401\(k\) After Tax but deducts before taxes/)
+    expect { guard.validate! }.to raise_error(ArgumentError, /reported as Roth 401\(k\) but deducts before taxes/)
+  end
+  it "requires non-Roth after-tax employee deductions to use post-tax treatment" do
+    employee.update!(retirement_rate: 0)
+    field_assignment(reporting_group: "401k_non_roth_after_tax")
+    expect { guard.validate! }.to raise_error(ArgumentError, /Non-Roth After Tax but deducts before taxes/)
+  end
+
+  it "does not use an employee non-Roth after-tax type for an employer contribution" do
+    employee.update!(retirement_rate: 0)
+    field_assignment(reporting_group: "401k_non_roth_after_tax", treatment: "employer_contribution")
+    expect { guard.validate! }.to raise_error(ArgumentError, /employee non-Roth after-tax type/)
   end
 end

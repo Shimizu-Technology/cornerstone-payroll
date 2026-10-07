@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarClock, RotateCcw, ShieldAlert, UserMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -37,7 +38,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
   const [reasonCategory, setReasonCategory] = useState<EmployeeTerminationInput['reason_category']>();
   const [internalNotes, setInternalNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -46,7 +47,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
     setReasonCategory(undefined);
     setInternalNotes('');
     setError(null);
-  }, [open, mode]);
+  }, [open, mode, setError]);
 
   const workerLabel = employee.employment_type === 'contractor' ? 'contractor' : 'employee';
   const canSubmit = useMemo(() => {
@@ -112,7 +113,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             </p>
           </div>
 
-          {error && <div className="rounded-2xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">{error}</div>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
           <div className={`grid gap-4 ${isTermination ? 'sm:grid-cols-2' : ''}`}>
             <div>

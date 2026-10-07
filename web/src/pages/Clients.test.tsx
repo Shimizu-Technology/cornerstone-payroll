@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Clients } from './Clients';
+import { FeedbackProvider } from '@/components/ui/action-feedback';
 import type { MigrationPromotionPreview } from '@/services/api';
 
 const apiMocks = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const apiMocks = vi.hoisted(() => ({
   retryTestWorkspace: vi.fn(),
   archiveTestWorkspace: vi.fn(),
   restoreTestWorkspace: vi.fn(),
+  activeCompanyId: 6,
   auth: { isAdmin: true, isAccountant: false, isManager: false },
 }));
 
@@ -33,7 +35,7 @@ const refreshCompanies = vi.fn();
 
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('@/contexts/CompanyContext', () => ({
-  useCompany: () => ({ refreshCompanies, switchCompany: vi.fn() }),
+  useCompany: () => ({ refreshCompanies, switchCompany: vi.fn(), activeCompanyId: apiMocks.activeCompanyId }),
 }));
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => apiMocks.auth,
@@ -380,5 +382,157 @@ describe('Clients migration promotion', () => {
 
     expect((await screen.findAllByRole('button', { name: /open read-only/i })).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /promote rehearsal/i })).toBeNull();
+  });
+});
+
+
+describe('Clients name-only rename', () => {
+  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // jsdom reports no rendered offsetParent; finish dialog focus before typing.
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 0; });
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.list.mockResolvedValue({ companies: [target] });
+    apiMocks.update.mockResolvedValue({ company: target });
+    refreshCompanies.mockResolvedValue(undefined);
+  });
+  const renderClients = () => render(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
+  const openRename = async (user: ReturnType<typeof userEvent.setup>) => {
+    const actions = await screen.findAllByRole('button', { name: `Rename ${target.name}` });
+    expect(actions).toHaveLength(2); // Mobile card and desktop table.
+    await user.click(actions[0]);
+    return screen.getByRole('dialog', { name: 'Rename client' });
+  };
+  const changeName = async (user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, name = 'Updated employer') => {
+    await user.clear(within(dialog).getByLabelText('Client name'));
+    await user.type(within(dialog).getByLabelText('Client name'), name);
+    await user.click(within(dialog).getByRole('button', { name: 'Save client name' }));
+  };
+
+  it('saves only a trimmed name and publishes success before refresh completes', async () => {
+    const user = userEvent.setup();
+    let resolveRefresh!: () => void;
+    refreshCompanies.mockImplementation(() => new Promise<void>(resolve => { resolveRefresh = resolve; }));
+    renderClients();
+    const dialog = await openRename(user);
+    expect((within(dialog).getByLabelText('Client name') as HTMLInputElement).value).toBe(target.name);
+    await changeName(user, dialog, "  MoSa's Hotbox, Inc.  ");
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(6, { name: "MoSa's Hotbox, Inc." }));
+    expect(apiMocks.update).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Client name updated.')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Rename client' })).toBeNull();
+    resolveRefresh();
+  });
+
+  it('rejects blank names and closes unchanged names without a request', async () => {
+    const user = userEvent.setup();
+    renderClients();
+    let dialog = await openRename(user);
+    await changeName(user, dialog, '   ');
+    expect(await screen.findByText('Enter a client name. This name appears on reports and earnings statements.')).toBeTruthy();
+    expect(apiMocks.update).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    dialog = await openRename(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Save client name' }));
+    expect(apiMocks.update).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps failed saves available without reporting success', async () => {
+    const user = userEvent.setup();
+    apiMocks.update.mockRejectedValue(new Error('Client name cannot be saved.'));
+    renderClients();
+    await changeName(user, await openRename(user));
+    expect(await screen.findByText('Client name cannot be saved.')).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByText('Client name updated.')).toBeNull();
+    expect(refreshCompanies).not.toHaveBeenCalled();
+  });
+
+  it('warns about failed refresh separately from the successful save', async () => {
+    const user = userEvent.setup();
+    renderClients();
+    const dialog = await openRename(user);
+    apiMocks.list.mockRejectedValueOnce(new Error('List unavailable'));
+    await changeName(user, dialog);
+    expect(await screen.findByText('Client name updated.')).toBeTruthy();
+    expect(await screen.findByText('The client name was saved, but the client list could not fully refresh. Refresh the page before opening a report.')).toBeTruthy();
+    expect(screen.getAllByText('Updated employer')).toHaveLength(2);
+    expect(apiMocks.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks duplicate submission and dismissal during save', async () => {
+    const user = userEvent.setup();
+    let resolveSave!: () => void;
+    apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    renderClients();
+    const dialog = await openRename(user);
+    await changeName(user, dialog);
+    expect((within(dialog).getByRole('button', { name: 'Saving…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(apiMocks.update).toHaveBeenCalledTimes(1);
+    resolveSave();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('ignores pending save after unmount', async () => {
+    const user = userEvent.setup();
+    let resolveSave!: () => void;
+    apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    const rendered = renderClients();
+    await changeName(user, await openRename(user));
+    rendered.unmount();
+    resolveSave();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(refreshCompanies).not.toHaveBeenCalled();
+    expect(apiMocks.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes a saved rename after an administrator switches clients', async () => {
+    const user = userEvent.setup();
+    apiMocks.activeCompanyId = 6;
+    let resolveSave!: () => void;
+    apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    const rendered = renderClients();
+    await changeName(user, await openRename(user));
+    apiMocks.activeCompanyId = 4;
+    rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
+    await act(async () => { resolveSave(); });
+    await waitFor(() => expect(refreshCompanies).toHaveBeenCalledOnce());
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('Client name updated.')).toBeNull();
+    apiMocks.activeCompanyId = 6;
+  });
+  it('ignores completion after the admin scope changes', async () => {
+    const user = userEvent.setup();
+    let resolveSave!: () => void;
+    apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    const rendered = renderClients();
+    await changeName(user, await openRename(user));
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
+    resolveSave();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('Client name updated.')).toBeNull();
+    expect(refreshCompanies).not.toHaveBeenCalled();
+    expect(apiMocks.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides rename from non-admin staff and read-only workspaces', async () => {
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    const rendered = renderClients();
+    await screen.findAllByText(target.name);
+    expect(screen.queryByRole('button', { name: `Rename ${target.name}` })).toBeNull();
+    rendered.unmount();
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.list.mockResolvedValue({ companies: [{ ...rehearsal, test_workspace_sealed_at: '2026-10-07T00:00:00Z' }] });
+    renderClients();
+    await screen.findAllByText(rehearsal.name);
+    expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
   });
 });

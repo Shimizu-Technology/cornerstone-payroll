@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useState, useLayoutEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { payrollItemsApi } from '@/services/api';
+import { payrollFieldRequestedAmount } from '@/lib/payroll-field-request';
 import { formatCurrency } from '@/lib/utils';
 import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment, PayrollItemFieldEntry } from '@/types';
 
@@ -61,7 +63,8 @@ interface PayrollItemEditModalProps {
   wageRates?: EmployeeWageRate[];
 }
 
-type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean };
+type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean; applied_amount?: number };
+const EMPTY_WAGE_RATES: EmployeeWageRate[] = [];
 
 interface EditableFields {
   hours_worked: number;
@@ -93,7 +96,7 @@ export function PayrollItemEditModal({
   onSaved,
   onRemoved,
   contractorPayType,
-  wageRates = [],
+  wageRates = EMPTY_WAGE_RATES,
 }: PayrollItemEditModalProps) {
   const [fields, setFields] = useState<EditableFields>({
     hours_worked: 0,
@@ -121,10 +124,10 @@ export function PayrollItemEditModal({
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
-  useEffect(() => {
-    if (item) {
+  useLayoutEffect(() => {
+    if (item && open) {
       const initialWageRateHours = item.wage_rate_hours && item.wage_rate_hours.length > 0
         ? item.wage_rate_hours
         : wageRates.map((rate) => ({
@@ -172,7 +175,8 @@ export function PayrollItemEditModal({
           .filter(entry => entry.active === true)
           .map(entry => ({
             ...entry,
-            amount: Number(entry.amount) || 0,
+            amount: payrollFieldRequestedAmount(entry),
+            applied_amount: Number(entry.amount) || 0,
             active: true,
           })),
       });
@@ -181,7 +185,7 @@ export function PayrollItemEditModal({
       setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
-  }, [item, wageRates]);
+  }, [item, wageRates, open, setError]);
 
   if (!item) return null;
 
@@ -264,10 +268,11 @@ export function PayrollItemEditModal({
   };
 
   const handlePayrollFieldEntryAmountChange = (index: number, amount: number | null) => {
+    if (Number(fields.payroll_field_entries[index]?.amount) === (amount ?? 0)) return;
     setPayrollFieldEntriesDirty(true);
     setFields((prev) => {
       const updated = [...prev.payroll_field_entries];
-      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual', dirty: true };
+      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual', dirty: true, replace_request: true };
       return { ...prev, payroll_field_entries: updated };
     });
   };
@@ -309,8 +314,9 @@ export function PayrollItemEditModal({
       if (payrollFieldEntriesDirty) {
         payload.payroll_field_entries = fields.payroll_field_entries
           .filter(entry => entry.dirty && entry.active === true)
-          .map(({ dirty: _dirty, ...entry }) => {
+          .map(({ dirty: _dirty, applied_amount: _applied, ...entry }) => {
             void _dirty;
+            void _applied;
             return {
             ...entry,
             amount: Number(entry.amount) || 0,
@@ -377,9 +383,7 @@ export function PayrollItemEditModal({
         </DialogHeader>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <div className="space-y-4 mt-4">
@@ -635,6 +639,7 @@ export function PayrollItemEditModal({
                 <p className="mt-0.5 text-xs text-gray-500">
                   Client-wide fields assigned to this employee. Amounts can be overridden for this check without changing employee defaults.
                 </p>
+                <p className="mt-2 text-xs leading-5 text-gray-600">Inputs show requested amounts. Limits may reduce the applied amount. Enter zero to intentionally clear a request, including an amount previously capped to zero.</p>
               </div>
               <div className="space-y-4">
                 {employeePaidPayrollFieldEntries.length > 0 && (
@@ -647,9 +652,11 @@ export function PayrollItemEditModal({
                           <div>
                             <p className="text-sm font-medium text-gray-900">{entry.label}</p>
                             <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}{entry.reporting_group ? ` · ${entry.reporting_group.replace(/_/g, ' ')}` : ''}</p>
+                            {entry.applied_amount != null && entry.applied_amount !== Number(entry.amount) && <p className="mt-1 text-xs text-amber-800">Previously applied {formatCurrency(entry.applied_amount)} after limits; requested {formatCurrency(Number(entry.amount))}.</p>}
                           </div>
                           <NumericInput
                             value={Number(entry.amount) || 0}
+                            aria-label={`${entry.label} requested amount`}
                             onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
                             min={0}
                             fixedDecimalsOnBlur={2}
@@ -672,6 +679,7 @@ export function PayrollItemEditModal({
                           </div>
                           <NumericInput
                             value={Number(entry.amount) || 0}
+                            aria-label={`${entry.label} requested amount`}
                             onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
                             min={0}
                             fixedDecimalsOnBlur={2}

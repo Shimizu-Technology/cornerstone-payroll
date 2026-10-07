@@ -8,6 +8,19 @@ RSpec.describe PayrollImport::ImportService do
   let(:service) { described_class.new(pay_period) }
 
   describe "#apply!" do
+    it "snapshots the delivery method before issuing review so profile edits cannot change imported payroll" do
+      employee = create(:employee, company: company, payment_delivery_method: "direct_deposit")
+      actor = create(:user, company: company, organization: company.organization)
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.update!(gross_pay: 600, net_pay: 500) }
+      results = service.apply!(matched: [ { employee_id: employee.id, regular_hours: 40, total_tips: 0 } ])
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      checksum = pay_period.payroll_review_packages.current.last.calculation_checksum
+      EmployeePaymentDefaultService.new(employee: employee, method: "paper_check", actor: actor).call
+      expect(item.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(PayrollReview::CalculationSnapshot.new(pay_period: pay_period).call[:checksum]).to eq(checksum)
+    end
+
     it "copies employee recurring payroll adjustments onto MoSa imported payroll items before calculating" do
       employee = create(
         :employee,

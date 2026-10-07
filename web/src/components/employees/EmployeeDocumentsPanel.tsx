@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Eye, FileText, ShieldCheck, UploadCloud, Trash2, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -87,7 +88,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const [savingRequirementId, setSavingRequirementId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<ClientDocument | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -179,7 +180,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
       ) setLoading(false);
     }
-  }, [api, employeeId, isClient, onReadinessChange]);
+  }, [api, employeeId, isClient, onReadinessChange, setError]);
 
   useEffect(() => {
     void loadDocuments();
@@ -343,8 +344,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         </div>
       </CardHeader>
       <CardContent className="space-y-5 p-4 sm:p-5">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
-        {success && <div className="rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-sm text-success-700">{success}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <section aria-labelledby="employee-document-readiness-heading" className="rounded-2xl border border-neutral-200 bg-white p-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

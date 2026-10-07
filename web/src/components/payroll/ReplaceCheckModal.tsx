@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Dialog,
@@ -144,9 +145,9 @@ export function ReplaceCheckModal({
   const [form, setForm] = useState<FormState>(() => initialForm(payrollItem));
   const [preview, setPreview] = useState<ReplaceCheckPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewError, setPreviewError, previewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError, submitErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // Reset on open / item change so previous submissions don't leak in.
   useEffect(() => {
@@ -250,7 +251,7 @@ export function ReplaceCheckModal({
     } finally {
       setPreviewLoading(false);
     }
-  }, [inputsChanged, payrollItem.id, correctedInputs]);
+  }, [inputsChanged, setPreviewError, payrollItem.id, correctedInputs]);
 
   useEffect(() => {
     if (!open) return;
@@ -502,7 +503,7 @@ export function ReplaceCheckModal({
               </p>
             )}
 
-            {previewError && <p className="text-sm text-red-600">{previewError}</p>}
+            {previewError && <ActionFeedback retryKey={previewErrorFeedbackAttempt} tone="error" message={previewError} />}
 
             {preview?.meta.is_zero_change && (
               <p className="text-sm text-gray-600">
@@ -566,9 +567,7 @@ export function ReplaceCheckModal({
         </div>
 
         {submitError && (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-            {submitError}
-          </p>
+          <ActionFeedback retryKey={submitErrorFeedbackAttempt} tone="error" message={submitError} />
         )}
 
         <DialogFooter>

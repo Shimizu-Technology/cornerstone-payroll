@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { CheckCircle2, Clock3, Download, FileLock2, Maximize2, Plus, Printer, Settings2, ShieldCheck, TriangleAlert } from 'lucide-react';
@@ -72,7 +73,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   const [artifactVerified, setArtifactVerified] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [draftNumbers, setDraftNumbers] = useState<Record<string, string>>({});
   const [savingNumbers, setSavingNumbers] = useState(false);
   const compactPreviewRef = useRef<HTMLIFrameElement>(null);
@@ -160,7 +161,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     } finally {
       if (requestToken === previewRequestRef.current) setBusyAction(null);
     }
-  }, [revokePreview]);
+  }, [revokePreview, setError]);
 
   const openSavedRun = useCallback(async (printRun: CheckPrintRun) => {
     setRun(printRun);
@@ -264,7 +265,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       workspaceRequestRef.current += 1;
       previewRequestRef.current += 1;
     };
-  }, [applyQueue, open, openSavedRun, payPeriodId, revokePreview]);
+  }, [applyQueue, open, openSavedRun, payPeriodId, revokePreview, setError]);
 
   useEffect(() => {
     if (!open || activeGenerationId === null) return undefined;
@@ -298,7 +299,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [activeGenerationId, loadQueue, onPackageGenerated, open, payPeriodId, refreshRuns]);
+  }, [activeGenerationId, loadQueue, onPackageGenerated, open, payPeriodId, refreshRuns, setError]);
 
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
@@ -423,7 +424,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     } catch (err) {
       if (workspaceToken === workspaceRequestRef.current) setError(err instanceof Error ? err.message : 'Could not refresh the current checks.');
     }
-  }, [loadQueue, revokePreview]);
+  }, [loadQueue, revokePreview, setError]);
 
   const generate = async (): Promise<void> => {
     const printerProfile = queue?.meta.printer_profile;
@@ -667,7 +668,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                     </section>
                   )}
 
-                  {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+                  {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">

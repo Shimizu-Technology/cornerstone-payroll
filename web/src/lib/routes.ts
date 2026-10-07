@@ -45,6 +45,23 @@ export function employeeEditPath(companyId: number, employeeId: number, context:
   return withReturnContext(`${employeesPath(companyId)}/${employeeId}/edit`, context);
 }
 
+export function retirementSetupPath(
+  companyId: number,
+  employeeId: number,
+  year: number,
+  section: 'retirement-plan' | 'retirement-year-evidence',
+  context: ReturnContext = {},
+): string {
+  const path = employeePath(companyId, employeeId, 'pay-setup', context);
+  const params = new URLSearchParams(path.split('?')[1]);
+  if (Number.isInteger(year) && year >= 2000 && year <= 2200) params.set('retirement_year', String(year));
+  const base = `${companyPath(companyId)}/employees/${employeeId}/pay-setup`;
+  const result = `${base}${params.size ? `?${params.toString()}` : ''}#${section}`;
+  if (result.length <= MAX_APP_URL_LENGTH) return result;
+  params.delete('return_to');
+  return `${base}${params.size ? `?${params.toString()}` : ''}#${section}`;
+}
+
 export function payRunsPath(companyId: number, query = ''): string {
   return `${companyPath(companyId)}/pay-runs${normalizeQuery(query)}`;
 }

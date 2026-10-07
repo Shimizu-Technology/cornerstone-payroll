@@ -1,4 +1,5 @@
 import { supportsSourceOperation } from '@/lib/time-tracking';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -91,7 +92,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
   const [accountLink, setAccountLink] = useState<AireAccountLink | null>(null);
   const [accountLinkLoading, setAccountLinkLoading] = useState(false);
   const [accountLinkBusy, setAccountLinkBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const successTimerRef = useRef<number | null>(null);
 
@@ -115,7 +116,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     } finally {
       setLoading(false);
     }
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setError]);
 
   useEffect(() => {
     loadSources();
@@ -147,7 +148,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       });
 
     return () => { active = false; };
-  }, [form.id, accountLinkSupported]);
+  }, [form.id, accountLinkSupported, setError]);
 
   useEffect(() => {
     if (loading) return;
@@ -160,7 +161,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     if (result === 'cancelled') setError('Time tracking account connection was cancelled. Nothing was changed.');
     url.searchParams.delete('aire_link');
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [loading]);
+  }, [loading, setError]);
 
   useEffect(() => {
     return () => {
@@ -344,8 +345,8 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
-        {success && <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">{success}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
 
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           <div className="flex gap-2">

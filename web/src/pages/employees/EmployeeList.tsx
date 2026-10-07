@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { 
@@ -76,7 +77,7 @@ export function EmployeeList() {
   const [employeeCompanyId, setEmployeeCompanyId] = useState<number | null>(null);
   const [departmentCompanyId, setDepartmentCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
@@ -98,7 +99,7 @@ export function EmployeeList() {
     setShowBulkImport(false);
     setIsLoading(true);
     setError(null);
-  }, [companyId]);
+  }, [companyId, setError]);
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') ?? 'active';
@@ -162,7 +163,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
+  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -185,9 +186,9 @@ export function EmployeeList() {
       setDepartmentCompanyId(requestedCompanyId);
     } catch (err) {
       if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
-      console.error('Failed to load departments:', err);
+      setError(`Could not load the department filter. Refresh to try again. ${err instanceof Error ? err.message : ''}`);
     }
-  }, [companyId, isClient]);
+  }, [companyId, isClient, setError]);
 
   useEffect(() => {
     fetchEmployees();
@@ -374,16 +375,10 @@ export function EmployeeList() {
 
         {/* Error State */}
         {error && (
-          <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {switchNotice && (
-          <div
-            role="status"
-            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800"
-          >
-            <span>{switchNotice}</span>
+          <ActionFeedback tone="success" message={switchNotice}><span>{switchNotice}</span>
             <button
               type="button"
               onClick={() => setSwitchNotice(null)}
@@ -391,15 +386,10 @@ export function EmployeeList() {
               aria-label="Dismiss company switch notice"
             >
               Dismiss
-            </button>
-          </div>
+            </button></ActionFeedback>
         )}
         {saveNotice && (
-          <div
-            role="status"
-            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800"
-          >
-            <span>{saveNotice}</span>
+          <ActionFeedback tone="success" message={saveNotice}><span>{saveNotice}</span>
             <button
               type="button"
               onClick={() => setSaveNotice(null)}
@@ -407,8 +397,7 @@ export function EmployeeList() {
               aria-label="Dismiss update notice"
             >
               Dismiss
-            </button>
-          </div>
+            </button></ActionFeedback>
         )}
 
         {/* Loading State */}

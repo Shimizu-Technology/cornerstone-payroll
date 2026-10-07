@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
@@ -14,9 +14,23 @@ export function CompanySwitcher() {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownId = useId();
   const organizationCompanies = companies.filter(company => !activeOrganizationId || company.organization_id === activeOrganizationId);
   const productionCompanies = organizationCompanies.filter(company => !isTestWorkspace(company));
   const testWorkspaces = organizationCompanies.filter(isTestWorkspace);
+  // A workspace label must distinguish similar client records without changing
+  // the employer name printed on reports, checks, or earnings statements.
+  const normalizedName = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const nameCounts = new Map<string, number>();
+  organizationCompanies.forEach(company => {
+    const name = normalizedName(company.name);
+    nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+  });
+  const hasDuplicateName = (company: { name: string }) => (nameCounts.get(normalizedName(company.name)) || 0) > 1;
+  const clientLabel = (company: { id: number; name: string }) =>
+    hasDuplicateName(company) ? `${company.name} · Client #${company.id}` : company.name;
+  const activeLabel = activeCompany ? clientLabel(activeCompany) : null;
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -53,8 +67,8 @@ export function CompanySwitcher() {
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Payroll client</p>
         </div>
-        <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
-          {activeCompany?.name || 'Loading...'}
+        <p className={`mt-0.5 text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
+          {activeLabel || 'Loading...'}
         </p>
         {activeCompany && isTestWorkspace(activeCompany) && (
           <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
@@ -73,12 +87,16 @@ export function CompanySwitcher() {
       </div>
       <button
         type="button"
+        ref={triggerRef}
+        aria-label={activeCompany && hasDuplicateName(activeCompany) ? `Payroll client: ${activeLabel}` : undefined}
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? dropdownId : undefined}
         onClick={() => setIsOpen(!isOpen)}
         className="mt-1 flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50/70 px-3 py-2 text-left transition-colors hover:bg-neutral-100"
       >
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-neutral-900">
-            {activeCompany?.name || 'Select Company'}
+          <p className={`text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
+            {activeLabel || 'Select Company'}
           </p>
           {activeCompany && isTestWorkspace(activeCompany) && (
             <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
@@ -96,7 +114,14 @@ export function CompanySwitcher() {
       </button>
 
       {isOpen && (
-        <div className="absolute left-2 right-2 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
+        <div id={dropdownId} role="group" aria-label="Payroll clients" onKeyDown={event => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsOpen(false);
+            triggerRef.current?.focus();
+          }
+        }} className="absolute left-2 right-2 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
           {[
             { label: 'Production clients', items: productionCompanies },
             { label: 'Test workspaces', items: testWorkspaces },
@@ -111,6 +136,8 @@ export function CompanySwitcher() {
                   <button
                     type="button"
                     key={company.id}
+                    aria-label={clientLabel(company)}
+                    aria-current={company.id === activeCompany?.id ? 'true' : undefined}
                     onClick={() => handleCompanySelect(company.id)}
                     disabled={workspaceUnavailable}
                     className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-4 text-left transition-colors last:border-0 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:opacity-65 ${
@@ -118,8 +145,8 @@ export function CompanySwitcher() {
                     } ${company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''}`}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className={`truncate text-sm ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
-                        {company.name}
+                      <p className={`text-sm ${hasDuplicateName(company) ? 'break-words' : 'truncate'} ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
+                        {clientLabel(company)}
                       </p>
                       {isTestWorkspace(company) && (
                         <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}</p>

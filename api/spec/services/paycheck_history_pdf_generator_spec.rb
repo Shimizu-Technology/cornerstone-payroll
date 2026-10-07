@@ -36,4 +36,22 @@ RSpec.describe PaycheckHistoryPdfGenerator do
 
     expect(text).to include("Voided loan", "Manual pay-period entry", "$25.00")
   end
+  it "prints direct deposits and zero-net earnings without implying a missing check" do
+    company = create(:company)
+    period = create(:pay_period, :committed, company: company)
+    create(:payroll_item, company: company, pay_period: period,
+      employee: create(:employee, company: company), payment_delivery_method: "direct_deposit",
+      check_number: nil, gross_pay: 900, net_pay: 700)
+    create(:payroll_item, company: company, pay_period: period,
+      employee: create(:employee, company: company), payment_delivery_method: "paper_check",
+      check_number: nil, gross_pay: 197.67, net_pay: 0, loan_deduction: 182.54)
+    create(:payroll_item, company: company, pay_period: period,
+      employee: create(:employee, company: company), payment_delivery_method: "paper_check",
+      check_number: "9001", gross_pay: 500, net_pay: 400, voided: true)
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(period).generate)).pages.map(&:text).join("\n")
+      .gsub(/\s+/, " ")
+    expect(text).to include("Direct deposit", "$0 net", "earnings", "statement only", "Paper check", "9001", "Voided")
+    expect(text).not_to include("No check issued")
+  end
 end

@@ -31,6 +31,15 @@ module MigrationRehearsal
         cleanup_existing_uploads!
         maps = copy_company_setup!
         target_batch = copy_historical_archive!(maps.fetch(:employees))
+        maps.fetch(:employees).each_value do |employee|
+          employee.employee_retirement_year_inputs.order(:created_at, :id).group_by(&:tax_year).each_value do |inputs|
+            input = inputs.last
+            next if input.historical_retirement_review.blank?
+
+            HistoricalRetirementProjection.new(employee: employee, tax_year: input.tax_year,
+              review: input.historical_retirement_review).validate_review!
+          end
+        end
         copy_backup_drafts!(maps) if company.backup_snapshot?
         verify_copy!(target_batch)
         ready_at = Time.current

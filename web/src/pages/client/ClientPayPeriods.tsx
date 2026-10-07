@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Search } from 'lucide-react';
@@ -21,7 +22,7 @@ export function ClientPayPeriods(): ReactElement {
   const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [search, setSearch] = useState('');
   const loadRequestIdRef = useRef(0);
 
@@ -44,14 +45,14 @@ export function ClientPayPeriods(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, setError]);
 
   useLayoutEffect((): void => {
     loadRequestIdRef.current += 1;
     setPayPeriods([]);
     setError(null);
     setLoading(true);
-  }, [companyId]);
+  }, [companyId, setError]);
 
   useEffect((): (() => void) => {
     void load();
@@ -89,7 +90,7 @@ export function ClientPayPeriods(): ReactElement {
       <Header title="Pay Periods" description="Review payroll runs and employee pay information." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         <div className="rounded-xl border border-primary-200 bg-primary-50/70 px-4 py-3 text-sm text-primary-800">
           Review-ready Cornerstone payrolls appear here before processing when your approval is required. Finalized Cornerstone payrolls and locked imported payrolls remain available as read-only history.
         </div>

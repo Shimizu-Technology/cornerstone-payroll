@@ -100,8 +100,11 @@ class PayrollRetirementConfigurationGuard
       tax_treatment: treatment, deduction_category: treatment
     )
     return unless group
-
+    if group == PayrollReportingGroups::GROUP_RETIREMENT_OTHER && name.to_s.match?(/401\s*\(?k\)?/i)
+      raise ArgumentError, "Retirement setup needs review: #{label} has an ambiguous 401(k) contribution type. Verify whether it is designated Roth or non-Roth after-tax and select its explicit reporting group."
+    end
     validate_tax_treatment!(label: label, group: group, treatment: treatment)
+    return if group == PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX
 
     rates = if treatment == "employer_contribution"
       case group
@@ -118,11 +121,14 @@ class PayrollRetirementConfigurationGuard
   end
 
   def validate_tax_treatment!(label:, group:, treatment:)
+    if treatment == "employer_contribution" && group == PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX
+      raise ArgumentError, "Retirement setup needs review: #{label} uses an employee non-Roth after-tax type for an employer contribution. Verify its employer Traditional or designated Roth reporting group."
+    end
     return if treatment == "employer_contribution"
 
     incompatible = if group == PayrollReportingGroups::GROUP_401K_PRE_TAX
       treatment.in?(%w[post_tax post_tax_deduction])
-    elsif group == PayrollReportingGroups::GROUP_401K_AFTER_TAX
+    elsif group.in?([ PayrollReportingGroups::GROUP_401K_AFTER_TAX, PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ])
       treatment.in?(%w[pre_tax pre_tax_deduction])
     end
     return unless incompatible

@@ -25,6 +25,56 @@ class CheckPrintRenderFingerprint
     for_payload(payload)
   end
 
+  # Saved PDFs retain the issuer name that was printed. Only a trusted,
+  # transactional name-only rename may explain that one input difference.
+  # Every candidate must still reproduce the entire sealed render digest.
+  def self.matches_saved_record?(record, run:, company:, stored_digest:)
+    return false if stored_digest.blank?
+    return true if for_record(record, company: company, check_stock_type: run.check_stock_type) == stored_digest
+
+    historical_issuer_names(run, company).any? do |name|
+      historical_company = company.dup
+      historical_company.id = company.id
+      historical_company.name = name
+      for_record(record, company: historical_company, check_stock_type: run.check_stock_type) == stored_digest
+    end
+  end
+
+  def self.historical_issuer_names(run, company)
+    return [] unless run.generated_at && run.company_id == company.id
+
+    cache_key = [ company.name, company.updated_at, run.generated_at ]
+    cache = run.instance_variable_get(:@historical_issuer_name_cache)
+    return cache.last if cache&.first == cache_key
+
+    current_name = company.name
+    names = []
+    logs = AuditLog.where(record_type: %w[Company companies], record_id: company.id,
+      action: [ "company#name_changed", "companies#update" ])
+      .where("created_at >= ?", run.generated_at).order(created_at: :desc, id: :desc)
+    logs.each do |log|
+      data = log.metadata
+      # A generic or mixed name update cannot prove historical issuer identity.
+      if log.action != "company#name_changed"
+        break unless data["actual_changes"] == true && !Array(data["changed_fields"]).include?("name")
+        next
+      end
+      break unless log.company_id == company.id && log.organization_id == company.organization_id &&
+        data["actual_changes"] == true && data["name_only"] == true &&
+        data["changed_fields"] == [ "name" ] &&
+        data.dig("after_values", "name") == current_name
+
+      old_name = data.dig("before_values", "name")
+      break unless old_name.is_a?(String) && old_name.present?
+
+      names << old_name
+      current_name = old_name
+    end
+    run.instance_variable_set(:@historical_issuer_name_cache, [ cache_key, names.uniq ])
+    names.uniq
+  end
+  private_class_method :historical_issuer_names
+
   def self.deep_sort(value)
     case value
     when Hash
