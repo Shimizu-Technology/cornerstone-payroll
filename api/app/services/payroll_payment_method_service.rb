@@ -4,11 +4,12 @@
 # never recalculates gross pay, withholding, liabilities, or YTD amounts.
 class PayrollPaymentMethodService
   class Error < StandardError; end
+  UNSPECIFIED_CHECK_NUMBER = Object.new.freeze
   attr_reader :reapproval_pay_period_ids
 
   def initialize(payroll_item:, method:, actor:, reason: nil, confirm_not_paid: false, ip_address: nil,
                  update_employee_default: false, retire_existing_check: false, confirm_check_cancelled: false,
-                 cancellation_evidence_reference: nil, expected_check_number: nil)
+                 cancellation_evidence_reference: nil, expected_check_number: UNSPECIFIED_CHECK_NUMBER)
     @item = payroll_item
     @method = method.to_s
     @actor = actor
@@ -38,7 +39,7 @@ class PayrollPaymentMethodService
       raise Error, "This check has cleared. Resolve the bank clearing evidence before changing its delivery method." if CheckReconciliationStatus.for(item) == "cleared"
 
       old_method = item.effective_payment_delivery_method
-      if @expected_check_number && @expected_check_number.to_s != item.check_number.to_s
+      if !@expected_check_number.equal?(UNSPECIFIED_CHECK_NUMBER) && @expected_check_number.to_s != item.check_number.to_s
         raise Error, "The original check number changed. Reopen this payroll and review the current check."
       end
       if @retire_existing_check && (!period.committed? || old_method != "paper_check" || method != "direct_deposit")

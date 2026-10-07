@@ -225,6 +225,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(payroll_item.reload.payment_delivery_method).to be_nil
     end
 
+    it "retains explicit JSON null as an optimistic expectation of no assigned check" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+      patch path, params: {
+        payment_delivery_method: "direct_deposit", reason: "Payment was not issued",
+        confirm_not_paid: true, expected_check_number: nil
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("number changed")
+      expect(payroll_item.reload).to have_attributes(payment_delivery_method: "paper_check", check_number: "2000")
+    end
+
     it "rejects a committed switch without a no-payment attestation" do
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")

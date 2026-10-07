@@ -85,6 +85,47 @@ RSpec.describe 'Audited payment delivery changes' do
       cancellation_evidence_reference: 'Bank stop-payment confirmation 123', expected_check_number: '9000' }
   end
 
+  def retain_print_package(number, include_key: true)
+    entry = { 'source_type' => 'payroll_item', 'source_id' => item.id, 'check_number' => number }
+    entry['key'] = "payroll_item:#{item.id}" if include_key
+    period.check_print_runs.create!(company: company, created_by: actor,
+      check_stock_type: 'standard', storage_key: "synthetic-#{SecureRandom.uuid}",
+      filename: 'synthetic-check.pdf', sha256: 'a' * 64, byte_size: 100, selected_count: 1, generated_at: Time.current,
+      manifest: [ entry ])
+  end
+
+  it 'does not require cancelling a newly assigned unprinted check because an older number had activity' do
+    item.mark_package_prepared!(user: actor)
+    retain_print_package('9000')
+    perform_change(**cancellation)
+    PayrollPaymentMethodService.new(payroll_item: item, method: 'paper_check', actor: actor,
+      reason: 'Bank enrollment still pending', confirm_not_paid: true, expected_check_number: nil).call
+    expect(item.reload.check_number).to eq('9001')
+    expect(PayrollPaymentMethodEligibility.new(item).call).to include(mode: 'simple', requires_check_cancellation: false)
+    perform_change(expected_check_number: '9001')
+    expect(item.reload.check_number).to be_nil
+    expect(item.check_events.where(event_type: 'voided').pluck(:check_number)).to contain_exactly('9000', '9001')
+  end
+
+  it 'still protects a current check present in a retained package without preparation markers' do
+    retain_print_package('9000')
+    expect(PayrollPaymentMethodEligibility.new(item).call).to include(mode: 'retire_check')
+    expect { perform_change }.to raise_error(PayrollPaymentMethodService::Error, /simple switch/)
+  end
+
+  it 'conservatively protects legacy package entries that lack a check number' do
+    retain_print_package(nil, include_key: false)
+    expect(PayrollPaymentMethodEligibility.new(item).call).to include(mode: 'retire_check')
+    expect { perform_change }.to raise_error(PayrollPaymentMethodService::Error, /simple switch/)
+  end
+
+  it 'rejects an explicit expected absence after another accountant assigns a check' do
+    expect { perform_change(expected_check_number: nil, update_employee_default: true) }
+      .to raise_error(PayrollPaymentMethodService::Error, /number changed/)
+    expect(item.reload).to have_attributes(check_number: '9000', payment_delivery_method: 'paper_check')
+    expect(employee.reload.payment_delivery_method).to eq('paper_check')
+  end
+
   it 'retires a prepared check with explicit evidence without changing money or voiding payroll' do
     item.mark_package_prepared!(user: actor)
     money = item.attributes.slice('gross_pay', 'net_pay', 'withholding_tax', 'social_security_tax', 'medicare_tax', 'loan_payment')
