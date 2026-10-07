@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CheckItem, EarningsStatementItem, PayPeriod } from '@/types';
 import { ChecksPanel } from './ChecksPanel';
@@ -146,6 +146,23 @@ describe('ChecksPanel earnings statements', () => {
     expect(screen.getByRole('button', { name: 'Print all earnings statements' })).toBeTruthy();
   });
 
+  it('applies local statement search within the parent search results', async () => {
+    renderStatements([paperStatement, depositStatement, { ...statementOnly, employee_name: 'Casey Example' }], { searchTerm: 'Example' });
+    const section = await screen.findByRole('region', { name: 'Earnings statements' });
+    await within(section).findByText('Casey Example');
+    expect(within(section).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(section).queryByText('Drew Deposit')).toBeNull();
+
+    fireEvent.change(within(section).getByRole('textbox', { name: 'Search earnings statements' }), { target: { value: 'CASEY' } });
+    expect(within(section).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(section).getByText('Casey Example')).toBeTruthy();
+    expect(within(section).queryByText('Avery Example')).toBeNull();
+
+    fireEvent.change(within(section).getByRole('textbox', { name: 'Search earnings statements' }), { target: { value: '' } });
+    expect(within(section).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(section).queryByText('Drew Deposit')).toBeNull();
+  });
+
   it('works for a run containing only statement-only rows and can view or download one', async () => {
     renderStatements([statementOnly]);
     const statement = await screen.findByRole('listitem', { name: 'Earnings statement for Casey Zero' });
@@ -180,8 +197,10 @@ describe('ChecksPanel earnings statements', () => {
     apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [statementOnly], meta });
     view.rerender(<ChecksPanel payPeriod={{ id: 9, status: 'committed' } as PayPeriod} />);
     await screen.findByText('Casey Zero');
-    resolveOld({ checks: [check], direct_deposit_items: [], earnings_statement_items: [paperStatement], meta });
-    await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveOld({ checks: [check], direct_deposit_items: [], earnings_statement_items: [paperStatement], meta });
+    });
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('Avery Example')).toBeNull();
     expect(screen.getByText('Casey Zero')).toBeTruthy();
   });
