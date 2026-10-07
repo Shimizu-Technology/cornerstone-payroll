@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ReprintCheckModal
  * Confirms reissue: voids the old physical check number, assigns a new one in-place.

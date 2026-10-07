@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { CheckCircle2, Landmark, Pencil, ShieldCheck, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';

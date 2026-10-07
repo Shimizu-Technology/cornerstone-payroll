@@ -2,8 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
-import { ActionFeedback, FeedbackProvider, useFeedback } from './action-feedback';
-import { useFeedbackState } from '@/lib/use-feedback-state';
+import { ActionFeedback, FeedbackProvider, useFeedback, useFeedbackState } from './action-feedback';
 import { Dialog, DialogContent, DialogTitle } from './dialog';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
