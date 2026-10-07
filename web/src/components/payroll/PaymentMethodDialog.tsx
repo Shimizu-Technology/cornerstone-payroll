@@ -63,7 +63,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
   const currentMethod = record?.effective_payment_delivery_method || record?.payment_delivery_method || 'paper_check';
   const eligibility = record?.payment_method_change;
   const methodChanges = method !== currentMethod;
-  const committed = payPeriod.status === 'committed';
+  const committed = eligibility?.requires_unpaid_confirmation ?? payPeriod.status === 'committed';
   const retiresCheck = committed && methodChanges && eligibility?.mode === 'retire_check';
   const blocked = !eligibility || !eligibility.eligible;
   const ready = Boolean(record && !loading && !saving && !blocked && (methodChanges || futureDefault) &&
@@ -111,7 +111,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
           <Select label="Payment method for this payroll" value={method} onChange={event => setMethod(event.target.value as PaymentDeliveryMethod)}><option value="paper_check">Paper check</option><option value="direct_deposit">Direct deposit</option></Select>
           <p className="text-sm text-neutral-600">This payroll only, unless you also update the future default below.</p>
           <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={futureDefault} onChange={event => setFutureDefault(event.target.checked)} />Also use this method as the employee’s future payroll default</label>
-          {payPeriod.status === 'approved' && <p role="note" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This change returns the run to Calculated. Review and approve it again before processing.</p>}
+          {payPeriod.status === 'approved' && !committed && <p role="note" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This change returns the run to Calculated. Review and approve it again before processing.</p>}
           {committed && <>
             <Input label="Reason for changing this payment (at least 10 characters)" value={reason} onChange={event => setReason(event.target.value)} />
             <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={unpaid} onChange={event => setUnpaid(event.target.checked)} />I verified that this payment has not been paid by check or bank transfer.</label>

@@ -35,11 +35,29 @@ describe('scoped payment method changes', () => {
     expect(screen.getByText(/Future payroll default also updated/)).toBeTruthy();
   });
   it('sends an explicit empty check identity before commitment', async () => {
-    const { user } = setup({ ...item, check_number: null }, { ...period, status: 'approved' });
+    const { user } = setup({ ...item, check_number: null, payment_method_change: { ...item.payment_method_change!, requires_unpaid_confirmation: false } }, { ...period, status: 'approved' });
     await screen.findByText(/Current method:/);
     await user.click(screen.getByRole('button', { name: 'Save payment method' }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(12, 31, 'direct_deposit', expect.objectContaining({ expected_check_number: null }), 6));
     expect(mocks.save.mock.calls[0][3]).not.toHaveProperty('confirm_not_paid');
+  });
+  it('uses fresh committed eligibility when the outer workspace is still approved', async () => {
+    const { user } = setup(item, { ...period, status: 'approved' });
+    await attest(user);
+    expect(screen.queryByText(/This change returns the run to Calculated/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Save payment method' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(12, 31, 'direct_deposit', expect.objectContaining({ confirm_not_paid: true, reason: 'Employer confirmed payment remains unpaid' }), 6));
+  });
+  it('shows cancellation evidence from fresh eligibility despite a stale draft workspace', async () => {
+    const record = { ...item, payment_method_change: { ...item.payment_method_change!, mode: 'retire_check' as const, requires_check_cancellation: true } };
+    const { user } = setup(record, { ...period, status: 'draft' });
+    await attest(user);
+    const button = screen.getByRole('button', { name: 'Record cancellation and save' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    await user.type(screen.getByLabelText('Check cancellation evidence reference'), 'Synthetic cancelled check on file');
+    await user.click(screen.getByLabelText(/original check is cancelled/));
+    await user.click(button);
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(12, 31, 'direct_deposit', expect.objectContaining({ confirm_not_paid: true, retire_existing_check: true, confirm_check_cancelled: true }), 6));
   });
   it('requires explicit cancelled-check evidence for a prepared check replacement', async () => {
     const record = { ...item, payment_method_change: { ...item.payment_method_change!, mode: 'retire_check' as const, requires_check_cancellation: true } };
