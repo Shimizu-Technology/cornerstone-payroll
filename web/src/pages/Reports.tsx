@@ -1,3 +1,4 @@
+import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -1130,7 +1131,7 @@ function W2GuPanel() {
 
 // ─── Employee Pay History Panel ────────────────────────────────────────────
 
-function EmployeePayHistoryPanel() {
+export function EmployeePayHistoryPanel() {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -1322,7 +1323,7 @@ function EmployeePayHistoryPanel() {
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-500">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
-                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Check number</dt><dd>{history.check_number ?? '—'}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-500">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div><div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div><div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div><div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div></dl></details>
                 </div>
               ))}
@@ -1342,7 +1343,7 @@ function EmployeePayHistoryPanel() {
                     <th className="pb-2 pr-4 font-medium text-right">Custom Ded.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
-                    <th className="pb-2 font-medium">Check #</th>
+                    <th className="pb-2 font-medium">Payment</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1358,7 +1359,7 @@ function EmployeePayHistoryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
-                      <td className="py-2 font-mono text-gray-500">{h.check_number ?? '—'}</td>
+                      <td className="py-2 text-gray-500">{payrollPaymentLabel(h)}{h.check_number && <span className="block font-mono text-xs">Check #{h.check_number}</span>}</td>
                     </tr>
                   ))}
                   {report.history.length === 0 && (
