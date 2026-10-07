@@ -8,7 +8,8 @@ module TimeTracking
       "payment_prepared" => :payment_pending,
       "payment_issued" => :paid,
       "payment_failed" => :needs_attention,
-      "payment_voided" => :needs_attention
+      "payment_voided" => :needs_attention,
+      "payment_cancelled" => :in_payroll
     }.freeze
 
     def self.call(import)

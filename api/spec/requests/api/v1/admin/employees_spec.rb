@@ -628,6 +628,25 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(response.parsed_body.dig("data", "payment_delivery_method")).to eq("direct_deposit")
       end
 
+      it "preserves existing inherited payroll and audits other profile edits alongside a future default change" do
+        period = create(:pay_period, company: company, status: "calculated")
+        item = create(:payroll_item, company: company, pay_period: period, employee: employee,
+          payment_delivery_method: nil, net_pay: 500)
+        old_review = PayrollReview::RevisionService.new(pay_period: period).issue!
+        period.update!(status: "approved", approved_at: Time.current)
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { payment_delivery_method: "direct_deposit", first_name: "Updated" }
+        }
+        expect(response).to have_http_status(:ok)
+        expect(item.reload.payment_delivery_method).to eq("paper_check")
+        expect(old_review.reload).to be_superseded
+        expect(response.parsed_body.dig("payment_method_review", "reapproval_pay_period_ids")).to eq([ period.id ])
+        audit = AuditLog.where(action: "employees#update", record_id: employee.id.to_s).last
+        expect(audit.metadata.fetch("after_values")).to include(
+          "first_name" => "Updated", "payment_delivery_method" => "direct_deposit"
+        )
+      end
+
       it "appends effective-dated W-4 history while leaving the prior election intact" do
         EmployeeW4ElectionChangeService.new(
           employee: employee,

@@ -5,6 +5,7 @@ module Api
     module Admin
       class PayStubsController < BaseController
         before_action :set_payroll_item, only: [ :show, :generate, :download ]
+        before_action :require_statement_activity, only: [ :generate, :download ]
 
         # GET /api/v1/admin/pay_stubs/:payroll_item_id
         # Get pay stub info (not the PDF itself)
@@ -56,7 +57,7 @@ module Api
           # Try to get from storage first
           # The delivery method can be changed for an unissued committed run.
           # A previously stored PDF may still name the old method or check.
-          if r2_configured? && @payroll_item.payment_delivery_method.blank?
+          if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive?
             storage = R2StorageService.new
             key = existing_storage_key(storage: storage)
             pdf_data = storage.download(key) if key.present?
@@ -89,7 +90,7 @@ module Api
                                 .not_voided.reportable
                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                                 .to_a
-          eligible_items = all_items.select { |item| pay_stub_printable?(item) }
+          eligible_items = all_items.select { |item| EarningsStatementEligibility.printable?(item) }
           skipped_count = all_items.count - eligible_items.count
 
           eligible_items.each do |item|
@@ -145,7 +146,7 @@ module Api
           end
 
           requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
-          base_items = pay_period.payroll_items
+          base_items = pay_period.payroll_items.reportable
                                  .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
 
           skipped_count = 0
@@ -166,24 +167,33 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            unpaid_items = selected_items.reject { |item| pay_stub_printable?(item) }
+            unpaid_items = selected_items.reject { |item| EarningsStatementEligibility.printable?(item) }
             if unpaid_items.any?
               names = unpaid_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
               return render json: {
-                error: "Selected employees have no printable net-pay stub in this pay period",
+                error: "Selected employees have no earnings-statement activity in this pay period",
                 details: "Remove #{names} from the selection and try again."
               }, status: :unprocessable_entity
             end
 
-            if deposit_only && selected_items.any? { |item| item.effective_payment_delivery_method != "direct_deposit" }
-              return render json: { error: "The direct-deposit stub selection may include only direct-deposit employees" }, status: :unprocessable_entity
+            if deposit_only
+              invalid_deposit_items = selected_items.reject do |item|
+                item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?
+              end
+              if invalid_deposit_items.any?
+                names = invalid_deposit_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
+                return render json: {
+                  error: "Select only direct-deposit employees with a positive payment",
+                  details: "Remove #{names} from this selection and try again. To include paper checks or statement-only records, use all earnings statements."
+                }, status: :unprocessable_entity
+              end
             end
 
             items = selected_items
           else
             all_items = base_items.not_voided.reportable.to_a
             items = all_items.select do |item|
-              pay_stub_printable?(item) && (!deposit_only || item.effective_payment_delivery_method == "direct_deposit")
+              EarningsStatementEligibility.printable?(item) && (!deposit_only || (item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?))
             end
             skipped_count = all_items.count - items.count
           end
@@ -263,14 +273,16 @@ module Api
           end
         end
 
-        def storage_key
-          pay_stub_key(@payroll_item)
+        def require_statement_activity
+          return if EarningsStatementEligibility.printable?(@payroll_item)
+
+          render json: {
+            error: @payroll_item.voided? ? "Voided payroll does not have a current earnings statement" : "This payroll record has no earnings-statement activity"
+          }, status: :unprocessable_entity
         end
 
-        def pay_stub_printable?(item)
-          return false if item.voided?
-
-          item.check_number.present? || item.gross_pay.to_d.positive? || item.net_pay.to_d.positive?
+        def storage_key
+          pay_stub_key(@payroll_item)
         end
 
         def pay_stub_key(item)

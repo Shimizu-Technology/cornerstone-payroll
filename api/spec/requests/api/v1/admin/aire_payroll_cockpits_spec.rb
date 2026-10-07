@@ -53,6 +53,13 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       expect(audit.record_id.to_i).to eq(allocation.id)
       expect(audit.metadata).to include("command_id" => allocation.commit_command_id,
         "reason" => allocation.reconciliation_note)
+      expect(response.parsed_body.fetch("manual_allocation")).to include("payment_cancellation_pending" => false)
+      allocation.update!(payment_cancellation_intent: { "command_id" => "PRIVATE-INTENT-MUST-NOT-LEAK" })
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_review"
+      expect(response).to have_http_status(:ok)
+      row = response.parsed_body.fetch("cornerstone_manual_allocations").find { |value| value["id"] == allocation.id }
+      expect(row).to include("payment_cancellation_pending" => true)
+      expect(response.body).not_to include("PRIVATE-INTENT-MUST-NOT-LEAK")
     end
   end
 

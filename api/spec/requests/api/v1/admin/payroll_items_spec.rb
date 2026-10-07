@@ -178,6 +178,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/payment_method" do
     let(:path) { "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/payment_method" }
+    before { payroll_item.update!(gross_pay: 600, net_pay: 500) }
 
     it "changes only this calculated run through the HTTP endpoint" do
       original_net = payroll_item.net_pay
@@ -189,6 +190,31 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response.parsed_body.fetch("pay_period_status")).to eq("calculated")
       expect(payroll_item.reload).to have_attributes(payment_delivery_method: "direct_deposit", net_pay: original_net)
       expect(employee.reload.payment_delivery_method).to be_nil
+      expect(response.parsed_body.dig("payroll_item", "payment_method_change")).to include(
+        "eligible" => true, "mode" => "simple", "target_method" => "paper_check"
+      )
+    end
+
+    it "saves this run and its future default in one request" do
+      pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: Time.current)
+      patch path, params: { payment_delivery_method: "direct_deposit", update_employee_default: true }
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(response.parsed_body.dig("payroll_item", "employee_payment_delivery_method")).to eq("direct_deposit")
+      expect(response.parsed_body.dig("payment_method_review", "reapproval_pay_period_ids")).to eq([ pay_period.id ])
+    end
+
+    it "requires an explicit retirement mode and cancellation evidence for a prepared check" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+      payroll_item.mark_package_prepared!(user: admin_user)
+      patch path, params: {
+        payment_delivery_method: "direct_deposit", reason: "Original check retained and destroyed",
+        confirm_not_paid: true, retire_existing_check: true, expected_check_number: "2000",
+        confirm_check_cancelled: true, cancellation_evidence_reference: "Payroll cancellation log 2"
+      }
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload).to have_attributes(check_number: nil, payment_delivery_method: "direct_deposit", voided: false)
     end
 
     it "rejects an unsupported method without changing the run" do
@@ -197,6 +223,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Choose paper check or direct deposit")
       expect(payroll_item.reload.payment_delivery_method).to be_nil
+    end
+
+    it "retains explicit JSON null as an optimistic expectation of no assigned check" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
+      patch path, params: {
+        payment_delivery_method: "direct_deposit", reason: "Payment was not issued",
+        confirm_not_paid: true, expected_check_number: nil
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("number changed")
+      expect(payroll_item.reload).to have_attributes(payment_delivery_method: "paper_check", check_number: "2000")
     end
 
     it "rejects a committed switch without a no-payment attestation" do
@@ -643,6 +681,46 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:ok)
       expect(entry.reload.amount.to_f).to eq(25.0)
       expect(entry.metadata).not_to have_key("uncapped_amount")
+    end
+
+    it "accepts an explicit zero request replacement even when the applied deduction was already zero" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic zero replacement", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "loan")
+      entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
+        amount: 0, source: "manual", metadata: { "uncapped_amount" => "400", "loan_requested_amount" => "500", "audit" => "keep" })
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 0, source: "manual", replace_request: true } ] }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload).to have_attributes(amount: 0.to_d, metadata: { "audit" => "keep" })
+    end
+
+    it "preserves the original request when a row editor echoes the requested value rather than its capped result" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic request echo", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "loan")
+      entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
+        amount: 40, source: "manual", metadata: { "uncapped_amount" => "400", "loan_requested_amount" => "500" })
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 500, source: "manual", replace_request: false } ] }
+      }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.metadata).to include("uncapped_amount" => "400", "loan_requested_amount" => "500")
+    end
+
+    it "rejects a string replacement flag rather than silently dropping the row" do
+      field = create(:payroll_field_definition, company: company, name: "Synthetic invalid request flag", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "loan")
+      entry = create(:payroll_item_field_entry, payroll_item: payroll_item, payroll_field_definition: field,
+        amount: 40, source: "manual", metadata: { "uncapped_amount" => "400" })
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: { payroll_field_entries: [ { id: entry.id, payroll_field_definition_id: field.id, label: field.name,
+          amount: 0, source: "manual", replace_request: "false" } ] }
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").join(" ")).to match(/must be a JSON boolean/)
+      expect(entry.reload).to have_attributes(amount: 40.to_d, metadata: { "uncapped_amount" => "400" })
     end
 
     it "returns a validation response for stale payroll field definition ids" do

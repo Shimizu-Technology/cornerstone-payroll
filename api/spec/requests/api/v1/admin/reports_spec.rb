@@ -27,7 +27,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
   end
 
   def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300,
-                                       hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil)
+                                       hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil, payment_method: nil)
     batch = HistoricalImportBatch.create!(
       company: company,
       source_label: "QuickBooks #{suffix}",
@@ -84,6 +84,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       medicare_tax: 10,
       after_tax_deductions: 30,
       net_pay: net_pay,
+      payment_method: payment_method,
       hours_breakdown: hours_breakdown,
       earnings_breakdown: [ { "label" => "Reported Tips", "amount" => "25.00" } ],
       pretax_deduction_breakdown: pretax_deduction_breakdown || [ { "label" => "401(k) pre-tax", "amount" => "20.00" } ],
@@ -3485,6 +3486,66 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(ytd_rows).to include([ "Total Deductions", 261.50 ])
       expect(ytd_rows).to include([ "Custom Deductions", 15.00 ])
       expect(ytd_rows.flatten).not_to include(:gross_pay, :roth_retirement)
+    end
+  end
+  describe "recorded payment labels across report exports" do
+    let!(:period) do
+      create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 9, 21), end_date: Date.new(2026, 10, 4), pay_date: Date.new(2026, 10, 8))
+    end
+    let!(:deposit) do
+      create(:payroll_item, company: company, employee: employee, pay_period: period,
+        payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 900, net_pay: 700)
+    end
+
+    it "prints the recorded method in the paycheck-history PDF and spreadsheet" do
+      employee.update!(payment_delivery_method: "paper_check")
+      get "/api/v1/admin/reports/paycheck_history_pdf", params: { pay_period_id: period.id }
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("Direct deposit")
+      expect(text).not_to include("No check issued")
+
+      get "/api/v1/admin/reports/paycheck_history_xlsx", params: { pay_period_id: period.id }
+      expect(response).to have_http_status(:ok)
+      Tempfile.create([ "payment-label-history", ".xlsx" ]) do |file|
+        file.binmode
+        file.write(response.body)
+        file.flush
+        sheet = Roo::Excelx.new(file.path).sheet("QB Paycheck History")
+        expect(sheet.row(1)).to eq([ "Pay Date", "Name", "Total Pay", "Net Pay", "Pay Method", "Check #", "Status" ])
+        expect(sheet.row(2)[4..5]).to eq([ "Direct deposit", nil ])
+      end
+    end
+
+    it "appends payment method without moving existing employee-history CSV columns" do
+      get "/api/v1/admin/reports/employee_pay_history_csv", params: {
+        employee_id: employee.id, start_date: "2026-01-01", end_date: "2026-12-31"
+      }
+      expect(response).to have_http_status(:ok)
+      rows = CSV.parse(response.body)
+      expect(rows.first[-2..]).to eq([ "Check Number", "Payment method" ])
+      expect(rows[1][-2..]).to eq([ nil, "Direct deposit" ])
+    end
+
+    it "retains source methods for imported employee history without using today's profile" do
+      create_locked_historical_paycheck(employee: employee, suffix: "source-deposit",
+        pay_date: Date.new(2026, 9, 10), payment_method: "Direct Deposit")
+      create_locked_historical_paycheck(employee: employee, suffix: "source-unknown",
+        pay_date: Date.new(2026, 8, 27))
+      get "/api/v1/admin/reports/employee_pay_history", params: {
+        employee_id: employee.id, start_date: "2026-01-01", end_date: "2026-12-31"
+      }
+      expect(response).to have_http_status(:ok)
+      imported = response.parsed_body.dig("report", "history").select { |row| row["record_type"] == "imported" }
+      expect(imported.map { |row| row["payment_method"] }).to eq([ "Direct Deposit", nil ])
+
+      get "/api/v1/admin/reports/employee_pay_history_csv", params: {
+        employee_id: employee.id, start_date: "2026-01-01", end_date: "2026-12-31"
+      }
+      expect(response).to have_http_status(:ok)
+      rows = CSV.parse(response.body, headers: true)
+      expect(rows.map { |row| row["Payment method"] }).to eq([ "Direct deposit", "Direct deposit", "Not recorded" ])
     end
   end
 end

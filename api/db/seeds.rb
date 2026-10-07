@@ -12,8 +12,10 @@ AnnualRetirementLimit.find_or_create_by!(tax_year: 2026) do |limit|
   limit.catch_up_limit = 8_000
   limit.enhanced_catch_up_limit = 11_250
   limit.roth_catch_up_wage_threshold = 150_000
-  limit.source_name = "IRS Notice 2025-67 and Retirement Topics: Catch-up Contributions"
-  limit.source_url = "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-catch-up-contributions"
+  limit.annual_additions_limit = 72_000
+  limit.compensation_limit = 360_000
+  limit.source_name = "IRS Notice 2025-67"
+  limit.source_url = "https://www.irs.gov/pub/irs-drop/n-25-67.pdf"
 end
 
 puts "\nSeeding legacy tax tables (for backward compatibility)..."

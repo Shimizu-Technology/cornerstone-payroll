@@ -114,10 +114,17 @@ class PayStubGenerator
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
-        payroll_item.effective_payment_delivery_method == "direct_deposit" ?
-          [ "Payment:", "Direct deposit (stub only; transfer not confirmed)" ] :
+        if !payroll_item.net_pay.to_d.positive?
+          [ "Payment:", "Earnings statement only - no payment issued" ]
+        elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
+          [ "Payment:", "Direct deposit (stub only; transfer not confirmed)" ]
+        else
           [ "Check #:", payroll_item.check_number.presence || "No check issued" ]
+        end
       ]
+      if !payroll_item.net_pay.to_d.positive? && payroll_item.check_number.present?
+        data << [ "Check reference:", payroll_item.check_number ]
+      end
 
       pdf.table(data, cell_style: { borders: [], padding: [ 2, 10, 2, 0 ] }) do
         column(0).font_style = :bold

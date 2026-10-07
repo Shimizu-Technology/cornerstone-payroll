@@ -11,8 +11,15 @@ database_name = ActiveRecord::Base.connection_db_config.database.to_s
 abort "Refusing to seed an unexpected database" unless database_name == "cornerstone_payroll_staging_v2"
 
 slug = "aire-payroll-staging-v2"
-if Organization.exists?(slug: slug)
-  puts "Cornerstone staging v2 fixture already exists"
+browser_origin = ENV.fetch("AIRE_PUBLIC_URL")
+if (organization = Organization.find_by(slug: slug))
+  # Keep existing payroll/history untouched. Only the known isolated fixture's
+  # browser destination follows this stack's trusted HTTPS deployment config.
+  source = TimeTrackingSource.find_by!(id: 910_001, company_id: 910_001,
+    source_type: "aire_services", base_url: "http://aire-api:3000")
+  abort "Unexpected staging fixture owner" unless source.company.organization_id == organization.id
+  source.update!(authorization_origin: browser_origin) unless source.authorization_origin == browser_origin
+  puts "Cornerstone staging v2 fixture already exists; browser destination verified"
   exit
 end
 
@@ -188,6 +195,7 @@ ActiveRecord::Base.transaction do
     name: "AIRE Staging v2",
     source_type: "aire_services",
     base_url: "http://aire-api:3000",
+    authorization_origin: browser_origin,
     shared_secret: integration_secret,
     active: true
   )

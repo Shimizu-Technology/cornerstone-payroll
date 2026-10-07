@@ -310,7 +310,10 @@ module QuickbooksHistory
         value = item.fetch(:value)
         next if value.zero?
 
-        if label.match?(/\A401\(k\) After Tax\z/i) && item.fetch(:value_type) == "percentage"
+        if label.match?(/\A401\(k\) After Tax\z/i)
+          errors << "QuickBooks after-tax retirement '#{safe_label(label)}' needs administrator verification of designated Roth treatment"
+          next
+        elsif label.match?(/roth.*401|401.*roth/i) && item.fetch(:value_type) == "percentage"
           result[:roth_retirement_rate] = rate_fraction(value)
         elsif label.match?(/\A401\(k\) Pre-Tax\z/i) && item.fetch(:value_type) == "percentage"
           result[:retirement_rate] = rate_fraction(value)
@@ -332,6 +335,9 @@ module QuickbooksHistory
         end
 
         if label.match?(/\A401\(k\) After Tax\z/i)
+          errors << "QuickBooks employer after-tax retirement '#{safe_label(label)}' needs administrator verification of designated Roth treatment"
+          next
+        elsif label.match?(/roth.*401|401.*roth/i)
           result[:employer_roth_match_rate] = rate_fraction(item.fetch(:value))
         elsif label.match?(/\A401\(k\) Pre-Tax\z/i)
           result[:employer_retirement_match_rate] = rate_fraction(item.fetch(:value))
@@ -350,8 +356,11 @@ module QuickbooksHistory
       attributes = case label
       when /401\(k\).*Pre-Tax/i
         [ "pre_tax_deduction", "retirement", PayrollReportingGroups::GROUP_401K_PRE_TAX ]
-      when /401\(k\).*After Tax/i
+      when /roth.*401|401.*roth/i
         [ "post_tax_deduction", "retirement", PayrollReportingGroups::GROUP_401K_AFTER_TAX ]
+      when /401\(k\).*After Tax/i
+        errors << "QuickBooks after-tax retirement '#{safe_label(label)}' needs explicit Roth or non-Roth verification"
+        [ "post_tax_deduction", "retirement", PayrollReportingGroups::GROUP_RETIREMENT_OTHER ]
       when /Health Insurance/i
         [ "post_tax_deduction", "insurance", nil ]
       when /\bRent\b/i

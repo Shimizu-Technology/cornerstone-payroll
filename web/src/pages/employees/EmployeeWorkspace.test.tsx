@@ -14,6 +14,10 @@ const apiMocks = vi.hoisted(() => ({
   recordActivities: vi.fn(),
 }));
 
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ hasCapability: () => true }),
+}));
+
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompanyId: 1 }),
 }));
@@ -31,6 +35,7 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/components/employees/EmployeeRetirementElectionPanel', () => ({
   EmployeeRetirementElectionPanel: () => null,
 }));
+vi.mock('@/components/employees/EmployeeRetirementYearPanel', () => ({ EmployeeRetirementYearPanel: () => null }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
   PdfPreview: ({ artifact }: { artifact: { title: string } | null }) => artifact ? <div role="dialog">{artifact.title}</div> : null,
@@ -170,6 +175,29 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(screen.getAllByRole('button', { name: 'View stub for Sep 19, 2026' })[0]).toBeTruthy();
   });
 
+  it('keeps a zero-net loan statement discoverable with an accurate payment label on phone and desktop', async () => {
+    apiMocks.employeePayHistory.mockResolvedValue({ report: {
+      summary: {},
+      history: [{
+        key: 'native:4', record_type: 'native', payroll_item_id: 4, pay_period_id: 5,
+        pay_date: '2026-10-08', period_description: 'October payroll',
+        source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+        hours_worked: 21.37, gross_pay: 197.67, total_deductions: 197.67, net_pay: 0,
+        payment_delivery_method: 'paper_check', check_number: null,
+      }],
+    } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/pay-history']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('cell', { name: '$0 net · earnings statement only' })).toBeTruthy();
+    const phoneCard = screen.getByRole('group', { name: 'Pay history for Oct 8, 2026' });
+    expect(within(phoneCard).getByText('$0 net · earnings statement only')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'View stub for Oct 8, 2026' })).toHaveLength(2);
+    expect(screen.queryByText('Paper check · not assigned')).toBeNull();
+  });
+
   it('previews a Cornerstone stub from history and offers no stub for imported history', async () => {
     apiMocks.batchPdf.mockResolvedValue({ blob: new Blob(['%PDF']), filename: 'paystub.pdf' });
     apiMocks.employeePayHistory.mockResolvedValue({ report: { summary: {}, history: [
@@ -206,6 +234,18 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(await screen.findByText('Complete activity history')).toBeTruthy();
     expect(screen.getByText('Employment milestones')).toBeTruthy();
     expect(screen.getByText('Classification history')).toBeTruthy();
-    expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1);
+    await waitFor(() => expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1));
   });
+  it('retains retirement year alongside source-hour filters between employee sections', async () => {
+    render(<MemoryRouter initialEntries={['/companies/1/employees/2/pay-setup?retirement_year=2027&hours_source=8&hours_start=2026-09-01&history_year=2026']}><Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Record certification' });
+    for (const name of ['Hours & payroll', 'Pay setup']) {
+      const href = screen.getByRole('link', { name }).getAttribute('href');
+      expect(href).toContain('retirement_year=2027');
+      expect(href).toContain('hours_source=8');
+      expect(href).toContain('hours_start=2026-09-01');
+      expect(href).toContain('history_year=2026');
+    }
+  });
+
 });

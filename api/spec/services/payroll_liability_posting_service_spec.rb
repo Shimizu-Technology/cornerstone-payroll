@@ -94,6 +94,32 @@ RSpec.describe PayrollLiabilityPostingService do
       expect(posting.entries).to be_empty
     end
 
+    it "keeps independent opposite-bucket historical rows payable despite a matching built-in label and amount" do
+      builtin_type = company.deduction_types.create!(name: "401(k) Employer Match", category: "employer_contribution",
+        sub_category: "retirement", reporting_group: "401k_pre_tax", active: true)
+      independent_type = company.deduction_types.create!(name: "Synthetic independent Roth employer contribution",
+        category: "employer_contribution", sub_category: "retirement", reporting_group: "401k_after_tax", active: true)
+      payroll_item.payroll_item_deductions.create!(deduction_type: builtin_type, label: "401(k) Employer Match",
+        category: "employer_contribution", reporting_group: "401k_pre_tax", amount: 30)
+      independent = payroll_item.payroll_item_deductions.create!(deduction_type: independent_type, label: "401(k) Employer Match",
+        category: "employer_contribution", reporting_group: "401k_after_tax", amount: 30)
+      expect(PayrollRetirementTotals.additions_for_item(payroll_item.reload)[:employer]).to eq(70)
+      posting = described_class.post!(pay_period: pay_period, actor: actor)
+      expect(posting.entries.where(category: %w[retirement_employer roth_retirement_employer]).sum(:amount)).to eq(70)
+      expect(posting.entries.find_by!(component_key: "deduction_type:#{independent_type.id}:#{independent.id}").amount).to eq(30)
+    end
+
+    it "does not mistake a different amount for the persisted built-in match mirror" do
+      type = company.deduction_types.create!(name: "Synthetic independent Traditional employer contribution",
+        category: "employer_contribution", sub_category: "retirement", reporting_group: "401k_pre_tax", active: true)
+      independent = payroll_item.payroll_item_deductions.create!(deduction_type: type, label: "401(k) Employer Match",
+        category: "employer_contribution", reporting_group: "401k_pre_tax", amount: 120)
+      expect(PayrollRetirementTotals.additions_for_item(payroll_item.reload)[:employer]).to eq(160)
+      posting = described_class.post!(pay_period: pay_period, actor: actor)
+      expect(posting.entries.where(category: %w[retirement_employer roth_retirement_employer]).sum(:amount)).to eq(160)
+      expect(posting.entries.find_by!(component_key: "deduction_type:#{type.id}:#{independent.id}").amount).to eq(120)
+    end
+
     it "preserves signed tax credits from a corrective paycheck" do
       original_period = create(:pay_period, :committed, company: company,
         start_date: Date.new(2026, 6, 15),

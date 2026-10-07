@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
@@ -21,7 +22,7 @@ export function ClientDashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [dashboardPayload, setDashboardPayload] = useState<ClientDashboardPayload | null>(null);
   const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
   const documentCount = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.documentCount : 0;
@@ -62,7 +63,7 @@ export function ClientDashboard(): ReactElement {
 
     void load();
     return (): void => { cancelled = true; };
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setError]);
 
   return (
     <div>
@@ -74,9 +75,7 @@ export function ClientDashboard(): ReactElement {
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && (
-          <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">

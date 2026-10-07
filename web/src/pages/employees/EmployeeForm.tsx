@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
@@ -179,7 +180,8 @@ const toCurrencyDraft = (value: number | null | undefined): string =>
 const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string }> = [
   { value: '', label: 'No special report group' },
   { value: '401k_pre_tax', label: '401(k) Pre-Tax' },
-  { value: '401k_after_tax', label: '401(k) After Tax / Roth' },
+  { value: '401k_after_tax', label: 'Roth 401(k)' },
+  { value: '401k_non_roth_after_tax', label: '401(k) non-Roth after-tax' },
   { value: 'retirement_other', label: 'Other Retirement' },
 ];
 
@@ -236,6 +238,7 @@ const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormDa
 });
 
 export function EmployeeForm() {
+  const { notify } = useFeedback();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -262,7 +265,7 @@ export function EmployeeForm() {
   const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
   const [showQuickPayrollField, setShowQuickPayrollField] = useState(false);
   const [quickPayrollField, setQuickPayrollField] = useState<QuickPayrollFieldDraft>(initialQuickPayrollFieldDraft());
-  const [quickPayrollFieldError, setQuickPayrollFieldError] = useState<string | null>(null);
+  const [quickPayrollFieldError, setQuickPayrollFieldError, quickPayrollFieldErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [legacyPayItemSource, setLegacyPayItemSource] = useState<LegacyPayItemSource | null>(null);
   const [quickPayrollFieldSaving, setQuickPayrollFieldSaving] = useState(false);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
@@ -278,7 +281,7 @@ export function EmployeeForm() {
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [generalError, setGeneralError, generalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
@@ -432,7 +435,7 @@ export function EmployeeForm() {
     } finally {
       if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [companyId, id, isClient]);
+  }, [companyId, id, isClient, setGeneralError]);
 
   const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness'] | undefined): void => {
     if (companyIdRef.current !== companyId) return;
@@ -453,9 +456,9 @@ export function EmployeeForm() {
       const response = await payrollFieldsApi.list({ active: true, ...(id ? { employee_id: Number(id) } : {}) });
       if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
     } catch (err) {
-      if (isCurrentRequest()) console.error('Failed to load payroll fields:', err);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load available payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
     }
-  }, [companyId, id, isClient]);
+  }, [companyId, id, isClient, setGeneralError]);
 
   const fetchEmployeePayrollFields = useCallback(async () => {
     if (!id || isClient) return;
@@ -482,9 +485,9 @@ export function EmployeeForm() {
         dirty: false,
       })));
     } catch (err) {
-      if (isCurrentRequest()) console.error('Failed to load employee payroll fields:', err);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load this employee's payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
     }
-  }, [companyId, id, isClient]);
+  }, [companyId, id, isClient, setGeneralError]);
 
   const fetchDepartments = useCallback(async () => {
     const requestId = ++departmentsRequestIdRef.current;
@@ -499,9 +502,9 @@ export function EmployeeForm() {
         : await departmentsApi.list({ company_id: companyId, active: true });
       if (isCurrentRequest()) setDepartments(response.data);
     } catch (err) {
-      if (isCurrentRequest()) console.error('Failed to load departments:', err);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load departments. Refresh before choosing a department. ${err instanceof Error ? err.message : ''}`);
     }
-  }, [companyId, isClient]);
+  }, [companyId, isClient, setGeneralError]);
 
   useEffect(() => {
     setLoadedEmployee(null);
@@ -550,7 +553,7 @@ export function EmployeeForm() {
       departmentsRequestIdRef.current += 1;
       quickPayrollFieldRequestIdRef.current += 1;
     };
-  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
+  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing, setGeneralError, setQuickPayrollFieldError]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -1114,6 +1117,7 @@ export function EmployeeForm() {
       }
 
       if (!isCurrentSubmission()) return;
+      notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
         : !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid
@@ -1218,10 +1222,8 @@ export function EmployeeForm() {
 
       <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-4 pb-32 sm:p-6 sm:pb-32 lg:p-8 lg:pb-32">
         {generalError && (
-          <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
-            <p className="text-danger-700">{generalError}</p>
-          </div>
+          <ActionFeedback retryKey={generalErrorFeedbackAttempt} tone="error" message={generalError}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
+            <p className="text-danger-700">{generalError}</p></ActionFeedback>
         )}
 
         {isEditing && !isClient && loadedEmployee?.configuration_review_status === 'needs_review' && (
@@ -1896,6 +1898,7 @@ export function EmployeeForm() {
                           <option key={option.value || 'none'} value={option.value}>{option.label}</option>
                         ))}
                       </Select>
+                      <p className="mt-3 rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900">Enable catch-up in Pay setup → Retirement plan. Adding a field creates another contribution; it does not split or replace an existing deduction. Confirm existing manual paycheck entries before adding a replacement.</p>
                     </div>}
                     <div>
                       <label className="mb-1 block text-xs font-medium text-gray-600">Default</label>
@@ -1941,7 +1944,7 @@ export function EmployeeForm() {
                     </label>
                   </div>
                   {legacyPayItemSource && <p role="note" className="mt-3 text-xs leading-5 text-amber-800">Old notes are reference only; dates mentioned there never controlled the old calculation. Set first and last payday above if the replacement needs limits. For a loan balance that should stop at payoff, connect a verified loan in Loans after this move.</p>}
-                  {quickPayrollFieldError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{quickPayrollFieldError}</p>}
+                  {quickPayrollFieldError && <ActionFeedback retryKey={quickPayrollFieldErrorFeedbackAttempt} tone="error" message={quickPayrollFieldError} />}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim() || !quickPayrollField.category}>
                       {quickPayrollFieldSaving ? 'Saving…' : legacyPayItemSource ? 'Move to typed setup' : 'Create and assign'}

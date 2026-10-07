@@ -73,6 +73,16 @@ RSpec.describe StaffRolePolicy do
   end
 
   describe "high-impact endpoint registry" do
+    it "separates retirement evidence and election edits from payroll read access" do
+      %w[employee_retirement_year_inputs employee_retirement_elections].each do |resource|
+        expect(described_class.capability_for(controller_path: "api/v1/admin/#{resource}", action_name: "index")).to eq(:payroll_operations)
+        expect(described_class.capability_for(controller_path: "api/v1/admin/#{resource}", action_name: "create")).to eq(:manage_client_configuration)
+      end
+      %w[create update].each do |action|
+        expect(described_class.capability_for(controller_path: "api/v1/admin/annual_retirement_limits", action_name: action)).to eq(:manage_platform)
+      end
+    end
+
     it "references real controller actions" do
       described_class::ACTION_CAPABILITIES.each_key do |endpoint|
         controller_path, action_name = endpoint.split("#", 2)

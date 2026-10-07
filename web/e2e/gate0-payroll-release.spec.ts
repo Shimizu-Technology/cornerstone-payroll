@@ -5,6 +5,15 @@ import { resolve } from 'node:path';
 
 interface Gate0Fixture {
   schema_version: number;
+  delivery_company_id: number;
+  delivery_pay_period_id: number;
+  delivery_zero_item_id: number;
+  delivery_zero_employee_id: number;
+  delivery_paper_item_id: number;
+  delivery_desktop_item_id: number;
+  delivery_desktop_employee_id: number;
+  delivery_mobile_item_id: number;
+  delivery_mobile_employee_id: number;
   company_id: number;
   other_company_id: number;
   admin_email: string;
@@ -111,6 +120,66 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantApi.dispose();
     await clientApi.dispose();
   });
+
+  for (const width of [390, 1440]) {
+    test(`prints zero-net statements and safely changes a printed check at ${width}px`, async ({ browser }): Promise<void> => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.delivery_company_id),
+      } });
+      const page = await context.newPage();
+      try {
+        await page.goto(`/companies/${fixture.delivery_company_id}/pay-runs/${fixture.delivery_pay_period_id}/checks`);
+        const statement = page.getByRole('listitem', { name: 'Earnings statement for Zero Earnings', exact: true });
+        await expect(statement).toContainText('No payment issued');
+        await statement.getByRole('button', { name: 'View', exact: true }).click();
+        const preview = page.getByRole('dialog', { name: 'Earnings statement — Zero Earnings', exact: true });
+        await expect(preview.getByLabel('Page 1 preview', { exact: true })).toBeVisible();
+        await expect(preview).toContainText('Page 1 of 1');
+        const downloadPromise = page.waitForEvent('download');
+        await preview.getByRole('button', { name: 'Download', exact: true }).click();
+        expect((await downloadPromise).suggestedFilename()).toContain('paystubs');
+        await preview.getByRole('button', { name: 'Close PDF preview', exact: true }).click();
+        await statement.getByRole('checkbox').check();
+        const selectedDownload = page.waitForEvent('download');
+        await page.getByRole('button', { name: 'Download selected statements', exact: true }).click();
+        expect((await selectedDownload).suggestedFilename()).toContain('selected_paystubs');
+        const zeroResponse = await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${fixture.delivery_zero_item_id}`);
+        expect(zeroResponse.ok()).toBe(true);
+        expect((await zeroResponse.json()).payroll_item).toMatchObject({ check_number: null, net_pay: '0.0' });
+        const zeroRun = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}`)).json()).pay_period;
+        expect(zeroRun.payroll_items.find((row: { id: number }) => row.id === fixture.delivery_zero_item_id)).toMatchObject({ check_number: null, check_print_count: 0 });
+
+        const employeeId = width === 390 ? fixture.delivery_mobile_employee_id : fixture.delivery_desktop_employee_id;
+        const itemId = width === 390 ? fixture.delivery_mobile_item_id : fixture.delivery_desktop_item_id;
+        const employeeName = width === 390 ? 'Printed Mobile' : 'Printed Desktop';
+        const before = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${itemId}`)).json()).payroll_item;
+        await page.getByRole('button', { name: `Change payment method for ${employeeName}`, exact: true }).click();
+        const change = page.getByRole('dialog', { name: 'Change payment method', exact: true });
+        await change.getByLabel('Reason for changing this payment (at least 10 characters)', { exact: true }).fill('Synthetic employee requested direct deposit before payment');
+        await change.getByLabel(/I verified that this payment has not been paid/).check();
+        await change.getByLabel(/Also use this method/).check();
+        await expect(change.getByRole('button', { name: 'Record cancellation and save', exact: true })).toBeDisabled();
+        await change.getByLabel('Check cancellation evidence reference', { exact: true }).fill(`Synthetic check ${before.check_number} recovered and destroyed`);
+        await change.getByLabel(/I verified that the original check is cancelled/).check();
+        await change.getByRole('button', { name: 'Record cancellation and save', exact: true }).click();
+        await expect(change).toHaveCount(0);
+        await expect(page.locator('[data-feedback-portal]')).toContainText('Future payroll default also updated');
+        const after = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${itemId}`)).json()).payroll_item;
+        expect(after).toMatchObject({ check_number: null, payment_delivery_method: 'direct_deposit' });
+        const changedRun = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}`)).json()).pay_period;
+        expect(changedRun.payroll_items.find((row: { id: number }) => row.id === itemId)).toMatchObject({ voided: false, check_number: null });
+        for (const key of ['gross_pay', 'net_pay', 'withholding_tax', 'social_security_tax', 'medicare_tax', 'loan_payment', 'total_deductions']) expect(after[key]).toEqual(before[key]);
+        await page.goto(`/companies/${fixture.delivery_company_id}/employees/${employeeId}/pay-setup`);
+        await page.getByRole('button', { name: 'Change future payment method', exact: true }).click();
+        await page.getByLabel('Future payroll payment method', { exact: true }).selectOption('paper_check');
+        await page.getByRole('button', { name: 'Save future default', exact: true }).click();
+        await expect(page.locator('[data-feedback-portal]')).toContainText('Existing payroll delivery choices were preserved');
+        const retained = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${itemId}`)).json()).payroll_item;
+        expect(retained.payment_delivery_method).toEqual('direct_deposit');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+      } finally { await context.close(); }
+    });
+  }
 
   test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({

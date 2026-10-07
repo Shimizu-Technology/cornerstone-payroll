@@ -582,8 +582,10 @@ class E2eReleaseFixture
         subject_name: "May 18 - 31, 2026"
       )
 
+      delivery_fixture = build_payment_delivery_fixture!(organization, admin)
       {
         schema_version: 1,
+        **delivery_fixture,
         organization_id: organization.id,
         company_id: company.id,
         other_company_id: other_company.id,
@@ -623,6 +625,36 @@ class E2eReleaseFixture
         original_client_pay_rate: client_employee.pay_rate.to_f,
         original_client_ssn_last_four: client_employee.ssn_last_four
       }
+    end
+
+    def build_payment_delivery_fixture!(organization, admin)
+      company = organization.companies.create!(name: "Synthetic Payment Delivery", ein: "00-0000042", pay_frequency: "biweekly", next_check_number: 9200)
+      department = company.departments.create!(name: "Synthetic Operations")
+      period = company.pay_periods.create!(start_date: Date.new(2026, 9, 21), end_date: Date.new(2026, 10, 4),
+        pay_date: Date.new(2026, 10, 8), status: "committed", cycle: "regular", committed_at: Time.current)
+      records = [
+        [ "Zero", "Earnings", 200, 0, "paper_check", nil, false ],
+        [ "Delivery", "Paper", 600, 500, "paper_check", "9100", false ],
+        [ "Printed", "Desktop", 600, 500, "paper_check", "9101", true ],
+        [ "Printed", "Mobile", 600, 500, "paper_check", "9102", true ],
+        [ "Zero", "Deposit", 200, 0, "direct_deposit", nil, false ]
+      ].each_with_index.map do |values, index|
+        first, last, gross, net, method, number, printed = values
+        employee = create_employee!(company: company, department: department, first_name: first, last_name: last,
+          email: "delivery-#{index}@example.test", ssn: format("900-00-%04d", 4200 + index), pay_rate: 10, hire_date: Date.new(2026, 9, 1))
+        employee.update!(payment_delivery_method: method)
+        item = period.payroll_items.create!(company: company, employee: employee, employment_type: "hourly", pay_rate: 10,
+          hours_worked: gross / 10, gross_pay: gross, net_pay: net, total_deductions: gross - net,
+          withholding_tax: net.zero? ? 0 : 54.1, social_security_tax: net.zero? ? 12.4 : 37.2,
+          medicare_tax: net.zero? ? 2.9 : 8.7, loan_deduction: net.zero? ? 184.7 : 0, loan_payment: net.zero? ? 184.7 : 0,
+          payment_delivery_method: method, check_number: number, check_printed_at: printed ? Time.current : nil, check_print_count: printed ? 1 : 0)
+        item.check_events.create!(user: admin, event_type: "printed", check_number: number, reason: "Synthetic printed check awaiting delivery") if printed
+        { employee_id: employee.id, item_id: item.id }
+      end
+      { delivery_company_id: company.id, delivery_pay_period_id: period.id, delivery_zero_item_id: records[0][:item_id],
+        delivery_zero_employee_id: records[0][:employee_id], delivery_paper_item_id: records[1][:item_id],
+        delivery_desktop_item_id: records[2][:item_id], delivery_desktop_employee_id: records[2][:employee_id],
+        delivery_mobile_item_id: records[3][:item_id], delivery_mobile_employee_id: records[3][:employee_id] }
     end
 
     def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:, default_payroll_adjustments: [], employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)

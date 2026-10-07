@@ -92,6 +92,26 @@ RSpec.describe "General test workspaces" do
     expect(workspace.employees.count).to eq(employee_count)
   end
 
+  it "copies annual retirement evidence history with the latest verified values and source" do
+    first = employee.employee_retirement_year_inputs.create!(company: source_company, tax_year: 2026,
+      prior_year_wage_status: "verified", prior_year_fica_wages: 160_000,
+      prior_year_wage_source: "2025 employer W-2GU Box 3", employer_additions_before_system: 1_000,
+      opening_balances_verified: true, source_reference: "Initial provider reconciliation", reason: "Initial review")
+    latest = employee.employee_retirement_year_inputs.create!(first.attributes.except("id", "created_at", "updated_at")
+      .merge("employer_additions_before_system" => 900, "reason" => "Corrected reconciliation"))
+    workspace = create_workspace(copy_mode: "setup_only")
+
+    TestWorkspace::Cloner.new(company: workspace, actor: actor).call
+
+    copied_employee = workspace.employees.sole
+    expect(copied_employee.employee_retirement_year_inputs.count).to eq(2)
+    copied = copied_employee.retirement_year_input_for(2026)
+    expect(copied).to have_attributes(company: workspace, created_by: actor, employer_additions_before_system: 900.to_d,
+      prior_year_fica_wages: 160_000.to_d, source_reference: latest.source_reference, reason: latest.reason)
+    expect(copied.created_at).to eq(latest.created_at)
+    expect(employee.retirement_year_input_for(2026)).to eq(latest)
+  end
+
   it "rolls an archive back when its audit record cannot be written" do
     workspace = create_workspace(copy_mode: "setup_only")
     allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid)

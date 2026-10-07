@@ -166,8 +166,7 @@ h6,
 }
 
 .invoice-modal-panel,
-.invoice-action-panel,
-.invoice-toast {
+.invoice-action-panel {
   animation: invoice-panel-in 200ms ease-out;
 }
 
@@ -192,4 +191,9 @@ h6,
 
 .reports-tables table thead th > span {
   letter-spacing: normal;
+}
+
+@keyframes feedback-enter {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }

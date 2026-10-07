@@ -1,3 +1,4 @@
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
@@ -145,7 +146,7 @@ export function ChecksPayments() {
   const [liabilityLoading, setLiabilityLoading] = useState(true);
   const [liabilityError, setLiabilityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<FormState>(() => initialFormState());
@@ -189,7 +190,7 @@ export function ChecksPayments() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, typeFilter]);
+  }, [setError, statusFilter, typeFilter]);
 
   const loadLiabilities = useCallback(async () => {
     setLiabilityLoading(true);
@@ -599,9 +600,7 @@ export function ChecksPayments() {
 
       <div className="space-y-4 p-4 sm:p-6 lg:p-8">
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         {showForm && (
@@ -992,7 +991,7 @@ export function ChecksPayments() {
       <NonEmployeeCheckEditModal check={editingCheck} onClose={() => setEditingCheck(null)} onSaved={(updated) => { handleSavedCheck(updated); void loadLiabilities(); }} />
 
       {previewUrl && previewCheck && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-neutral-950/70 p-4">
+        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-neutral-950/70 p-4`}>
           <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-5 py-4">
               <div>

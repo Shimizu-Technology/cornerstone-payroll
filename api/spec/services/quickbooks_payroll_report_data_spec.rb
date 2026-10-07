@@ -90,7 +90,7 @@ RSpec.describe QuickbooksPayrollReportData do
     expect(data.employee_adjusted_gross(payroll_item)).to eq(1_000.00)
     expect(data.pre_tax_retirement_deduction_lines_for(payroll_item)).to be_empty
     expect(data.employee_after_tax_total(payroll_item)).to eq(100.00)
-    expect(entry.description).to eq("401(k) After Tax")
+    expect(entry.description).to eq("Roth 401(k)")
     expect(entry.type).to eq("Roth 401(k)")
   end
 

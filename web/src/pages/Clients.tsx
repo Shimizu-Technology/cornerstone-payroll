@@ -1,3 +1,4 @@
+import { useFeedbackState, useFeedback, ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Archive, RotateCcw, Clock3 } from 'lucide-react';
@@ -135,18 +136,49 @@ export function Clients() {
   const navigate = useNavigate();
   const rehearsalNameId = useId();
   const workspaceNameId = useId();
-  const { refreshCompanies, switchCompany } = useCompany();
-  const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const renameNameId = useId();
+  const { refreshCompanies, switchCompany, activeOrganizationId, activeCompanyId } = useCompany();
+  const { user, isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const { notify } = useFeedback();
+  const renameScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${activeCompanyId ?? ''}:${canManageClients}`;
+  const renamePermissionScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${canManageClients}`;
+  const renamePermissionScopeRef = useRef(renamePermissionScope);
+  renamePermissionScopeRef.current = renamePermissionScope;
+  const renameScopeRef = useRef(renameScope);
+  renameScopeRef.current = renameScope;
+  const renameMountedRef = useRef(true);
+  const renameRequestRef = useRef(0);
+  const renameBusyRef = useRef(false);
+  const [renameClient, setRenameClient] = useState<CompanyListItem | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError, renameErrorAttempt] = useFeedbackState<string | null>(null);
+
+  useEffect(() => {
+    renameMountedRef.current = true;
+    return () => {
+      renameMountedRef.current = false;
+      renameRequestRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    renameRequestRef.current += 1;
+    renameBusyRef.current = false;
+    setRenameClient(null);
+    setRenaming(false);
+    setRenameError(null);
+  }, [renameScope, setRenameError]);
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
   const [workspaceBuilderOpen, setWorkspaceBuilderOpen] = useState(false);
   const [workspaceBuilderSourceId, setWorkspaceBuilderSourceId] = useState<number | null>(null);
@@ -160,7 +192,7 @@ export function Clients() {
   const [workspaceConfirmed, setWorkspaceConfirmed] = useState(false);
   const [loadingWorkspacePreview, setLoadingWorkspacePreview] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError, workspaceErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const workspacePreviewRequestIdRef = useRef(0);
   const [showArchivedWorkspaces, setShowArchivedWorkspaces] = useState(false);
   const [archiveWorkspace, setArchiveWorkspace] = useState<CompanyListItem | null>(null);
@@ -171,7 +203,7 @@ export function Clients() {
   const [loadingRehearsal, setLoadingRehearsal] = useState(false);
   const [creatingRehearsal, setCreatingRehearsal] = useState(false);
   const [rehearsalConfirmed, setRehearsalConfirmed] = useState(false);
-  const [rehearsalError, setRehearsalError] = useState<string | null>(null);
+  const [rehearsalError, setRehearsalError, rehearsalErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [retryingRehearsalId, setRetryingRehearsalId] = useState<number | null>(null);
   const [promotionRehearsalId, setPromotionRehearsalId] = useState<number | null>(null);
   const [promotionPreview, setPromotionPreview] = useState<MigrationPromotionPreview | null>(null);
@@ -179,7 +211,7 @@ export function Clients() {
   const [promotionAction, setPromotionAction] = useState<'backup' | 'apply' | null>(null);
   const [promotionConfirmed, setPromotionConfirmed] = useState(false);
   const [promotionDispositions, setPromotionDispositions] = useState<Record<number, PromotionPaymentDisposition>>({});
-  const [promotionError, setPromotionError] = useState<string | null>(null);
+  const [promotionError, setPromotionError, promotionErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [promotionNotice, setPromotionNotice] = useState<string | null>(null);
   const promotionPreviewRequestIdRef = useRef(0);
   const productionCompanies = companies.filter(company => !isTestWorkspace(company));
@@ -207,7 +239,7 @@ export function Clients() {
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -245,7 +277,7 @@ export function Clients() {
     }).finally(() => {
       if (workspacePreviewRequestIdRef.current === requestId) setLoadingWorkspacePreview(false);
     });
-  }, [workspaceBuilderOpen, workspaceBuilderSourceId, workspaceCopyMode, workspaceExcludedPayrolls, workspaceCutoffPayPeriodId]);
+  }, [workspaceBuilderOpen, workspaceBuilderSourceId, workspaceCopyMode, workspaceExcludedPayrolls, workspaceCutoffPayPeriodId, setWorkspaceError]);
 
   const refreshPromotionPreview = useCallback(async (rehearsalId: number, quiet = false) => {
     const requestId = ++promotionPreviewRequestIdRef.current;
@@ -269,7 +301,7 @@ export function Clients() {
     } finally {
       if (!quiet && promotionPreviewRequestIdRef.current === requestId) setLoadingPromotion(false);
     }
-  }, []);
+  }, [setPromotionError]);
 
   useEffect(() => {
     if (!promotionRehearsalId || promotionPreview?.backup?.status !== 'pending') return;
@@ -553,6 +585,68 @@ export function Clients() {
     }
   };
 
+  const handleOpenRename = (client: CompanyListItem) => {
+    if (!canManageClients || isReadOnlyWorkspace(client) || client.migration_rehearsal_status === 'pending' || renameBusyRef.current) return;
+    setRenameClient(client);
+    setRenameName(client.name);
+    setRenameError(null);
+  };
+
+  const handleCloseRename = () => {
+    if (renameBusyRef.current) return;
+    renameRequestRef.current += 1;
+    setRenameClient(null);
+    setRenameError(null);
+  };
+
+  const handleRename = async () => {
+    if (!canManageClients || !renameClient || renameBusyRef.current) return;
+    const name = renameName.trim();
+    if (!name) {
+      setRenameError('Enter a client name. This name appears on reports and earnings statements.');
+      return;
+    }
+    if (name === renameClient.name) {
+      handleCloseRename();
+      return;
+    }
+    const clientId = renameClient.id;
+    const scope = renameScopeRef.current;
+    const requestId = ++renameRequestRef.current;
+    const isCurrent = () => renameMountedRef.current && renameScopeRef.current === scope && renameRequestRef.current === requestId;
+    renameBusyRef.current = true;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      await companiesApi.update(clientId, { name });
+      if (!isCurrent()) {
+        // A client switch can abandon this dialog without abandoning its saved change.
+        // Refresh only while the same administrator and organization remain active.
+        if (renameMountedRef.current && renamePermissionScopeRef.current === renamePermissionScope) {
+          await Promise.allSettled([load(true), refreshCompanies()]);
+        }
+        return;
+      }
+      // Publish the save result before refreshing client context or leaving the dialog.
+      notify({ tone: 'success', message: 'Client name updated.' });
+      setCompanies(current => current.map(client => client.id === clientId ? { ...client, name } : client));
+      setRenameClient(null);
+      const results = await Promise.allSettled([companiesApi.list(), refreshCompanies()]);
+      if (!isCurrent()) return;
+      if (results[0].status === 'fulfilled') setCompanies(results[0].value.companies);
+      if (results.some(result => result.status === 'rejected')) {
+        notify({ tone: 'warning', message: 'The client name was saved, but the client list could not fully refresh. Refresh the page before opening a report.' });
+      }
+    } catch (err) {
+      if (isCurrent()) setRenameError(err instanceof Error ? err.message : 'Could not save the client name. Try again.');
+    } finally {
+      if (isCurrent()) {
+        renameBusyRef.current = false;
+        setRenaming(false);
+      }
+    }
+  };
+
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
@@ -610,15 +704,11 @@ export function Clients() {
       <div className="space-y-6 p-4 sm:p-6">
         {/* Error */}
         {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {promotionNotice && (
-          <div role="status" className="flex items-start justify-between gap-4 rounded-xl border border-success-100 bg-success-50 p-4 text-sm text-success-800">
-            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
-            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button>
-          </div>
+          <ActionFeedback tone="success" message={promotionNotice}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
+            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button></ActionFeedback>
         )}
 
         {/* Primary actions */}
@@ -780,7 +870,7 @@ export function Clients() {
                   </div>
 
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
-                  {workspaceError && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{workspaceError}</div>}
+                  {workspaceError && <ActionFeedback retryKey={workspaceErrorFeedbackAttempt} tone="error" message={workspaceError} />}
 
                   <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
                     <button type="button" onClick={() => void handleOpenRehearsal(workspaceBuilderSource)} className="text-left text-sm font-semibold text-warning-800 hover:text-warning-900">Need an exact migration rehearsal and verified promotion instead?</button>
@@ -853,7 +943,7 @@ export function Clients() {
               </div>
             )}
 
-            {rehearsalError && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{rehearsalError}</div>}
+            {rehearsalError && <ActionFeedback retryKey={rehearsalErrorFeedbackAttempt} tone="error" message={rehearsalError} />}
             <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
               <Button variant="outline" onClick={handleCloseRehearsal}>Cancel</Button>
               <Button onClick={handleCreateRehearsal} disabled={!rehearsalPreview?.ready || !rehearsalConfirmed || !rehearsalName.trim() || creatingRehearsal}>
@@ -1025,7 +1115,7 @@ export function Clients() {
                 </div>
               )}
 
-              {promotionError && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{promotionError}</div>}
+              {promotionError && <ActionFeedback retryKey={promotionErrorFeedbackAttempt} tone="error" message={promotionError} />}
               <div className="mt-6 flex flex-col-reverse gap-3 border-t border-neutral-200 pt-4 sm:flex-row sm:justify-between">
                 <Button variant="outline" onClick={handleClosePromotion}>Cancel</Button>
                 <div className="flex flex-col gap-3 sm:flex-row">
@@ -1056,9 +1146,7 @@ export function Clients() {
             </h3>
 
             {formError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {formError}
-              </div>
+              <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />
             )}
 
             {/* Basic Info */}
@@ -1075,6 +1163,7 @@ export function Clients() {
                     placeholder="e.g. MoSa's Hotbox, Inc."
                     disabled={!canManageClients}
                   />
+                  <p className="mt-1 text-xs text-neutral-500">Shown on reports and earnings statements.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">EIN</label>
@@ -1348,6 +1437,11 @@ export function Clients() {
                               {loadingEditId === c.id ? 'Loading...' : 'Edit'}
                             </Button>
                           )}
+                          {canManageClients && !isReadOnlyWorkspace(c) && (
+                            <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                              Rename
+                            </Button>
+                          )}
                           {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
@@ -1487,6 +1581,11 @@ export function Clients() {
                                 )}
                               </Button>
                             )}
+                            {canManageClients && !isReadOnlyWorkspace(c) && (
+                              <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                                Rename
+                              </Button>
+                            )}
                             {canManageClients && !isTestWorkspace(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                                 Time tracking
@@ -1505,6 +1604,27 @@ export function Clients() {
           </>
         )}
       </div>
+
+      <Dialog open={renameClient !== null} onOpenChange={open => { if (!open) handleCloseRename(); }} dismissOnEscape={!renaming}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename client</DialogTitle>
+            <DialogDescription>Use the employer name that should appear on newly generated reports and earnings statements. Previously downloaded reports and saved print packages keep their original name.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={event => { event.preventDefault(); void handleRename(); }}>
+            <div className="space-y-2 py-4">
+              <label htmlFor={renameNameId} className="text-sm font-medium">Client name</label>
+              <Input id={renameNameId} value={renameName} onChange={event => setRenameName(event.target.value)} disabled={renaming} aria-describedby={`${renameNameId}-help`} aria-invalid={Boolean(renameError)} />
+              <p id={`${renameNameId}-help`} className="text-xs text-neutral-500">Shown on reports and earnings statements.</p>
+              {renameError && <ActionFeedback retryKey={renameErrorAttempt} tone="error" message={renameError} />}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseRename} disabled={renaming}>Cancel</Button>
+              <Button type="submit" disabled={renaming}>{renaming ? 'Saving…' : 'Save client name'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={archiveWorkspace !== null} onOpenChange={open => { if (!open && workspaceLifecycleId === null) setArchiveWorkspace(null); }}>
         <DialogContent>

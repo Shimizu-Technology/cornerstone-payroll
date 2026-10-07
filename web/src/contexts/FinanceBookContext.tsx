@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -124,7 +125,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
   const [kind, setKind] = useState<FinanceBook['kind']>('client');
   const [companyId, setCompanyId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const canManage = ['super_admin', 'org_admin', 'admin'].includes(user?.role || '');
   const canCreatePersonal = canManage && (user?.role === 'super_admin' || activeOrganizationId === user?.organization_id);
   const eligibleCompanies = companies.filter((company) => company.organization_id === activeBook.organization_id
@@ -174,7 +175,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
     </section>
     {showSetup && canManage && <form onSubmit={(event) => void submit(event)} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Add financial book">
       <div><h2 className="font-semibold text-neutral-950">Add financial book</h2><p className="text-sm text-neutral-600">Choose whose finances this book will hold. A personal book is visible only to you.</p></div>
-      {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm font-medium">Book type<select value={kind} onChange={(event) => { setKind(event.target.value as FinanceBook['kind']); setCompanyId(''); }} disabled={saving}
           className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3"><option value="client">Client company</option><option value="organization">Organization</option>{canCreatePersonal && !books.some((book) => book.kind === 'personal') && <option value="personal">Private personal</option>}</select></label>

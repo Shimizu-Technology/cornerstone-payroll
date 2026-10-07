@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
@@ -111,7 +112,7 @@ export function CheckSettingsPage() {
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // Editable form state
@@ -286,7 +287,7 @@ export function CheckSettingsPage() {
       }
       loadProfiles();
     })();
-  }, [applySettingsToForm, loadProfiles]);
+  }, [applySettingsToForm, loadProfiles, setError]);
 
   useEffect(() => {
     if (!loading) {
@@ -326,13 +327,13 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(JSON.stringify(nextConfig, null, 2));
     setError(null);
     setSuccess(null);
-  }, [parsedLayoutOverrides]);
+  }, [parsedLayoutOverrides, setError]);
 
   const handleVisualLayoutChange = useCallback((config: Record<string, unknown>) => {
     setLayoutOverridesJson(JSON.stringify(config, null, 2));
     setError(null);
     setSuccess(null);
-  }, []);
+  }, [setError]);
 
   const handleVisualOffsetChange = useCallback((axis: 'x' | 'y', value: string) => {
     if (axis === 'x') {
@@ -734,10 +735,10 @@ export function CheckSettingsPage() {
 
         {/* Feedback */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{error}</div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
         {success && (
-          <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{success}</div>
+          <ActionFeedback tone="success" message={success} />
         )}
         {hasUnsavedCheckSettings && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

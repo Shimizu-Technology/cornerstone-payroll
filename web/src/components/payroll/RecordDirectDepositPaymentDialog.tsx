@@ -1,3 +1,4 @@
+import { ActionFeedback, useFeedback, useFeedbackState } from '@/components/ui/action-feedback';
 import { useState } from 'react';
 import { checksApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,8 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
   const [note, setNote] = useState('');
   const [attested, setAttested] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const { notify } = useFeedback();
 
   const submit = async () => {
     setSaving(true);
@@ -33,6 +35,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
         note: note.trim() || undefined,
         attestation: attested,
       });
+      notify({ tone: 'success', message: `Bank payment recorded for ${item.employee_name}.` });
       await onComplete();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not record bank payment.');
@@ -51,14 +54,14 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
       </DialogHeader>
       <div className="grid gap-4">
         <Input label="Bank settlement date" type="date" value={settledOn} onChange={(event) => setSettledOn(event.target.value)} />
-        <Input label="Bank confirmation or transaction reference" value={bankReference} onChange={(event) => setBankReference(event.target.value)} helperText="Required evidence from your bank or payment provider." />
+        <Input label="Bank confirmation or transaction reference" maxLength={200} value={bankReference} onChange={(event) => setBankReference(event.target.value)} helperText="Use the bank or payment provider’s reference, up to 200 characters." />
         <Input label="Note (optional)" value={note} onChange={(event) => setNote(event.target.value)} />
       </div>
       <label className="flex items-start gap-2 rounded-xl border border-primary-200 bg-primary-50 p-4 text-sm leading-5 text-primary-900">
         <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
         <span>I verified this transfer completed at the bank. Recording it will mark any linked time tracking hours paid.</span>
       </label>
-      {error && <div role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">{error}</div>}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button onClick={() => void submit()} disabled={saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>

@@ -186,6 +186,25 @@ module TimeTracking
       )
     end
 
+    def cancel_payroll_manual_allocation_payment(allocation_id:, command_id:, expected_version:, occurred_at:, reason:,
+                                                  cancellation_evidence_reference:, payment_method:, payment_reference:, payment_effective_on: nil)
+      require_capability!(:manual_allocations)
+      require_capability!(:payment_cancellation_v1)
+      payload = delegated_request_json(
+        payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/cancel_payment"),
+        body: { command_id: command_id, expected_version: expected_version, occurred_at: occurred_at,
+          reason: reason, cancellation_evidence_reference: cancellation_evidence_reference,
+          payment_method: payment_method, payment_reference: payment_reference,
+          payment_effective_on: payment_effective_on }.compact
+      )
+      validate_verified_cancellation_response!(payload)
+      command = payload["command"]
+      unless command.is_a?(Hash) && command["id"] == command_id
+        raise Error, "#{@source.name} did not acknowledge the saved payment cancellation command"
+      end
+      payload
+    end
+
     def void_payroll_manual_allocation(allocation_id:, command_id:, expected_version:, occurred_at:, reason:)
       require_capability!(:manual_allocations)
       delegated_request_json(
@@ -363,6 +382,7 @@ module TimeTracking
 
     def record_payroll_batch_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, metadata: {})
       require_capability!(:exact_line_receipts_v2)
+      require_capability!(:payment_cancellation_v1) if status == "payment_cancelled"
       request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
@@ -380,7 +400,8 @@ module TimeTracking
 
     def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, contract_version: nil, source_line_key: nil, source_kind: nil, total_hours: nil, regular_hours: nil, overtime_hours: nil, payment_method: nil, payment_reference: nil, payment_effective_on: nil, metadata: {})
       require_capability!(:exact_line_receipts_v2)
-      request_json(
+      require_capability!(:payment_cancellation_v1) if status == "payment_cancelled"
+      payload = request_json(
         payroll_batch_processing_events_uri(batch_id),
         validate_source: false,
         method: :post,
@@ -405,6 +426,20 @@ module TimeTracking
           metadata: metadata
         }.compact
       )
+      if status == "payment_cancelled"
+        validate_verified_cancellation_response!(payload)
+        validate_exact_cancellation_receipt!(payload, expected: {
+          event_id: event_id, status: status, occurred_at: occurred_at,
+          external_system: "cornerstone_payroll", external_pay_period_id: external_pay_period_id,
+          external_payroll_item_id: external_payroll_item_id, source_time_entry_id: source_time_entry_id,
+          source_user_uuid: source_user_uuid, contract_version: contract_version,
+          source_line_key: source_line_key, source_kind: source_kind,
+          total_hours: total_hours, regular_hours: regular_hours, overtime_hours: overtime_hours,
+          payment_method: payment_method, payment_reference: payment_reference,
+          payment_effective_on: payment_effective_on, metadata: metadata
+        })
+      end
+      payload
     end
 
     class Error < StandardError
@@ -764,6 +799,44 @@ module TimeTracking
       "#{@source.name}: #{normalized}"
     rescue JSON::ParserError
       nil
+    end
+
+    def validate_exact_cancellation_receipt!(payload, expected:)
+      receipt = payload["entry_processing"]
+      keys = %i[event_id status external_system external_pay_period_id external_payroll_item_id source_time_entry_id
+        source_user_uuid contract_version source_line_key source_kind payment_method payment_reference payment_effective_on]
+      valid = receipt.is_a?(Hash) && keys.all? { |key| receipt[key.to_s] == expected[key] }
+      valid &&= %i[total_hours regular_hours overtime_hours].all? do |key|
+        exact_decimal?(receipt[key.to_s], expected[key])
+      end
+      actual_metadata = receipt.is_a?(Hash) ? receipt["metadata"] : nil
+      valid &&= actual_metadata.is_a?(Hash) && expected.fetch(:metadata).deep_stringify_keys.all? do |key, value|
+        actual_metadata[key] == value
+      end
+      valid &&= receipt["occurred_at"].is_a?(String) &&
+        Time.iso8601(receipt["occurred_at"]) == Time.iso8601(expected.fetch(:occurred_at))
+      raise Error, "#{@source.name} did not acknowledge the exact cancelled payment receipt" unless valid
+    rescue ArgumentError, TypeError
+      raise Error, "#{@source.name} returned an invalid cancelled payment receipt"
+    end
+
+    def exact_decimal?(actual, expected)
+      return false unless actual.is_a?(String) || actual.is_a?(Numeric)
+
+      amount = BigDecimal(actual.to_s)
+      wanted = BigDecimal(expected.to_s)
+      amount.finite? && wanted.finite? && amount == wanted
+    rescue ArgumentError, TypeError
+      false
+    end
+
+    def validate_verified_cancellation_response!(payload)
+      result = ConnectionIdentity.validate!(source: @source, payload: payload)
+      raise Error, "#{@source.name} omitted its verified payment cancellation descriptor" if result.legacy
+
+      validate_integration_response!(payload)
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
     end
 
     def validate_integration_response!(payload)

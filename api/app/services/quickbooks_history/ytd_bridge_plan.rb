@@ -11,7 +11,8 @@ module QuickbooksHistory
     NON_TAXABLE_EARNING = BundleParser::NON_TAXABLE_EARNING_LABEL
     FICA_EXEMPT_PRETAX_DEDUCTION = BundleParser::FICA_EXEMPT_PRETAX_DEDUCTION_LABEL
     RETIREMENT_PRE_TAX = /401\s*\(?k\)?.*pre.?tax/i
-    RETIREMENT_ROTH = /401\s*\(?k\)?.*after.?tax|roth/i
+    RETIREMENT_ROTH = /\A(?!.*non[-\s]?roth).*\broth\b/i
+    AMBIGUOUS_AFTER_TAX_RETIREMENT = /401\s*\(?k\)?.*after.?tax/i
     INSURANCE = /insurance|health/i
     LOAN = /loan|advance/i
     TIPS = /\A(?:pay\s*tips?|reported tips?)\z/i
@@ -33,6 +34,11 @@ module QuickbooksHistory
           "passed" => false,
           "errors" => (Array(reconciliation["errors"]) + [ "Historical YTD eligibility validation failed" ]).uniq
         )
+      end
+      ambiguous_labels = balances.flat_map { |balance| balance.dig("source_breakdown", "after_tax_deduction_breakdown").to_h.keys }
+        .select { |label| label.match?(AMBIGUOUS_AFTER_TAX_RETIREMENT) && !label.match?(/\broth\b/i) }.uniq
+      if ambiguous_labels.any?
+        errors << "Verify the contribution type for historical after-tax 401(k) labels (#{ambiguous_labels.join(', ')}). After-tax amounts cannot be assumed to be designated Roth; correct the retained classification before applying the YTD bridge."
       end
       errors.concat(Array(reconciliation["errors"]))
       summary = build_summary(balances)

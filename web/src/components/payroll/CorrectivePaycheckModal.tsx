@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Dialog,
@@ -84,9 +85,9 @@ export function CorrectivePaycheckModal({
   }));
   const [preview, setPreview] = useState<CorrectivePaycheckPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewError, setPreviewError, previewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
-  const [issueError, setIssueError] = useState<string | null>(null);
+  const [issueError, setIssueError, issueErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // When the modal re-opens for a different item, reset the form.
   useEffect(() => {
@@ -157,7 +158,7 @@ export function CorrectivePaycheckModal({
     } finally {
       setPreviewLoading(false);
     }
-  }, [inputsChanged, originalPayPeriod.id, originalItem.employee_id, correctedInputs]);
+  }, [inputsChanged, setPreviewError, originalPayPeriod.id, originalItem.employee_id, correctedInputs]);
 
   useEffect(() => {
     if (!open) return;
@@ -306,7 +307,7 @@ export function CorrectivePaycheckModal({
             )}
 
             {previewError && (
-              <p className="text-sm text-red-600">{previewError}</p>
+              <ActionFeedback retryKey={previewErrorFeedbackAttempt} tone="error" message={previewError} />
             )}
 
             {preview?.meta.is_zero_change && (
@@ -375,7 +376,7 @@ export function CorrectivePaycheckModal({
         </div>
 
         {issueError && (
-          <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">{issueError}</p>
+          <ActionFeedback retryKey={issueErrorFeedbackAttempt} tone="error" message={issueError} />
         )}
 
         <DialogFooter>
