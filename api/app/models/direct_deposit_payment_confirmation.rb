@@ -7,6 +7,7 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
   belongs_to :user
 
   validates :settled_on, :bank_reference, presence: true
+  validates :bank_reference, length: { maximum: 200 }
   validate :valid_payroll_item
   validate :valid_actor
   validate :not_future_dated
