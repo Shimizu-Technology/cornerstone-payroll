@@ -67,6 +67,7 @@ for (const width of [390, 1440]) {
     const toast = page.locator('[data-feedback-portal] [role="alert"]');
     await expect(toast).toContainText('Choose the first pay date');
     await expect(toast).toBeVisible();
+    expect(await page.locator('[data-feedback-portal]').evaluate((element) => Number(getComputedStyle(element).zIndex))).toBeGreaterThan(9999);
     expect(await page.evaluate(() => Math.max(window.scrollY, ...Array.from(document.querySelectorAll("*"), (element) => element.scrollTop)))).toBeGreaterThan(500);
     const position = await toast.boundingBox();
     expect(position?.y).toBeGreaterThanOrEqual(0);

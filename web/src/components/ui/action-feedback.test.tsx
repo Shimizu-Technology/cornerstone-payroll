@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { ActionFeedback, FeedbackProvider, useFeedback, useFeedbackState } from './action-feedback';
@@ -13,6 +13,20 @@ function NotifyButton({ tone = 'error' }: { tone?: 'error' | 'success' }) {
 }
 
 describe('shared action feedback', () => {
+  it('keeps a failed legacy check action above its still-open overlay', async () => {
+    const { checksApi } = await import('@/services/api');
+    const { VoidCheckModal } = await import('@/components/payroll/VoidCheckModal');
+    vi.spyOn(checksApi, 'void').mockRejectedValue(new Error('Synthetic check action failed'));
+    render(<FeedbackProvider><VoidCheckModal item={{ id: 4, check_number: '1001', employee_name: 'Synthetic Example', net_pay: 10 } as import('@/types').CheckItem} onClose={() => undefined} onComplete={async () => undefined} /></FeedbackProvider>);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Synthetic damaged check' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Void Check' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Synthetic check action failed'));
+    const layer = (element: Element) => Number(element.className.match(/z-\[(\d+)\]/)?.[1]);
+    const modal = screen.getByRole('heading', { name: 'Void Check #1001' }).closest('.fixed')!;
+    expect(layer(document.querySelector('[data-feedback-portal]')!)).toBeGreaterThan(layer(modal));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+  });
+
   it('reannounces an identical failed attempt without clearing the source validation state', () => {
     function RepeatedValidation() {
       const [error, setError, attempt] = useFeedbackState<string | null>(null);

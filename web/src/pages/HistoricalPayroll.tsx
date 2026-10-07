@@ -1213,10 +1213,10 @@ export function HistoricalPayroll(): ReactElement {
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {error && Object.keys(validationErrors).length > 0 && (
-          <div role="alert" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
+          <div role="region" aria-label="Import validation details" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p>{error}</p>
+              <p className="font-semibold">Fields to review</p>
               {Object.keys(validationErrors).length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {Object.entries(validationErrors).flatMap(([field, messages]) => (

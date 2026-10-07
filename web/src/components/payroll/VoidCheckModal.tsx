@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: VoidCheckModal
  * Confirms void with required written reason (10+ chars).
@@ -38,7 +38,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+    <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-black/50`}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-red-700">Void Check #{item.check_number}</h2>

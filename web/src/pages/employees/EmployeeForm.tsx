@@ -451,7 +451,7 @@ export function EmployeeForm() {
       const response = await payrollFieldsApi.list({ active: true, ...(id ? { employee_id: Number(id) } : {}) });
       if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
     } catch (err) {
-      if (isCurrentRequest()) setGeneralError(`Could not load available payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load available payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
     }
   }, [companyId, id, isClient, setGeneralError]);
 
@@ -480,7 +480,7 @@ export function EmployeeForm() {
         dirty: false,
       })));
     } catch (err) {
-      if (isCurrentRequest()) setGeneralError(`Could not load this employee's payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load this employee's payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
     }
   }, [companyId, id, isClient, setGeneralError]);
 
@@ -497,7 +497,7 @@ export function EmployeeForm() {
         : await departmentsApi.list({ company_id: companyId, active: true });
       if (isCurrentRequest()) setDepartments(response.data);
     } catch (err) {
-      if (isCurrentRequest()) setGeneralError(`Could not load departments. Refresh before choosing a department. ${err instanceof Error ? err.message : ''}`);
+      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load departments. Refresh before choosing a department. ${err instanceof Error ? err.message : ''}`);
     }
   }, [companyId, isClient, setGeneralError]);
 

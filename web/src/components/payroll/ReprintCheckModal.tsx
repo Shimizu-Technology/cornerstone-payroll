@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ReprintCheckModal
  * Confirms reissue: voids the old physical check number, assigns a new one in-place.
@@ -62,7 +62,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+    <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-black/50 p-4`}>
       <div className="w-full max-w-lg space-y-5 rounded-xl bg-white p-6 shadow-xl">
         <div>
           <h2 className="text-lg font-semibold text-orange-800">Reissue Check #{item.check_number}</h2>

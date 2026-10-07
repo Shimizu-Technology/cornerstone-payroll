@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
@@ -827,7 +827,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
       {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
       {previewUrl && previewItem && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
           <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>

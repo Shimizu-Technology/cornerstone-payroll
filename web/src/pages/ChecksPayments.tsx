@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
@@ -914,7 +914,7 @@ export function ChecksPayments() {
       <NonEmployeeCheckEditModal check={editingCheck} onClose={() => setEditingCheck(null)} onSaved={(updated) => { handleSavedCheck(updated); void loadLiabilities(); }} />
 
       {previewUrl && previewCheck && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-neutral-950/70 p-4">
+        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-neutral-950/70 p-4`}>
           <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-5 py-4">
               <div>
