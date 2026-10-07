@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unplug, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';

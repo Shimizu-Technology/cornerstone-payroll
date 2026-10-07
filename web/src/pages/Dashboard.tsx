@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';

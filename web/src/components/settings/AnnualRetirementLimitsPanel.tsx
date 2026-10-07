@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ExternalLink, Pencil, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';

@@ -1,5 +1,4 @@
-import { ApiError } from '@/services/api';
-import { errorFieldLabel } from '@/lib/api-error-message';
+import { ApiError, errorFieldLabel } from '@/services/api';
 
 export function retirementErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {

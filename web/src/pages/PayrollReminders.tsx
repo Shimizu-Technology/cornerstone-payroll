@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';

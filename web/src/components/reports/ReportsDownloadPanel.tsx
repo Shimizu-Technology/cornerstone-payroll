@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';

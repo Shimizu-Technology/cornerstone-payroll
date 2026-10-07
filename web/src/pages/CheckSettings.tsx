@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.

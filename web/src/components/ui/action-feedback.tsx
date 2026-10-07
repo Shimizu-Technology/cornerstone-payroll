@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import { errorRecovery } from '@/lib/error-recovery';
 import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
@@ -122,4 +122,16 @@ export function useFeedback(): { notify: (input: FeedbackInput) => void } {
   useEffect(() => () => release?.(owner), [owner, release]);
   const notify = useCallback((input: FeedbackInput) => publish?.(input, owner), [owner, publish]);
   return useMemo(() => ({ notify }), [notify]);
+}
+
+
+/** Retain error state while letting a repeated failed attempt show a dismissed toast again. */
+export function useFeedbackState<T>(initial: T | (() => T)): [T, Dispatch<SetStateAction<T>>, number] {
+  const [value, setValue] = useState<T>(initial);
+  const [attempt, setAttempt] = useState(0);
+  const setFeedback = useCallback<Dispatch<SetStateAction<T>>>((next) => {
+    setValue(next);
+    setAttempt((previous) => previous + 1);
+  }, []);
+  return [value, setFeedback, attempt];
 }

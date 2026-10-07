@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';

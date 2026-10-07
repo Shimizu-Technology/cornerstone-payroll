@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { CheckCircle2, Clock3, Download, FileLock2, Maximize2, Plus, Printer, Settings2, ShieldCheck, TriangleAlert } from 'lucide-react';

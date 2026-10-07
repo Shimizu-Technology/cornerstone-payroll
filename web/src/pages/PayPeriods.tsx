@@ -1,6 +1,5 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';

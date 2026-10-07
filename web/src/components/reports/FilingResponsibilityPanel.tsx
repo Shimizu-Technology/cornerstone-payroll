@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, PencilLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';

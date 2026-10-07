@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, Printer, Plus } from 'lucide-react';
 import { Link } from 'react-router';

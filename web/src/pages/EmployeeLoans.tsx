@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, CircleDollarSign, Link2, Plus, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';

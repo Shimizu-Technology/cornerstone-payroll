@@ -1,5 +1,4 @@
-import { useFeedbackState } from '@/lib/use-feedback-state';
-import { ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Copy, History, LockKeyhole, ShieldCheck, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
