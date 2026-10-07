@@ -4578,14 +4578,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
     $$ LANGUAGE plpgsql;
     CREATE TRIGGER verified_history_receipt_integrity BEFORE INSERT OR UPDATE OR DELETE
     ON aire_verified_history_rollout_receipts FOR EACH ROW EXECUTE FUNCTION protect_verified_history_receipt();
-  add_foreign_key "invoice_recurrences", "invoices", column: "source_invoice_id"
-  add_foreign_key "invoice_recurrences", "organizations"
-  add_foreign_key "invoice_recurrences", "users", column: "created_by_id"
-  add_foreign_key "invoice_send_schedules", "invoices"
-  add_foreign_key "invoice_send_schedules", "organizations"
-  add_foreign_key "invoice_send_schedules", "users", column: "created_by_id"
-  add_foreign_key "invoices", "invoice_recurrences"
-
+  SQL
   execute <<~SQL
     CREATE OR REPLACE FUNCTION prevent_retirement_year_input_mutation()
     RETURNS trigger AS $$

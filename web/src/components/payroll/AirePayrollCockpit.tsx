@@ -406,7 +406,7 @@ export function AirePayrollCockpit({
 
     setCommandError(notice);
     navigate(currentAppPath(location.pathname, location.search), { replace: true, state: null });
-  }, [location.pathname, location.search, location.state, navigate]);
+  }, [location.pathname, location.search, location.state, navigate, setCommandError]);
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
