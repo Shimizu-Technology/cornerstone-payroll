@@ -236,4 +236,16 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(screen.getByText('Classification history')).toBeTruthy();
     await waitFor(() => expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1));
   });
+  it('retains retirement year alongside source-hour filters between employee sections', async () => {
+    render(<MemoryRouter initialEntries={['/companies/1/employees/2/pay-setup?retirement_year=2027&hours_source=8&hours_start=2026-09-01&history_year=2026']}><Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Record certification' });
+    for (const name of ['Hours & payroll', 'Pay setup']) {
+      const href = screen.getByRole('link', { name }).getAttribute('href');
+      expect(href).toContain('retirement_year=2027');
+      expect(href).toContain('hours_source=8');
+      expect(href).toContain('hours_start=2026-09-01');
+      expect(href).toContain('history_year=2026');
+    }
+  });
+
 });

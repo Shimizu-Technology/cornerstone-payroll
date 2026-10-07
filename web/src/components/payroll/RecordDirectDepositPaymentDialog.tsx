@@ -1,3 +1,4 @@
+import { ActionFeedback, useFeedback, useFeedbackState } from '@/components/ui/action-feedback';
 import { useState } from 'react';
 import { checksApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,8 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
   const [note, setNote] = useState('');
   const [attested, setAttested] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const { notify } = useFeedback();
 
   const submit = async () => {
     setSaving(true);
@@ -33,6 +35,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
         note: note.trim() || undefined,
         attestation: attested,
       });
+      notify({ tone: 'success', message: `Bank payment recorded for ${item.employee_name}.` });
       await onComplete();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not record bank payment.');
@@ -58,7 +61,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
         <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
         <span>I verified this transfer completed at the bank. Recording it will mark any linked time tracking hours paid.</span>
       </label>
-      {error && <div role="alert" className="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">{error}</div>}
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button onClick={() => void submit()} disabled={saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>
