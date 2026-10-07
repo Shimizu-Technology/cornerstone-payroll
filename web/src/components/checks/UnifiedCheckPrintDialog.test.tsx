@@ -560,7 +560,7 @@ describe('UnifiedCheckPrintDialog', () => {
     expect(screen.queryByText('Generating and saving package')).toBeNull();
   });
 
-  it('ignores a completed package whose history finishes loading after the workspace changes', async () => {
+  it('notifies prepared payroll before preview loading and ignores late history after workspace changes', async () => {
     const user = userEvent.setup();
     let resolveHistory!: (value: { check_print_runs: CheckPrintRun[] }) => void;
     apiMocks.printRuns
@@ -575,13 +575,14 @@ describe('UnifiedCheckPrintDialog', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Generate and save package' }));
     await waitFor(() => expect(apiMocks.printRuns).toHaveBeenCalledTimes(2));
+    expect(onPackageGenerated).toHaveBeenCalledOnce();
     view.rerender(<MemoryRouter><UnifiedCheckPrintDialog open={false} payPeriodId={9} onOpenChange={vi.fn()} onPackageGenerated={onPackageGenerated} /></MemoryRouter>);
     view.rerender(<MemoryRouter><UnifiedCheckPrintDialog open payPeriodId={10} onOpenChange={vi.fn()} onPackageGenerated={onPackageGenerated} /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Generate and save package' });
 
     await act(async () => { resolveHistory({ check_print_runs: [generatedRun] }); });
     expect(apiMocks.printQueue).toHaveBeenCalledTimes(2);
-    expect(onPackageGenerated).not.toHaveBeenCalled();
+    expect(onPackageGenerated).toHaveBeenCalledOnce();
   });
 
   it('blocks printing and confirmation for an outdated package and offers replacement generation', async () => {
