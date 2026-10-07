@@ -90,6 +90,23 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$310.00")
   end
 
+  it "identifies a zero-net earnings statement without implying a deposit or missing check" do
+    payroll_item.update!(payment_delivery_method: "direct_deposit", net_pay: 0)
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+
+    expect(text).to include("Earnings statement only - no payment issued", "$0.00", "$310.00")
+    expect(text).not_to include("Direct deposit", "No check issued")
+  end
+
+  it "retains a historical check reference on a nonpositive adjustment statement" do
+    payroll_item.update_columns(net_pay: -20, check_number: "8101")
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+
+    expect(text).to include("Earnings statement only - no payment issued", "Check reference: 8101")
+  end
+
   it "does not label missing check numbers as direct deposit" do
     payroll_item.update!(check_number: nil)
 

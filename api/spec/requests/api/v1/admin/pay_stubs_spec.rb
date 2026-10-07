@@ -97,6 +97,31 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
     end
   end
 
+  describe "current statement eligibility for individual downloads" do
+    it "generates a fresh zero-net statement instead of reusing an old cached payment label" do
+      payroll_item.update!(net_pay: 0)
+      expect(storage).not_to receive(:download)
+
+      get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
+
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
+      expect(text).to include("Earnings statement only - no payment issued")
+    end
+
+    it "does not generate a current statement for voided or no-activity records" do
+      payroll_item.update!(voided: true, voided_at: Time.current, void_reason: "Cancelled test payroll")
+      get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Voided payroll")
+
+      payroll_item.update!(voided: false, gross_pay: 0, net_pay: 0)
+      get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("no earnings-statement activity")
+    end
+  end
+
   describe "POST /api/v1/admin/pay_stubs/batch_generate" do
     before do
       allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
@@ -145,6 +170,59 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(CombinePDF.parse(response.body).pages.count).to eq(2)
     end
 
+    it "includes wage-positive zero-net and reimbursement-only statements exactly once without issuing payments" do
+      zero_employee = create(:employee, company: company, department: department, first_name: "Avery", last_name: "Example")
+      zero_item = create(:payroll_item, pay_period: pay_period, employee: zero_employee,
+        hours_worked: 21.37, gross_pay: 197.67, total_deductions: 197.67,
+        social_security_tax: 12.26, medicare_tax: 2.87, loan_payment: 182.54, net_pay: 0)
+      reimb_employee = create(:employee, company: company, department: department, first_name: "Casey", last_name: "Reimbursement")
+      create(:payroll_item, pay_period: pay_period, employee: reimb_employee,
+        gross_pay: 0, non_taxable_pay: 75, net_pay: 75, payment_delivery_method: "direct_deposit")
+      previous_attributes = zero_item.attributes
+      next_number = company.next_check_number
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["X-Pay-Stubs-Generated"]).to eq("4")
+      pdf_pages = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text)
+      expect(pdf_pages.count { |text| text.include?("Avery Example") }).to eq(1)
+      zero_text = pdf_pages.find { |text| text.include?("Avery Example") }
+      expect(zero_text).to include("197.67", "182.54", "21.37", "$0.00")
+      expect(zero_item.reload.attributes).to eq(previous_attributes)
+      expect(company.reload.next_check_number).to eq(next_number)
+    end
+
+    it "prints a selected statement-only row and negative correction activity" do
+      payroll_item.update!(net_pay: 0)
+      correction_employee = create(:employee, company: company, department: department, first_name: "Casey", last_name: "Correction")
+      correction = create(:payroll_item, pay_period: pay_period, employee: correction_employee,
+        correction_for_payroll_item: payroll_item, hours_worked: 0, gross_pay: -100, net_pay: -80,
+        total_deductions: -20, withholding_tax: -20)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id, payroll_item_ids: [ payroll_item.id, correction.id, payroll_item.id ]
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["X-Pay-Stubs-Generated"]).to eq("2")
+      expect(CombinePDF.parse(response.body).pages.count).to eq(2)
+      expect(PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")).to include("Casey Correction", "-100.00")
+    end
+
+    it "does not expose a legacy-excluded row through an explicit selection" do
+      empty_employee = create(:employee, company: company, department: department)
+      empty = create(:payroll_item, pay_period: pay_period, employee: empty_employee, hours_worked: 0)
+      PayrollItemLegacyDisposition.create!(payroll_item: empty, company: company,
+        created_by: admin_user, reason: "verified_empty_legacy_item", evidence_digest: "a" * 64)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id, payroll_item_ids: [ empty.id ]
+      }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
     it "limits the combined PDF to selected payroll items" do
       post "/api/v1/admin/pay_stubs/batch_pdf", params: {
         pay_period_id: pay_period.id,
@@ -179,7 +257,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to eq("Selected employees have no printable net-pay stub in this pay period")
+      expect(response.parsed_body.fetch("error")).to eq("Selected employees have no earnings-statement activity in this pay period")
       expect(response.parsed_body.fetch("details")).to include(unpaid_employee.full_name)
     end
 
@@ -227,6 +305,20 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")
       expect(text).to include("EARNINGS STATEMENT", "Dina Deposit", "Direct deposit")
       expect(text).not_to include("Pat Stub", "Alex Ledger")
+    end
+
+    it "keeps statement-only deposits in all statements, separate from positive-net deposit printing" do
+      deposit_item.update!(net_pay: 0)
+
+      post "/api/v1/admin/pay_stubs/direct_deposit_stubs_pdf", params: { pay_period_id: pay_period.id }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("No direct-deposit")
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id, payroll_item_ids: [ deposit_item.id ]
+      }
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["X-Pay-Stubs-Generated"]).to eq("1")
     end
 
     it "rejects a paper-check item in an explicit stub selection" do

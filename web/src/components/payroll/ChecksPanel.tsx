@@ -3,13 +3,15 @@ import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } 
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
+import type { CheckItem, CheckListMeta, EarningsStatementItem, PayPeriod } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
@@ -72,8 +74,11 @@ function eventLabel(eventType: string): string {
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged }: ChecksPanelProps) {
   const { notify } = useFeedback();
+  const loadRequest = useRef(0);
   const [checks, setChecks] = useState<CheckItem[]>([]);
-  const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>>([]);
+  const [statementItems, setStatementItems] = useState<EarningsStatementItem[]>([]);
+  const [statementSearch, setStatementSearch] = useState('');
+  const [statementPreview, setStatementPreview] = useState<{ item: EarningsStatementItem; url: string } | null>(null);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,26 +99,40 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
   const load = useCallback(async () => {
+    const request = ++loadRequest.current;
+    setStatementPreview(null);
     try {
       setLoading(true);
       setError(null);
       const data = await checksApi.list(payPeriod.id);
+      if (request !== loadRequest.current) return;
       setChecks(data.checks);
-      setDirectDepositItems(data.direct_deposit_items || []);
+      const statements = data.earnings_statement_items || [];
+      setStatementItems(statements);
       setMeta(data.meta);
       setCheckNumberDrafts(Object.fromEntries(data.checks.map((item) => [item.id, item.check_number || ''])));
-      setSelectedStubIds((current) => current.filter((id) => data.checks.some((item) => item.id === id && !item.voided)));
+      setSelectedStubIds((current) => current.filter((id) => statements.some((item) => item.id === id)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load checks');
+      if (request === loadRequest.current) setError(err instanceof Error ? err.message : 'Failed to load checks and earnings statements');
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   }, [payPeriod.id]);
 
-  useEffect(() => { load(); }, [load, refreshToken]);
+  const invalidateLoad = useCallback(() => { loadRequest.current++; }, []);
+
+  useEffect(() => {
+    void load();
+    return invalidateLoad;
+  }, [load, refreshToken, invalidateLoad]);
 
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
+
+  useEffect(() => {
+    const url = statementPreview?.url;
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [statementPreview?.url]);
 
   // ---- Preview single check PDF ----
   const handlePreviewPdf = async (item: CheckItem) => {
@@ -157,7 +176,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     }
   };
 
-  const handleDownloadStubForItem = async (item: CheckItem) => {
+  const handleDownloadStubForItem = async (item: Pick<CheckItem, 'id' | 'employee_name'>) => {
     setActionLoading({ id: item.id, action: 'stub' });
     try {
       const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
@@ -174,7 +193,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     }
   };
 
-  const handlePrintStubForItem = async (item: CheckItem) => {
+  const handlePrintStubForItem = async (item: Pick<CheckItem, 'id' | 'employee_name'>) => {
     setActionLoading({ id: item.id, action: 'stub' });
     try {
       const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
@@ -199,7 +218,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const selectedStubIdSet = new Set(selectedStubIds);
 
   const selectedStubRequestIds = () =>
-    selectedStubIds.length > 0 ? selectedStubIds : checks.filter((item) => !item.voided).map((item) => item.id);
+    selectedStubIds.length > 0 ? selectedStubIds : undefined;
 
   const notifySkippedPayStubs = (skippedCount?: number) => {
     if (!skippedCount || selectedStubIds.length > 0) return;
@@ -354,7 +373,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8 text-gray-500 text-sm">
-        Loading checks…
+        Loading checks and earnings statements…
       </div>
     );
   }
@@ -381,13 +400,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         ].some((value) => value?.toLowerCase().includes(normalizedSearch));
       })
     : checks;
-  const stubEligibleChecks = filteredChecks.filter((item) => !item.voided);
-  const stubEligibleIds = stubEligibleChecks.map((item) => item.id);
+  const normalizedStatementSearch = (searchTerm || statementSearch).trim().toLowerCase();
+  const filteredStatements = statementItems.filter((item) =>
+    !normalizedStatementSearch || item.employee_name.toLowerCase().includes(normalizedStatementSearch));
+  const stubEligibleIds = filteredStatements.map((item) => item.id);
   const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
-  const hasPrintableStub = checks.some((item) => !item.voided);
+  const hasPrintableStub = statementItems.length > 0;
+  const hasPhysicalChecks = checks.some((item) => !item.voided && Number(item.net_pay) > 0);
+  const directDepositCount = statementItems.filter((item) => !item.statement_only && item.payment_delivery_method === 'direct_deposit').length;
+  const statementOnlyCount = statementItems.filter((item) => item.statement_only).length;
 
-  const toggleStubSelection = (item: CheckItem) => {
-    if (item.voided) return;
+  const toggleStubSelection = (item: EarningsStatementItem) => {
     setSelectedStubIds((current) =>
       current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]
     );
@@ -403,6 +426,19 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       }
       return Array.from(currentSet);
     });
+  };
+
+  const handleViewStatement = async (item: EarningsStatementItem) => {
+    const request = loadRequest.current;
+    setActionLoading({ id: item.id, action: 'stub' });
+    try {
+      const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
+      if (request === loadRequest.current) setStatementPreview({ item, url: URL.createObjectURL(result.blob) });
+    } catch (err) {
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to open earnings statement' });
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   return (
@@ -451,58 +487,85 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           {batchAction && (
             <span className="text-sm text-blue-600 animate-pulse mr-2">{batchAction}</span>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void handlePrintPayStubs()}
-            disabled={batchLoading || !hasPrintableStub}
-          >
-            {selectedStubIds.length > 0 ? `Print ${selectedStubIds.length} Stub${selectedStubIds.length === 1 ? '' : 's'}` : 'Print Paper-Check Stubs'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void handleDownloadPayStubs()}
-            disabled={batchLoading || !hasPrintableStub}
-          >
-            {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download Paper-Check Stubs'}
-          </Button>
         </div>
       </div>
 
-      {isFirstHawaiian4Up && (
+      {isFirstHawaiian4Up && hasPhysicalChecks && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           First Hawaiian 4-Up checks do not include a pay stub on the check stock. Print matching stubs on plain white paper after printing checks.
         </div>
       )}
 
-      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+      {hasPhysicalChecks && <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
         Saving a check package prepares the selected checks. Record a check as issued only after it was released to the employee.
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked AIRE hours are not marked paid until then.'}
-      </div>
+      </div>}
 
-      {directDepositItems.length > 0 && (
-        <section className="rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="font-semibold text-slate-950">Direct deposit</h3>
-              <p className="mt-1 max-w-2xl text-sm text-slate-600">Print the existing earnings stubs on plain paper. Printing a stub does not initiate or confirm a bank transfer.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download all stubs</Button>
-              <Button size="sm" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print all stubs</Button>
-            </div>
+      <section aria-label="Earnings statements" className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-neutral-950">Earnings statements</h3>
+            <p className="mt-1 max-w-2xl text-sm text-neutral-600">Includes paper checks, direct deposits, and earned pay reduced to $0 by deductions. Statements print on plain paper and do not issue a payment.</p>
+            <p className="mt-2 text-sm text-neutral-600">{statementItems.length} statement{statementItems.length === 1 ? '' : 's'} · {directDepositCount} direct deposit{directDepositCount === 1 ? '' : 's'} · {statementOnlyCount} statement only</p>
           </div>
-          <ul className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            {directDepositItems.filter((item) => !normalizedSearch || item.employee_name.toLowerCase().includes(normalizedSearch)).map((item) => (
-              <li key={item.id} className="flex justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
-                <span className="font-medium text-slate-800">{item.employee_name}</span>
-                <span className="tabular-nums text-slate-600">{formatCurrency(item.net_pay)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+            <Button size="sm" onClick={() => void handlePrintPayStubs()} disabled={batchLoading || !hasPrintableStub}>
+              {selectedStubIds.length ? `Print ${selectedStubIds.length} selected statement${selectedStubIds.length === 1 ? '' : 's'}` : 'Print all earnings statements'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void handleDownloadPayStubs()} disabled={batchLoading || !hasPrintableStub}>
+              {selectedStubIds.length ? 'Download selected statements' : 'Download all earnings statements'}
+            </Button>
+          </div>
+        </div>
+        {directDepositCount > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(true)} disabled={batchLoading}>Print direct-deposit statements</Button>
+            <Button size="sm" variant="outline" onClick={() => void handleDirectDepositStubs(false)} disabled={batchLoading}>Download direct-deposit statements</Button>
+          </div>
+        )}
+        {statementItems.length > 0 ? (
+          <>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <Input aria-label="Search earnings statements" placeholder="Search employees…" value={statementSearch} onChange={(event) => setStatementSearch(event.target.value)} className="sm:max-w-xs" />
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <label className="flex min-h-11 items-center gap-2">
+                  <input type="checkbox" className="h-4 w-4" checked={allVisibleStubsSelected} onChange={toggleAllVisibleStubs} disabled={stubEligibleIds.length === 0} aria-label="Select all visible earnings statements" />
+                  Select visible
+                </label>
+                {selectedStubIds.length > 0 && <Button size="sm" variant="outline" onClick={() => setSelectedStubIds([])}>Clear selection ({selectedStubIds.length})</Button>}
+              </div>
+            </div>
+            {filteredStatements.length === 0 && <p className="mt-4 text-sm text-neutral-500">No earnings statements match this search.</p>}
+            {[true, false].map((statementOnly) => {
+              const groupItems = filteredStatements.filter((item) => item.statement_only === statementOnly);
+              if (!groupItems.length) return null;
+              return (
+                <div key={String(statementOnly)} className="mt-4">
+                  <h4 className="text-sm font-semibold text-neutral-800">{statementOnly ? 'Statement only · no payment issued' : 'Paychecks and direct deposits'} ({groupItems.length})</h4>
+                  <ul className="mt-2 space-y-2">
+                    {groupItems.map((item) => (
+                      <li key={item.id} className="rounded-xl border border-neutral-200 p-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4" aria-label={`Earnings statement for ${item.employee_name}`}>
+                        <div>
+                          <label className="flex min-h-11 items-center gap-3">
+                            <input type="checkbox" className="h-4 w-4 shrink-0" checked={selectedStubIdSet.has(item.id)} onChange={() => toggleStubSelection(item)} aria-label={`Select earnings statement for ${item.employee_name}`} />
+                            <span className="min-w-0 break-words font-semibold text-neutral-950">{item.employee_name}</span>
+                          </label>
+                          <p className="ml-7 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
+                        </div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end">
+                          <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
+                          <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Print</Button>
+                          <Button size="sm" variant="outline" onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </>
+        ) : <p className="mt-4 text-sm text-neutral-500">No earnings statements are needed for this run. Employees with no payroll activity are omitted.</p>}
+      </section>
 
       {checkNumberChanges.length > 0 && (
         <div className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -525,7 +588,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       {/* Checks table */}
       {filteredChecks.length === 0 ? (
         <div className="py-8 text-center text-gray-500 text-sm">
-          {normalizedSearch ? 'No checks match this search.' : 'No checks found for this pay period.'}
+          {normalizedSearch ? 'No checks match this search.' : 'No paper checks were issued for this pay period.'}
         </div>
       ) : (
         <>
@@ -539,20 +602,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
               return (
                 <MobileRecordCard key={item.id} tone={item.voided ? 'muted' : 'default'}>
                   <div className="flex items-start justify-between gap-3">
-                    <label className="flex min-w-0 items-start gap-3">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 rounded border-gray-300"
-                        checked={selectedStubIdSet.has(item.id)}
-                        onChange={() => toggleStubSelection(item)}
-                        disabled={item.voided}
-                        aria-label={`Select pay stub for ${item.employee_name}`}
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold text-neutral-950">{item.employee_name}</p>
-                        {item.department_name && <p className="truncate text-sm text-neutral-500">{item.department_name}</p>}
-                      </div>
-                    </label>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-neutral-950">{item.employee_name}</p>
+                      {item.department_name && <p className="truncate text-sm text-neutral-500">{item.department_name}</p>}
+                    </div>
                     {checkStatusBadge(item)}
                   </div>
 
@@ -633,15 +686,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
             <table className="min-w-[760px] w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="w-10 px-3 py-2 text-left font-medium text-gray-600">
-                  <input
-                    type="checkbox"
-                    checked={allVisibleStubsSelected}
-                    onChange={toggleAllVisibleStubs}
-                    disabled={stubEligibleIds.length === 0}
-                    aria-label="Select all visible pay stubs"
-                  />
-                </th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600">Check #</th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600">Employee</th>
                 <th className="px-3 py-2 text-right font-medium text-gray-600">Net Pay</th>
@@ -655,15 +699,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                   key={item.id}
                   className={`border-b border-gray-100 hover:bg-gray-50 ${item.voided ? 'opacity-60' : ''}`}
                 >
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedStubIdSet.has(item.id)}
-                      onChange={() => toggleStubSelection(item)}
-                      disabled={item.voided}
-                      aria-label={`Select pay stub for ${item.employee_name}`}
-                    />
-                  </td>
                   <td className="px-3 py-2 text-gray-800">
                     <div className="flex items-center gap-2">
                       {item.voided || !item.check_number ? (
@@ -824,6 +859,23 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           }}
         />
       )}
+
+      <Dialog open={statementPreview !== null} onOpenChange={(open) => { if (!open) setStatementPreview(null); }}>
+        <DialogContent className="dialog-wide flex h-[90dvh] flex-col">
+          <DialogHeader>
+            <DialogTitle>Earnings statement — {statementPreview?.item.employee_name}</DialogTitle>
+            <DialogDescription>Print on plain paper. This statement does not issue a check or bank transfer.</DialogDescription>
+          </DialogHeader>
+          {statementPreview && <>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void handlePrintStubForItem(statementPreview.item)} disabled={isActionLoading(statementPreview.item.id, 'stub')}>Print statement</Button>
+              <Button size="sm" variant="outline" onClick={() => void handleDownloadStubForItem(statementPreview.item)} disabled={isActionLoading(statementPreview.item.id, 'stub')}>Download statement</Button>
+              <Button size="sm" variant="outline" onClick={() => setStatementPreview(null)}>Close</Button>
+            </div>
+            <iframe src={statementPreview.url} title={`Earnings statement PDF for ${statementPreview.item.employee_name}`} className="min-h-0 flex-1 rounded-lg border bg-neutral-50" />
+          </>}
+        </DialogContent>
+      </Dialog>
 
       {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
       {previewUrl && previewItem && createPortal(

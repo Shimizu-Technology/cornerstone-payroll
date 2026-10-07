@@ -125,6 +125,34 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body.dig("meta", "direct_deposit_count")).to eq(1)
     end
 
+    it "lists zero-net wage statements without putting them in the payment queue" do
+      zero_employee = create(:employee, company: company, first_name: "Avery", last_name: "Example")
+      zero_item = create(:payroll_item, pay_period: pay_period, employee: zero_employee,
+        gross_pay: 197.67, total_deductions: 197.67, net_pay: 0, check_number: nil)
+      zero_deposit_employee = create(:employee, company: company, first_name: "Casey", last_name: "Example")
+      zero_deposit = create(:payroll_item, pay_period: pay_period, employee: zero_deposit_employee,
+        payment_delivery_method: "direct_deposit", gross_pay: 100, net_pay: 0, check_number: nil)
+      blank_employee = create(:employee, company: company)
+      blank = create(:payroll_item, pay_period: pay_period, employee: blank_employee,
+        gross_pay: 0, net_pay: 0, check_number: nil)
+      item_b.update!(voided: true, voided_at: Time.current, void_reason: "Cancelled test payroll")
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+
+      json = response.parsed_body
+      expect(json.fetch("earnings_statement_items").map { |row| row.fetch("id") }).to contain_exactly(item_a.id, zero_item.id, zero_deposit.id)
+      expect(json.fetch("earnings_statement_items")).to include(a_hash_including(
+        "id" => zero_item.id, "gross_pay" => 197.67, "total_deductions" => 197.67,
+        "net_pay" => 0.0, "statement_only" => true, "payment_delivery_method" => "paper_check"
+      ))
+      expect(json.fetch("checks").map { |row| row.fetch("id") }).not_to include(zero_item.id, zero_deposit.id, blank.id)
+      expect(json.fetch("direct_deposit_items")).to be_empty
+      expect(json.dig("meta", "earnings_statement_count")).to eq(3)
+      expect(json.dig("meta", "statement_only_count")).to eq(2)
+      expect(json.dig("meta", "direct_deposit_count")).to eq(0)
+      expect(zero_item.reload.check_number).to be_nil
+    end
+
     it "keeps a stable employee order instead of re-sorting by edited check number" do
       item_a.update!(check_number: "9999")
 
@@ -160,7 +188,6 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
       }.to change { CheckEvent.where(event_type: "batch_downloaded").count }.by(2)
     end
-
   end
 
   describe "GET /api/v1/admin/pay_periods/:pay_period_id/checks/rehearsal_preview_pdf" do
@@ -286,7 +313,6 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/mark_all_printed"
       expect(response.parsed_body["marked_printed"]).to eq(1)
     end
-
   end
 
   # -----------------------------------------------------------------------
@@ -310,7 +336,6 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/committed pay periods/)
     end
-
   end
 
   # -----------------------------------------------------------------------
@@ -345,7 +370,6 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/committed pay periods/)
     end
-
   end
 
   describe "POST /api/v1/admin/payroll_items/:payroll_item_id/check/mark_delivered" do
