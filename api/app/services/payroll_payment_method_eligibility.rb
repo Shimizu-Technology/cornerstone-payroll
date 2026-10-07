@@ -39,8 +39,16 @@ class PayrollPaymentMethodEligibility
 
   def check_has_activity?
     item.check_prepared? ||
-      item.check_events.where(event_type: %w[prepared printed batch_downloaded delivered]).exists? ||
-      item.pay_period.check_print_runs.any? { |run| run.manifest.any? { |entry| entry["key"] == "payroll_item:#{item.id}" } }
+      item.check_events.where(event_type: %w[prepared printed batch_downloaded delivered],
+        check_number: [ nil, "", item.check_number ]).exists? ||
+      item.pay_period.check_print_runs.any? do |run|
+        run.manifest.any? do |entry|
+          references_item = entry["key"] == "payroll_item:#{item.id}" ||
+            (entry["source_type"] == "payroll_item" && entry["source_id"].to_s == item.id.to_s)
+          references_item &&
+            (entry["check_number"].blank? || entry["check_number"].to_s == item.check_number.to_s)
+        end
+      end
   end
 
   private

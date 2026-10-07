@@ -48,8 +48,8 @@ module Api
             retire_existing_check: params[:retire_existing_check],
             confirm_check_cancelled: params[:confirm_check_cancelled],
             cancellation_evidence_reference: params[:cancellation_evidence_reference],
-            expected_check_number: params[:expected_check_number],
-            ip_address: request.remote_ip
+            ip_address: request.remote_ip,
+            **(params.key?(:expected_check_number) ? { expected_check_number: params[:expected_check_number] } : {})
           )
           updated = payment_service.call
           render json: {
