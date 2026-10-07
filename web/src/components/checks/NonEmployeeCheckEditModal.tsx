@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -301,7 +301,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+    <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b px-6 py-4">
           <div>
