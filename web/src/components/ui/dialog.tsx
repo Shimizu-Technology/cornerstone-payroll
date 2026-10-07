@@ -34,7 +34,7 @@ interface DocumentDialogState {
 const documentDialogStates = new WeakMap<Document, DocumentDialogState>();
 
 function setBackgroundInert(state: DocumentDialogState, element: HTMLElement): void {
-  if (element.hasAttribute('data-dialog-portal') || state.backgroundInertValues.has(element)) return;
+  if (element.hasAttribute('data-dialog-portal') || element.hasAttribute('data-feedback-portal') || state.backgroundInertValues.has(element)) return;
   state.backgroundInertValues.set(element, element.getAttribute('inert'));
   element.setAttribute('inert', '');
 }
@@ -134,11 +134,11 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
     acquireDialog(document, portal, previouslyFocused);
 
     const dialogElement = (): HTMLElement | null => portal.querySelector<HTMLElement>('[role="dialog"]');
-    const focusableElements = (): HTMLElement[] => {
+    const focusableElements = (includeFeedback = false): HTMLElement[] => {
       const dialog = dialogElement();
-      return dialog
-        ? Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => element.offsetParent !== null)
-        : [];
+      const withinDialog = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)) : [];
+      const feedback = includeFeedback ? Array.from(document.querySelectorAll<HTMLElement>(`[data-feedback-portal] ${FOCUSABLE_SELECTOR.split(',').join(', [data-feedback-portal] ')}`)) : [];
+      return [...withinDialog, ...feedback].filter((element) => element.offsetParent !== null && !element.closest('[inert]'));
     };
     const focusFrame = window.requestAnimationFrame(() => {
       (focusableElements()[0] || dialogElement())?.focus();
@@ -146,6 +146,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (documentDialogStates.get(document)?.portals.at(-1)?.element !== portal) return;
       if (event.key === 'Escape') {
+        if (event.target instanceof HTMLElement && event.target.closest('[data-feedback-portal]')) return;
         if (!dismissOnEscapeRef.current) return;
         event.preventDefault();
         onOpenChangeRef.current(false);
@@ -153,21 +154,16 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
       }
       if (event.key !== 'Tab') return;
 
-      const focusable = focusableElements();
+      const focusable = focusableElements(true);
       if (focusable.length === 0) {
         event.preventDefault();
         dialogElement()?.focus();
         return;
       }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      const index = focusable.indexOf(document.activeElement as HTMLElement);
+      const next = event.shiftKey ? (index <= 0 ? focusable.length - 1 : index - 1) : (index + 1) % focusable.length;
+      event.preventDefault();
+      focusable[next]?.focus();
     };
     document.addEventListener('keydown', handleKeyDown, true);
 

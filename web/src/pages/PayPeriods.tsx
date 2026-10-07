@@ -1,3 +1,5 @@
+import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
@@ -151,7 +153,8 @@ export function PayPeriods() {
   );
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [calculationResult, setCalculationResult] = useState<{ id: number; summary: string; failed: boolean; failures: PayrollCalculationFailure[]; year: number; names: Map<number, string> } | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
@@ -195,6 +198,9 @@ export function PayPeriods() {
   const mutationGenerationRef = useRef(0);
   const loadPayPeriodsRef = useRef<(silent?: boolean) => Promise<void>>(async (): Promise<void> => undefined);
 
+  const [createError, setCreateError, createErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
+
   useLayoutEffect((): void => {
     payPeriodViewKeyRef.current = payPeriodViewKey;
     loadRequestIdRef.current += 1;
@@ -224,15 +230,13 @@ export function PayPeriods() {
     setCurrentNextCheckNumber(null);
     setCheckSettingsError(null);
     setLoadingCheckSettings(false);
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setCreateError, setEditError, setError]);
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [editError, setEditError] = useState<string | null>(null);
   const [currentNextCheckNumber, setCurrentNextCheckNumber] = useState<number | null>(null);
   const [loadingCheckSettings, setLoadingCheckSettings] = useState(false);
   const [checkSettingsError, setCheckSettingsError] = useState<string | null>(null);
@@ -329,7 +333,7 @@ export function PayPeriods() {
         setLoading(false);
       }
     }
-  }, [activeCompanyId, page, payPeriodViewKey, searchTerm, sortBy, sortDirection, sourceFilter, statusFilter, yearFilter]);
+  }, [activeCompanyId, page, payPeriodViewKey, searchTerm, setError, sortBy, sortDirection, sourceFilter, statusFilter, yearFilter]);
   useEffect((): void => {
     loadPayPeriodsRef.current = loadPayPeriods;
   }, [loadPayPeriods]);
@@ -400,8 +404,13 @@ export function PayPeriods() {
     try {
       setActionInFlight(`run-${id}`);
       setError(null);
-      await payPeriodsApi.runPayroll(id);
+      setCalculationResult(null);
+      const response = await payPeriodsApi.runPayroll(id);
       if (!isCurrentMutation()) return;
+      const failed = response.results.errors.length;
+      setCalculationResult({ id, failed: failed > 0, failures: response.results.errors, year: Number(response.pay_period.pay_date.slice(0, 4)), names: new Map((response.pay_period.payroll_items || []).map((item) => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`])), summary: failed
+        ? `Calculated ${response.results.success.length} employees. ${failed} ${failed === 1 ? 'employee needs' : 'employees need'} attention before approval.`
+        : `Payroll calculated for ${response.results.success.length} ${response.results.success.length === 1 ? 'employee' : 'employees'}${response.results.skipped.length ? `; ${response.results.skipped.length} skipped` : ''}. Review the results before approval.` });
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
@@ -738,11 +747,12 @@ export function PayPeriods() {
           </div>
         )}
         {/* Error display */}
-        {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-            {error}
-          </div>
-        )}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {calculationResult && <ActionFeedback tone={calculationResult.failed ? 'error' : 'success'} message={calculationResult.summary}>
+          <p>{calculationResult.summary}</p>
+          {calculationResult.failed && activeCompanyId && <div className="mt-3"><PayrollCalculationIssues failures={calculationResult.failures} names={calculationResult.names} companyId={activeCompanyId} year={calculationResult.year} returnTo={payRunDestination(calculationResult.id, 'work')} /></div>}
+          <button type="button" className="mt-3 min-h-11 rounded-full border border-primary-200 px-4 py-2 font-semibold text-primary-800" onClick={() => navigate(payRunDestination(calculationResult.id, 'work'))}>Open payroll results</button>
+        </ActionFeedback>}
         {switchNotice && (
           <div
             role="status"
@@ -1103,14 +1113,7 @@ export function PayPeriods() {
                   : 'Create a payroll run with an explicit purpose and verified dates.'}
               </DialogDescription>
             </DialogHeader>
-            {createError && (
-              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                <div className="flex gap-2">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <p>{createError}</p>
-                </div>
-              </div>
-            )}
+            {createError && <ActionFeedback retryKey={createErrorFeedbackAttempt} tone="error" message={createError} />}
             <div className="grid gap-4 py-4">
               <div className="rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-xs font-medium leading-5 text-primary-800">{scheduleContext}</div>
               <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4">
@@ -1279,14 +1282,7 @@ export function PayPeriods() {
                 Update pay period dates and notes before commit.
               </DialogDescription>
             </DialogHeader>
-            {editError && (
-              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                <div className="flex gap-2">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <p>{editError}</p>
-                </div>
-              </div>
-            )}
+            {editError && <ActionFeedback retryKey={editErrorFeedbackAttempt} tone="error" message={editError} />}
             <div className="grid gap-4 py-4">
               {editingPayPeriod?.status === 'draft' && (
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4">

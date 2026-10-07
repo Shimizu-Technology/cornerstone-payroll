@@ -1,3 +1,4 @@
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -146,7 +147,7 @@ function handlePeriodTypeChange(
 
 export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmployeeCheckEditModalProps) {
   const [form, setForm] = useState<FormState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Reset form whenever the modal is opened with a (possibly different) check.
@@ -157,7 +158,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
     } else {
       setForm(null);
     }
-  }, [check]);
+  }, [check, setError]);
 
   // ESC closes the modal — matches the rest of the panel's modal behaviour.
   useEffect(() => {
@@ -300,7 +301,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+    <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b px-6 py-4">
           <div>
@@ -343,9 +344,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

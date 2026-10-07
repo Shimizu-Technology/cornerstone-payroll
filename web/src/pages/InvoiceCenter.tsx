@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
@@ -263,7 +264,7 @@ export function InvoiceCenter() {
   const [loading, setLoading] = useState(true);
   const [scopeLoading, setScopeLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const loadSequence = useRef(0);
@@ -337,7 +338,7 @@ export function InvoiceCenter() {
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [businessFilter, invoiceOrganizationId]);
+  }, [businessFilter, invoiceOrganizationId, setError]);
 
   useEffect(() => {
     let active = true;
@@ -823,12 +824,7 @@ export function InvoiceCenter() {
       </div>
 
       {(error || success) && (
-        <div role="status" className={`invoice-toast fixed right-4 top-4 z-[80] w-[min(28rem,calc(100vw-2rem))] rounded-xl border px-4 py-3 text-sm shadow-xl ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
-          <div className="flex items-start justify-between gap-3">
-            <span>{error || success}</span>
-            <button onClick={() => { setError(null); setSuccess(null); }}><X className="h-4 w-4" /></button>
-          </div>
-        </div>
+        <ActionFeedback retryKey={errorFeedbackAttempt} tone={error ? "error" : "success"} message={error || success || ""} />
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

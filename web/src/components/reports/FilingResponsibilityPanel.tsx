@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, PencilLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -52,7 +53,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
   const [sourceCutoffDate, setSourceCutoffDate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const filings = Object.entries(gate.filings) as [PayrollFilingType, PayrollFilingGate][];
   const coverage = gate.source_coverage;
@@ -221,7 +222,7 @@ export function FilingResponsibilityPanel({ gate, canRecord, onUpdated }: Filing
                       {responsibleParty === 'external_provider' && (
                         <p className="mt-3 text-sm text-neutral-600">Cornerstone reports will remain draft/reference copies because the external provider owns this filing.</p>
                       )}
-                      {error && <p className="mt-3 text-sm text-danger-600" role="alert">{error}</p>}
+                      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
                       <div className="mt-4 flex flex-wrap gap-2">
                         <Button size="sm" onClick={saveReview} disabled={saving}>
                           {saving ? 'Saving…' : 'Save responsibility'}

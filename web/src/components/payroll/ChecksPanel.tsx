@@ -1,3 +1,4 @@
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
@@ -70,6 +71,7 @@ function eventLabel(eventType: string): string {
 }
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged }: ChecksPanelProps) {
+  const { notify } = useFeedback();
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [directDepositItems, setDirectDepositItems] = useState<Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
@@ -82,7 +84,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
   const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
   const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
-  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
+  const [checkNumberSaveError, setCheckNumberSaveError, checkNumberSaveErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -123,7 +125,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       setPreviewUrl(url);
       setPreviewItem(item);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to load check PDF');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
     } finally {
       setActionLoading(null);
     }
@@ -151,7 +153,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         printWindow.print();
       });
     } else {
-      alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
+      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups for this site to print checks.' });
     }
   };
 
@@ -166,7 +168,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download pay stub');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to download pay stub' });
     } finally {
       setActionLoading(null);
     }
@@ -185,10 +187,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         });
       } else {
         URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups for this site to print pay stubs.');
+        notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups for this site to print pay stubs.' });
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to print pay stub');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to print pay stub' });
     } finally {
       setActionLoading(null);
     }
@@ -201,7 +203,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   const notifySkippedPayStubs = (skippedCount?: number) => {
     if (!skippedCount || selectedStubIds.length > 0) return;
-    alert(`${skippedCount} employee${skippedCount === 1 ? '' : 's'} with no pay activity were skipped.`);
+    notify({ tone: 'info', message: `${skippedCount} employee${skippedCount === 1 ? '' : 's'} with no pay activity were skipped.` });
   };
 
   const handleDownloadPayStubs = async () => {
@@ -218,7 +220,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       notifySkippedPayStubs(result.skippedCount);
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download pay stubs');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to download pay stubs' });
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -241,10 +243,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         });
       } else {
         URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups for this site to print pay stubs.');
+        notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups for this site to print pay stubs.' });
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to print pay stubs');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to print pay stubs' });
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -261,7 +263,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         const printWindow = window.open(url);
         if (!printWindow) {
           URL.revokeObjectURL(url);
-          alert('Pop-up blocked. Please allow pop-ups to print direct-deposit stubs.');
+          notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print direct-deposit stubs.' });
           return;
         }
         printWindow.addEventListener('load', () => {
@@ -276,7 +278,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         setTimeout(() => URL.revokeObjectURL(url), 100);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate direct-deposit stubs');
+      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate direct-deposit stubs' });
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -518,7 +520,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           </div>
         </div>
       )}
-      {checkNumberSaveError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
+      {checkNumberSaveError && <ActionFeedback retryKey={checkNumberSaveErrorFeedbackAttempt} tone="error" message={checkNumberSaveError} />}
 
       {/* Checks table */}
       {filteredChecks.length === 0 ? (
@@ -825,7 +827,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
       {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
       {previewUrl && previewItem && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
           <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>

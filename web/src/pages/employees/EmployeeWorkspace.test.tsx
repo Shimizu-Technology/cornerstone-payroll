@@ -207,6 +207,6 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(await screen.findByText('Complete activity history')).toBeTruthy();
     expect(screen.getByText('Employment milestones')).toBeTruthy();
     expect(screen.getByText('Classification history')).toBeTruthy();
-    expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1);
+    await waitFor(() => expect(apiMocks.recordActivities).toHaveBeenCalledWith('employees', 2, { page: 1, per_page: 20 }, 1));
   });
 });

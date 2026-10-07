@@ -30,9 +30,19 @@ RSpec.describe HistoricalRetirementProjection do
 
   it "requires explicit complete review while profiles remain readable" do
     expect(projection.totals).to include(retirement: 0, roth_retirement: 0)
-    expect { projection.totals(strict: true) }.to raise_error(ArgumentError, /Retirement year evidence/)
+    expect { projection.totals(strict: true) }.to raise_error(ArgumentError, /No complete contribution-type review is recorded for 2026/)
     expect(employee.merge_historical_ytd({ roth_retirement: 0, gross_pay: 0 }, 2026)).to include(roth_retirement: 0, gross_pay: 40_000)
     expect { save_review(review.merge("classifications" => [])) }.to raise_error(ActiveRecord::RecordInvalid, /every retained candidate/)
+  end
+
+  it "does not describe a missing review as a changed source" do
+    [ nil, {}, { "classifications" => [] } ].each do |missing|
+      expect { described_class.new(employee: employee, tax_year: 2026, review: missing).totals(strict: true) }
+        .to raise_error(ArgumentError) { |error|
+          expect(error.message).to include("No complete contribution-type review is recorded for 2026")
+          expect(error.message).not_to include("digest has changed")
+        }
+    end
   end
 
   it "recovers Roth once, counts employer additions, and never mutates source/wages/taxes" do

@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
@@ -147,7 +148,7 @@ export function PayrollRegisterPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingHistoryPackage, setExportingHistoryPackage] = useState<'xlsx' | 'pdf' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<PayrollRegisterReport['report'] | null>(null);
 
   useEffect(() => {
@@ -177,7 +178,7 @@ export function PayrollRegisterPanel() {
     };
     void loadPeriods();
     return () => { cancelled = true; };
-  }, [activeCompanyId]);
+  }, [activeCompanyId, setError]);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx || exportingHistoryPackage !== null;
   const downloadFormats: ReportDownloadFormat[] = [
@@ -363,7 +364,7 @@ export function PayrollRegisterPanel() {
               className="shrink-0"
             />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -416,7 +417,7 @@ function TaxSummaryPanel() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
@@ -583,7 +584,7 @@ function TaxSummaryPanel() {
               />
             </div>
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -635,13 +636,13 @@ function W2GuPanel() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflight, setPreflight] = useState<W2GuPreflightResult | null>(null);
   const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
-  const [preflightError, setPreflightError] = useState<string | null>(null);
-  const [markReadyError, setMarkReadyError] = useState<string | null>(null);
+  const [preflightError, setPreflightError, preflightErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [markReadyError, setMarkReadyError, markReadyErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [markingReady, setMarkingReady] = useState(false);
   const [filingNotes, setFilingNotes] = useState('');
   const [filingGate, setFilingGate] = useState<PayrollFilingGateGroup | null>(null);
@@ -896,7 +897,7 @@ function W2GuPanel() {
             />
           </div>
           {error && (
-            <p className="mt-3 text-sm text-red-600">{error}</p>
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
         </CardContent>
       </Card>
@@ -910,22 +911,18 @@ function W2GuPanel() {
       )}
 
       {preflightError && (
-        <Card>
-          <CardContent className="pt-6">
+        <ActionFeedback retryKey={preflightErrorFeedbackAttempt} tone="error" message={preflightError}><CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Preflight Error</p>
             <p className="text-sm text-red-600 mt-1">{preflightError}</p>
-          </CardContent>
-        </Card>
+          </CardContent></ActionFeedback>
       )}
 
       {markReadyError && (
-        <Card>
-          <CardContent className="pt-6">
+        <ActionFeedback retryKey={markReadyErrorFeedbackAttempt} tone="error" message={markReadyError}><CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
             <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
             <p className="text-xs text-gray-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
-          </CardContent>
-        </Card>
+          </CardContent></ActionFeedback>
       )}
 
       {filing && (
@@ -1143,7 +1140,7 @@ function EmployeePayHistoryPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<EmployeePayHistoryReport | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
@@ -1172,7 +1169,7 @@ function EmployeePayHistoryPanel() {
       }
     }
     loadAllEmployees();
-  }, []);
+  }, [setError]);
 
   async function loadReport() {
     if (!selectedEmployeeId) return;
@@ -1286,7 +1283,7 @@ function EmployeePayHistoryPanel() {
               disabled={loading || exportingPdf || exportingXlsx || exportingCsv || !selectedEmployeeId}
             />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -1411,7 +1408,7 @@ export function YtdSummaryPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
   const reportRequestSequence = useRef(0);
   const selectedPayRun = payRuns.find((payRun) => payRun.key === selectedPayRunKey);
@@ -1439,7 +1436,7 @@ export function YtdSummaryPanel() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeCompanyId, loadedPayRunCompanyId, periodMode]);
+  }, [activeCompanyId, loadedPayRunCompanyId, periodMode, setError]);
 
   function calendarRange(mode: 'quarter' | 'month'): { start_date: string; end_date: string } {
     const startMonth = mode === 'quarter' ? ((quarter - 1) * 3) + 1 : month;
@@ -1709,7 +1706,7 @@ export function YtdSummaryPanel() {
           <p className="mt-4 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm leading-6 text-primary-950" role="note">
             <span className="font-semibold">Date basis: pay date.</span> A work period such as April 1–15 appears on the date it was paid, such as April 30. Choose Single payroll run to avoid translating those dates yourself.
           </p>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -1951,10 +1948,10 @@ function AnnualPayrollSummaryPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<AnnualPayrollSummaryReport['report'] | null>(null);
 
-  async function loadReport() {
+  const loadReport = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -1965,11 +1962,11 @@ function AnnualPayrollSummaryPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [setError]);
 
   useEffect(() => {
     void loadReport();
-  }, []);
+  }, [loadReport]);
 
   async function download(
     format: 'xlsx' | 'pdf' | 'csv',
@@ -2032,7 +2029,7 @@ function AnnualPayrollSummaryPanel() {
             <ReportDownloadMenu formats={exportFormats} disabled={loading || !report || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
         </CardHeader>
-        {error && <CardContent><p className="text-sm text-red-600">{error}</p></CardContent>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p className="text-sm text-red-600">{error}</p></ActionFeedback>}
       </Card>
 
       {loading && !report && (
@@ -2162,7 +2159,7 @@ function EmployerLiabilityPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
   async function loadReport() {
@@ -2272,7 +2269,7 @@ function EmployerLiabilityPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -2361,7 +2358,7 @@ export function QuarterlyCompliancePacketPanel() {
   const [startingWorkflow, setStartingWorkflow] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [bridgeRecoveryPath, setBridgeRecoveryPath] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
   const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
@@ -2555,13 +2552,11 @@ export function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
-          {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            <p>{error}</p>
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>
             {bridgeRecoveryPath && <div className="mt-2">
               <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
               <Link to={bridgeRecoveryPath} className="mt-2 inline-block font-semibold text-primary-700 underline underline-offset-2">Review historical YTD bridge</Link>
-            </div>}
-          </div>}
+            </div>}</ActionFeedback>}
         </CardContent>
       </Card>
 
@@ -3149,7 +3144,7 @@ function Form941GuPanel() {
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<Form941GuReport | null>(null);
 
   async function loadReport() {
@@ -3244,7 +3239,7 @@ function Form941GuPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
 
@@ -3547,7 +3542,7 @@ function Form1099NecPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const loadReport = async () => {
     setLoading(true);
@@ -3640,7 +3635,7 @@ function Form1099NecPanel() {
       </Card>
 
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>
+        <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
       )}
 
       {report && (

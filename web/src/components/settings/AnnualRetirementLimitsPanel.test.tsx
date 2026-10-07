@@ -53,7 +53,7 @@ describe('AnnualRetirementLimitsPanel', () => {
     expect(screen.getByText('$360,000')).toBeTruthy();
     expect(screen.getByText('Covered 2025 employer wages must exceed this amount.')).toBeTruthy();
     expect(screen.getByRole('link', { name: /IRS 2026 announcement/ }).getAttribute('href')).toBe(limit.source_url);
-    expect(screen.queryByRole('button', { name: 'Add retirement year' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add IRS retirement limits' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Edit 2026/ })).toBeNull();
   });
 
@@ -62,7 +62,7 @@ describe('AnnualRetirementLimitsPanel', () => {
     mocks.create.mockImplementation(async (payload) => ({ data: { ...payload, id: 5 } }));
     render(<AnnualRetirementLimitsPanel />);
     await screen.findByText('$35,750');
-    await user.click(screen.getByRole('button', { name: 'Add retirement year' }));
+    await user.click(screen.getByRole('button', { name: 'Add IRS retirement limits' }));
     const form = screen.getByRole('form', { name: 'Add verified retirement year' });
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Add verified retirement year' }));
     const inputs = within(form).getAllByRole('textbox') as HTMLInputElement[];

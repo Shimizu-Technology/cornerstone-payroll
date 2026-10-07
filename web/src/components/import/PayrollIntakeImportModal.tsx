@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, FileText, RefreshCw, UploadCloud, UserPlus } from 'lucide-react';
 import {
@@ -113,7 +114,7 @@ export function PayrollIntakeImportModal({
   const [pastedText, setPastedText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [importData, setImportData] = useState<PayrollIntakeImportData | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false);
@@ -123,7 +124,7 @@ export function PayrollIntakeImportModal({
   const [createEmployeeRow, setCreateEmployeeRow] = useState<EditableRow | null>(null);
   const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>(() => defaultNewEmployeeForm());
   const [creatingEmployee, setCreatingEmployee] = useState(false);
-  const [createEmployeeError, setCreateEmployeeError] = useState<string | null>(null);
+  const [createEmployeeError, setCreateEmployeeError, createEmployeeErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
   const [dispositionTargets, setDispositionTargets] = useState<PayrollIntakeDispositionTarget[]>([]);
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
@@ -146,7 +147,7 @@ export function PayrollIntakeImportModal({
       if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
     });
     return () => { active = false; };
-  }, [open, payPeriodId]);
+  }, [open, payPeriodId, setError]);
 
   const employeeOptions = useMemo(() => (
     [...localEmployees]
@@ -498,9 +499,7 @@ export function PayrollIntakeImportModal({
         </DialogHeader>
 
         {error && (
-          <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         {step === 'upload' && (
@@ -875,9 +874,7 @@ export function PayrollIntakeImportModal({
           </DialogHeader>
 
           {createEmployeeError && (
-            <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-              {createEmployeeError}
-            </div>
+            <ActionFeedback retryKey={createEmployeeErrorFeedbackAttempt} tone="error" message={createEmployeeError} />
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">

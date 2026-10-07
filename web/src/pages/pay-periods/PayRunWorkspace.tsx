@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -303,26 +304,26 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const { isAdmin } = useAuth();
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
-  const [mockPreviewError, setMockPreviewError] = useState<string | null>(null);
+  const [mockPreviewError, setMockPreviewError, mockPreviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [mockPreview, setMockPreview] = useState<PdfArtifact | null>(null);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [hasNonEmployeeChecks, setHasNonEmployeeChecks] = useState<boolean | null>(null);
-  const [printRefreshError, setPrintRefreshError] = useState<string | null>(null);
+  const [printRefreshError, setPrintRefreshError, printRefreshErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const refreshRequestIdRef = useRef(0);
   const [switchItem, setSwitchItem] = useState<PayrollItem | null>(null);
   const [switchReason, setSwitchReason] = useState('');
   const [confirmNotPaid, setConfirmNotPaid] = useState(false);
   const [switchBusy, setSwitchBusy] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
+  const [switchError, setSwitchError, switchErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentPreview, setPaymentPreview] = useState<PromotedPaymentPreview | null>(null);
   const [paymentPreviewBusy, setPaymentPreviewBusy] = useState(false);
-  const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
+  const [paymentPreviewError, setPaymentPreviewError, paymentPreviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentStartingNumber, setPaymentStartingNumber] = useState('');
   const [paymentCheckDate, setPaymentCheckDate] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentError, setPaymentError, paymentErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const nextMethod: PaymentDeliveryMethod = switchItem?.effective_payment_delivery_method === 'direct_deposit' ? 'paper_check' : 'direct_deposit';
   const mockPreviewEligible = items.filter((item) => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay || 0) > 0).length;
@@ -349,7 +350,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     });
 
     return () => { active = false; };
-  }, [isAdmin, payRun.id, recordOnlyPromoted]);
+  }, [isAdmin, payRun.id, recordOnlyPromoted, setPaymentPreviewError]);
 
   const previewMockChecks = async () => {
     setMockPreviewBusy(true);
@@ -472,9 +473,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     <>
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
       {paymentNotice && (
-        <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
-          <strong>Ready to print.</strong> {paymentNotice}
-        </div>
+        <ActionFeedback tone="success" message={paymentNotice}><strong>Ready to print.</strong> {paymentNotice}</ActionFeedback>
       )}
       {recordOnlyPromoted && (
         <Card className="border-amber-200 bg-amber-50/70">
@@ -487,7 +486,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               </p>
               {!isAdmin && <p className="mt-2 text-sm font-medium text-amber-900">Ask an organization administrator to prepare this payroll. Accountants and managers can use the normal check workflow after that.</p>}
               {paymentPreviewBusy && <p role="status" className="mt-2 text-sm text-neutral-600">Verifying that this payroll has no prior payment activity…</p>}
-              {paymentPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{paymentPreviewError}</p>}
+              {paymentPreviewError && <ActionFeedback retryKey={paymentPreviewErrorFeedbackAttempt} tone="error" message={paymentPreviewError} />}
               {paymentPreview && !paymentPreview.eligible && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-danger-700">{paymentPreview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
             </div>
             {isAdmin && (
@@ -507,8 +506,8 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           <div>
             <CardTitle>Checks and direct deposit</CardTitle>
             <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview VOID-marked rehearsal checks, then print on plain paper or download the PDF. These documents are not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
-            {printRefreshError && <p role="alert" className="mt-2 text-sm text-danger-700">{printRefreshError}</p>}
-            {mockPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{mockPreviewError}</p>}
+            {printRefreshError && <ActionFeedback retryKey={printRefreshErrorFeedbackAttempt} tone="error" message={printRefreshError} />}
+            {mockPreviewError && <ActionFeedback retryKey={mockPreviewErrorFeedbackAttempt} tone="error" message={mockPreviewError} />}
           </div>
           {canPreviewMockChecks && (
             <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
@@ -620,7 +619,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             <input type="checkbox" className="mt-1" checked={confirmNotPaid} onChange={(event) => setConfirmNotPaid(event.target.checked)} />
             I confirm this payment has not been issued by check or bank transfer.
           </label>
-          {switchError && <p role="alert" className="text-sm text-danger-700">{switchError}</p>}
+          {switchError && <ActionFeedback retryKey={switchErrorFeedbackAttempt} tone="error" message={switchError} />}
           <DialogFooter>
             <Button variant="outline" onClick={resetSwitchDialog} disabled={switchBusy}>Cancel</Button>
             <Button onClick={() => void switchPaymentMethod()} disabled={switchBusy || switchReason.trim().length < 10 || !confirmNotPaid}>{switchBusy ? 'Switching…' : 'Confirm switch'}</Button>
@@ -661,7 +660,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             <input type="checkbox" className="mt-1" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
             I confirm this payroll has not been paid by paper check or bank transfer, and these are the original employee payments—not replacements.
           </label>
-          {paymentError && <p role="alert" className="text-sm text-danger-700">{paymentError}</p>}
+          {paymentError && <ActionFeedback retryKey={paymentErrorFeedbackAttempt} tone="error" message={paymentError} />}
           <DialogFooter>
             <Button variant="outline" onClick={resetPaymentDialog} disabled={paymentBusy}>Cancel</Button>
             <Button onClick={() => void preparePromotedPayment()} disabled={paymentBusy || !paymentStartingNumber || !paymentCheckDate || !paymentConfirmed}>
