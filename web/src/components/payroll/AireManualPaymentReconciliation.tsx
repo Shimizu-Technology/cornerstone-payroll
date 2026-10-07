@@ -182,7 +182,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
           <Badge className="mt-2" variant={allocation.status === 'issued' && !allocation.payment_cancellation_pending ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
           {!allocation.payment_cancellation_pending && allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
             ? <p className="mt-2">Time tracking issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
-            : <p className="mt-2 text-neutral-600">{allocation.payment_cancellation_pending ? 'The original payment was cancelled in Payroll. These hours stay reserved while the cancellation syncs; a replacement is not paid yet.' : 'Verified issued receipt details are not available in this review.'}</p>}
+            : <p className="mt-2 text-neutral-600">{allocation.payment_cancellation_pending ? 'The original payment was cancelled in Payroll. These hours stay reserved while the cancellation syncs. Time tracking has not confirmed the cancellation or replacement yet.' : 'Verified issued receipt details are not available in this review.'}</p>}
           {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">Time tracking status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button type="button" variant="outline" size="sm" disabled={busy || loading}
