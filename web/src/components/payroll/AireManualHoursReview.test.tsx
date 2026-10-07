@@ -78,7 +78,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Manual AIRE hours check')).toBeTruthy();
-    expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
+    expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
     expect(screen.getByText(/there is no separate “mark paid” step in AIRE/i)).toBeTruthy();

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +27,7 @@ const apiMocks = vi.hoisted(() => ({
   retryTestWorkspace: vi.fn(),
   archiveTestWorkspace: vi.fn(),
   restoreTestWorkspace: vi.fn(),
+  activeCompanyId: 6,
   auth: { isAdmin: true, isAccountant: false, isManager: false },
 }));
 
@@ -34,7 +35,7 @@ const refreshCompanies = vi.fn();
 
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('@/contexts/CompanyContext', () => ({
-  useCompany: () => ({ refreshCompanies, switchCompany: vi.fn() }),
+  useCompany: () => ({ refreshCompanies, switchCompany: vi.fn(), activeCompanyId: apiMocks.activeCompanyId }),
 }));
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => apiMocks.auth,
@@ -490,6 +491,22 @@ describe('Clients name-only rename', () => {
     expect(apiMocks.list).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes a saved rename after an administrator switches clients', async () => {
+    const user = userEvent.setup();
+    apiMocks.activeCompanyId = 6;
+    let resolveSave!: () => void;
+    apiMocks.update.mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    const rendered = renderClients();
+    await changeName(user, await openRename(user));
+    apiMocks.activeCompanyId = 4;
+    rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
+    await act(async () => { resolveSave(); });
+    await waitFor(() => expect(refreshCompanies).toHaveBeenCalledOnce());
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('Client name updated.')).toBeNull();
+    apiMocks.activeCompanyId = 6;
+  });
   it('ignores completion after the admin scope changes', async () => {
     const user = userEvent.setup();
     let resolveSave!: () => void;

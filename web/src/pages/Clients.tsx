@@ -141,6 +141,9 @@ export function Clients() {
   const { user, isAdmin: canManageClients, isAccountant, isManager } = useAuth();
   const { notify } = useFeedback();
   const renameScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${activeCompanyId ?? ''}:${canManageClients}`;
+  const renamePermissionScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${canManageClients}`;
+  const renamePermissionScopeRef = useRef(renamePermissionScope);
+  renamePermissionScopeRef.current = renamePermissionScope;
   const renameScopeRef = useRef(renameScope);
   renameScopeRef.current = renameScope;
   const renameMountedRef = useRef(true);
@@ -616,7 +619,14 @@ export function Clients() {
     setRenameError(null);
     try {
       await companiesApi.update(clientId, { name });
-      if (!isCurrent()) return;
+      if (!isCurrent()) {
+        // A client switch can abandon this dialog without abandoning its saved change.
+        // Refresh only while the same administrator and organization remain active.
+        if (renameMountedRef.current && renamePermissionScopeRef.current === renamePermissionScope) {
+          await Promise.allSettled([load(true), refreshCompanies()]);
+        }
+        return;
+      }
       // Publish the save result before refreshing client context or leaving the dialog.
       notify({ tone: 'success', message: 'Client name updated.' });
       setCompanies(current => current.map(client => client.id === clientId ? { ...client, name } : client));
@@ -1428,7 +1438,7 @@ export function Clients() {
                             </Button>
                           )}
                           {canManageClients && !isReadOnlyWorkspace(c) && (
-                            <Button size="sm" variant="outline" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                            <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
                               Rename
                             </Button>
                           )}
@@ -1572,7 +1582,7 @@ export function Clients() {
                               </Button>
                             )}
                             {canManageClients && !isReadOnlyWorkspace(c) && (
-                              <Button size="sm" variant="outline" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                              <Button size="sm" variant="outline" className="text-xs" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
                                 Rename
                               </Button>
                             )}

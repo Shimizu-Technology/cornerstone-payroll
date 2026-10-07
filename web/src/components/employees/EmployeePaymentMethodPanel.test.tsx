@@ -23,10 +23,18 @@ describe('employee future payment default', () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(screen.getByText(/future payroll default saved as Direct deposit/)).toBeTruthy();
   });
+  it('disables saving an unchanged reviewed default', async () => {
+    const user = userEvent.setup();
+    render(<EmployeePaymentMethodPanel employee={employee} onEmployeeReload={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    expect((screen.getByRole('button', { name: 'Save future default' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
   it('reports the saved outcome even when reload fails', async () => {
     const user = userEvent.setup();
     render(<FeedbackProvider><EmployeePaymentMethodPanel employee={employee} onEmployeeReload={vi.fn().mockRejectedValue(new Error('Offline'))} /></FeedbackProvider>);
     await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    await user.selectOptions(screen.getByLabelText('Future payroll payment method'), 'direct_deposit');
     await user.click(screen.getByRole('button', { name: 'Save future default' }));
     expect(await screen.findByText(/future payment method was saved, but the employee screen could not refresh/)).toBeTruthy();
     expect(mocks.update).toHaveBeenCalledOnce();
@@ -38,6 +46,7 @@ describe('employee future payment default', () => {
     const reload = vi.fn();
     const view = render(<FeedbackProvider><EmployeePaymentMethodPanel employee={employee} onEmployeeReload={reload} /></FeedbackProvider>);
     await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    await user.selectOptions(screen.getByLabelText('Future payroll payment method'), 'direct_deposit');
     await user.click(screen.getByRole('button', { name: 'Save future default' }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledOnce());
     view.unmount();
@@ -49,6 +58,7 @@ describe('employee future payment default', () => {
     mocks.update.mockResolvedValue({ data: employee, payment_method_review: { reapproval_pay_period_ids: [8] } });
     render(<FeedbackProvider><EmployeePaymentMethodPanel employee={employee} onEmployeeReload={vi.fn().mockResolvedValue(undefined)} /></FeedbackProvider>);
     await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    await user.selectOptions(screen.getByLabelText('Future payroll payment method'), 'direct_deposit');
     await user.click(screen.getByRole('button', { name: 'Save future default' }));
     expect(await screen.findByText(/Review and approve pay runs #8 again/)).toBeTruthy();
   });

@@ -23,6 +23,7 @@ export function EmployeePaymentMethodPanel({ employee, onEmployeeReload }: { emp
   const canChange = hasCapability('payroll_operations');
 
   const save = async (): Promise<void> => {
+    if (saving || !canChange || method === employee.payment_delivery_method) return;
     const savingScope = scope;
     setSaving(true);
     setError(null);
@@ -51,7 +52,7 @@ export function EmployeePaymentMethodPanel({ employee, onEmployeeReload }: { emp
       {editing ? <fieldset disabled={saving} className="space-y-4">
         <Select label="Future payroll payment method" value={method} onChange={event => setMethod(event.target.value as PaymentDeliveryMethod)}><option value="paper_check">Paper check</option><option value="direct_deposit">Direct deposit</option></Select>
         <p className="text-xs leading-5 text-neutral-600">Existing pay runs retain their delivery choice. Confirm direct-deposit enrollment with the employer or bank; this setting does not send a transfer.</p>
-        <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => { setEditing(false); setError(null); }}>Cancel</Button><Button onClick={() => void save()}>{saving ? 'Saving…' : 'Save future default'}</Button></div>
+        <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => { setEditing(false); setError(null); }}>Cancel</Button><Button disabled={saving || !canChange || method === employee.payment_delivery_method} onClick={() => void save()}>{saving ? 'Saving…' : 'Save future default'}</Button></div>
       </fieldset> : canChange ? <Button variant="outline" onClick={() => { setMethod(employee.payment_delivery_method || 'paper_check'); setError(null); setEditing(true); }}>Change future payment method</Button> : <p className="text-sm text-neutral-600">Ask the payroll team to change this employee’s future payment method.</p>}
     </CardContent>
   </Card>;

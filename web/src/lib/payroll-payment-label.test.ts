@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { payrollPaymentLabel } from './payroll-payment-label';
+import type { PayrollItem } from '@/types';
+import { payRunPaymentDisplay, payrollPaymentLabel } from './payroll-payment-label';
 
 describe('payrollPaymentLabel', () => {
   it('uses the saved direct-deposit method and distinguishes zero-net statements', () => {
@@ -19,5 +20,18 @@ describe('payrollPaymentLabel', () => {
     expect(payrollPaymentLabel({ record_type: 'imported', net_pay: 700 })).toBe('Not recorded');
     expect(payrollPaymentLabel({ record_type: 'imported', payment_method: 'Cash' })).toBe('Cash');
     expect(payrollPaymentLabel({ record_type: 'adjustment', net_pay: 100 })).toBe('Adjustment — no payment issued');
+  });
+});
+
+describe('payRunPaymentDisplay action eligibility', () => {
+  const item = { net_pay: 500, gross_pay: 600, effective_payment_delivery_method: 'direct_deposit' } as PayrollItem;
+  it('exposes the guarded change dialog before and after commitment', () => {
+    for (const committed of [false, true]) expect(payRunPaymentDisplay(item, { committed, rehearsal: false, canPreview: false }).canChange).toBe(true);
+  });
+  it('keeps rehearsal, zero-net and voided rows without a payment-change action', () => {
+    const options = { committed: false, rehearsal: false, canPreview: false };
+    expect(payRunPaymentDisplay(item, { ...options, rehearsal: true }).canChange).toBe(false);
+    expect(payRunPaymentDisplay({ ...item, net_pay: 0 }, options).canChange).toBe(false);
+    expect(payRunPaymentDisplay({ ...item, voided: true }, options).canChange).toBe(false);
   });
 });

@@ -78,7 +78,8 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
     try {
       saved = await payrollItemsApi.updatePaymentMethod(payPeriod.id, record.id, method, {
         update_employee_default: futureDefault,
-        ...(committed ? { reason: reason.trim(), confirm_not_paid: unpaid, expected_check_number: record.check_number || null } : {}),
+        expected_check_number: record.check_number || null,
+        ...(committed ? { reason: reason.trim(), confirm_not_paid: unpaid } : {}),
         ...(retiresCheck ? { retire_existing_check: true, confirm_check_cancelled: cancelled, cancellation_evidence_reference: evidence.trim() } : {}),
       }, payPeriod.company_id);
     } catch (caught) {
