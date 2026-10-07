@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle2, MessageSquare, Paperclip, Send, Wifi } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
   const [selectedThread, setSelectedThread] = useState<ClientPortalThread | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
@@ -70,7 +71,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, setError]);
 
   useEffect(() => {
     void loadThreads();
@@ -119,7 +120,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
     return () => {
       active = false;
     };
-  }, [api, selectedId]);
+  }, [api, selectedId, setError]);
 
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -202,7 +203,7 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
         </div>
       </CardHeader>
       <CardContent>
-        {error && <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className={`${mobileConversationOpen ? 'hidden lg:block' : 'block'} min-w-0 space-y-4`}>

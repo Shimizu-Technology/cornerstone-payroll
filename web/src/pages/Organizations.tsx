@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -22,7 +23,7 @@ export function Organizations() {
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const [isAdding, setIsAdding] = useState(false);
@@ -34,7 +35,7 @@ export function Organizations() {
   const [newUnlimitedClients, setNewUnlimitedClients] = useState(false);
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
-  const [newError, setNewError] = useState<string | null>(null);
+  const [newError, setNewError, newErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
   const [transferCompanyId, setTransferCompanyId] = useState('');
   const [transferProfileId, setTransferProfileId] = useState('');
@@ -43,7 +44,7 @@ export function Organizations() {
   const [transferIssuer, setTransferIssuer] = useState('');
   const [transferPreview, setTransferPreview] = useState<OrganizationCompanyTransferPreview | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
-  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferError, setTransferError, transferErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -51,13 +52,13 @@ export function Organizations() {
   const [editStatus, setEditStatus] = useState<'active' | 'inactive'>('active');
   const [editClientLimit, setEditClientLimit] = useState('3');
   const [editUnlimitedClients, setEditUnlimitedClients] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [adminOrgId, setAdminOrgId] = useState<number | null>(null);
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
-  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminError, setAdminError, adminErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [adminActionId, setAdminActionId] = useState<number | null>(null);
 
@@ -73,7 +74,7 @@ export function Organizations() {
     } finally {
       setIsLoading(false);
     }
-  }, [page]);
+  }, [page, setError]);
 
   useEffect(() => {
     void fetchOrganizations();
@@ -385,17 +386,13 @@ export function Organizations() {
         </div>
 
         {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-lg border border-danger-200 bg-danger-50 p-4">
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" />
-            <p className="text-danger-700">{error}</p>
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600" />
+            <p className="text-danger-700">{error}</p></ActionFeedback>
         )}
 
         {successMessage && (
-          <div className="mb-6 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4">
-            <Mail className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
-            <p className="text-green-700">{successMessage}</p>
-          </div>
+          <ActionFeedback tone="success" message={successMessage}><Mail className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+            <p className="text-green-700">{successMessage}</p></ActionFeedback>
         )}
 
         {isTransferring && (
@@ -434,7 +431,7 @@ export function Organizations() {
               </div>
               <Button onClick={executeTransfer} disabled={transferBusy || transferPreview.blockers.length > 0 || !transferName.trim() || !transferSlug.trim() || (transferProfileId !== '' && !transferIssuer.trim())}>{transferBusy ? 'Moving...' : 'Move company and selected invoices'}</Button>
             </div>}
-            {transferError && <p className="text-sm text-danger-700">{transferError}</p>}
+            {transferError && <ActionFeedback retryKey={transferErrorFeedbackAttempt} tone="error" message={transferError} />}
           </Card>
         )}
 
@@ -452,9 +449,7 @@ export function Organizations() {
               </Button>
             </div>
             {newError && (
-              <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700">
-                {newError}
-              </div>
+              <ActionFeedback retryKey={newErrorFeedbackAttempt} tone="error" message={newError} />
             )}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Input placeholder="Organization name *" value={newName} onChange={(event) => setNewName(event.target.value)} />
@@ -519,7 +514,7 @@ export function Organizations() {
                           Unlimited
                         </label>
                       </div>
-                      {editError && <p className="text-xs text-danger-600">{editError}</p>}
+                      {editError && <ActionFeedback retryKey={editErrorFeedbackAttempt} tone="error" message={editError} />}
                       <MobileCardActions className="mt-0 grid grid-cols-2">
                         <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>{isSavingEdit ? 'Saving...' : 'Save'}</Button>
                         <Button size="sm" variant="outline" onClick={() => setEditingId(null)} disabled={isSavingEdit}>Cancel</Button>
@@ -595,7 +590,7 @@ export function Organizations() {
                         <div className="space-y-2">
                           <Input className="w-64" value={editName} onChange={(event) => setEditName(event.target.value)} />
                           <Input className="w-64" value={editSlug} onChange={(event) => setEditSlug(event.target.value)} />
-                          {editError && <p className="text-xs text-danger-600">{editError}</p>}
+                          {editError && <ActionFeedback retryKey={editErrorFeedbackAttempt} tone="error" message={editError} />}
                         </div>
                       ) : (
                         <div>
@@ -769,9 +764,7 @@ export function Organizations() {
               </Button>
             </div>
             {adminError && (
-              <div className="mb-4 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700">
-                {adminError}
-              </div>
+              <ActionFeedback retryKey={adminErrorFeedbackAttempt} tone="error" message={adminError} />
             )}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Input placeholder="Admin email *" type="email" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} />

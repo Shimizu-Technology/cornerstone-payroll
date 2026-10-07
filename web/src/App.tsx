@@ -1,10 +1,11 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
+import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
@@ -392,6 +393,16 @@ function AppWithClerk({ children }: { children: React.ReactNode }) {
   );
 }
 
+function AppFeedback({ children }: { children: ReactNode }) {
+  const { user, isLoading: authLoading } = useAuth();
+  const { activeCompanyId, activeOrganizationId, loading: companyLoading } = useCompany();
+  const { pathname } = useLocation();
+  const publicRoute = pathname === '/' || pathname === '/login' || pathname === '/invite';
+  if (!publicRoute && (authLoading || companyLoading)) return <PageLoader />;
+  const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${activeCompanyId ?? 'none'}`;
+  return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -400,7 +411,7 @@ function App() {
         <AuthProvider>
           <PostHogIdentify />
           <CompanyProvider>
-            <AppRoutes />
+            <AppFeedback><AppRoutes /></AppFeedback>
           </CompanyProvider>
         </AuthProvider>
       </AppWithClerk>

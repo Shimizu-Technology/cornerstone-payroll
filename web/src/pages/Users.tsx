@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -57,7 +58,7 @@ export function Users() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // New user form
@@ -65,7 +66,7 @@ export function Users() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('accountant');
-  const [newError, setNewError] = useState<string | null>(null);
+  const [newError, setNewError, newErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingNew, setIsSavingNew] = useState(false);
   const [newClientIds, setNewClientIds] = useState<number[]>([]);
   const [availableCompanies, setAvailableCompanies] = useState<CompanyListItem[]>([]);
@@ -78,7 +79,7 @@ export function Users() {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('employee');
   const [editClientIds, setEditClientIds] = useState<number[]>([]);
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const editRoleOptions = roleOptions.filter((role) => !role.legacy || editRole === role.value);
 
@@ -99,7 +100,7 @@ export function Users() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [setError]);
 
   const loadCompanies = useCallback(async () => {
     const requestId = companiesRequestIdRef.current + 1;
@@ -455,17 +456,13 @@ export function Users() {
         </section>
 
         {error && (
-          <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
-            <p className="text-danger-700">{error}</p>
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
+            <p className="text-danger-700">{error}</p></ActionFeedback>
         )}
 
         {successMessage && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
-            <Mail className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
-            <p className="text-green-700">{successMessage}</p>
-          </div>
+          <ActionFeedback tone="success" message={successMessage}><Mail className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+            <p className="text-green-700">{successMessage}</p></ActionFeedback>
         )}
 
         {/* Invite New User Form */}
@@ -476,9 +473,7 @@ export function Users() {
               An invitation will be sent via Clerk. Their name will update from their profile when they accept.
             </p>
             {newError && (
-              <div className="mb-3 p-3 bg-danger-50 border border-danger-200 rounded-lg">
-                <p className="text-sm text-danger-600">{newError}</p>
-              </div>
+              <ActionFeedback retryKey={newErrorFeedbackAttempt} tone="error" message={newError}><p className="text-sm text-danger-600">{newError}</p></ActionFeedback>
             )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
@@ -546,7 +541,7 @@ export function Users() {
                               This role does not use payroll client assignments. Saving will clear any existing client assignments.
                             </p>
                           )}
-                          {editError && <p className="text-sm text-danger-600">{editError}</p>}
+                          {editError && <ActionFeedback retryKey={editErrorFeedbackAttempt} tone="error" message={editError} />}
                           <MobileCardActions className="mt-0 grid grid-cols-2">
                             <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
                               <Check className="mr-1 h-4 w-4" />
@@ -713,7 +708,7 @@ export function Users() {
                           </div>
                         )}
                         {editingId === user.id && editError && (
-                          <p className="text-xs text-danger-600 mt-1 text-right">{editError}</p>
+                          <ActionFeedback retryKey={editErrorFeedbackAttempt} tone="error" message={editError} />
                         )}
                       </TableCell>
                     </TableRow>

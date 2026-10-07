@@ -450,7 +450,11 @@ RSpec.describe PayStubGenerator do
     pages = PDF::Reader.new(StringIO.new(pdf)).pages
 
     expect(pages.count).to be > 1
-    expect(pages.last.text).to include("Supplemental Earning 120")
+    # SQL does not promise association order, and totals may occupy a final
+    # content page. Verify every earning and distinguish content from a footer.
+    earning_numbers = pages.flat_map { |page| page.text.scan(/Supplemental\s+Earning\s+(\d+)\b/).flatten.map(&:to_i) }
+    expect(earning_numbers.sort).to eq((1..120).to_a)
+    expect(pages.last.text).to match(/Supplemental\s+Earning|NET\s+PAY|YEAR-TO-DATE\s+SUMMARY/)
     expect(pages.last.text).to include("Generated on")
   end
 end

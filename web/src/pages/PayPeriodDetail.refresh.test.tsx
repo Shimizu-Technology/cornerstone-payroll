@@ -294,3 +294,20 @@ it('edits the selected active wage rate after an inactive rate', async () => {
   expect(trainerHours.value).toBe('12');
   expect(serverHours.value).toBe('0');
 });
+
+it('shows partial calculation failures by employee and keeps failed worksheet hours', async () => {
+  await renderCappedFieldWorksheet();
+  apiMocks.runPayroll.mockResolvedValue({
+    pay_period: { ...initialPayPeriod, status: 'draft' },
+    results: { success: [], skipped: [], errors: [{ employee_id: 30, name: 'Ana Cruz', error: 'Review the applied historical 401(k) classification.' }] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
+  expect(screen.getByRole('heading', { name: 'Resolve these employees before approval' })).toBeTruthy();
+  const link = screen.getByRole('link', { name: 'Review 2026 retirement checks' });
+  expect(link.getAttribute('href')).toContain('/companies/7/employees/30/pay-setup?');
+  expect(link.getAttribute('href')).toContain('retirement_year=2026#retirement-year-evidence');
+  const card = screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect((within(card).getByLabelText('Regular hours') as HTMLInputElement).value).toBe('8');
+  expect(screen.getByRole('button', { name: 'Review affected employees' })).toBeTruthy();
+});

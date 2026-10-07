@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import {
@@ -41,7 +42,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(null);
   const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>([]);
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
@@ -84,7 +85,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
       if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
     });
     return () => { active = false; };
-  }, [open, payPeriodId]);
+  }, [open, payPeriodId, setError]);
 
   const handleDownloadTemplate = async () => {
     try {
@@ -287,9 +288,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
         </DialogHeader>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-            {error}
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         {/* Upload Step */}

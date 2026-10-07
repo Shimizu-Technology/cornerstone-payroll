@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { CheckCircle2, ShieldCheck } from 'lucide-react';
@@ -120,7 +121,7 @@ export function ClientPayPeriodDetail(): ReactElement {
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {resolvedError && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{resolvedError}</div>}
+        {resolvedError && <ActionFeedback tone="error" message={resolvedError} />}
 
         {loading || resolvedRouteKey !== routeKey ? (
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>

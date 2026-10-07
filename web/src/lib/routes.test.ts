@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   correctionRunPath,
   employeeEditPath,
+  retirementSetupPath,
   employeePath,
   employeesPath,
   importedPayRunPath,
@@ -14,6 +15,12 @@ import {
 } from './routes';
 
 describe('canonical payroll routes', (): void => {
+  it('opens the correct retirement year and section with a bounded return link', () => {
+    expect(retirementSetupPath(7, 30, 2027, 'retirement-year-evidence', { returnTo: '/companies/7/pay-runs/12/work' }))
+      .toBe('/companies/7/employees/30/pay-setup?return_to=%2Fcompanies%2F7%2Fpay-runs%2F12%2Fwork&retirement_year=2027#retirement-year-evidence');
+    expect(retirementSetupPath(7, 30, Number.NaN, 'retirement-plan')).toBe('/companies/7/employees/30/pay-setup#retirement-plan');
+    expect(retirementSetupPath(7, 30, 2027, 'retirement-plan', { returnTo: `/${'x'.repeat(2050)}` }).length).toBeLessThanOrEqual(2048);
+  });
   it('builds company-scoped list and record routes', (): void => {
     expect(employeesPath(12, '?status=active')).toBe('/companies/12/employees?status=active');
     expect(employeesPath(12, 'status=active')).toBe('/companies/12/employees?status=active');

@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -93,6 +94,9 @@ export function EmployeeWorkspace(): ReactElement {
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const retirementYearParam = searchParams.get('retirement_year');
+  const retirementYear = retirementYearParam && /^\d{4}$/.test(retirementYearParam) && Number(retirementYearParam) >= 2000 && Number(retirementYearParam) <= 2200
+    ? Number(retirementYearParam) : undefined;
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [payHistory, setPayHistory] = useState<PayHistoryReport | null>(null);
   const [payHistoryError, setPayHistoryError] = useState<string | null>(null);
@@ -103,8 +107,17 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewSourceReferences, setReviewSourceReferences] = useState<Record<string, string>>({});
   const [reviewEffectiveDates, setReviewEffectiveDates] = useState<Record<string, string>>({});
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
-  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewError, setReviewError, reviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (loading || !employee || activeTab !== 'pay-setup') return;
+    const targetId = location.hash.slice(1);
+    if (!['retirement-plan', 'retirement-year-evidence'].includes(targetId)) return;
+    const target = document.getElementById(targetId);
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [loading, employee, activeTab, location.hash]);
+
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
@@ -170,7 +183,7 @@ export function EmployeeWorkspace(): ReactElement {
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [load]);
+  }, [load, setReviewError]);
 
   const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
@@ -295,7 +308,7 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {(reviewError || reviewNotice) && <div className={`rounded-2xl border px-4 py-3 text-sm ${reviewError ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-800'}`} role={reviewError ? 'alert' : 'status'}>{reviewError || reviewNotice}</div>}
+        {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
             <span>{payHistoryError}</span>
@@ -326,6 +339,7 @@ export function EmployeeWorkspace(): ReactElement {
             onReviewEffectiveDateChange={(code, value) => setReviewEffectiveDates((current) => ({ ...current, [code]: value }))}
             onResolveReview={(item) => void resolveConfigurationReview(item)}
             onEmployeeReload={load}
+            retirementYear={retirementYear}
           />
         )}
         {activeTab === 'pay-history' && (
@@ -417,9 +431,10 @@ interface PaySetupProps {
   onReviewEffectiveDateChange: (code: string, value: string) => void;
   onResolveReview: (item: ConfigurationReviewItem) => void;
   onEmployeeReload: () => Promise<void>;
+  retirementYear?: number;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -525,8 +540,9 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
       </Card>
       </div>
 
+      {employee.employment_type !== 'contractor' && <nav aria-label="Retirement setup steps" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm leading-6"><p className="font-semibold text-neutral-900">401(k) setup has two parts</p><p className="mt-1 text-neutral-600">Contribution settings control each paycheck. Yearly checks confirm the records used for annual limits.</p><div className="mt-3 flex flex-wrap gap-x-6 gap-y-2"><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-plan">1 · Contribution settings</a><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-year-evidence">2 · Yearly checks</a></div></nav>}
       {employee.employment_type !== 'contractor' && <EmployeeRetirementElectionPanel employee={employee} onSaved={onEmployeeReload} />}
-      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel employee={employee} />}
+      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel key={`${employee.id}:${retirementYear || 'current'}`} employee={employee} initialYear={retirementYear} />}
 
       {employee.employment_type !== 'contractor' && (
         <Card>
