@@ -8,6 +8,7 @@ class PayrollCalculationContext
   VERSION = 1
 
   SCALAR_ATTRIBUTES = %w[
+    date_of_birth
     employment_type
     salary_type
     pay_frequency

@@ -11,6 +11,10 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
       time_tracking_import: [ :time_tracking_source, { pay_period: :company } ]
     ).find(acknowledgement_id)
     return if acknowledgement.delivered_at.present?
+    dependencies = Array(acknowledgement.delivery_dependencies)
+    unless AirePayrollEntryAcknowledgement.where(id: dependencies).where.not(delivered_at: nil).count == dependencies.length
+      raise TimeTracking::Client::Error, "An earlier source payment receipt must be delivered before this transition"
+    end
 
     import = acknowledgement.time_tracking_import
     return unless import.finalized_batch?
@@ -46,7 +50,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
         pay_period_start: import.pay_period.start_date.iso8601,
         pay_period_end: import.pay_period.end_date.iso8601,
         pay_date: import.pay_period.pay_date.iso8601
-      }
+      }.merge(acknowledgement.cancellation_metadata.symbolize_keys)
     )
     acknowledgement.mark_delivered!(at: Time.current)
   rescue TimeTracking::Client::Error => e

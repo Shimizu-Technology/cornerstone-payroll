@@ -113,16 +113,22 @@ module TimeTracking
     end
 
     def sync!(allocation, raise_on_failure: false)
-      validate_sync_source!(allocation.reload)
-      3.times do
-        allocation.reload
-        transitioned = case allocation.status
-        when "pending_commit" then sync_commit!(allocation)
-        when "committed" then sync_committed!(allocation)
-        when "issued" then sync_issued!(allocation)
-        else false
+      PaymentCancellationBridge.with_item_lock(allocation.payroll_item_id) do
+        validate_sync_source!(allocation.reload)
+        4.times do
+          allocation.reload
+          transitioned = if allocation.payment_cancellation_intent.present? && allocation.status != "pending_commit"
+            sync_cancellation!(allocation)
+          else
+            case allocation.status
+            when "pending_commit" then sync_commit!(allocation)
+            when "committed" then sync_committed!(allocation)
+            when "issued" then sync_issued!(allocation)
+            else false
+            end
+          end
+          break unless transitioned
         end
-        break unless transitioned
       end
       allocation
     rescue TimeTracking::Client::Error => e
@@ -197,7 +203,7 @@ module TimeTracking
       item = allocation.payroll_item.reload
       if !item.voided? && item.effective_payment_delivery_method == "direct_deposit" &&
          (confirmation = item.direct_deposit_payment_confirmation)
-        result = client_for(allocation).issue_payroll_manual_allocation(
+        result = issue_with_durable_intent!(allocation,
           allocation_id: allocation.remote_allocation_id,
           command_id: allocation.issue_command_id,
           expected_version: allocation.remote_version,
@@ -211,7 +217,7 @@ module TimeTracking
         return true
       end
       if !item.voided? && (delivery = delivered_check_event(allocation))
-        result = client_for(allocation).issue_payroll_manual_allocation(
+        result = issue_with_durable_intent!(allocation,
           allocation_id: allocation.remote_allocation_id,
           command_id: allocation.issue_command_id,
           expected_version: allocation.remote_version,
@@ -237,6 +243,99 @@ module TimeTracking
       true
     end
 
+    def issue_with_durable_intent!(allocation, **payload)
+      allocation.with_lock do
+        if allocation.payment_issue_intent.blank?
+          allocation.update!(payment_issue_intent: payload.stringify_keys)
+        end
+      end
+      # Reuse the saved original command and tuple after an uncertain response.
+      intent = allocation.reload.payment_issue_intent.symbolize_keys
+      client_for(allocation).issue_payroll_manual_allocation(**intent)
+    end
+
+    def sync_cancellation!(allocation)
+      intent = allocation.payment_cancellation_intent
+      unless allocation.time_tracking_source.supports?(:payment_cancellation_v1)
+        raise TimeTracking::Client::Error, "The original source has not verified payment cancellation support"
+      end
+      # A remote issue may have succeeded before its local status write failed.
+      # Replay that exact durable command, then cancel its acknowledged version.
+      if allocation.payment_issue_intent.present? && !intent.key?("expected_version")
+        result = client_for(allocation).issue_payroll_manual_allocation(**allocation.payment_issue_intent.symbolize_keys)
+        remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
+        allocation.with_lock { allocation.update!(remote_version: remote.fetch("version")) }
+      end
+      unless intent.key?("expected_version")
+        allocation.with_lock do
+          # Version is frozen before the HTTP request, so a lost response can
+          # replay the same immutable command without deriving new arguments.
+          intent = allocation.payment_cancellation_intent.merge("expected_version" => allocation.remote_version)
+          allocation.update!(payment_cancellation_intent: intent)
+        end
+      end
+      payload = intent.except("check_event_id").symbolize_keys.merge(allocation_id: allocation.remote_allocation_id)
+      result = client_for(allocation).cancel_payroll_manual_allocation_payment(**payload)
+      remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
+      unless valid_cancellation_acknowledgement?(result, allocation, intent, remote)
+        raise TimeTracking::Client::Error, "The source did not acknowledge the committed payroll obligation after cancellation"
+      end
+      persist_cancellation_acknowledgement!(allocation, intent, remote)
+      true
+    end
+
+    def valid_cancellation_acknowledgement?(result, allocation, intent, remote)
+      command = result["command"]
+      return false unless command.is_a?(Hash) && command["id"] == intent["command_id"] &&
+        remote["status"] == "committed" && remote.fetch("version") > intent.fetch("expected_version")
+
+      expected = {
+        "source_time_entry_id" => allocation.source_time_entry_id,
+        "source_time_entry_version" => allocation.source_time_entry_version,
+        "source_user_uuid" => allocation.source_user_uuid,
+        "work_date" => allocation.original_work_date.iso8601,
+        "external_pay_period_id" => allocation.pay_period_id.to_s,
+        "external_payroll_item_id" => allocation.payroll_item_id.to_s
+      }
+      return false unless expected.all? { |key, value| remote[key] == value }
+      return false unless cancellation_hours_match?(remote["regular_hours"], allocation.regular_hours) &&
+        cancellation_hours_match?(remote["overtime_hours"], allocation.overtime_hours)
+
+      payment = remote["cancelled_payment"]
+      return false unless payment.is_a?(Hash) && (payment["event_id"].is_a?(String) || payment["event_id"].is_a?(Integer)) && payment["event_id"].to_s.present? &&
+        payment["event_type"] == "payment_cancelled" &&
+        %w[payment_method payment_reference payment_effective_on cancellation_evidence_reference reason].all? { |key| payment[key] == intent[key] }
+
+      payment["occurred_at"].is_a?(String) && Time.iso8601(payment["occurred_at"]) == Time.iso8601(intent.fetch("occurred_at"))
+    rescue ArgumentError, TypeError
+      false
+    end
+
+    def cancellation_hours_match?(actual, expected)
+      return false unless actual.is_a?(String) || actual.is_a?(Numeric)
+
+      amount = BigDecimal(actual.to_s)
+      amount.finite? && amount == expected.to_d
+    rescue ArgumentError, TypeError
+      false
+    end
+
+    def persist_cancellation_acknowledgement!(allocation, intent, remote)
+      allocation.with_lock do
+        next unless allocation.payment_cancellation_intent["command_id"] == intent["command_id"]
+
+        allocation.update!(status: "committed", remote_version: remote.fetch("version"),
+          payment_cancellation_receipts: allocation.payment_cancellation_receipts + [ intent.merge(
+            "acknowledged_at" => Time.current.iso8601(6), "remote_version" => remote.fetch("version"),
+            "source_instance_id" => allocation.time_tracking_source.expected_source_instance_id,
+            "source_acknowledgement" => remote.slice("id", "version", "status", "source_time_entry_id",
+              "source_time_entry_version", "source_user_uuid", "work_date", "regular_hours", "overtime_hours",
+              "external_pay_period_id", "external_payroll_item_id", "cancelled_payment")) ],
+          payment_cancellation_intent: {}, payment_issue_intent: {},
+          issue_command_id: SecureRandom.uuid, last_sync_error: nil, last_synced_at: Time.current)
+      end
+    end
+
     def sync_issued!(allocation)
       return false unless allocation.payroll_item.reload.voided?
 
@@ -257,7 +356,7 @@ module TimeTracking
       allocation.with_lock do
         next unless allocation.status == from
 
-        allocation.update!(status: to, remote_version: remote.fetch("version"),
+        allocation.update!(payment_issue_intent: {}, status: to, remote_version: remote.fetch("version"),
                            last_sync_error: nil, last_synced_at: Time.current)
       end
     end

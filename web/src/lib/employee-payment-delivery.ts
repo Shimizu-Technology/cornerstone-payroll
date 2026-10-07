@@ -1,4 +1,4 @@
-import type { Employee } from '@/types';
+import type { PaymentDeliveryMethod, Employee } from '@/types';
 
 export function employeePaymentDelivery(employee: Pick<Employee, 'payment_delivery_method'>) {
   switch (employee.payment_delivery_method) {
@@ -19,3 +19,5 @@ export function employeePaymentDelivery(employee: Pick<Employee, 'payment_delive
       };
   }
 }
+
+export const paymentMethodLabel = (method: PaymentDeliveryMethod): string => method === 'direct_deposit' ? 'Direct deposit' : 'Paper check';

@@ -59,6 +59,9 @@ class CheckEvent < ApplicationRecord
   end
 
   def record_aire_entry_lifecycle
+    if payment_cancellation?
+      TimeTracking::PaymentCancellationBridge.record_manual_intents!(self)
+    end
     status = aire_entry_lifecycle_status
     return unless status
 
@@ -74,16 +77,25 @@ class CheckEvent < ApplicationRecord
   end
 
   def dispatch_aire_manual_allocations
-    return unless event_type == "delivered" || (event_type == "voided" && payroll_item.voided?)
+    return unless event_type == "delivered" || payment_cancellation? || (event_type == "voided" && payroll_item.voided?)
 
     payroll_item.time_tracking_manual_allocations.where.not(status: "voided").find_each do |allocation|
       AireManualAllocationSyncJob.perform_later(allocation.id)
     end
   end
 
+  def payment_cancellation?
+    event_type == "voided" && details["payment_delivery_change"] == true && details["original_check_cancelled"] == true
+  end
+
   def aire_entry_lifecycle_status
     return "payment_prepared" if %w[prepared printed].include?(event_type)
     return "payment_issued" if event_type == "delivered"
+    if event_type == "voided" && details["payment_delivery_change"] == true && details["original_check_cancelled"] == true
+      # Cancel only this physical payment. The payroll item and the earlier
+      # committed-payroll acknowledgement remain valid and payable.
+      return "payment_cancelled"
+    end
     return "payment_voided" if event_type == "voided" && payroll_item.voided?
     return "payment_issued" if event_type == "voided" && payroll_item.check_status == "delivered"
     "payment_prepared" if event_type == "voided" && %w[prepared printed].include?(payroll_item.check_status)

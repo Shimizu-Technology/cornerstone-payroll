@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,7 +54,7 @@ function CompanyActivityHistory(): ReactElement {
   const [total, setTotal] = useState(0);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportError, setExportError, exportErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [activityView, setActivityView] = useState<'important' | 'documents' | 'all'>('important');
   const latestRequestId = useRef(0);
 
@@ -213,9 +214,7 @@ function CompanyActivityHistory(): ReactElement {
             </div>
           </div>
           {exportError && (
-            <p className="mb-4 rounded-xl bg-danger-50 px-4 py-4 text-sm text-danger-700" role="alert">
-              {exportError}
-            </p>
+            <ActionFeedback retryKey={exportErrorFeedbackAttempt} tone="error" message={exportError} />
           )}
           <fieldset className="mb-4">
             <legend className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Activity view</legend>

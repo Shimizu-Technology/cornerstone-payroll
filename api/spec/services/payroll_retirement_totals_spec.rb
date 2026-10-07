@@ -80,4 +80,21 @@ RSpec.describe PayrollRetirementTotals do
     item.update_columns(retirement_payment: -20, roth_retirement_payment: -10)
     expect(described_class.for_item(item.reload)).to eq(retirement: 905.00.to_d, roth_retirement: 90.to_d)
   end
+  it "keeps genuine non-Roth after-tax amounts out of Roth reporting and reconciles their field mirrors once" do
+    definition = create(:payroll_field_definition, company: company, name: "Non-Roth after-tax 401(k)", kind: "deduction",
+      tax_treatment: "post_tax_deduction", category: "retirement", reporting_group: "401k_non_roth_after_tax")
+    create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: definition, amount: 100,
+      reporting_group: "401k_non_roth_after_tax", tax_treatment: "post_tax_deduction")
+    deduction(label: definition.name, amount: 100, category: "post_tax", group: "401k_non_roth_after_tax")
+      .deduction_type.update!(name: "Payroll Field: #{definition.name}")
+    expect(described_class.for_item(item.reload)).to eq(retirement: 945.to_d, roth_retirement: 110.to_d)
+    expect(described_class.additions_for_item(item)[:non_roth_after_tax]).to eq(100)
+  end
+
+  it "does not infer designated Roth from an unverified after-tax label" do
+    expect(PayrollReportingGroups.infer_retirement_group(label: "401(k) After Tax", deduction_category: "post_tax"))
+      .to eq("retirement_other")
+    expect(PayrollReportingGroups.infer_retirement_group(label: "Non-Roth 401(k) After Tax", deduction_category: "post_tax"))
+      .to eq("401k_non_roth_after_tax")
+  end
 end

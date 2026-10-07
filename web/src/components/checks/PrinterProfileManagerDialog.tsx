@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, Printer, Plus } from 'lucide-react';
 import { Link } from 'react-router';
@@ -38,7 +39,7 @@ export function PrinterProfileManagerDialog({
   const [offsetY, setOffsetY] = useState('0');
   const [busyProfileId, setBusyProfileId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const wasOpenRef = useRef(false);
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export function PrinterProfileManagerDialog({
       setError(null);
     }
     wasOpenRef.current = open;
-  }, [open, profiles.length]);
+  }, [open, profiles.length, setError]);
 
   const resetForm = (): void => {
     setName('');
@@ -175,7 +176,7 @@ export function PrinterProfileManagerDialog({
           </section>
         </div>
 
-        {error && <div role="alert" className="mx-6 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving || busyProfileId !== null}>Done</Button>
         </DialogFooter>

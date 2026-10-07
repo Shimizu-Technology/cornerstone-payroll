@@ -98,6 +98,7 @@ module TestWorkspace
           employee: target,
           created_by: actor
         )
+        EmployeeRetirementYearInputCopier.call(source: source, target: target, actor: actor, mode: :history)
         source.employee_deductions.order(:id).each do |deduction|
           copy_record!(
             deduction,

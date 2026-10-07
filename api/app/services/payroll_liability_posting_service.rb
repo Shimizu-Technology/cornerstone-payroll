@@ -318,7 +318,7 @@ class PayrollLiabilityPostingService
       sub_category = type&.sub_category
       next unless sub_category.in?(%w[retirement garnishment child_support benefit])
       next if payroll_field_labels.include?(deduction.label)
-      next if deduction.label.in?([ "401(k) Employer Match", "Roth 401(k) Employer Match" ])
+      next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if deduction.amount.to_d.zero?
 
       category = case sub_category

@@ -1,3 +1,7 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
+import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
+import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useLocation, useSearchParams } from 'react-router';
@@ -30,7 +34,7 @@ import {
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { parsePayRunId } from '@/lib/pay-run-filters';
-import { ApiError, payPeriodsApi, employeesApi, payrollItemsApi } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -54,7 +58,7 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, PaymentDeliveryMethod } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -65,9 +69,15 @@ interface HoursEntry {
 interface PayrollFieldDraftEntry {
   mode: 'default' | 'override';
   amount: number | null;
+  replace_request?: boolean;
 }
 
 const TABLE_STICKY_TOP_CLASS = 'top-0';
+
+function PayrollFieldAppliedNotice({ assignment }: { assignment: PayPeriodPayrollFieldAssignment }): ReactElement | null {
+  if (assignment.requested_amount == null || assignment.current_amount == null || payrollFieldAmountsEqual(assignment.requested_amount, assignment.current_amount)) return null;
+  return <p className="mt-1 text-xs leading-5 text-warning-800">Last applied {formatCurrency(assignment.current_amount)} after limits. The input shows the requested amount.</p>;
+}
 
 const MAX_HOURS_PER_PERIOD = 200;
 const runPurposeLabels: Record<PayRunPurpose, string> = {
@@ -338,6 +348,7 @@ export function PayPeriodDetail({
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [payrollFieldAssignments, setPayrollFieldAssignments] = useState<PayPeriodPayrollFieldAssignment[]>([]);
+  const [retainedRetirementEntries, setRetainedRetirementEntries] = useState<NonNullable<PayPeriodPayrollFieldInputs['retained_manual_entries']>>([]);
   const [payrollFieldDrafts, setPayrollFieldDrafts] = useState<Record<string, PayrollFieldDraftEntry>>({});
   // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
   // can detect when the FIT auto-deposit amount has been overridden away
@@ -348,13 +359,16 @@ export function PayPeriodDetail({
   const [bonusEdits, setBonusEdits] = useState<Record<string, number>>({});
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [calculationFailures, setCalculationFailures] = useState<PayrollCalculationFailure[]>([]);
+  const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
+  const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
   const commitRouteGenerationRef = useRef(0);
   const { activeCompany } = useCompany();
-  const [paymentMethodBusyId, setPaymentMethodBusyId] = useState<number | null>(null);
+  const [paymentMethodItem, setPaymentMethodItem] = useState<PayrollItem | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
   const [clientApprovalLoading, setClientApprovalLoading] = useState(false);
   const [clientApprovers, setClientApprovers] = useState<Array<{ id: number; name: string; email: string }>>([]);
@@ -424,12 +438,14 @@ export function PayPeriodDetail({
   const syncPayrollFieldInputs = useCallback((worksheet: PayPeriodPayrollFieldInputs) => {
     setPayrollFields(worksheet.fields);
     setPayrollFieldAssignments(worksheet.assignments);
+    setRetainedRetirementEntries(worksheet.retained_manual_entries || []);
     setShowPayrollFields(worksheet.assignments.length > 0);
     setPayrollFieldDrafts(Object.fromEntries(worksheet.assignments.map((assignment) => {
       const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
       return [key, {
         mode: assignment.overridden ? 'override' : 'default',
-        amount: assignment.current_amount ?? assignment.suggested_amount ?? null,
+        amount: assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null,
+        replace_request: false,
       } satisfies PayrollFieldDraftEntry];
     })));
   }, []);
@@ -504,7 +520,7 @@ export function PayPeriodDetail({
         setLoading(false);
       }
     }
-  }, [loadEligibleEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
+  }, [loadEligibleEmployees, setError, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect((): (() => void) => {
     // Reset cross-pay-period observer state so divergence indicators don't
@@ -512,6 +528,9 @@ export function PayPeriodDetail({
     // new panel loads.
     setPayPeriod(null);
     setCommitPeriodId(null);
+    setCalculationFailures([]);
+    setCalculationNotice(null);
+    setWorksheetRefreshWarning(null);
     setTimeTrackingImportOpen(false);
     setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
@@ -536,7 +555,7 @@ export function PayPeriodDetail({
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [loadPayPeriod, payRunId]);
+  }, [loadPayPeriod, payRunId, setError]);
 
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) return;
@@ -676,7 +695,7 @@ export function PayPeriodDetail({
 
     const key = `${employeeId}:${fieldId}`;
     const normalizedAmount = amount == null ? null : Math.max(0, amount);
-    const defaultAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+    const defaultAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
 
     setPayrollFieldDrafts((previous) => {
       const current = previous[key];
@@ -689,7 +708,7 @@ export function PayPeriodDetail({
         ...previous,
         [key]: returnedToDefault
           ? { mode: 'default', amount: defaultAmount }
-          : { mode: 'override', amount: normalizedAmount },
+          : { mode: 'override', amount: normalizedAmount, replace_request: true },
       };
     });
   };
@@ -717,6 +736,9 @@ export function PayPeriodDetail({
     try {
       setProcessing(true);
       setError(null);
+      setCalculationFailures([]);
+      setCalculationNotice(null);
+      setWorksheetRefreshWarning(null);
 
       const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
         const rateEntryInvalid = (entry.wage_rates || []).some((rate) => (
@@ -797,7 +819,7 @@ export function PayPeriodDetail({
         loan_deductions[empId] = Math.max(0, toNumber(amount));
       });
 
-      const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
+      const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number; replace_request?: boolean }>> = {};
       payrollFieldAssignments.forEach((assignment) => {
         const field = worksheetPayrollFields.find((candidate) => candidate.id === assignment.payroll_field_definition_id);
         const isLoanField = field?.category === 'loan' && field.tax_treatment === 'post_tax_deduction';
@@ -820,7 +842,7 @@ export function PayPeriodDetail({
 
         payroll_field_inputs[String(assignment.employee_id)] ||= {};
         payroll_field_inputs[String(assignment.employee_id)][String(assignment.payroll_field_definition_id)] = draft.mode === 'override'
-          ? { mode: 'override', amount: Math.max(0, toNumber(draft.amount)) }
+          ? { mode: 'override', amount: Math.max(0, toNumber(draft.amount)), ...(draft.replace_request ? { replace_request: true } : {}) }
           : { mode: 'default' };
       });
 
@@ -856,12 +878,14 @@ export function PayPeriodDetail({
         })
         .catch((refreshError) => {
           console.warn('Payroll ran successfully, but the payroll field worksheet could not be refreshed.', refreshError);
+          setWorksheetRefreshWarning('The calculation returned, but payroll fields could not refresh. Reload the page before reviewing or editing the worksheet.');
         });
 
+      setCalculationFailures(response.results.errors);
       if (response.results.errors.length > 0) {
-        setError(
-          `Calculated ${response.results.success.length} employees. ${response.results.errors.length} errors: ${response.results.errors.map((e) => e.error).join(', ')}`
-        );
+        setError(`Calculated ${response.results.success.length} employees. ${response.results.errors.length} ${response.results.errors.length === 1 ? 'employee needs' : 'employees need'} attention before approval.`);
+      } else {
+        setCalculationNotice(`Payroll calculated for ${response.results.success.length} ${response.results.success.length === 1 ? 'employee' : 'employees'}${response.results.skipped.length ? `; ${response.results.skipped.length} skipped` : ''}. Review the results before approval.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
@@ -1062,21 +1086,6 @@ export function PayPeriodDetail({
     if (payPeriod) void loadPayPeriod(payPeriod.id, true);
   };
 
-  const handlePaymentMethodChange = async (item: PayrollItem, method: PaymentDeliveryMethod) => {
-    if (!payPeriod || method === item.effective_payment_delivery_method) return;
-    if (payPeriod.status === 'approved' && !window.confirm('Changing payment method rolls this run back to calculated so it can be approved again. Continue?')) return;
-    setPaymentMethodBusyId(item.id);
-    setError(null);
-    try {
-      await payrollItemsApi.updatePaymentMethod(payPeriod.id, item.id, method);
-      await loadPayPeriod(payPeriod.id, true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change payment method');
-    } finally {
-      setPaymentMethodBusyId(null);
-    }
-  };
-
   const handlePayrollItemApplied = (updated?: PayrollItem) => {
     if (!updated) return;
 
@@ -1216,7 +1225,7 @@ export function PayPeriodDetail({
     const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
     const currentDraft = payrollFieldDrafts[key];
     const calculatedMode = assignment.overridden ? 'override' : 'default';
-    const calculatedAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+    const calculatedAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
     return !currentDraft
       || currentDraft.mode !== calculatedMode
       || !payrollFieldAmountsEqual(currentDraft.amount, calculatedAmount);
@@ -1458,7 +1467,7 @@ export function PayPeriodDetail({
       tone: 'default' as const,
     },
     {
-      label: 'Calculated',
+      label: isDraft ? 'Last calculation attempt' : 'Calculated',
       timestamp: lifecycle.calculated?.timestamp,
       actor: lifecycleActor(lifecycle.calculated?.actor_name),
       tone: isDraft ? 'default' as const : 'warning' as const,
@@ -1555,8 +1564,10 @@ export function PayPeriodDetail({
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={payrollItems.length === 0
+            disabled={processing || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={calculationFailures.length > 0
+              ? 'Resolve the employee calculation errors and calculate again before approval'
+              : payrollItems.length === 0
               ? 'Enter pay for at least one employee before approval'
               : hasPendingCalculationChanges
               ? 'Recalculate the staged payroll changes before approval'
@@ -1667,6 +1678,7 @@ export function PayPeriodDetail({
 
   return (
     <div>
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={() => loadPayPeriod(payPeriod.id, true)} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -1688,33 +1700,38 @@ export function PayPeriodDetail({
           <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {payableItems.map((item) => (
-              <label key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+              <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
                   {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
                 </span>
-                <select
-                  aria-label={`Payment method for ${item.employee_name}`}
-                  className="h-10 shrink-0 rounded-md border border-neutral-300 bg-white px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                  value={item.effective_payment_delivery_method || 'paper_check'}
-                  disabled={paymentMethodBusyId !== null}
-                  onChange={(event) => void handlePaymentMethodChange(item, event.target.value as PaymentDeliveryMethod)}
-                >
-                  <option value="paper_check">Paper check</option>
-                  <option value="direct_deposit">Direct deposit</option>
-                </select>
-              </label>
+                <div className="shrink-0 text-right">
+                  <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
+                  <Button size="sm" variant="outline" className="min-h-11" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
       )}
 
+      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}>
+        <p>{error}</p>
+        {calculationFailures.length > 0 && <Button variant="outline" className="mt-3" onClick={() => {
+          const section = document.getElementById('payroll-calculation-issues');
+          section?.scrollIntoView({ block: 'start' });
+          section?.focus({ preventScroll: true });
+        }}>Review affected employees</Button>}
+      </ActionFeedback>}
+      {calculationNotice && <ActionFeedback tone="success" message={calculationNotice} />}
+      {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
+      {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
+        ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
+        ...employees.map((employee): [number, string] => [employee.id, `${employee.first_name} ${employee.last_name}`]),
+      ])} />}
+
       <div className="space-y-6">
-        {error && (
-          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-            {error}
-          </div>
-        )}
+
 
         {hasPendingCalculationChanges && (
           <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
@@ -2189,6 +2206,15 @@ export function PayPeriodDetail({
         })()}
 
         {/* Hours Input (Draft Mode) */}
+        {(isDraft || isCalculated) && retainedRetirementEntries.length > 0 && <section className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900" aria-label="Retained manual retirement entries">
+          <p className="font-semibold">Saved retirement entries still apply to this paycheck</p>
+          <p className="mt-1">Pausing or replacing a recurring assignment leaves saved manual amounts in place. Review these entries before adding another contribution; clear an obsolete request explicitly in the paycheck editor.</p>
+          <ul className="mt-3 space-y-2">{retainedRetirementEntries.map((entry, index) => {
+            const employee = employees.find((candidate) => candidate.id === entry.employee_id);
+            const item = payrollItems.find((candidate) => candidate.employee_id === entry.employee_id);
+            return <li key={`${entry.employee_id}:${entry.field_id}:${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2"><span>{employee ? `${employee.first_name} ${employee.last_name}` : `Employee #${entry.employee_id}`} · {entry.label}: requested {formatCurrency(Number(entry.requested_amount))}, applied {formatCurrency(Number(entry.applied_amount))}</span>{item && <Link className="font-semibold underline underline-offset-2" to={`/companies/${payPeriod.company_id}/pay-runs/${payPeriod.id}/payroll-items/${item.id}`}>Review paycheck</Link>}</li>;
+          })}</ul>
+        </section>}
         {(isDraft || isCalculated) && (
           <Card>
             <div
@@ -2340,7 +2366,7 @@ export function PayPeriodDetail({
                   {payrollItemByEmployeeId.get(emp.id)?.imported_bonus != null && <p className="text-xs text-neutral-500">Workbook bonus: {formatCurrency(toNumber(payrollItemByEmployeeId.get(emp.id)?.imported_bonus))}{bonusEdits[String(emp.id)] != null && ' · Manual amount retained'}</p>}
                   {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && <p className="text-xs text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>}
                   {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">One-time loan deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
-                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label>{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
+                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
               {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
@@ -2667,6 +2693,7 @@ export function PayPeriodDetail({
                           return (
                             <TableCell key={key} className={`min-w-[180px] align-top ${rowTone}`}>
                               <div className="flex flex-col items-center gap-1">
+                                <PayrollFieldAppliedNotice assignment={assignment} />
                                 <div className="flex items-center justify-center gap-1.5">
                                   <span className="text-xs text-gray-400">$</span>
                                   <NumericInput
@@ -2685,6 +2712,7 @@ export function PayPeriodDetail({
                                     min={0}
                                     fixedDecimalsOnBlur={2}
                                     disabled={!editable}
+                                    aria-label={`${field.name} requested amount for ${emp.first_name} ${emp.last_name}`}
                                     aria-invalid={draft?.mode === 'override' && draft.amount == null}
                                   />
                                 </div>

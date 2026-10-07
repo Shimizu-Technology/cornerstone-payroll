@@ -1,4 +1,5 @@
 import { supportsSourceOperation } from '@/lib/time-tracking';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -110,7 +111,7 @@ export function TimeTrackingImportModal({
   const [reconciliationNote, setReconciliationNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
   const [roundingExceptionCount, setRoundingExceptionCount] = useState(0);
   const [appliedThisSession, setAppliedThisSession] = useState(false);
@@ -214,7 +215,7 @@ export function TimeTrackingImportModal({
     return () => {
       cancelled = true;
     };
-  }, [initialSourceId, open, payPeriod.id, payPeriod.company_id, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
+  }, [initialSourceId, open, payPeriod.id, payPeriod.company_id, payPeriod.start_date, payPeriod.end_date, payPeriod.status, setError]);
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.id === sourceId) || null,
@@ -449,10 +450,8 @@ export function TimeTrackingImportModal({
 
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-8">
           {error && (
-            <div className="flex gap-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800" role="alert">
-              <AlertTriangle className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{error}</span>
-            </div>
+            <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertTriangle className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{error}</span></ActionFeedback>
           )}
 
           {step === 'select' && (

@@ -96,6 +96,7 @@ class Employee < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_many :employee_w4_elections, dependent: :restrict_with_error
   has_many :employee_retirement_elections, dependent: :restrict_with_error
+  has_many :employee_retirement_year_inputs, dependent: :restrict_with_error
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
   has_many :employee_work_profiles, dependent: :restrict_with_error
@@ -208,6 +209,15 @@ class Employee < ApplicationRecord
         .max_by { |election| [ election.effective_on, election.created_at, election.id ] }
     else
       employee_retirement_elections.effective_on(date).first
+    end
+  end
+
+  def retirement_year_input_for(year)
+    if association(:employee_retirement_year_inputs).loaded?
+      employee_retirement_year_inputs.select { |input| input.tax_year == year.to_i }
+        .max_by { |input| [ input.created_at, input.id ] }
+    else
+      employee_retirement_year_inputs.where(tax_year: year).recent_first.first
     end
   end
 
@@ -467,7 +477,9 @@ class Employee < ApplicationRecord
     return live_totals unless balance
     raise ArgumentError, "historical balance tax year does not match" if balance.tax_year != year
 
-    historical = balance.ytd_aggregate_totals
+    historical = balance.ytd_aggregate_totals.merge(
+      HistoricalRetirementProjection.new(employee: self, tax_year: year, balance: balance).totals.slice(:retirement, :roth_retirement)
+    )
     live_totals.each_with_object({}) do |(key, value), totals|
       totals[key] = value.to_f + historical.fetch(key, 0).to_f
     end

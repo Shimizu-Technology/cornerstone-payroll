@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -55,7 +56,10 @@ import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
+import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
+import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
+import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
 
 type PayHistoryReport = Awaited<ReturnType<typeof reportsApi.employeePayHistory>>['report'];
 type ConfigurationReviewItem = NonNullable<Employee['configuration_review_items']>[number];
@@ -96,6 +100,9 @@ export function EmployeeWorkspace(): ReactElement {
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const retirementYearParam = searchParams.get('retirement_year');
+  const retirementYear = retirementYearParam && /^\d{4}$/.test(retirementYearParam) && Number(retirementYearParam) >= 2000 && Number(retirementYearParam) <= 2200
+    ? Number(retirementYearParam) : undefined;
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [payHistory, setPayHistory] = useState<PayHistoryReport | null>(null);
   const [payHistoryError, setPayHistoryError] = useState<string | null>(null);
@@ -106,8 +113,17 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewSourceReferences, setReviewSourceReferences] = useState<Record<string, string>>({});
   const [reviewEffectiveDates, setReviewEffectiveDates] = useState<Record<string, string>>({});
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
-  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewError, setReviewError, reviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (loading || !employee || activeTab !== 'pay-setup') return;
+    const targetId = location.hash.slice(1);
+    if (!['retirement-plan', 'retirement-year-evidence'].includes(targetId)) return;
+    const target = document.getElementById(targetId);
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [loading, employee, activeTab, location.hash]);
+
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
@@ -173,7 +189,7 @@ export function EmployeeWorkspace(): ReactElement {
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [load]);
+  }, [load, setReviewError]);
 
   const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
@@ -295,7 +311,7 @@ export function EmployeeWorkspace(): ReactElement {
           href: (() => {
             const href = employeePath(companyId, employeeId, tab.id, { returnTo });
             const query = new URLSearchParams(href.split('?')[1]);
-            ['hours_source', 'hours_start', 'hours_end', 'hours_cursor', 'detail_cursor', 'period', 'history_year', 'history_source'].forEach((key) => {
+            ['hours_source', 'hours_start', 'hours_end', 'hours_cursor', 'detail_cursor', 'period', 'history_year', 'history_source', 'retirement_year'].forEach((key) => {
               const value = searchParams.get(key);
               if (value) query.set(key, value);
             });
@@ -306,7 +322,7 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {(reviewError || reviewNotice) && <div className={`rounded-2xl border px-4 py-3 text-sm ${reviewError ? 'border-danger-200 bg-danger-50 text-danger-800' : 'border-success-200 bg-success-50 text-success-800'}`} role={reviewError ? 'alert' : 'status'}>{reviewError || reviewNotice}</div>}
+        {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
             <span>{payHistoryError}</span>
@@ -337,6 +353,7 @@ export function EmployeeWorkspace(): ReactElement {
             onReviewEffectiveDateChange={(code, value) => setReviewEffectiveDates((current) => ({ ...current, [code]: value }))}
             onResolveReview={(item) => void resolveConfigurationReview(item)}
             onEmployeeReload={load}
+            retirementYear={retirementYear}
           />
         )}
         {activeTab === 'pay-history' && (
@@ -429,15 +446,17 @@ interface PaySetupProps {
   onReviewEffectiveDateChange: (code: string, value: string) => void;
   onResolveReview: (item: ConfigurationReviewItem) => void;
   onEmployeeReload: () => Promise<void>;
+  retirementYear?: number;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload }: PaySetupProps): ReactElement {
+function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
   const upcomingW4 = employee.upcoming_w4_election;
   return (
     <div className="space-y-6">
+      <EmployeePaymentMethodPanel key={employee.id} employee={employee} onEmployeeReload={onEmployeeReload} />
       {employee.configuration_source === 'quickbooks_history' && (
         <Card className={employee.configuration_review_status === 'needs_review' ? 'border-warning-200 bg-warning-50/40' : 'border-success-200 bg-success-50/40'}>
           <CardHeader className="flex-row items-start justify-between gap-4">
@@ -531,13 +550,15 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
         <CardContent className="p-6">
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm"><Settings2 className="h-5 w-5" /></span>
           <h2 className="mt-4 font-display text-xl font-extrabold tracking-tight text-neutral-950">Edit source settings</h2>
-          <p className="mt-2 text-sm leading-6 text-neutral-600">Changes happen on the existing validated employee form. Saving returns to this workspace.</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">Wage, tax, and other employee fields use the validated employee form. Payment method and retirement settings have their own controls here.</p>
           <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
         </CardContent>
       </Card>
       </div>
 
+      {employee.employment_type !== 'contractor' && <nav aria-label="Retirement setup steps" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm leading-6"><p className="font-semibold text-neutral-900">401(k) setup has two parts</p><p className="mt-1 text-neutral-600">Contribution settings control each paycheck. Yearly checks confirm the records used for annual limits.</p><div className="mt-3 flex flex-wrap gap-x-6 gap-y-2"><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-plan">1 · Contribution settings</a><a className="font-semibold text-primary-700 underline underline-offset-2" href="#retirement-year-evidence">2 · Yearly checks</a></div></nav>}
       {employee.employment_type !== 'contractor' && <EmployeeRetirementElectionPanel employee={employee} onSaved={onEmployeeReload} />}
+      {employee.employment_type !== 'contractor' && <EmployeeRetirementYearPanel key={`${employee.id}:${retirementYear || 'current'}`} employee={employee} initialYear={retirementYear} />}
 
       {employee.employment_type !== 'contractor' && (
         <Card>
@@ -684,10 +705,10 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums">{formatCurrency(item.gross_pay)}</p></div>
                   <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-emerald-700">{formatCurrency(item.net_pay)}</p></div>
                   <div><p className="text-xs text-neutral-500">Deductions</p><p className="tabular-nums">{formatCurrency(item.total_deductions)}</p></div>
-                  <div><p className="text-xs text-neutral-500">Payment</p><p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</p></div>
+                  <div><p className="text-xs text-neutral-500">Payment</p><p>{payrollPaymentLabel(item)}</p>{item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}</div>
                 </div>
                 <SavedHours item={item} />
-                <p className="text-sm text-neutral-600">{item.payment_evidence?.label || 'Payment evidence not available'}</p>
+                {item.net_pay > 0 && <p className="text-sm text-neutral-600">{item.payment_evidence?.label || 'Payment evidence not available'}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
                     <Button variant="outline" size="sm" className="min-h-11" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
@@ -719,7 +740,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell><p className="text-xs text-neutral-500">{item.payment_evidence?.label || 'Payment evidence not available'}</p>{item.record_type === 'native' && item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : item.check_number ? `Check #${item.check_number}` : item.record_type === 'native' ? 'Paper check · not assigned' : 'Not recorded'}</TableCell>
+                  <TableCell>{item.net_pay > 0 && <p className="text-xs text-neutral-500">{item.payment_evidence?.label || 'Payment evidence not available'}</p>}{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
                   <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
                     <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
                   </div></TableCell>

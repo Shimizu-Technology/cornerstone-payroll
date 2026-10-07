@@ -29,7 +29,7 @@ function decimalHours(value: string): Decimal | null {
 }
 
 const hours = (value: number) => Number(value).toFixed(2);
-const stateLabel = (allocation: AireManualAllocation) => ({
+const stateLabel = (allocation: AireManualAllocation) => allocation.payment_cancellation_pending ? 'Cancellation awaiting time tracking confirmation' : ({
   pending_commit: 'Saved locally; time tracking confirmation pending',
   committed: 'Linked; payment evidence pending',
   issued: 'Payment recorded in time tracking',
@@ -179,10 +179,10 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
           <p className="mt-1">{hours(allocation.regular_hours)} regular · {hours(allocation.overtime_hours)} OT · {activeCompanyId && allocation.pay_period_id === payPeriodId && allocation.payroll_item_id
             ? <Link className="font-semibold text-primary-800 underline underline-offset-4" to={payrollItemPath(activeCompanyId, payPeriodId, allocation.payroll_item_id, { returnTo: currentAppPath(location.pathname, location.search) })}>Payroll item {allocation.payroll_item_id}</Link>
             : 'payroll item review needed'}</p>
-          <Badge className="mt-2" variant={allocation.status === 'issued' ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
-          {allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
+          <Badge className="mt-2" variant={allocation.status === 'issued' && !allocation.payment_cancellation_pending ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
+          {!allocation.payment_cancellation_pending && allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
             ? <p className="mt-2">Time tracking issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
-            : <p className="mt-2 text-neutral-600">Verified issued receipt details are not available in this review.</p>}
+            : <p className="mt-2 text-neutral-600">{allocation.payment_cancellation_pending ? 'The original payment was cancelled in Payroll. These hours stay reserved while the cancellation syncs. Time tracking has not confirmed the cancellation or replacement yet.' : 'Verified issued receipt details are not available in this review.'}</p>}
           {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">Time tracking status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button type="button" variant="outline" size="sm" disabled={busy || loading}

@@ -4,11 +4,13 @@ require "rails_helper"
 
 RSpec.describe EmployeeRetirementElectionChangeService do
   let(:company) { create(:company) }
-  let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
+  let(:employee) { create(:employee, company: company, department: create(:department, company: company), date_of_birth: Date.new(1970, 1, 1)) }
   let(:attributes) do
     {
       effective_on: "2026-09-01",
       plan_name: "MoSa 401(k)",
+      plan_source_reference: "Signed test plan document, section 4",
+      roth_available: true,
       eligible: true,
       participating: true,
       traditional_contribution_type: "percentage",
@@ -17,7 +19,7 @@ RSpec.describe EmployeeRetirementElectionChangeService do
       roth_contribution_type: "fixed",
       roth_rate: 0,
       roth_amount: 125,
-      eligible_compensation: "gross_excluding_tips",
+      eligible_compensation: "gross_wages",
       catch_up_enabled: true,
       limit_priority: "traditional_first",
       employer_match_mode: "employee_deferral_percentage",
@@ -76,5 +78,41 @@ RSpec.describe EmployeeRetirementElectionChangeService do
         employee: employee, attributes: unsupported, actor: nil, source: "staff", reason: "Signed election"
       ).call!
     end.to raise_error(ActiveRecord::RecordInvalid, /True up policy can only reconcile/)
+  end
+
+  it "requires explicit plan evidence and a birth date before enabling catch-up" do
+    employee.update!(date_of_birth: nil)
+    expect do
+      described_class.new(employee: employee, attributes: attributes.except(:plan_source_reference),
+        actor: nil, source: "staff", reason: "Initial setup").call!
+    end.to raise_error(ActiveRecord::RecordInvalid, /date of birth/)
+  end
+
+  it "rejects an unsupported plan type rather than applying standard 401(k) limits" do
+    expect do
+      described_class.new(employee: employee, attributes: attributes.merge(plan_type: "simple_401k"),
+        actor: nil, source: "staff", reason: "Initial setup").call!
+    end.to raise_error(ActiveRecord::RecordInvalid, /standard 401/)
+  end
+
+  it "does not infer Roth availability from a positive contribution" do
+    expect do
+      described_class.new(employee: employee, attributes: attributes.merge(roth_available: false),
+        actor: nil, source: "staff", reason: "Initial setup").call!
+    end.to raise_error(ActiveRecord::RecordInvalid, /designated Roth employee/)
+  end
+
+  it "rejects a restricted-compensation deferral match true-up" do
+    expect do
+      described_class.new(employee: employee, attributes: attributes.merge(eligible_compensation: "base_pay"),
+        actor: nil, source: "staff", reason: "Initial setup").call!
+    end.to raise_error(ActiveRecord::RecordInvalid, /all gross wages/)
+  end
+
+  it "requires separate employer Roth permission" do
+    expect do
+      described_class.new(employee: employee, attributes: attributes.merge(employer_match_destination: "roth"),
+        actor: nil, source: "staff", reason: "Initial setup").call!
+    end.to raise_error(ActiveRecord::RecordInvalid, /designated Roth employer/)
   end
 end

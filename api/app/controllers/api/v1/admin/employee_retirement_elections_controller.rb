@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class EmployeeRetirementElectionsController < BaseController
+        before_action :require_manager_or_admin!, only: :create
         before_action :set_employee
 
         def index
@@ -37,7 +38,9 @@ module Api
 
         def election_params
           params.require(:retirement_election).permit(
-            :effective_on, :plan_name, :eligible, :participating,
+            :effective_on, :plan_name, :plan_type, :limitation_year_type, :related_plan_review_required,
+            :roth_available, :employer_roth_available, :plan_source_reference, :regular_plan_deferral_limit,
+            :eligible, :participating,
             :traditional_contribution_type, :traditional_rate, :traditional_amount,
             :roth_contribution_type, :roth_rate, :roth_amount, :eligible_compensation,
             :catch_up_enabled, :limit_priority, :plan_annual_employee_limit,

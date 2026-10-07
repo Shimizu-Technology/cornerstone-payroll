@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -18,6 +19,7 @@ import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-r
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Header } from '@/components/layout/Header';
+import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
@@ -42,10 +44,11 @@ import {
   type PayRunWorkspaceTab,
 } from '@/lib/routes';
 import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
+import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { parsePositiveRouteId } from '@/lib/route-params';
-import { checksApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
+import { checksApi, payPeriodsApi } from '@/services/api';
 import type { PromotedPaymentPreview } from '@/services/api';
-import type { PayPeriod, PayrollItem, PaymentDeliveryMethod } from '@/types';
+import type { PayPeriod, PayrollItem } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
 
@@ -188,7 +191,7 @@ export function PayRunWorkspace(): ReactElement {
     return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
   }
 
-  const items = payRun.payroll_items || [];
+  const items = [...(payRun.payroll_items || [])].sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || '') || a.id - b.id);
   const reportableItems = items.filter((item) => !item.voided);
   const statusConfig = payPeriodStatusConfig[payRun.status];
 
@@ -215,7 +218,7 @@ export function PayRunWorkspace(): ReactElement {
         ...tab,
         href: payRunPath(companyId, payRunId, tab.id, { returnTo }),
         count: tab.id === 'checks'
-          ? countActivePayrollChecks(items) + items.filter((item) => !item.voided && item.effective_payment_delivery_method === 'direct_deposit' && Number(item.net_pay || 0) > 0).length
+          ? items.filter(item => !item.voided && (item.earnings_statement_eligible ?? (Number(item.gross_pay || 0) !== 0 || Number(item.net_pay || 0) !== 0 || Boolean(item.check_number)))).length
           : undefined,
       }))} />
 
@@ -303,28 +306,23 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const { isAdmin } = useAuth();
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
-  const [mockPreviewError, setMockPreviewError] = useState<string | null>(null);
+  const [mockPreviewError, setMockPreviewError, mockPreviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [mockPreview, setMockPreview] = useState<PdfArtifact | null>(null);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [hasNonEmployeeChecks, setHasNonEmployeeChecks] = useState<boolean | null>(null);
-  const [printRefreshError, setPrintRefreshError] = useState<string | null>(null);
+  const [printRefreshError, setPrintRefreshError, printRefreshErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const refreshRequestIdRef = useRef(0);
   const [switchItem, setSwitchItem] = useState<PayrollItem | null>(null);
-  const [switchReason, setSwitchReason] = useState('');
-  const [confirmNotPaid, setConfirmNotPaid] = useState(false);
-  const [switchBusy, setSwitchBusy] = useState(false);
-  const [switchError, setSwitchError] = useState<string | null>(null);
   const [paymentPreview, setPaymentPreview] = useState<PromotedPaymentPreview | null>(null);
   const [paymentPreviewBusy, setPaymentPreviewBusy] = useState(false);
-  const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
+  const [paymentPreviewError, setPaymentPreviewError, paymentPreviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentStartingNumber, setPaymentStartingNumber] = useState('');
   const [paymentCheckDate, setPaymentCheckDate] = useState('');
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentError, setPaymentError, paymentErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
-  const nextMethod: PaymentDeliveryMethod = switchItem?.effective_payment_delivery_method === 'direct_deposit' ? 'paper_check' : 'direct_deposit';
   const mockPreviewEligible = items.filter((item) => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay || 0) > 0).length;
   const canPreviewMockChecks = isRehearsal && (payRun.status === 'calculated' || payRun.status === 'approved');
   const recordOnlyPromoted = !isRehearsal && payRun.status === 'committed' &&
@@ -349,7 +347,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     });
 
     return () => { active = false; };
-  }, [isAdmin, payRun.id, recordOnlyPromoted]);
+  }, [isAdmin, payRun.id, recordOnlyPromoted, setPaymentPreviewError]);
 
   const previewMockChecks = async () => {
     setMockPreviewBusy(true);
@@ -381,13 +379,6 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     return () => { active = false; };
   }, [payRun.id, payRun.status, checkPrintRefreshToken]);
 
-  const resetSwitchDialog = () => {
-    setSwitchItem(null);
-    setSwitchReason('');
-    setConfirmNotPaid(false);
-    setSwitchError(null);
-  };
-
   const getCurrentPayRunSummary = async (): Promise<PayPeriod | null> => {
     const requestId = ++refreshRequestIdRef.current;
     try {
@@ -413,26 +404,6 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
   const handlePrintConfirmed = () => {
     setCheckPrintRefreshToken((value) => value + 1);
     void refreshPayRunSummary();
-  };
-
-  const switchPaymentMethod = async () => {
-    if (!switchItem || switchReason.trim().length < 10 || !confirmNotPaid) return;
-    setSwitchBusy(true);
-    setSwitchError(null);
-    try {
-      await payrollItemsApi.updatePaymentMethod(payRun.id, switchItem.id, nextMethod, {
-        reason: switchReason.trim(),
-        confirm_not_paid: true,
-      });
-      const updated = await getCurrentPayRunSummary();
-      if (updated) onChanged(updated);
-      setCheckPrintRefreshToken((value) => value + 1);
-      resetSwitchDialog();
-    } catch (error) {
-      setSwitchError(error instanceof Error ? error.message : 'Could not switch payment method.');
-    } finally {
-      setSwitchBusy(false);
-    }
   };
 
   const resetPaymentDialog = () => {
@@ -468,13 +439,70 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     }
   };
 
+  const paymentRecords = <>
+    {items.length ? (
+            <>
+            <div className="divide-y divide-neutral-200 sm:hidden">
+              {items.map((item) => {
+                const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
+                return (
+                  <div key={item.id} className="space-y-3 px-4 py-4" role="group" aria-label={`Payment record for ${item.employee_name}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
+                        <p className="mt-1 text-xs text-neutral-500">{display.description}</p>
+                      </div>
+                      <Badge variant={display.tone}>{display.status}</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
+                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {display.canChange && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>}
+                      <Link className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open record <ArrowRight className="h-4 w-4" /></Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block">
+            <Table>
+              <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Payment method</TableHead><TableHead>Check / stub</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+              <TableBody striped>
+                {items.map((item) => {
+                  const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
+                      <TableCell>{display.method}</TableCell>
+                      <TableCell>{display.check}</TableCell>
+                      <TableCell><Badge variant={display.tone}>{display.status}</Badge></TableCell>
+                      <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
+                      <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {display.canChange && (
+                            <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>
+                          )}
+                          <Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            </div>
+            </>
+          ) : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+  </>;
+
   return (
     <>
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
       {paymentNotice && (
-        <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
-          <strong>Ready to print.</strong> {paymentNotice}
-        </div>
+        <ActionFeedback tone="success" message={paymentNotice}><strong>Ready to print.</strong> {paymentNotice}</ActionFeedback>
       )}
       {recordOnlyPromoted && (
         <Card className="border-amber-200 bg-amber-50/70">
@@ -487,7 +515,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
               </p>
               {!isAdmin && <p className="mt-2 text-sm font-medium text-amber-900">Ask an organization administrator to prepare this payroll. Accountants and managers can use the normal check workflow after that.</p>}
               {paymentPreviewBusy && <p role="status" className="mt-2 text-sm text-neutral-600">Verifying that this payroll has no prior payment activity…</p>}
-              {paymentPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{paymentPreviewError}</p>}
+              {paymentPreviewError && <ActionFeedback retryKey={paymentPreviewErrorFeedbackAttempt} tone="error" message={paymentPreviewError} />}
               {paymentPreview && !paymentPreview.eligible && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-danger-700">{paymentPreview.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>}
             </div>
             {isAdmin && (
@@ -507,8 +535,8 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           <div>
             <CardTitle>Checks and direct deposit</CardTitle>
             <p className="mt-2 text-sm text-neutral-500">{isRehearsal ? 'Preview VOID-marked rehearsal checks, then print on plain paper or download the PDF. These documents are not payments.' : 'Paper checks and direct-deposit stubs are separate. Printing a stub does not initiate a bank transfer.'}</p>
-            {printRefreshError && <p role="alert" className="mt-2 text-sm text-danger-700">{printRefreshError}</p>}
-            {mockPreviewError && <p role="alert" className="mt-2 text-sm text-danger-700">{mockPreviewError}</p>}
+            {printRefreshError && <ActionFeedback retryKey={printRefreshErrorFeedbackAttempt} tone="error" message={printRefreshError} />}
+            {mockPreviewError && <ActionFeedback retryKey={mockPreviewErrorFeedbackAttempt} tone="error" message={mockPreviewError} />}
           </div>
           {canPreviewMockChecks && (
             <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
@@ -527,72 +555,15 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           </div>
         )}
         <CardContent className="p-0">
-          {items.length ? (
-            <>
-            <div className="divide-y divide-neutral-200 sm:hidden">
-              {items.map((item) => {
-                const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_status === 'printed' ? 'Printed' : item.check_status === 'prepared' ? 'Prepared' : item.check_number ? 'Assigned' : 'Pending';
-                const canSwitch = payRun.status === 'committed' && !item.voided && Number(item.net_pay || 0) > 0 &&
-                  (isDeposit || (!item.check_prepared_at && !item.check_printed_at && !item.check_print_count && item.check_status !== 'printed' && item.check_status !== 'delivered'));
-                return (
-                  <div key={item.id} className="space-y-3 px-4 py-4" role="group" aria-label={`Payment record for ${item.employee_name}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
-                        <p className="mt-1 text-xs text-neutral-500">{isDeposit ? 'Direct deposit · earnings stub' : isRehearsal ? 'Rehearsal preview · no check number' : `Paper check · ${item.check_number || 'number not assigned'}`}</p>
-                      </div>
-                      <Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : ['prepared', 'printed', 'delivered'].includes(item.check_status || '') ? 'success' : 'default'}>{status}</Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
-                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {canSwitch && <Button size="sm" variant="outline" onClick={() => { setSwitchItem(item); setSwitchError(null); }}>Switch for this run</Button>}
-                      <Link className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open record <ArrowRight className="h-4 w-4" /></Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="hidden sm:block">
-            <Table>
-              <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Payment method</TableHead><TableHead>Check / stub</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-              <TableBody striped>
-                {items.map((item) => {
-                  const isDeposit = item.effective_payment_delivery_method === 'direct_deposit';
-                  const status = item.voided ? 'Voided' : isDeposit ? 'Stub ready' : isRehearsal ? canPreviewMockChecks ? 'Preview ready' : 'Not ready' : item.check_status === 'delivered' ? 'Issued' : item.check_status === 'printed' ? 'Printed' : item.check_status === 'prepared' ? 'Prepared' : item.check_number ? 'Assigned' : 'Pending';
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
-                      <TableCell>{isDeposit ? 'Direct deposit' : 'Paper check'}</TableCell>
-                      <TableCell>{isDeposit ? 'Earnings stub' : isRehearsal ? 'Rehearsal preview - no check number' : item.check_number || 'Not assigned'}</TableCell>
-                      <TableCell><Badge variant={item.voided ? 'danger' : isDeposit ? 'info' : isRehearsal ? 'warning' : ['prepared', 'printed', 'delivered'].includes(item.check_status || '') ? 'success' : 'default'}>{status}</Badge></TableCell>
-                      <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
-                      <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {payRun.status === 'committed' && !item.voided && Number(item.net_pay || 0) > 0 &&
-                            (isDeposit || (!item.check_prepared_at && !item.check_printed_at && !item.check_print_count && item.check_status !== 'printed' && item.check_status !== 'delivered')) && (
-                            <Button size="sm" variant="outline" onClick={() => { setSwitchItem(item); setSwitchError(null); }}>Switch for this run</Button>
-                          )}
-                          <Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            </div>
-            </>
-          ) : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+          {payRun.status === 'committed' && !isRehearsal ? <details className="border-t border-neutral-100">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-700 sm:px-6">Review payment methods and amounts</summary>
+            {paymentRecords}
+          </details> : paymentRecords}
         </CardContent>
       </Card>
       {!isRehearsal && payRun.status === 'committed' && (
         <>
-          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} />
+          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
           <UnifiedCheckPrintDialog
             open={checkPrintOpen}
             payPeriodId={payRun.id}
@@ -601,32 +572,11 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           />
         </>
       )}
-      <Dialog open={switchItem !== null} onOpenChange={(open) => { if (!open && !switchBusy) resetSwitchDialog(); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Switch payment method for this run</DialogTitle>
-            <DialogDescription>
-              {switchItem?.employee_name} will change to {nextMethod === 'paper_check' ? 'paper check' : 'direct deposit'}.
-              Pay, taxes, and the employee’s future default stay unchanged.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm text-neutral-700">
-            {nextMethod === 'paper_check'
-              ? 'A new check number will be assigned. Do not continue if a bank transfer was already sent.'
-              : 'The assigned check number will be retired. A printed, downloaded, delivered, or cleared check must use the correction workflow instead.'}
-          </p>
-          <Input label="Reason (at least 10 characters)" value={switchReason} onChange={(event) => setSwitchReason(event.target.value)} />
-          <label className="flex items-start gap-2 text-sm text-neutral-700">
-            <input type="checkbox" className="mt-1" checked={confirmNotPaid} onChange={(event) => setConfirmNotPaid(event.target.checked)} />
-            I confirm this payment has not been issued by check or bank transfer.
-          </label>
-          {switchError && <p role="alert" className="text-sm text-danger-700">{switchError}</p>}
-          <DialogFooter>
-            <Button variant="outline" onClick={resetSwitchDialog} disabled={switchBusy}>Cancel</Button>
-            <Button onClick={() => void switchPaymentMethod()} disabled={switchBusy || switchReason.trim().length < 10 || !confirmNotPaid}>{switchBusy ? 'Switching…' : 'Confirm switch'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PaymentMethodDialog payPeriod={payRun} item={switchItem} onClose={() => setSwitchItem(null)} onSaved={async () => {
+        const updated = await getCurrentPayRunSummary();
+        if (updated) onChanged(updated);
+        setCheckPrintRefreshToken(value => value + 1);
+      }} />
       <Dialog open={paymentDialogOpen} onOpenChange={(open) => { if (!open && !paymentBusy) resetPaymentDialog(); }}>
         <DialogContent>
           <DialogHeader>
@@ -661,7 +611,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
             <input type="checkbox" className="mt-1" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
             I confirm this payroll has not been paid by paper check or bank transfer, and these are the original employee payments—not replacements.
           </label>
-          {paymentError && <p role="alert" className="text-sm text-danger-700">{paymentError}</p>}
+          {paymentError && <ActionFeedback retryKey={paymentErrorFeedbackAttempt} tone="error" message={paymentError} />}
           <DialogFooter>
             <Button variant="outline" onClick={resetPaymentDialog} disabled={paymentBusy}>Cancel</Button>
             <Button onClick={() => void preparePromotedPayment()} disabled={paymentBusy || !paymentStartingNumber || !paymentCheckDate || !paymentConfirmed}>

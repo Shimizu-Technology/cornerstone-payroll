@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useFeedback } from '@/components/ui/action-feedback';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { AnnualRetirementLimitsPanel } from '@/components/settings/AnnualRetirementLimitsPanel';
 import {
   taxConfigsApi,
   type TaxConfig,
@@ -21,6 +23,7 @@ interface EditableConfig {
 }
 
 export default function TaxConfigs() {
+  const { notify } = useFeedback();
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
   const [auditLogs, setAuditLogs] = useState<TaxConfigAuditLog[]>([]);
@@ -43,20 +46,18 @@ export default function TaxConfigs() {
   const [activatingId, setActivatingId] = useState<number | null>(null);
   const [loadingDetailId, setLoadingDetailId] = useState<number | null>(null);
 
-  useEffect(() => {
-    fetchConfigs();
-  }, []);
-
-  const fetchConfigs = async () => {
+  const fetchConfigs = useCallback(async () => {
     try {
       const data = await taxConfigsApi.list();
       setConfigs(data.tax_configs);
     } catch (error) {
-      console.error('Failed to fetch tax configs:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to fetch tax configs. Check the entered values and try again.' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [notify]);
+
+  useEffect(() => { void fetchConfigs(); }, [fetchConfigs]);
 
   const fetchConfigDetails = async (id: number) => {
     setSelectedConfig(null);
@@ -68,7 +69,7 @@ export default function TaxConfigs() {
         return prev;
       });
     } catch (error) {
-      console.error('Failed to fetch config details:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to fetch config details. Check the entered values and try again.' });
     } finally {
       setLoadingDetailId((prev) => (prev === id ? null : prev));
     }
@@ -80,7 +81,7 @@ export default function TaxConfigs() {
       setAuditLogs(data.audit_logs);
       setShowAuditModal(true);
     } catch (error) {
-      console.error('Failed to fetch audit logs:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to fetch audit logs. Check the entered values and try again.' });
     }
   };
 
@@ -92,9 +93,10 @@ export default function TaxConfigs() {
         copy_from_year: copyFromYear ?? undefined,
       });
       setShowCreateModal(false);
+      notify({ tone: 'success', message: 'Tax year added. Retirement limits are configured separately below.' });
       fetchConfigs();
     } catch (error) {
-      console.error('Failed to create config:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to create config. Check the entered values and try again.' });
     } finally {
       setCreating(false);
     }
@@ -104,9 +106,10 @@ export default function TaxConfigs() {
     setActivatingId(id);
     try {
       await taxConfigsApi.activate(id);
+      notify({ tone: 'success', message: 'Tax configuration activated.' });
       fetchConfigs();
     } catch (error) {
-      console.error('Failed to activate config:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to activate config. Check the entered values and try again.' });
     } finally {
       setActivatingId(null);
     }
@@ -117,12 +120,13 @@ export default function TaxConfigs() {
     setDeletingId(id);
     try {
       await taxConfigsApi.delete(id);
+      notify({ tone: 'success', message: 'Tax configuration deleted.' });
       fetchConfigs();
       if (selectedConfig?.id === id) {
         setSelectedConfig(null);
       }
     } catch (error) {
-      console.error('Failed to delete config:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to delete config. Check the entered values and try again.' });
     } finally {
       setDeletingId(null);
     }
@@ -148,12 +152,13 @@ export default function TaxConfigs() {
     
     try {
       await taxConfigsApi.update(selectedConfig.id, editableConfig);
+      notify({ tone: 'success', message: 'Tax rates saved.' });
       await fetchConfigDetails(selectedConfig.id);
       fetchConfigs();
       setIsEditingGlobal(false);
       setEditableConfig(null);
     } catch (error) {
-      console.error('Failed to save config:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to save config. Check the entered values and try again.' });
     } finally {
       setSaving(false);
     }
@@ -174,10 +179,11 @@ export default function TaxConfigs() {
       await taxConfigsApi.updateFilingStatus(selectedConfig.id, editingFilingStatus, {
         standard_deduction: editableStandardDeduction,
       });
+      notify({ tone: 'success', message: 'Filing status deduction saved.' });
       await fetchConfigDetails(selectedConfig.id);
       setEditingFilingStatus(null);
     } catch (error) {
-      console.error('Failed to save filing status:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to save filing status. Check the entered values and try again.' });
     } finally {
       setSaving(false);
     }
@@ -211,11 +217,12 @@ export default function TaxConfigs() {
           rate: b.rate,
         })),
       });
+      notify({ tone: 'success', message: 'Tax brackets saved.' });
       await fetchConfigDetails(selectedConfig.id);
       setEditingBrackets(null);
       setEditableBrackets([]);
     } catch (error) {
-      console.error('Failed to save brackets:', error);
+      notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to save brackets. Check the entered values and try again.' });
     } finally {
       setSaving(false);
     }
@@ -252,16 +259,17 @@ export default function TaxConfigs() {
     <div>
       <Header
         title="Tax Configuration"
-        description="Manage annual tax rates, brackets, and deductions"
+        description="Manage annual tax rates, brackets, deductions, and retirement limits"
         actions={
           <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Create New Year
+            Add tax year
           </Button>
         }
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <AnnualRetirementLimitsPanel />
 
       {/* Tax Years List */}
       <div className="space-y-3 sm:hidden">

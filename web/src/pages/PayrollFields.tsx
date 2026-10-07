@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useCallback, useEffect, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,7 +20,8 @@ const amountTypeOptions: PayrollFieldAmountType[] = ['fixed', 'percentage', 'man
 const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string; helper: string }> = [
   { value: '', label: 'No special report group', helper: 'Shows by its field name/category only.' },
   { value: '401k_pre_tax', label: '401(k) Pre-Tax', helper: 'Traditional 401(k) deduction or match.' },
-  { value: '401k_after_tax', label: '401(k) After Tax / Roth', helper: 'Roth or after-tax 401(k) deduction or match.' },
+  { value: '401k_after_tax', label: 'Roth 401(k)', helper: 'Designated Roth elective deferrals or an explicitly supported employer Roth contribution.' },
+  { value: '401k_non_roth_after_tax', label: '401(k) non-Roth after-tax', helper: 'Voluntary after-tax contributions. These do not count as Roth catch-up.' },
   { value: 'retirement_other', label: 'Other Retirement', helper: 'Retirement-related, but not a 401(k) bucket.' },
 ];
 
@@ -59,9 +61,9 @@ export function PayrollFields() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
-  const loadFields = async () => {
+  const loadFields = useCallback(async () => {
     setLoading(true);
     try {
       const res = await payrollFieldsApi.list();
@@ -72,11 +74,11 @@ export function PayrollFields() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setError]);
 
   useEffect(() => {
-    loadFields();
-  }, []);
+    void loadFields();
+  }, [loadFields]);
 
   const setKind = (kind: PayrollFieldKind) => {
     setDraft((prev) => ({
@@ -92,6 +94,7 @@ export function PayrollFields() {
   };
 
   const saveField = async () => {
+    setError(null);
     if (!draft.name?.trim()) {
       setError('Name is required');
       return;
@@ -126,6 +129,7 @@ export function PayrollFields() {
 
   const archiveField = async (field: PayrollFieldDefinition) => {
     if (!window.confirm(`Archive ${field.name}? Existing payroll history stays unchanged.`)) return;
+    setError(null);
     try {
       await payrollFieldsApi.archive(field.id);
       if (editingId === field.id) {
@@ -146,7 +150,7 @@ export function PayrollFields() {
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
-        {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <Card>
           <CardContent className="space-y-4 py-5">
@@ -193,6 +197,7 @@ export function PayrollFields() {
                   {amountTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </Select>
               </div>
+              {draft.category === 'retirement' && <p className="rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900 sm:col-span-2">Enable catch-up in Employee → Pay setup → Retirement plan. A new field adds another contribution; it does not reclassify an existing deduction or increase the annual limit.</p>}
               {draft.amount_type === 'percentage' ? (
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default %</label>

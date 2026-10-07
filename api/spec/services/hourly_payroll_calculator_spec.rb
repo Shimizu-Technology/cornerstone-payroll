@@ -254,6 +254,7 @@ RSpec.describe HourlyPayrollCalculator do
   end
 
   describe "with retirement deductions" do
+    before { verify_synthetic_retirement_plan!(employee, pay_period.pay_date) }
     let(:employee) do
       create(:employee,
         company: company,
@@ -365,6 +366,7 @@ RSpec.describe HourlyPayrollCalculator do
         active: true
       )
 
+      verify_synthetic_retirement_plan!(roth_only_employee, pay_period.pay_date)
       described_class.new(roth_only_employee, roth_only_item).calculate
 
       expect(roth_only_item.roth_retirement_payment).to eq(80.00)
@@ -403,6 +405,7 @@ RSpec.describe HourlyPayrollCalculator do
         active: true
       )
 
+      verify_synthetic_retirement_plan!(traditional_only_employee, pay_period.pay_date)
       described_class.new(traditional_only_employee, traditional_only_item).calculate
 
       expect(traditional_only_item.retirement_payment).to eq(64.00)

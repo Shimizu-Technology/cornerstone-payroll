@@ -220,4 +220,23 @@ describe('AireManualPaymentReconciliation', () => {
     expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
     expect(screen.queryByText(/paid Aug/)).toBeNull();
   });
+  it('shows pending cancellation instead of the stale original paid claim and retries the same allocation', async () => {
+    const pending = { ...allocation, status: 'issued', payment_cancellation_pending: true,
+      payment_evidence: { reference: 'OLD-CHECK', effective_on: '2026-09-15', provenance: 'aire_issued_receipt' as const } };
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [pending] });
+    mocks.retry.mockResolvedValue({ manual_allocation: { ...allocation, payment_cancellation_pending: false } });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByText('Cancellation awaiting time tracking confirmation')).toBeTruthy();
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
+    expect(screen.getByText(/These hours stay reserved while the cancellation syncs/)).toBeTruthy();
+    expect(screen.getByText(/Time tracking has not confirmed the cancellation or replacement yet/)).toBeTruthy();
+    expect(screen.queryByText(/a replacement is not paid yet/)).toBeNull();
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry sync for entry 40' }));
+    await waitFor(() => expect(mocks.retry).toHaveBeenCalledWith(67, 9));
+    expect((await screen.findAllByText('Linked; payment evidence pending')).length).toBeGreaterThan(0);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
 });
