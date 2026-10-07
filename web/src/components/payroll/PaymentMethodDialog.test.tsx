@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentMethodDialog } from './PaymentMethodDialog';
@@ -15,8 +15,8 @@ function setup(record = item, run = period, refresh = vi.fn().mockResolvedValue(
   mocks.get.mockResolvedValue({ payroll_item: record });
   mocks.save.mockResolvedValue({ payroll_item: record, pay_period_status: run.status });
   const close = vi.fn();
-  render(<FeedbackProvider><PaymentMethodDialog payPeriod={run} item={record} onClose={close} onSaved={refresh} /></FeedbackProvider>);
-  return { user: userEvent.setup(), close, refresh };
+  const view = render(<FeedbackProvider><PaymentMethodDialog payPeriod={run} item={record} onClose={close} onSaved={refresh} /></FeedbackProvider>);
+  return { user: userEvent.setup(), close, refresh, unmount: view.unmount };
 }
 async function attest(user: ReturnType<typeof userEvent.setup>) {
   await user.type(await screen.findByLabelText('Reason for changing this payment (at least 10 characters)'), 'Employer confirmed payment remains unpaid');
@@ -68,6 +68,17 @@ describe('scoped payment method changes', () => {
     expect(await screen.findByText(/The check number changed/)).toBeTruthy();
     expect((screen.getByLabelText('Reason for changing this payment (at least 10 characters)') as HTMLInputElement).value).toContain('Employer confirmed');
     expect(close).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+  it('does not run an old payroll refresh when a pending save finishes after unmount', async () => {
+    const { user, unmount, refresh } = setup();
+    let finish!: (value: { payroll_item: PayrollItem; pay_period_status: string }) => void;
+    mocks.save.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    await attest(user);
+    await user.click(screen.getByRole('button', { name: 'Save payment method' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
+    unmount();
+    await act(async () => { finish({ payroll_item: item, pay_period_status: 'committed' }); });
     expect(refresh).not.toHaveBeenCalled();
   });
   it('requires a verified eligibility result instead of falling back to an unrestricted switch', async () => {

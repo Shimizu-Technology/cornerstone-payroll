@@ -191,7 +191,7 @@ export function PayRunWorkspace(): ReactElement {
     return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
   }
 
-  const items = [...(payRun.payroll_items || [])].sort((a, b) => a.employee_name.localeCompare(b.employee_name) || a.id - b.id);
+  const items = [...(payRun.payroll_items || [])].sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || '') || a.id - b.id);
   const reportableItems = items.filter((item) => !item.voided);
   const statusConfig = payPeriodStatusConfig[payRun.status];
 
@@ -439,6 +439,65 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
     }
   };
 
+  const paymentRecords = <>
+    {items.length ? (
+            <>
+            <div className="divide-y divide-neutral-200 sm:hidden">
+              {items.map((item) => {
+                const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
+                return (
+                  <div key={item.id} className="space-y-3 px-4 py-4" role="group" aria-label={`Payment record for ${item.employee_name}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
+                        <p className="mt-1 text-xs text-neutral-500">{display.description}</p>
+                      </div>
+                      <Badge variant={display.tone}>{display.status}</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
+                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {display.canChange && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>}
+                      <Link className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open record <ArrowRight className="h-4 w-4" /></Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block">
+            <Table>
+              <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Payment method</TableHead><TableHead>Check / stub</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+              <TableBody striped>
+                {items.map((item) => {
+                  const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
+                      <TableCell>{display.method}</TableCell>
+                      <TableCell>{display.check}</TableCell>
+                      <TableCell><Badge variant={display.tone}>{display.status}</Badge></TableCell>
+                      <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
+                      <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {display.canChange && (
+                            <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>
+                          )}
+                          <Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            </div>
+            </>
+          ) : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+  </>;
+
   return (
     <>
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
@@ -496,67 +555,15 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
           </div>
         )}
         <CardContent className="p-0">
-          {items.length ? (
-            <>
-            <div className="divide-y divide-neutral-200 sm:hidden">
-              {items.map((item) => {
-                const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
-                return (
-                  <div key={item.id} className="space-y-3 px-4 py-4" role="group" aria-label={`Payment record for ${item.employee_name}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
-                        <p className="mt-1 text-xs text-neutral-500">{display.description}</p>
-                      </div>
-                      <Badge variant={display.tone}>{display.status}</Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
-                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {display.canChange && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>}
-                      <Link className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open record <ArrowRight className="h-4 w-4" /></Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="hidden sm:block">
-            <Table>
-              <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Payment method</TableHead><TableHead>Check / stub</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-              <TableBody striped>
-                {items.map((item) => {
-                  const display = payRunPaymentDisplay(item, { committed: payRun.status === 'committed', rehearsal: isRehearsal, canPreview: canPreviewMockChecks });
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell>
-                      <TableCell>{display.method}</TableCell>
-                      <TableCell>{display.check}</TableCell>
-                      <TableCell><Badge variant={display.tone}>{display.status}</Badge></TableCell>
-                      <TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell>
-                      <TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {display.canChange && (
-                            <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>
-                          )}
-                          <Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            </div>
-            </>
-          ) : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
+          {payRun.status === 'committed' && !isRehearsal ? <details className="border-t border-neutral-100">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-700 sm:px-6">Review payment methods and amounts</summary>
+            {paymentRecords}
+          </details> : paymentRecords}
         </CardContent>
       </Card>
       {!isRehearsal && payRun.status === 'committed' && (
         <>
-          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} />
+          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
           <UnifiedCheckPrintDialog
             open={checkPrintOpen}
             payPeriodId={payRun.id}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
@@ -30,6 +30,27 @@ describe('employee future payment default', () => {
     await user.click(screen.getByRole('button', { name: 'Save future default' }));
     expect(await screen.findByText(/future payment method was saved, but the employee screen could not refresh/)).toBeTruthy();
     expect(mocks.update).toHaveBeenCalledOnce();
+  });
+  it('does not reload an old employee after a delayed save completes following navigation', async () => {
+    const user = userEvent.setup();
+    let finish!: (value: { data: Employee }) => void;
+    mocks.update.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const reload = vi.fn();
+    const view = render(<FeedbackProvider><EmployeePaymentMethodPanel employee={employee} onEmployeeReload={reload} /></FeedbackProvider>);
+    await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    await user.click(screen.getByRole('button', { name: 'Save future default' }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledOnce());
+    view.unmount();
+    await act(async () => { finish({ data: employee }); });
+    expect(reload).not.toHaveBeenCalled();
+  });
+  it('explains when older approvals need review again after preserving their delivery choices', async () => {
+    const user = userEvent.setup();
+    mocks.update.mockResolvedValue({ data: employee, payment_method_review: { reapproval_pay_period_ids: [8] } });
+    render(<FeedbackProvider><EmployeePaymentMethodPanel employee={employee} onEmployeeReload={vi.fn().mockResolvedValue(undefined)} /></FeedbackProvider>);
+    await user.click(screen.getByRole('button', { name: 'Change future payment method' }));
+    await user.click(screen.getByRole('button', { name: 'Save future default' }));
+    expect(await screen.findByText(/Review and approve pay runs #8 again/)).toBeTruthy();
   });
   it('keeps client viewers out of staff payment settings', () => {
     mocks.canChange = false;

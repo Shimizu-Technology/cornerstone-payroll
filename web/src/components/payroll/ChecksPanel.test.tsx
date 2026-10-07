@@ -156,6 +156,9 @@ describe('ChecksPanel earnings statements', () => {
     await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledTimes(1));
     expect(apiMocks.batchPdf).toHaveBeenNthCalledWith(1, 8, [43]);
     fireEvent.click(within(preview).getByRole('button', { name: 'Close PDF preview' }));
+    expect(screen.queryByRole('dialog', { name: 'Earnings statement — Casey Zero' })).toBeNull();
+    fireEvent.click(within(statement).getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:statement-test'));
   });
 
