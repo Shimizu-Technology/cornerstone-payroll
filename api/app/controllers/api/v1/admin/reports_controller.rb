@@ -2309,4 +2309,2106 @@ module Api
             net_pay: item.net_pay.to_f,
             check_number: item.check_number,
             payment_delivery_method: item.effective_payment_delivery_method,
+            payment_evidence: EmployeePayrollPaymentEvidence.new(item).call,
+            period_start: item.pay_period.start_date,
+            period_end: item.pay_period.end_date,
+            total_hours: item.total_hours,
+            hours_basis: item.correction_entry? ? "signed_payroll_correction" : "saved_payroll_item",
             payment_method_label: PayrollPaymentLabel.for(item),
+            payroll_field_entries: payroll_field_entry_rows(item),
+            payroll_field_totals: payroll_field_totals(item),
+            source: {
+              system: "cornerstone",
+              label: "Cornerstone",
+              locked: true
+            },
+            capabilities: { view: true, edit: false }
+          }
+        end
+
+        def employee_ytd_summary(employee, year = Date.current.year)
+          ytd_items = employee_reportable_ytd_items(employee, year)
+          {
+            year: year,
+            gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
+            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
+            withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
+            retirement: ytd_items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: ytd_items.sum { |item| item.roth_retirement_payment.to_f },
+            tips: ytd_items.sum { |item| item.reported_tips.to_f },
+            tips_paid_out: ytd_items.sum { |item| item.tips_paid_out.to_f },
+            bonus: ytd_items.sum { |item| item.bonus.to_f },
+            total_deductions: ytd_items.sum { |item| item.total_deductions.to_f },
+            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
+            net_pay: ytd_items.sum { |item| item.net_pay.to_f }
+          }
+        end
+
+        def employee_ytd_row(employee, year, custom_totals = nil)
+          ytd_items = employee_reportable_ytd_items(employee, year)
+          custom_totals ||= custom_ytd_totals_for_items(ytd_items)
+
+          {
+            employee_id: employee.id,
+            first_name: employee.first_name,
+            last_name: employee.last_name,
+            name: employee.full_name,
+            employment_type: employee.employment_type,
+            status: employee.status,
+            gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
+            custom_earnings_total: custom_totals[:custom_earnings_total],
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
+            withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
+            retirement: ytd_items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: ytd_items.sum { |item| item.roth_retirement_payment.to_f },
+            tips: ytd_items.sum { |item| item.reported_tips.to_f },
+            tips_paid_out: ytd_items.sum { |item| item.tips_paid_out.to_f },
+            bonus: ytd_items.sum { |item| item.bonus.to_f },
+            total_deductions: custom_totals[:total_deductions],
+            custom_deductions_total: custom_totals[:custom_deductions_total],
+            net_pay: ytd_items.sum { |item| item.net_pay.to_f }
+          }
+        end
+
+        def employee_pay_history_report(employee, items, period:)
+          unified = UnifiedPayrollReporting.new(company_id: current_company_id, period: period)
+          item_rows = items.to_a
+          historical_paychecks = unified.historical_paychecks(employee_id: employee.id)
+          historical_adjustments = unified.historical_adjustments(employee_id: employee.id)
+          entries = item_rows.map do |item|
+            { type: :native, record: item, pay_date: item.pay_period.pay_date, id: item.id }
+          end + historical_paychecks.map do |paycheck|
+            { type: :imported, record: paycheck, pay_date: paycheck.pay_date, id: paycheck.id }
+          end + historical_adjustments.map do |adjustment|
+            { type: :adjustment, record: adjustment, pay_date: adjustment.effective_pay_date, id: adjustment.id }
+          end
+          entries.sort_by! { |entry| [ entry.fetch(:pay_date), entry.fetch(:type).to_s, entry.fetch(:id) ] }
+          entries.reverse!
+          limit = employee_pay_history_limit
+          entries = entries.first(limit) if limit
+          selected_items = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :native }
+          selected_historical = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :imported }
+          selected_adjustments = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :adjustment }
+          history = entries.map do |entry|
+            case entry.fetch(:type)
+            when :native then pay_history_item(entry.fetch(:record))
+            when :imported then unified.history_row(entry.fetch(:record))
+            else unified.adjustment_history_row(entry.fetch(:record))
+            end
+          end
+          disclosure = PayrollFieldDisclosure.new(selected_items)
+          summary = payroll_period_employee_row(
+            employee, selected_items, selected_historical, selected_adjustments, unified: unified
+          )
+
+          {
+            type: "employee_pay_history",
+            meta: report_meta(employee.company, :employee_pay_history),
+            period: period.payload,
+            employee: {
+              id: employee.id,
+              name: employee.full_name,
+              first_name: employee.first_name,
+              last_name: employee.last_name,
+              employment_type: employee.employment_type,
+              pay_rate: employee.pay_rate.to_f
+            },
+            history: history,
+            summary: summary,
+            # Kept for older clients while they move from the YTD label to the
+            # exact pay-date period summary.
+            ytd: summary.merge(year: period.year),
+            source_summary: unified.source_summary(
+              native_items: selected_items,
+              historical_paychecks: selected_historical,
+              historical_adjustments: selected_adjustments
+            ),
+            payroll_fields: {
+              totals: disclosure.totals,
+              entries: disclosure.rows,
+              treatment_totals: disclosure.treatment_totals
+            }
+          }
+        end
+
+        def employee_pay_history_limit
+          return nil if params[:start_date].present? || params[:end_date].present? || params[:year].present? ||
+            ActiveModel::Type::Boolean.new.cast(params[:all_time])
+
+          limit = Integer(params[:limit].presence || 12, exception: false)
+          raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
+
+          limit
+        end
+
+        def sorted_payroll_items(items)
+          items.to_a.sort_by do |item|
+            [
+              item.employee&.last_name.to_s.downcase,
+              item.employee&.first_name.to_s.downcase,
+              item.employee_id.to_i
+            ]
+          end
+        end
+
+        def build_pay_period_payroll_items_report(pay_period)
+          items = sorted_payroll_items(
+            pay_period.payroll_items.not_voided.reportable.includes(
+              :payroll_item_earnings,
+              :payroll_item_field_entries,
+              payroll_item_deductions: :deduction_type,
+              employee: :department
+            )
+          )
+          w2_items = items.reject { |i| i.employment_type == "contractor" }
+          contractor_items = items.select { |i| i.employment_type == "contractor" }
+          adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
+          {
+            type: "payroll_summary_by_employee",
+            meta: report_meta(pay_period.company, :payroll_summary_by_employee),
+            pay_period: {
+              id: pay_period.id,
+              start_date: pay_period.start_date,
+              end_date: pay_period.end_date,
+              pay_date: pay_period.pay_date,
+              status: pay_period.status
+            },
+            summary: {
+              employee_count: w2_items.size,
+              total_gross: w2_items.sum(&:gross_pay),
+              total_reported_tips: w2_items.sum(&:reported_tips),
+              total_tips_paid_out: w2_items.sum(&:tips_paid_out),
+              total_bonus: w2_items.sum(&:bonus),
+              total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
+              total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_adjustment_taxable_additions: w2_items.sum(&:taxable_payroll_adjustments_total),
+              total_payroll_adjustment_non_taxable_additions: w2_items.sum(&:non_taxable_payroll_adjustments_total),
+              total_payroll_adjustment_pre_tax_deductions: w2_items.sum(&:pre_tax_payroll_adjustments_total),
+              total_payroll_adjustment_post_tax_deductions: w2_items.sum(&:post_tax_payroll_adjustments_total),
+              total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+              total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+              total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+              total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+              total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
+              total_withholding: w2_items.sum(&:withholding_tax),
+              total_social_security: w2_items.sum(&:social_security_tax),
+              total_medicare: w2_items.sum(&:medicare_tax),
+              total_traditional_retirement: w2_items.sum(&:retirement_payment),
+              total_roth_retirement: w2_items.sum(&:roth_retirement_payment),
+              total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
+              total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
+              total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
+              total_deductions: w2_items.sum(&:total_deductions),
+              total_net: w2_items.sum(&:net_pay)
+            },
+            payroll_adjustments: {
+              totals: adjustment_disclosure.totals,
+              entries: adjustment_disclosure.rows,
+              treatment_totals: adjustment_disclosure.treatment_totals
+            },
+            employees: w2_items.map { |item| payroll_item_detail(item) },
+            contractors: contractor_items.map { |item| payroll_item_detail(item) }
+          }
+        end
+
+        def custom_earnings_total(item)
+          Array(item.custom_earnings).sum { |entry| entry["amount"].to_f }
+        end
+
+        def custom_deductions_total(item)
+          Array(item.custom_deductions).sum { |entry| entry["amount"].to_f }
+        end
+
+        def active_payroll_field_entries(item)
+          item.payroll_item_field_entries.select(&:active?)
+        end
+
+        def payroll_adjustment_rows(item)
+          PayrollAdjustmentDisclosure.new([ item ]).rows
+        end
+
+        def payroll_adjustment_totals(item)
+          PayrollAdjustmentDisclosure.new([ item ]).treatment_totals
+        end
+
+        def tip_component_rows(item, fallback_components: nil)
+          data = item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data : {}
+          components = if data.key?("tip_components") || data.key?(:tip_components)
+            data["tip_components"] || data[:tip_components]
+          else
+            fallback_components
+          end
+          Array(components).filter_map do |component|
+            row = component.respond_to?(:to_h) ? component.to_h.with_indifferent_access : {}
+            label = row[:label].to_s.strip.presence || "Tips"
+            amount = money(row[:amount])
+            next unless amount.positive?
+
+            { label: label, amount: amount }
+          end
+        end
+
+        def intake_tip_components_by_item_id(items)
+          item_ids = Array(items).map(&:id).compact
+          return {} if item_ids.empty?
+
+          rows = PayrollIntakeRow
+            .where(applied_payroll_item_id: item_ids, status: "applied")
+            .order(updated_at: :desc, id: :desc)
+
+          rows.each_with_object({}) do |row, components_by_item_id|
+            item_id = row.applied_payroll_item_id
+            next if components_by_item_id.key?(item_id)
+
+            components_by_item_id[item_id] = [
+              { label: "Tips 1", amount: money(row.week1_tips) },
+              { label: "Tips 2", amount: money(row.week2_tips) }
+            ].select { |component| component[:amount].positive? }
+          end
+        end
+
+        def payroll_field_entry_rows(item)
+          active_payroll_field_entries(item).map do |entry|
+            {
+              id: entry.id,
+              payroll_field_definition_id: entry.payroll_field_definition_id,
+              label: entry.label,
+              kind: entry.kind,
+              tax_treatment: entry.tax_treatment,
+              category: entry.category,
+              reporting_group: entry.reporting_group,
+              source: entry.source,
+              employee_paid: entry.employee_paid,
+              employer_paid: entry.employer_paid,
+              amount: entry.amount.to_f
+            }
+          end
+        end
+
+        def payroll_field_totals(item)
+          active_payroll_field_entries(item).group_by(&:tax_treatment).transform_values { |entries| entries.sum { |entry| entry.amount.to_f } }
+        end
+
+        def payroll_field_total(item, treatment)
+          active_payroll_field_entries(item).sum { |entry| entry.tax_treatment == treatment ? entry.amount.to_f : 0.0 }
+        end
+
+        def employee_reportable_ytd_items(employee, year)
+          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
+          employee.payroll_items
+                  .joins(:pay_period)
+                  .includes(:payroll_item_field_entries)
+                  .where(company_id: current_company_id)
+                  .not_voided.reportable
+                  .where(pay_periods: { id: reportable_period_ids })
+                  .to_a
+        end
+
+        def ytd_custom_totals_by_employee(year)
+          reportable_period_ids = PayPeriod.reportable_for_company(current_company)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
+          PayrollItem.joins(:pay_period)
+                     .where(company_id: current_company_id)
+                     .not_voided.reportable
+                     .where(pay_periods: { id: reportable_period_ids })
+                     .select(:employee_id, :total_deductions, :custom_earnings, :custom_deductions)
+                     .to_a
+                     .group_by(&:employee_id)
+                     .transform_values { |items| custom_ytd_totals_for_items(items) }
+        end
+
+        def custom_ytd_totals_for_items(items)
+          {
+            custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
+            custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
+            total_deductions: items.sum { |item| item.total_deductions.to_f }
+          }
+        end
+
+        def earning_row(earning)
+          {
+            category: earning.category,
+            label: earning.label,
+            hours: earning.hours,
+            rate: earning.rate,
+            amount: earning.amount
+          }
+        end
+
+        def deduction_row(deduction)
+          {
+            category: deduction.category,
+            label: deduction.label,
+            deduction_type: deduction.deduction_type&.name,
+            amount: deduction.amount
+          }
+        end
+
+        def custom_deduction_row(deduction)
+          {
+            category: "post_tax",
+            label: deduction["label"].presence || "Other Deduction",
+            deduction_type: "One-time deduction",
+            amount: deduction["amount"].to_f
+          }
+        end
+
+        def deductions_breakdown(item)
+          item.payroll_item_deductions.map { |deduction| deduction_row(deduction) } +
+            Array(item.custom_deductions).filter_map do |deduction|
+              amount = deduction["amount"].to_f
+              amount.positive? ? custom_deduction_row(deduction) : nil
+            end
+        end
+
+        def employer_contributions_breakdown(item)
+          field_contribution_entries = active_payroll_field_entries(item).select(&:employer_contribution?)
+          field_contribution_amounts_by_label = field_contribution_entries
+            .group_by { |entry| entry.label.to_s }
+            .transform_values { |entries| entries.map { |entry| entry.amount.to_f.round(2) } }
+
+          item.payroll_item_deductions
+            .select(&:employer_contribution?)
+            .reject { |deduction| consume_matching_field_contribution?(field_contribution_amounts_by_label, deduction) }
+            .map { |deduction| deduction_row(deduction) } +
+            field_contribution_entries.map do |entry|
+              {
+                category: "employer_contribution",
+                label: entry.label,
+                deduction_type: "Payroll Field",
+                amount: entry.amount.to_f
+              }
+            end
+        end
+
+        def straight_loan_amount(item)
+          BigDecimal(item[:loan_deduction].to_s.presence || "0")
+        end
+
+        def payroll_summary_retirement_totals(items)
+          items.each_with_object({ retirement: BigDecimal("0"), roth_retirement: BigDecimal("0") }) do |item, totals|
+            PayrollRetirementTotals.for_item(item).each { |key, amount| totals[key] += amount }
+          end
+        end
+
+        def payroll_summary_employer_cost_totals(items)
+          employer_social_security_tax = items.sum(0.to_d) { |item| item.employer_social_security_tax.to_d }
+          employer_medicare_tax = items.sum(0.to_d) { |item| item.employer_medicare_tax.to_d }
+          employer_contributions = items.sum(0.to_d) { |item| employer_contributions_total(item).to_d }
+          contribution_entries = items.flat_map do |item|
+            quickbooks_report_data_for(item).deduction_contribution_entries_for_item(item)
+          end.select { |entry| entry.company_amount.to_f.nonzero? }
+          employer_traditional_401k_match = contribution_entries
+            .select { |entry| entry.reporting_group == PayrollReportingGroups::GROUP_401K_PRE_TAX }
+            .sum(0.to_d) { |entry| entry.company_amount.to_d }
+          employer_roth_401k_match = contribution_entries
+            .select { |entry| entry.reporting_group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }
+            .sum(0.to_d) { |entry| entry.company_amount.to_d }
+          employer_taxes_total = employer_social_security_tax + employer_medicare_tax
+
+          {
+            employer_social_security_tax: employer_social_security_tax.round(2).to_f,
+            employer_medicare_tax: employer_medicare_tax.round(2).to_f,
+            other_employer_taxes: 0.0,
+            employer_taxes_total: employer_taxes_total.round(2).to_f,
+            employer_traditional_401k_match: employer_traditional_401k_match.round(2).to_f,
+            employer_roth_401k_match: employer_roth_401k_match.round(2).to_f,
+            other_employer_contributions: (employer_contributions - employer_traditional_401k_match - employer_roth_401k_match).round(2).to_f,
+            employer_contributions: employer_contributions.round(2).to_f,
+            employer_taxes_and_contributions_total: (employer_taxes_total + employer_contributions).round(2).to_f,
+            employer_payroll_cost: items.sum(0.to_d) { |item| employer_payroll_cost(item).to_d }.round(2).to_f
+          }
+        end
+
+        # These saved additions are independent of the one-time bonus column.
+        # Do not use payroll_item_earnings here: it can mirror flexible fields.
+        def payroll_summary_bonus_amount(item)
+          bonus_label = /\bbonus(?:es)?\b/i
+          amount = item.bonus.to_d
+          amount += Array(item.custom_earnings).sum(BigDecimal("0")) do |entry|
+            entry["label"].to_s.match?(bonus_label) ? BigDecimal(entry["amount"].to_s.presence || "0") : BigDecimal("0")
+          end
+          amount += item.active_payroll_adjustments.sum(BigDecimal("0")) do |entry|
+            entry["treatment"] == "taxable_addition" && entry["label"].to_s.match?(bonus_label) ?
+              BigDecimal(entry["amount"].to_s.presence || "0") : BigDecimal("0")
+          end
+          amount + item.payroll_item_field_entries.active.sum(BigDecimal("0")) do |entry|
+            entry.kind == "addition" && entry.tax_treatment == "taxable_addition" && entry.label.match?(bonus_label) ?
+              entry.amount.to_d : BigDecimal("0")
+          end
+        end
+
+        def installment_loan_amount(item)
+          loan_payment = BigDecimal(item[:loan_payment].to_s.presence || "0")
+          adjustment = item.active_payroll_adjustments.sum(BigDecimal("0")) do |entry|
+            next BigDecimal("0") unless entry["treatment"] == "post_tax_deduction" &&
+              entry["label"].to_s.match?(/\A(?:Payroll Adjustment - )?Loan - Installment\z/i)
+
+            BigDecimal(entry["amount"].to_s)
+          end
+          [ loan_payment - straight_loan_amount(item), BigDecimal("0") ].max + adjustment
+        end
+
+        def employer_contributions_total(item)
+          quickbooks_report_data_for(item).employer_contribution_total(item)
+        end
+
+        def employer_payroll_cost(item)
+          quickbooks_report_data_for(item).total_payroll_cost(item)
+        end
+
+        def quickbooks_report_data_for(item)
+          @quickbooks_report_data_by_pay_period_id ||= {}
+          @quickbooks_report_data_by_pay_period_id[item.pay_period_id] ||= QuickbooksPayrollReportData.new(item.pay_period)
+        end
+
+        def consume_matching_field_contribution?(amounts_by_label, deduction)
+          amounts = amounts_by_label[deduction.label.to_s]
+          return false unless amounts
+
+          index = amounts.index(deduction.amount.to_f.round(2))
+          return false unless index
+
+          amounts.delete_at(index)
+          true
+        end
+
+        def send_spreadsheet!(filename:, sheets:)
+          exporter = SpreadsheetReportExporter.new(filename: filename, sheets: sheets)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: SpreadsheetReportExporter::CONTENT_TYPE,
+            disposition: "attachment"
+        end
+
+        def send_tabular_pdf!(title:, subtitle:, filename:, sheets:)
+          generator = TabularReportPdfGenerator.new(
+            title: title,
+            subtitle: subtitle,
+            filename: filename,
+            sheets: sheets
+          )
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        def send_tabular_csv!(filename:, sheet:)
+          exporter = TabularReportCsvExporter.new(filename: filename, sheet: sheet)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        end
+
+        def employee_pay_history_export_data
+          employee = Employee.find(params[:employee_id])
+          unless employee.company_id == current_company_id
+            render json: { error: "Employee not found" }, status: :not_found
+            return [ nil, nil, nil ]
+          end
+
+          period = employee_pay_history_period
+          items = employee_pay_history_items(employee, period)
+          [ employee, period, employee_pay_history_report(employee, items, period: period) ]
+        end
+
+        def report_meta(company, report_key)
+          {
+            company_id: company&.id,
+            company_name: company&.name,
+            generated_at: Time.current.iso8601,
+            report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil),
+            provisional: company&.test_workspace? || false,
+            payroll_status_note: company&.test_workspace? ? "TEST ONLY — calculated test payroll, not committed or paid" : nil
+          }
+        end
+
+        def report_info_sheet(report, title:, description: nil)
+          meta = report_value(report, :meta) || {}
+          pp = report_value(report, :pay_period) || {}
+          source = report_value(report, :source) || {}
+          visibility = report_value(report, :employee_visibility)
+          rows = [
+            [ "Field", "Value" ],
+            [ "Report", title ],
+            [ "Client", report_value(meta, :company_name) || report_value(report, :company, :name) || report_value(report, :employer, :name) || report_value(report, :payer, :name) ],
+            [ "Description", description || report_value(meta, :report_description) ],
+            [ "Pay Period", [ report_value(pp, :start_date), report_value(pp, :end_date) ].compact.join(" to ") ],
+            [ "Pay Date", report_value(pp, :pay_date) ],
+            [ "Source", report_value(source, :label) ],
+            [ "Source handling", report_value(source, :statement) ],
+            [ "Payroll status", report_value(meta, :payroll_status_note) ],
+            [ "Active $0-pay employees", visibility.nil? ? nil : (visibility[:include_zero_pay] ? "Included" : "Excluded") ],
+            [ "Active $0-pay employees in selection", report_value(report, :employee_visibility, :active_zero_pay_count) ],
+            [ "Generated At", report_value(meta, :generated_at) ]
+          ].reject { |_, value| value.blank? }
+
+          { name: "Report Info", rows: rows }
+        end
+
+        def report_value(hash, *keys)
+          keys.reduce(hash) do |current, key|
+            break nil unless current.respond_to?(:[])
+
+            current[key] || current[key.to_s]
+          end
+        end
+
+        def employment_type_label(type)
+          case type.to_s
+          when "salary"
+            "W-2 Salary"
+          when "hourly"
+            "W-2 Hourly"
+          when "contractor"
+            "1099 Contractor"
+          else
+            type.to_s.titleize
+          end
+        end
+
+        def report_group_label(group)
+          PayrollReportingGroups.label(group) || group.to_s.presence
+        end
+
+        def pay_period_lifecycle_report(pay_period)
+          user_ids = [ pay_period.calculated_by_id, pay_period.approved_by_id, pay_period.committed_by_id ].compact.uniq
+          names_by_id = visible_user_names_for_report(user_ids)
+
+          {
+            calculated: lifecycle_report_event(timestamp: pay_period.calculated_at, user_id: pay_period.calculated_by_id, names_by_id: names_by_id),
+            approved: lifecycle_report_event(timestamp: pay_period.approved_at, user_id: pay_period.approved_by_id, names_by_id: names_by_id),
+            committed: lifecycle_report_event(timestamp: pay_period.committed_at, user_id: pay_period.committed_by_id, names_by_id: names_by_id)
+          }
+        end
+
+        def lifecycle_report_event(timestamp:, user_id:, names_by_id:)
+          {
+            timestamp: timestamp,
+            actor_name: user_id.present? ? names_by_id[user_id] : nil
+          }
+        end
+
+        def visible_user_names_for_report(user_ids)
+          user_ids = Array(user_ids).compact.uniq
+          return {} if user_ids.empty?
+
+          scope = User.left_outer_joins(:company_assignments).where(id: user_ids)
+          admin_roles = User.roles.values_at("admin", "org_admin", "super_admin").compact
+          organization_id = current_user&.organization_id
+
+          if organization_id.present?
+            scope = scope.where(
+              "(users.organization_id = :organization_id AND users.role IN (:admin_roles)) OR users.company_id = :company_id OR company_assignments.company_id = :company_id",
+              company_id: current_company_id,
+              organization_id: organization_id,
+              admin_roles: admin_roles
+            )
+          else
+            scope = scope.where("users.company_id = :company_id OR company_assignments.company_id = :company_id", company_id: current_company_id)
+          end
+
+          names_by_id = scope.distinct.pluck("users.id", "users.name").to_h
+          missing_ids = user_ids - names_by_id.keys
+          if missing_ids.any?
+            names_by_id.merge!(User.super_admin.where(id: missing_ids).pluck("users.id", "users.name").to_h)
+          end
+          names_by_id
+        end
+
+        PAYROLL_REGISTER_HEADERS = [
+          "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
+          "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
+          "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Non-Taxable Pay",
+          "Gross Pay", "FIT", "Additional W/H", "SS Tax", "Medicare Tax",
+          "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
+          "Employer Match", "Employer Roth Match", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
+          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
+        ].freeze
+
+        CEO_PAYROLL_REGISTER_HINTS = [
+          "", "", "", "Hourly rate", "", "",
+          "For hourly employees only: Rate × Regular Hours + Rate × OT Hours × 1.5",
+          "For salary employees only", "Hourly Pay + Salary", "", "", "Tips 1 + Tips 2",
+          "One-time bonus", "Total hourly/salary pay + total tips + bonus", "Tips paid out daily",
+          "Stored calculated FIT", "Stored additional withholding", "Stored calculated Social Security", "Stored calculated Medicare",
+          "Employee retirement", "One-time loan deduction", "Recurring installment loan deduction",
+          "Employer-paid retirement and payroll-field contributions", "Stored total deductions", "Stored net pay",
+          "Gross pay + employer taxes + employer contributions", ""
+        ].freeze
+        CEO_PAYROLL_REGISTER_HEADERS = [
+          "#", "Employee", "Type", "Rate", "Regular Hours", "OT Hours", "Hourly Pay", "Salary",
+          "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Bonus", "Gross Pay", "Tips Out",
+          "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (401k)",
+          "Straight Loan", "Installment Loan", "Employer Contributions", "Total Deductions", "Net Pay", "Employer Cost", "Check #"
+        ].freeze
+        CEO_PAYROLL_REGISTER_KEYS = %i[
+          count employee type rate regular_hours overtime_hours hourly_pay salary_pay
+          total_hourly_salary tips_1 tips_2 total_tips bonus gross_pay tips_out withholding
+          additional_withholding social_security medicare retirement straight_loan installment_loan
+          employer_contributions total_deductions net_pay employer_cost check_number
+        ].freeze
+        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 14, 16, 18, 16, 14, 16, 12 ].freeze
+        CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 13, 23, 24, 25 ].freeze
+
+        def payroll_register_sheets(report)
+          employees = Array(report[:employees])
+          contractors = Array(report[:contractors])
+          adjustment_export = PayrollAdjustmentExport.new(employees + contractors)
+          field_columns = payroll_field_export_columns(employees + contractors)
+          status_note = report.dig(:meta, :payroll_status_note)
+          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          simple_register = report[:simple_register]
+          sheets = []
+          sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
+          sheets << { name: "Employees", rows: [ detail_headers ] + employee_rows }
+          sheets << { name: "Contractors", rows: [ detail_headers ] + contractor_rows } if contractor_rows.any?
+          sheets << earnings_breakdown_sheet(report)
+          sheets << deductions_breakdown_sheet(report)
+          sheets << payroll_adjustment_breakdown_sheet(report)
+          sheets << payroll_adjustment_totals_sheet(report)
+          sheets << payroll_field_breakdown_sheet(report)
+          sheets << payroll_field_totals_sheet(report)
+          sheets << payroll_register_review_sheet(simple_register) if simple_register
+          sheets << report_info_sheet(report, title: "Payroll Register")
+          sheets
+        end
+
+        def payroll_field_export_columns(workers)
+          workers.flat_map { |worker| active_payroll_field_snapshot_entries(worker) }
+            .group_by { |entry| payroll_field_export_key(entry) }
+            .map do |key, entries|
+              entry = entries.first
+              {
+                key: key,
+                label: entry[:label].to_s,
+                treatment: entry[:tax_treatment].to_s,
+                group: payroll_field_export_group(entry)
+              }
+            end
+            .sort_by { |column| [ payroll_field_export_group_order(column[:group]), column[:treatment], column[:label] ] }
+        end
+
+        def active_payroll_field_snapshot_entries(worker)
+          Array(worker[:payroll_field_entries]).reject { |entry| entry[:active] == false }
+        end
+
+        def payroll_field_export_key(entry)
+          if entry[:payroll_field_definition_id].present?
+            [ :definition, entry[:payroll_field_definition_id] ]
+          else
+            [ :entry, entry[:id] || entry[:payroll_item_id], entry[:label], entry[:kind], entry[:tax_treatment] ]
+          end
+        end
+
+        def payroll_field_export_group(entry)
+          treatment = entry[:tax_treatment].to_s
+          return :employer if treatment == "employer_contribution" || (entry[:employer_paid] == true && entry[:employee_paid] != true)
+          return :deduction if entry[:kind].to_s == "deduction" || %w[pre_tax_deduction post_tax_deduction].include?(treatment)
+
+          :addition
+        end
+
+        def payroll_field_export_group_order(group)
+          { addition: 0, deduction: 1, employer: 2 }.fetch(group, 3)
+        end
+
+        def payroll_field_export_header(column)
+          effect = { addition: "in gross", deduction: "in deductions", employer: "employer only" }.fetch(column[:group])
+          identity = column[:key][0] == :definition ? "field ##{column[:key][1]}" : "entry ##{column[:key][1]}"
+          "Payroll Field - #{column[:label]} (#{column[:treatment].humanize}; #{effect}; #{identity})"
+        end
+
+        def payroll_field_export_values(worker, columns)
+          columns.map do |column|
+            matching = active_payroll_field_snapshot_entries(worker).select do |entry|
+              payroll_field_export_key(entry) == column[:key]
+            end
+            matching.empty? ? nil : matching.sum { |entry| entry[:amount].to_f }
+          end
+        end
+
+        def cornerstone_payroll_register_sheet(simple_register)
+          columns = simple_register[:columns]
+          ceo_rows = simple_register[:rows].map { |row| CEO_PAYROLL_REGISTER_KEYS.map { |key| row[key] } }
+          total_row = CEO_PAYROLL_REGISTER_KEYS.map { |key| simple_register[:total][key] }
+          information_rows = simple_register[:pay_period_information].map { |row| [ nil, row[:label], row[:value] ] }
+
+          rows = []
+          information_header_index = rows.length
+          rows << [ "Pay Period Information" ]
+          information_start_index = rows.length
+          rows.concat(information_rows)
+          information_end_index = rows.length - 1
+          rows << []
+          hint_row_index = rows.length
+          rows << columns.map { |column| column[:hint] }
+          header_row_index = rows.length
+          rows << columns.map { |column| column[:label] }
+          data_start_index = rows.length
+          rows.concat(ceo_rows)
+          total_row_index = rows.length
+          rows << total_row
+
+          row_style_rules = [
+            { rows: information_header_index, style: :section_header },
+            { rows: information_start_index..information_end_index, styles: [ nil, :info_label, :info_value ] },
+            { rows: hint_row_index, styles: ceo_hint_styles },
+            { rows: header_row_index, styles: ceo_header_styles }
+          ]
+          row_style_rules << { rows: data_start_index...(total_row_index), styles: ceo_body_styles } if ceo_rows.any?
+          row_style_rules << { rows: total_row_index, styles: ceo_total_styles }
+
+          {
+            name: "Payroll Register",
+            rows: rows,
+            column_widths: CEO_PAYROLL_REGISTER_WIDTHS,
+            styles: ceo_register_style_definitions,
+            row_style_rules: row_style_rules,
+            row_heights: {
+              information_header_index => 24,
+              hint_row_index => 72,
+              header_row_index => 42,
+              total_row_index => 24
+            },
+            merged_cells: [
+              "A#{information_header_index + 1}:AA#{information_header_index + 1}"
+            ],
+            show_grid_lines: false,
+            zoom_scale: 80
+          }
+        end
+
+        def simple_payroll_register_payload(report)
+          ceo_rows = ceo_payroll_register_rows(Array(report[:employees]))
+          total_row = ceo_payroll_register_total_row(ceo_rows)
+          review_rows = payroll_register_review_rows(report, ceo_rows)
+          review_rows << [ "OK", nil, "No register exceptions detected", nil ] if review_rows.empty?
+
+          {
+            columns: CEO_PAYROLL_REGISTER_KEYS.each_index.map do |index|
+              {
+                key: CEO_PAYROLL_REGISTER_KEYS[index],
+                label: CEO_PAYROLL_REGISTER_HEADERS[index],
+                hint: CEO_PAYROLL_REGISTER_HINTS[index],
+                format: ceo_payroll_register_column_format(index),
+                calculated: CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index)
+              }
+            end,
+            pay_period_information: payroll_register_information_rows(report).map do |row|
+              { label: row[1], value: row[2] }
+            end,
+            rows: ceo_rows.map { |row| CEO_PAYROLL_REGISTER_KEYS.zip(row).to_h },
+            total: CEO_PAYROLL_REGISTER_KEYS.zip(total_row).to_h,
+            review: review_rows.map do |severity, employee, issue, detail|
+              { severity: severity, employee: employee, issue: issue, detail: detail }
+            end
+          }
+        end
+
+        def ceo_payroll_register_column_format(index)
+          return :count if index.zero?
+          return :text if index.in?([ 1, 2, 26 ])
+          return :number if index.in?([ 4, 5 ])
+
+          :currency
+        end
+
+        def ceo_payroll_register_rows(employees)
+          employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) }
+        end
+
+        def payroll_register_information_rows(report)
+          pp = report[:pay_period] || {}
+          meta = report[:meta] || {}
+          lifecycle = report[:lifecycle] || {}
+          [
+            [ nil, "Client", meta[:company_name] ],
+            [ nil, "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
+            [ nil, "Pay Date", pp[:pay_date] ],
+            [ nil, "Status", pp[:status].to_s.titleize ],
+            *([ [ nil, "Payroll status", meta[:payroll_status_note] ] ] if meta[:payroll_status_note]),
+            [ nil, "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
+            [ nil, "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
+            [ nil, "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
+          ]
+        end
+
+        def ceo_register_style_definitions
+          base_font = { font_name: "Arial", sz: 10 }
+          row_border = { style: :thin, color: "D9E2F3", edges: [ :bottom ] }
+          money_format = "$#,##0.00;[Red]-$#,##0.00"
+
+          {
+            section_header: base_font.merge(
+              sz: 12,
+              b: true,
+              fg_color: "FFFFFF",
+              bg_color: "1F4E78",
+              alignment: { vertical: :center }
+            ),
+            info_label: base_font.merge(b: true, fg_color: "1F4E78", alignment: { vertical: :center }),
+            info_value: base_font.merge(alignment: { vertical: :center }),
+            hint: base_font.merge(
+              sz: 9,
+              i: true,
+              fg_color: "44546A",
+              border: row_border,
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            hint_calculated: base_font.merge(
+              sz: 9,
+              i: true,
+              fg_color: "44546A",
+              bg_color: "DDEBF7",
+              border: row_border,
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            header: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              border: { style: :thin, color: "9EADBA" },
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            header_calculated: base_font.merge(
+              b: true,
+              bg_color: "BDD7EE",
+              border: { style: :thin, color: "7F9DB9" },
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            body_count: base_font.merge(border: row_border, alignment: { horizontal: :center, vertical: :center }),
+            body_text: base_font.merge(border: row_border, alignment: { vertical: :center }),
+            body_center: base_font.merge(border: row_border, alignment: { horizontal: :center, vertical: :center }),
+            body_number: base_font.merge(format_code: "0.00", border: row_border, alignment: { horizontal: :right, vertical: :center }),
+            body_currency: base_font.merge(format_code: money_format, border: row_border, alignment: { horizontal: :right, vertical: :center }),
+            body_calculated_currency: base_font.merge(
+              format_code: money_format,
+              bg_color: "F2F7FB",
+              border: row_border,
+              alignment: { horizontal: :right, vertical: :center }
+            ),
+            total: base_font.merge(b: true, bg_color: "EAF2F8", border: { style: :medium, color: "7F9DB9", edges: [ :top ] }),
+            total_text: base_font.merge(b: true, bg_color: "EAF2F8", border: { style: :medium, color: "7F9DB9", edges: [ :top ] }),
+            total_number: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              format_code: "0.00",
+              border: { style: :medium, color: "7F9DB9", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            ),
+            total_currency: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              format_code: money_format,
+              border: { style: :medium, color: "7F9DB9", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            ),
+            total_calculated_currency: base_font.merge(
+              b: true,
+              bg_color: "BDD7EE",
+              format_code: money_format,
+              border: { style: :medium, color: "5B7C99", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            )
+          }
+        end
+
+        def ceo_hint_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index) ? :hint_calculated : :hint
+          end
+        end
+
+        def ceo_header_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index) ? :header_calculated : :header
+          end
+        end
+
+        def ceo_body_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            case index
+            when 0 then :body_count
+            when 1 then :body_text
+            when 2, 26 then :body_center
+            when 4, 5 then :body_number
+            when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :body_calculated_currency
+            else :body_currency
+            end
+          end
+        end
+
+        def ceo_total_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            case index
+            when 1 then :total_text
+            when 4, 5 then :total_number
+            when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :total_calculated_currency
+            when 6..25 then :total_currency
+            else :total
+            end
+          end
+        end
+
+        def format_lifecycle_event_for_register(event)
+          event ||= {}
+          actor = event[:actor_name].presence || "Not recorded"
+          timestamp = format_report_timestamp(event[:timestamp])
+          timestamp.present? ? "#{actor} — #{timestamp}" : actor
+        end
+
+        def format_report_timestamp(timestamp)
+          return nil if timestamp.blank?
+
+          time = if timestamp.respond_to?(:in_time_zone)
+            timestamp
+          else
+            Time.zone.parse(timestamp.to_s)
+          end
+          time.in_time_zone("Pacific/Guam").strftime("%Y-%m-%d %I:%M %p ChST")
+        rescue ArgumentError, TypeError
+          timestamp.to_s
+        end
+
+        def ceo_payroll_register_row(emp, count)
+          hourly_pay = ceo_hourly_pay(emp)
+          salary_pay = ceo_salary_pay(emp)
+          tips_1, tips_2 = ceo_tip_columns(emp)
+          total_tips = money(tips_1.to_f + tips_2.to_f)
+          retirement = money(emp[:total_retirement_payment].presence || emp[:retirement_payment].to_f + emp[:roth_retirement_payment].to_f)
+          straight_loan = money(emp[:straight_loan_deduction])
+          installment_loan = money(emp[:installment_loan_payment])
+
+          [
+            count,
+            emp[:employee_name],
+            ceo_employment_type(emp),
+            emp[:employment_type].to_s == "hourly" ? money(emp[:pay_rate]) : nil,
+            ceo_regular_hours(emp),
+            emp[:overtime_hours].to_f,
+            hourly_pay,
+            salary_pay,
+            money(hourly_pay + salary_pay),
+            tips_1,
+            tips_2,
+            total_tips,
+            money(emp[:bonus]),
+            money(emp[:gross_pay]),
+            money(emp[:tips_paid_out]),
+            money(emp[:withholding_tax]),
+            money(emp[:additional_withholding]),
+            money(emp[:social_security_tax]),
+            money(emp[:medicare_tax]),
+            retirement,
+            straight_loan,
+            installment_loan,
+            money(emp[:employer_contributions_total]),
+            money(emp[:total_deductions]),
+            money(emp[:net_pay]),
+            money(emp[:employer_payroll_cost]),
+            emp[:check_number]
+          ]
+        end
+
+        def ceo_payroll_register_total_row(rows)
+          [
+            nil, "TOTAL", nil, nil,
+            sum_column(rows, 4),
+            sum_column(rows, 5),
+            sum_column(rows, 6),
+            sum_column(rows, 7),
+            sum_column(rows, 8),
+            sum_column(rows, 9),
+            sum_column(rows, 10),
+            sum_column(rows, 11),
+            sum_column(rows, 12),
+            sum_column(rows, 13),
+            sum_column(rows, 14),
+            sum_column(rows, 15),
+            sum_column(rows, 16),
+            sum_column(rows, 17),
+            sum_column(rows, 18),
+            sum_column(rows, 19),
+            sum_column(rows, 20),
+            sum_column(rows, 21),
+            sum_column(rows, 22),
+            sum_column(rows, 23),
+            sum_column(rows, 24),
+            sum_column(rows, 25),
+            nil
+          ]
+        end
+
+        def sum_column(rows, index)
+          money(rows.sum { |row| row[index].to_f })
+        end
+
+        def money(value)
+          BigDecimal(value.to_s.presence || "0").round(2).to_f
+        rescue ArgumentError, TypeError
+          0.0
+        end
+
+        def ceo_employment_type(emp)
+          emp[:employment_type].to_s == "salary" ? "Salary" : "Hourly"
+        end
+
+        def ceo_regular_hours(emp)
+          return emp[:hours_worked].to_f unless emp[:employment_type].to_s == "salary"
+
+          scheduled = emp[:scheduled_hours].to_f
+          scheduled.positive? ? scheduled : emp[:hours_worked].to_f
+        end
+
+        def ceo_hourly_pay(emp)
+          return 0.0 unless emp[:employment_type].to_s == "hourly"
+
+          wage_earnings = Array(emp[:earnings_breakdown]).select do |earning|
+            earning[:category].to_s.in?(%w[regular overtime])
+          end
+          amount = wage_earnings.sum { |earning| earning[:amount].to_f }
+          return money(amount) if amount.positive?
+
+          rate = emp[:pay_rate].to_f
+          money((emp[:hours_worked].to_f * rate) + (emp[:overtime_hours].to_f * rate * 1.5))
+        end
+
+        def ceo_salary_pay(emp)
+          return 0.0 unless emp[:employment_type].to_s == "salary"
+
+          salary_earnings = Array(emp[:earnings_breakdown]).select do |earning|
+            earning[:category].to_s == "salary"
+          end
+          amount = salary_earnings.sum { |earning| earning[:amount].to_f }
+          return money(amount) if amount.positive?
+
+          taxable_additions = emp[:bonus].to_f + emp[:reported_tips].to_f + emp[:custom_earnings_total].to_f + emp[:payroll_field_taxable_additions_total].to_f
+          money([ emp[:gross_pay].to_f - taxable_additions, 0.0 ].max)
+        end
+
+        def ceo_tip_columns(emp)
+          components = Array(emp[:tip_components]).filter_map do |component|
+            row = component.respond_to?(:to_h) ? component.to_h.with_indifferent_access : {}
+            amount = row[:amount].to_f
+            next unless amount.positive?
+
+            { bucket: ceo_tip_bucket(row[:label]), amount: amount }
+          end
+          return [ money(emp[:reported_tips]), 0.0 ] if components.empty?
+
+          if components.any? { |component| component[:bucket] }
+            tips_1 = components.select { |component| component[:bucket] == 1 }.sum { |component| component[:amount] }
+            tips_2 = components.select { |component| component[:bucket] == 2 }.sum { |component| component[:amount] }
+            unassigned = components.reject { |component| component[:bucket] }
+            unassigned.each do |component|
+              tips_1.zero? ? tips_1 += component[:amount] : tips_2 += component[:amount]
+            end
+            return [ money(tips_1), money(tips_2) ]
+          end
+
+          [ money(components.first[:amount]), money(components.drop(1).sum { |component| component[:amount] }) ]
+        end
+
+        def ceo_tip_bucket(label)
+          normalized = label.to_s.downcase.gsub(/[^a-z0-9]+/, "")
+          return 1 if normalized.in?(%w[tip1 tips1 week1 week1tip week1tips])
+          return 2 if normalized.in?(%w[tip2 tips2 week2 week2tip week2tips])
+
+          nil
+        end
+
+        def payroll_register_review_sheet(simple_register)
+          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + simple_register[:review].map do |row|
+            [ row[:severity], row[:employee], row[:issue], row[:detail] ]
+          end
+          { name: "Register Review", rows: rows }
+        end
+
+        def payroll_register_review_rows(report, ceo_rows)
+          rows = []
+          Array(report[:contractors]).each do |contractor|
+            rows << [ "Info", contractor[:employee_name], "Contractor shown separately from employee register", "Contractors remain available on the Contractors/detail sheets." ]
+          end
+
+          Array(report[:employees]).each_with_index do |emp, index|
+            row = ceo_rows[index]
+            displayed_gross = row[8].to_f + row[11].to_f + row[12].to_f
+            gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
+            if gross_diff.abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, recurring/manual adjustments, payroll fields, or non-taxable pay on detail sheets." ]
+            end
+
+            displayed_deductions = simple_register_deductions_total(emp)
+            deduction_diff = money(emp[:total_deductions].to_f - displayed_deductions)
+            if deduction_diff.abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the displayed columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, recurring/manual adjustments, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
+            end
+
+            tip_components_total = Array(emp[:tip_components]).sum { |component| component[:amount].to_f }
+            if tip_components_total.positive? && money(tip_components_total - emp[:reported_tips].to_f).abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Tip components do not tie to reported tips", "Components: #{format('$%.2f', tip_components_total)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}." ]
+            end
+
+            if emp[:tips_paid_out].to_f.positive? && money(emp[:reported_tips].to_f - emp[:tips_paid_out].to_f) < -0.01
+              rows << [ "Review", emp[:employee_name], "Tips paid out exceed reported taxable tips", "Tips out: #{format('$%.2f', emp[:tips_paid_out].to_f)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}. Confirm paid-out tips are included in taxable gross before filing." ]
+            end
+
+            rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "The employee register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
+            rows << [ "Review", emp[:employee_name], "Roth retirement present", "Retirement column includes Roth and traditional employee retirement." ] if emp[:roth_retirement_payment].to_f.positive?
+            rows << [ "Review", emp[:employee_name], "Payroll fields present", "Review Payroll Fields Detail for itemized field treatment." ] if Array(emp[:payroll_field_entries]).any? { |entry| entry[:amount].to_f.positive? }
+            rows << [ "Review", emp[:employee_name], "Recurring or manual adjustments present", "Review Payroll Adjustments Detail for the itemized amount, treatment, and saved source." ] if Array(emp[:payroll_adjustments]).any? { |entry| entry[:amount].to_f.positive? }
+          end
+
+          rows
+        end
+
+        def simple_register_deductions_total(emp)
+          money(
+            emp[:tips_paid_out].to_f + emp[:withholding_tax].to_f + emp[:additional_withholding].to_f +
+              emp[:social_security_tax].to_f + emp[:medicare_tax].to_f +
+              emp[:total_retirement_payment].to_f + emp[:straight_loan_deduction].to_f + emp[:installment_loan_payment].to_f
+          )
+        end
+
+        PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS = [
+          "Last Name", "First Name", "Employee Name", "Type", "Gross Pay",
+          "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings",
+          "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
+          "Loan Deduction", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay",
+          "Employer SS", "Employer Medicare", "Employer Match",
+          "Employer Roth Match", "Total Payroll Cost"
+        ].freeze
+
+        def payroll_summary_by_employee_sheets(report, pay_period = nil)
+          pay_period ||= PayPeriod.find_by(id: report_value(report, :pay_period, :id))
+          employees = Array(report[:employees])
+          contractors = Array(report[:contractors])
+          summary_rows = employees.map { |emp| payroll_summary_by_employee_row(emp) }
+          sheets = []
+          sheets << quickbooks_payroll_summary_sheet(pay_period) if pay_period
+          sheets += [
+            { name: "Employee Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + summary_rows },
+            payroll_summary_totals_sheet(report[:summary] || {}),
+            earnings_breakdown_sheet(report),
+            deductions_breakdown_sheet(report),
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
+            payroll_field_breakdown_sheet(report),
+            payroll_field_totals_sheet(report)
+          ]
+          if contractors.any?
+            sheets << { name: "Contractor Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + contractors.map { |emp| payroll_summary_by_employee_row(emp) } }
+            sheets << payroll_summary_totals_sheet(
+              payroll_summary_totals_for_items(contractors),
+              name: "Contractor Totals",
+              count_label: "Contractors"
+            )
+          end
+          sheets << report_info_sheet(report, title: "Payroll Summary by Employee")
+          sheets
+        end
+
+        def quickbooks_payroll_summary_sheet(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          items = qb.items
+          headers = [ "Item", "Total" ] + items.map { |item| qb.qb_employee_name(item.employee) }
+          rows = [ [ pay_period.company.name ], [ "Payroll summary by employee report" ], [ qb.qb_date_range_label ], [], headers ]
+
+          add_qb_matrix_row(rows, "Hours - total", items.sum { |item| item.total_hours.to_f }, items.map { |item| item.total_hours.to_f })
+          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item) }).select { |line| line.hours.to_f.positive? && line.label != "Gross" }.each do |line|
+            add_qb_matrix_row(rows, "Hours - #{line.label}", line.hours.to_f, items.map { |item| (qb.earnings_lines_for(item).find { |candidate| candidate.label == line.label }&.hours || 0).to_f })
+          end
+
+          add_qb_matrix_row(rows, "Gross pay - total", items.sum { |item| item.gross_pay.to_f }, items.map { |item| item.gross_pay.to_f })
+          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item).drop(1) }).each do |line|
+            add_qb_matrix_row(rows, "Gross pay - #{line.label}", line.amount.to_f, items.map { |item| (qb.earnings_lines_for(item).find { |candidate| candidate.label == line.label }&.amount || 0).to_f })
+          end
+          pre_tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.pre_tax_retirement_deduction_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Pre-tax / retirement deductions - total", -items.sum { |item| qb.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_f } }, items.map { |item| -qb.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_f } })
+          pre_tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Pre-tax / retirement deductions - #{label}", -items.sum { |item| qb.pre_tax_retirement_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.pre_tax_retirement_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          add_qb_matrix_row(rows, "Adjusted gross", items.sum { |item| qb.employee_adjusted_gross(item) }, items.map { |item| qb.employee_adjusted_gross(item) })
+
+          add_qb_matrix_row(rows, "Other pay - total", items.sum { |item| qb.other_pay_lines_for(item).sum { |line| line.amount.to_f } }, items.map { |item| qb.other_pay_lines_for(item).sum { |line| line.amount.to_f } })
+          qb.aggregate_lines(items.flat_map { |item| qb.other_pay_lines_for(item) }).each do |line|
+            add_qb_matrix_row(rows, "Other pay - #{line.label}", line.amount.to_f, items.map { |item| (qb.other_pay_lines_for(item).find { |candidate| candidate.label == line.label }&.amount || 0).to_f })
+          end
+
+          add_qb_matrix_row(rows, "Employee taxes & deductions - total", -items.sum { |item| qb.employee_tax_total(item) + qb.employee_after_tax_total(item) }, items.map { |item| -(qb.employee_tax_total(item) + qb.employee_after_tax_total(item)) })
+          add_qb_matrix_row(rows, "Employee taxes - total", -items.sum { |item| qb.employee_tax_total(item) }, items.map { |item| -qb.employee_tax_total(item) })
+          tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.employee_tax_lines_for(item) }).map(&:label)
+          tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Employee taxes - #{label}", -items.sum { |item| qb.employee_tax_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.employee_tax_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          after_tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.after_tax_deduction_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Employee after-tax deductions - total", -items.sum { |item| qb.employee_after_tax_total(item) }, items.map { |item| -qb.employee_after_tax_total(item) })
+          after_tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Employee after-tax deductions - #{label}", -items.sum { |item| qb.after_tax_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.after_tax_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+
+          add_qb_matrix_row(rows, "Net pay", items.sum { |item| item.net_pay.to_f }, items.map { |item| item.net_pay.to_f })
+          add_qb_matrix_row(rows, "Employer taxes & contributions - total", items.sum { |item| qb.employer_tax_total(item) + qb.employer_contribution_total(item) }, items.map { |item| qb.employer_tax_total(item) + qb.employer_contribution_total(item) })
+          add_qb_matrix_row(rows, "Employer taxes - total", items.sum { |item| qb.employer_tax_total(item) }, items.map { |item| qb.employer_tax_total(item) })
+          add_qb_matrix_row(rows, "Employer taxes - Social Security Employer", items.sum { |item| item.employer_social_security_tax.to_f }, items.map { |item| item.employer_social_security_tax.to_f })
+          add_qb_matrix_row(rows, "Employer taxes - Medicare Employer", items.sum { |item| item.employer_medicare_tax.to_f }, items.map { |item| item.employer_medicare_tax.to_f })
+          employer_labels = qb.aggregate_lines(items.flat_map { |item| qb.employer_contribution_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Company contributions - total", items.sum { |item| qb.employer_contribution_total(item) }, items.map { |item| qb.employer_contribution_total(item) })
+          employer_labels.each do |label|
+            add_qb_matrix_row(rows, "Company contributions - #{label}", items.sum { |item| qb.employer_contribution_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| qb.employer_contribution_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          add_qb_matrix_row(rows, "Total payroll cost", items.sum { |item| qb.total_payroll_cost(item) }, items.map { |item| qb.total_payroll_cost(item) })
+
+          { name: "QB Summary Matrix", rows: rows }
+        end
+
+        def add_qb_matrix_row(rows, label, total, values)
+          rows << [ label, total ] + values
+        end
+
+        def payroll_summary_by_employee_row(emp)
+          total_payroll_cost = emp[:gross_pay].to_f +
+            emp[:employer_social_security_tax].to_f +
+            emp[:employer_medicare_tax].to_f +
+            emp[:employer_retirement_match].to_f +
+            emp[:employer_roth_retirement_match].to_f +
+            emp[:payroll_field_employer_contributions_total].to_f
+
+          [
+            emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+            employment_type_label(emp[:employment_type]), emp[:gross_pay], emp[:reported_tips], emp[:tips_paid_out],
+            emp[:bonus], emp[:custom_earnings_total], emp[:withholding_tax],
+            emp[:social_security_tax], emp[:medicare_tax], emp[:retirement_payment],
+            emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
+            emp[:custom_deductions_total], emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
+            emp[:employer_medicare_tax], emp[:employer_retirement_match],
+            emp[:employer_roth_retirement_match], total_payroll_cost
+          ]
+        end
+
+        def payroll_summary_totals_sheet(summary, name: "Totals", count_label: "Employees")
+          rows = [
+            [ "Metric", "Amount" ],
+            [ count_label, summary[:employee_count] ],
+            [ "Gross Pay", summary[:total_gross] ],
+            [ "Reported Tips", summary[:total_reported_tips] ],
+            [ "Tips Paid Out", summary[:total_tips_paid_out] ],
+            [ "Bonus", summary[:total_bonus] ],
+            [ "Custom Earnings", summary[:total_custom_earnings] ],
+            [ "Custom Deductions", summary[:total_custom_deductions] ],
+            [ "Payroll Field Taxable Additions", summary[:total_payroll_field_taxable_additions] ],
+            [ "Payroll Field Non-Taxable Additions", summary[:total_payroll_field_non_taxable_additions] ],
+            [ "Payroll Field Pre-Tax Deductions", summary[:total_payroll_field_pre_tax_deductions] ],
+            [ "Payroll Field Post-Tax Deductions", summary[:total_payroll_field_post_tax_deductions] ],
+            [ "Payroll Field Employer Contributions", summary[:total_payroll_field_employer_contributions] ],
+            [ "FIT", summary[:total_withholding] ],
+            [ "SS Tax", summary[:total_social_security] ],
+            [ "Medicare Tax", summary[:total_medicare] ],
+            [ "401(k)", summary[:total_traditional_retirement] ],
+            [ "Roth 401(k)", summary[:total_roth_retirement] ],
+            [ "Employer Match", summary[:total_employer_traditional_retirement] ],
+            [ "Employer Roth Match", summary[:total_employer_roth_retirement] ],
+            [ "Total Deductions", summary[:total_deductions] ],
+            [ "Net Pay", summary[:total_net] ]
+          ]
+          { name: name, rows: rows }
+        end
+
+        def payroll_summary_totals_for_items(items)
+          {
+            employee_count: items.length,
+            total_gross: items.sum { |item| item[:gross_pay].to_f },
+            total_reported_tips: items.sum { |item| item[:reported_tips].to_f },
+            total_tips_paid_out: items.sum { |item| item[:tips_paid_out].to_f },
+            total_bonus: items.sum { |item| item[:bonus].to_f },
+            total_custom_earnings: items.sum { |item| item[:custom_earnings_total].to_f },
+            total_custom_deductions: items.sum { |item| item[:custom_deductions_total].to_f },
+            total_payroll_field_taxable_additions: items.sum { |item| item[:payroll_field_taxable_additions_total].to_f },
+            total_payroll_field_non_taxable_additions: items.sum { |item| item[:payroll_field_non_taxable_additions_total].to_f },
+            total_payroll_field_pre_tax_deductions: items.sum { |item| item[:payroll_field_pre_tax_deductions_total].to_f },
+            total_payroll_field_post_tax_deductions: items.sum { |item| item[:payroll_field_post_tax_deductions_total].to_f },
+            total_payroll_field_employer_contributions: items.sum { |item| item[:payroll_field_employer_contributions_total].to_f },
+            total_withholding: items.sum { |item| item[:withholding_tax].to_f },
+            total_social_security: items.sum { |item| item[:social_security_tax].to_f },
+            total_medicare: items.sum { |item| item[:medicare_tax].to_f },
+            total_traditional_retirement: items.sum { |item| item[:retirement_payment].to_f },
+            total_roth_retirement: items.sum { |item| item[:roth_retirement_payment].to_f },
+            total_employer_traditional_retirement: items.sum { |item| item[:employer_retirement_match].to_f },
+            total_employer_roth_retirement: items.sum { |item| item[:employer_roth_retirement_match].to_f },
+            total_deductions: items.sum { |item| item[:total_deductions].to_f },
+            total_net: items.sum { |item| item[:net_pay].to_f }
+          }
+        end
+
+        def payroll_export_row(emp)
+          [
+            emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+            emp[:department_name], employment_type_label(emp[:employment_type]), emp[:pay_rate],
+            emp[:hours_worked], emp[:overtime_hours], emp[:holiday_hours], emp[:pto_hours],
+            emp[:reported_tips], emp[:tips_paid_out], emp[:bonus], emp[:custom_earnings_total],
+            emp[:non_taxable_pay], emp[:gross_pay], emp[:withholding_tax], emp[:additional_withholding],
+            emp[:social_security_tax], emp[:medicare_tax], emp[:employer_social_security_tax],
+            emp[:employer_medicare_tax], emp[:retirement_payment], emp[:roth_retirement_payment],
+            emp[:employer_retirement_match], emp[:employer_roth_retirement_match],
+            emp[:straight_loan_deduction], emp[:installment_loan_payment], emp[:employer_contributions_total], emp[:employer_payroll_cost],
+            emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
+            emp[:net_pay], emp[:check_number], emp[:check_date]
+          ]
+        end
+
+        def earnings_breakdown_sheet(report)
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Category", "Label", "Hours", "Rate", "Amount" ] ]
+          (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
+            Array(emp[:earnings_breakdown]).each do |earning|
+              rows << [
+                emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+                earning[:category], earning[:label], earning[:hours], earning[:rate], earning[:amount]
+              ]
+            end
+          end
+          { name: "Earnings Detail", rows: rows }
+        end
+
+        def deductions_breakdown_sheet(report)
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Category", "Label", "Deduction Type", "Amount" ] ]
+          (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
+            Array(emp[:deductions_breakdown]).each do |deduction|
+              rows << [
+                emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+                deduction[:category], deduction[:label], deduction[:deduction_type], deduction[:amount]
+              ]
+            end
+          end
+          { name: "Deductions Detail", rows: rows }
+        end
+
+        def payroll_field_breakdown_sheet(report)
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Source", "Employee Paid", "Employer Paid", "Amount" ] ]
+          (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
+            Array(emp[:payroll_field_entries]).each do |entry|
+              rows << [
+                emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+                entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:source],
+                entry[:employee_paid], entry[:employer_paid], entry[:amount]
+              ]
+            end
+          end
+          { name: "Payroll Fields Detail", rows: rows }
+        end
+
+        def payroll_adjustment_breakdown_sheet(report)
+          export = payroll_adjustment_export(report)
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Adjustment", "Source", "Notes", "Amount" ] ]
+          (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
+            export.entries_for(emp).each do |entry|
+              rows << [
+                emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+                entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:notes], entry[:amount]
+              ]
+            end
+          end
+          { name: "Payroll Adjustments Detail", rows: rows }
+        end
+
+        def payroll_adjustment_totals_sheet(report)
+          rows = [ [ "Adjustment ID", "Kind", "Tax Treatment", "Adjustment", "Source", "Amount" ] ]
+          payroll_adjustment_export(report).grouped_totals.each do |entry|
+            rows << [ entry[:identity], entry[:kind], entry[:treatment], entry[:label], entry[:source], entry[:amount] ]
+          end
+          { name: "Payroll Adjustments Totals", rows: rows }
+        end
+
+        def payroll_adjustment_export(report)
+          PayrollAdjustmentExport.new(Array(report[:employees]) + Array(report[:contractors]))
+        end
+
+        def payroll_field_totals_sheet(report)
+          entries = (Array(report[:employees]) + Array(report[:contractors])).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+          rows = [ [ "Field ID", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
+          entries.group_by { |entry| payroll_field_export_key(entry) }.sort_by { |key, _| key.map(&:to_s) }.each do |key, grouped|
+            entry = grouped.first
+            amount = grouped.sum(BigDecimal("0")) { |item| BigDecimal(item[:amount].to_s.presence || "0") }
+            rows << [ key.join(":"), entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], amount ]
+          end
+          { name: "Payroll Fields Totals", rows: rows }
+        end
+
+        def employee_pay_history_field_breakdown_sheet(report)
+          rows = [ [ "Pay Date", "Period", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
+          Array(report[:history]).each do |item|
+            Array(item[:payroll_field_entries]).each do |entry|
+              rows << [ item[:pay_date], item[:period_description], entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], entry[:amount] ]
+            end
+          end
+          { name: "Payroll Fields", rows: rows }
+        end
+
+        def employee_pay_history_sheets(report)
+          rows = [ [
+            "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
+            "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
+            "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method"
+          ] ]
+          Array(report[:history]).each do |item|
+            rows << [
+              item.dig(:source, :label), item[:record_type], item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
+              item[:holiday_hours], item[:pto_hours], item[:reported_tips], item[:tips_paid_out],
+              item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
+              item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
+              item[:check_number], PayrollPaymentLabel.history_row(item)
+            ]
+          end
+          [
+            { name: "Pay History", rows: rows },
+            { name: "Period Summary", rows: employee_period_summary_rows(report) },
+            payroll_source_summary_sheet(report),
+            employee_pay_history_field_breakdown_sheet(report),
+            report_info_sheet(report, title: "Employee Pay History")
+          ]
+        end
+
+        def employee_period_summary_rows(report)
+          summary = report[:summary] || report[:ytd] || {}
+          period = report[:period] || {}
+          [
+            [ "Metric", "Amount" ],
+            [ "Basis", "Pay date" ],
+            [ "Start Date", period[:start_date] ],
+            [ "End Date", period[:end_date] ],
+            [ "Payroll Count", summary[:payroll_count] ],
+            [ "Gross Pay", summary[:gross_pay] ],
+            [ "Custom Earnings", summary[:custom_earnings_total] ],
+            [ "Payroll Field Taxable Additions", summary[:payroll_field_taxable_additions_total] ],
+            [ "Payroll Field Non-Taxable Additions", summary[:payroll_field_non_taxable_additions_total] ],
+            [ "Payroll Field Pre-Tax Deductions", summary[:payroll_field_pre_tax_deductions_total] ],
+            [ "Payroll Field Post-Tax Deductions", summary[:payroll_field_post_tax_deductions_total] ],
+            [ "Payroll Field Employer Contributions", summary[:payroll_field_employer_contributions_total] ],
+            [ "FIT", summary[:withholding_tax] ],
+            [ "SS Tax", summary[:social_security_tax] ],
+            [ "Medicare Tax", summary[:medicare_tax] ],
+            [ "401(k)", summary[:retirement] ],
+            [ "Roth 401(k)", summary[:roth_retirement] ],
+            [ "Tips", summary[:tips] ],
+            [ "Tips Paid Out", summary[:tips_paid_out] ],
+            [ "Bonus", summary[:bonus] ],
+            [ "Total Deductions", summary[:total_deductions] ],
+            [ "Custom Deductions", summary[:custom_deductions_total] ],
+            [ "Net Pay", summary[:net_pay] ]
+          ]
+        end
+
+        def employee_ytd_summary_rows(ytd)
+          ytd ||= {}
+          [
+            [ "Metric", "Amount" ],
+            [ "Tax Year", ytd[:year] ],
+            [ "Gross Pay", ytd[:gross_pay] ],
+            [ "Custom Earnings", ytd[:custom_earnings_total] ],
+            [ "Payroll Field Taxable Additions", ytd[:payroll_field_taxable_additions_total] ],
+            [ "Payroll Field Non-Taxable Additions", ytd[:payroll_field_non_taxable_additions_total] ],
+            [ "Payroll Field Pre-Tax Deductions", ytd[:payroll_field_pre_tax_deductions_total] ],
+            [ "Payroll Field Post-Tax Deductions", ytd[:payroll_field_post_tax_deductions_total] ],
+            [ "Payroll Field Employer Contributions", ytd[:payroll_field_employer_contributions_total] ],
+            [ "FIT", ytd[:withholding_tax] ],
+            [ "SS Tax", ytd[:social_security_tax] ],
+            [ "Medicare Tax", ytd[:medicare_tax] ],
+            [ "401(k)", ytd[:retirement] ],
+            [ "Roth 401(k)", ytd[:roth_retirement] ],
+            [ "Tips", ytd[:tips] ],
+            [ "Tips Paid Out", ytd[:tips_paid_out] ],
+            [ "Bonus", ytd[:bonus] ],
+            [ "Total Deductions", ytd[:total_deductions] ],
+            [ "Custom Deductions", ytd[:custom_deductions_total] ],
+            [ "Net Pay", ytd[:net_pay] ]
+          ]
+        end
+
+        def tax_summary_sheets(report)
+          totals = report[:totals] || {}
+          rows = [ [ "Category", "Amount" ] ] + totals.map { |key, value| [ key.to_s.humanize, value ] }
+          meta = [ [ "Field", "Value" ], [ "Year", report.dig(:period, :year) ], [ "Quarter", report.dig(:period, :quarter) ], [ "Pay Periods", report[:pay_periods_included] ], [ "Employees", report[:employee_count] ] ]
+          [
+            { name: "Summary", rows: rows },
+            { name: "Meta", rows: meta },
+            payroll_field_totals_for_report_sheet(report),
+            report_info_sheet(report, title: "Tax Summary")
+          ]
+        end
+
+        def employer_liability_sheets(report)
+          totals = report[:totals] || {}
+          employer_total = totals[:social_security_employer].to_f + totals[:medicare_employer].to_f
+          [
+            {
+              name: "Employer Liability",
+              rows: [
+                [ "Category", "Amount" ],
+                [ "Gross Wages", totals[:gross_wages] ],
+                [ "Employer Social Security", totals[:social_security_employer] ],
+                [ "Employer Medicare", totals[:medicare_employer] ],
+                [ "Total Employer Tax Liability", employer_total ]
+              ]
+            },
+            {
+              name: "Report Details",
+              rows: [
+                [ "Field", "Value" ],
+                [ "Company", report.dig(:meta, :company_name) ],
+                [ "Period", report.dig(:period, :label) ],
+                [ "Pay-date start", report.dig(:period, :start_date) ],
+                [ "Pay-date end", report.dig(:period, :end_date) ],
+                [ "Pay periods included", report[:pay_periods_included] ],
+                [ "Employees included", report[:employee_count] ],
+                [ "Basis", "Committed payroll by pay date" ]
+              ]
+            },
+            report_info_sheet(
+              report,
+              title: "Employer Tax Liability",
+              description: "Employer-side Social Security and Medicare obligations for the selected pay-date period."
+            )
+          ]
+        end
+
+        def report_period_filename_token(report)
+          year = report.dig(:period, :year)
+          quarter = report.dig(:period, :quarter)
+          return "#{year}_q#{quarter}" if year.present? && quarter.present?
+
+          start_date = report.dig(:period, :start_date)
+          end_date = report.dig(:period, :end_date)
+          return "#{start_date}_to_#{end_date}" if start_date.present? && end_date.present?
+
+          year.presence || "report"
+        end
+
+        def ytd_summary_sheets(report)
+          component_columns = Array(report[:component_columns])
+          provisional_column = report.dig(:meta, :provisional) ? [ "Payroll status" ] : []
+          rows = [ [
+            "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
+            "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
+            "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
+            "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
+            "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
+            "401(k) After Tax Label in Source Pre-Tax Bucket",
+            "Employer Social Security", "Employer Medicare", "Other Employer Taxes", "Employer Taxes Total",
+            "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match", "Other Employer Contributions",
+            "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
+            "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
+          ] + component_columns.map { |column| "Breakdown Already Included - #{column[:label]}" } + provisional_column ]
+          Array(report[:employees]).each do |emp|
+            rows << [
+              emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
+              emp[:total_hours], emp[:total_overtime_hours], emp[:gross_pay], emp[:custom_earnings_total], emp[:payroll_field_taxable_additions_total],
+              emp[:payroll_field_non_taxable_additions_total], emp[:payroll_field_pre_tax_deductions_total],
+              emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
+              emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:straight_loan_deductions], emp[:installment_loan_payments],
+              emp[:historical_loan_deductions_unclassified], emp[:health_insurance_deductions], emp[:source_labeled_after_tax_401k_in_pretax_bucket],
+              emp[:employer_social_security_tax], emp[:employer_medicare_tax], emp[:other_employer_taxes], emp[:employer_taxes_total],
+              emp[:employer_traditional_401k_match], emp[:employer_roth_401k_match], emp[:other_employer_contributions],
+              emp[:employer_contributions], emp[:employer_taxes_and_contributions_total], emp[:employer_payroll_cost],
+              emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
+              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
+              *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] },
+              *(provisional_column.empty? ? [] : [ "TEST ONLY — calculated, not paid" ])
+            ]
+          end
+          [
+            { name: "Payroll Summary", rows: rows },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
+            payroll_source_summary_sheet(report),
+            payroll_field_totals_for_report_sheet(report),
+            payroll_field_activity_for_report_sheet(report),
+            report_info_sheet(
+              report,
+              title: "Payroll Summary by Pay Date",
+              description: "Bonus is included in gross. Retirement and loan payments are included in deductions. Payroll field and source breakdown columns are views of these totals, not additional money."
+            )
+          ]
+        end
+
+        def build_annual_payroll_summary
+          AnnualPayrollSummary.new(company: Company.find(current_company_id)).call
+        end
+
+        def annual_payroll_summary_sheets(report)
+          headers = [
+            "Year", "Payrolls", "Paychecks", "Employees", "Hours", "Gross pay", "Non-taxable pay",
+            "Adjusted gross", "Pre-tax deductions", "Employee taxes", "After-tax deductions", "Net pay",
+            "Employer taxes", "Employer contributions", "Total payroll cost", "Cornerstone payrolls",
+            "QuickBooks payrolls", "QuickBooks paychecks", "Opening summaries", "Ledger adjustments",
+            "Excluded unlinked paychecks", "Excluded unlinked gross pay", "Excluded unlinked net pay"
+          ]
+          row_values = lambda do |row|
+            [
+              row[:year], row[:payroll_count], row[:paycheck_count], row[:employee_count], row[:hours],
+              row[:gross_pay], row[:non_taxable_pay], row[:adjusted_gross], row[:pretax_deductions],
+              row[:employee_taxes], row[:after_tax_deductions], row[:net_pay], row[:employer_taxes],
+              row[:employer_contributions], row[:total_payroll_cost], row[:cornerstone_payroll_count],
+              row[:quickbooks_payroll_count], row[:quickbooks_paycheck_count], row[:opening_summary_count],
+              row[:adjustment_count], row[:excluded_unlinked_paycheck_count], row[:excluded_unlinked_gross_pay],
+              row[:excluded_unlinked_net_pay]
+            ]
+          end
+          annual_rows = [ headers ] + annual_payroll_summary_rows(report).map { |row| row_values.call(row) }
+          totals = report[:totals] || {}
+
+          [
+            { name: "Annual Totals", rows: annual_rows },
+            annual_payroll_summary_information_sheet(report)
+          ]
+        end
+
+        def annual_payroll_summary_pdf_sheets(report)
+          rows = annual_payroll_summary_rows(report)
+          sheets = [
+            {
+              name: "Annual Pay Totals",
+              rows: [
+                [ "Year", "Hours", "Gross pay", "Non-taxable pay", "Adjusted gross", "Pre-tax deductions",
+                  "Employee taxes", "After-tax deductions", "Net pay" ],
+                *rows.map do |row|
+                  [ row[:year], annual_payroll_pdf_number(row[:hours]), annual_payroll_pdf_money(row[:gross_pay]),
+                    annual_payroll_pdf_money(row[:non_taxable_pay]), annual_payroll_pdf_money(row[:adjusted_gross]),
+                    annual_payroll_pdf_money(row[:pretax_deductions]), annual_payroll_pdf_money(row[:employee_taxes]),
+                    annual_payroll_pdf_money(row[:after_tax_deductions]), annual_payroll_pdf_money(row[:net_pay]) ]
+                end
+              ]
+            },
+            {
+              name: "Employer Cost and Payroll Sources",
+              rows: [
+                [ "Year", "Employer taxes", "Employer contributions", "Total payroll cost", "Cornerstone payrolls",
+                  "QuickBooks payrolls", "QuickBooks paychecks", "Opening summaries", "Ledger adjustments" ],
+                *rows.map do |row|
+                  [ row[:year], annual_payroll_pdf_money(row[:employer_taxes]),
+                    annual_payroll_pdf_money(row[:employer_contributions]), annual_payroll_pdf_money(row[:total_payroll_cost]),
+                    row[:cornerstone_payroll_count], row[:quickbooks_payroll_count], row[:quickbooks_paycheck_count],
+                    row[:opening_summary_count], row[:adjustment_count] ]
+                end
+              ]
+            }
+          ]
+
+          if report.dig(:totals, :excluded_unlinked_paycheck_count).to_i.positive?
+            sheets << {
+              name: "Excluded Unlinked Imports",
+              rows: [
+                [ "Year", "Excluded paychecks", "Excluded gross pay", "Excluded net pay" ],
+                *rows.map do |row|
+                  [ row[:year], row[:excluded_unlinked_paycheck_count],
+                    annual_payroll_pdf_money(row[:excluded_unlinked_gross_pay]),
+                    annual_payroll_pdf_money(row[:excluded_unlinked_net_pay]) ]
+                end
+              ]
+            }
+          end
+
+          sheets << annual_payroll_summary_information_sheet(report)
+        end
+
+        def annual_payroll_summary_rows(report)
+          Array(report[:years]) + [ (report[:totals] || {}).merge(year: "All years") ]
+        end
+
+        def annual_payroll_pdf_money(value)
+          ActiveSupport::NumberHelper.number_to_currency(value.to_d, precision: 2)
+        end
+
+        def annual_payroll_pdf_number(value)
+          ActiveSupport::NumberHelper.number_to_rounded(
+            value.to_d,
+            precision: 4,
+            strip_insignificant_zeros: true,
+            delimiter: ","
+          )
+        end
+
+        def annual_payroll_summary_information_sheet(report)
+          totals = report[:totals] || {}
+          {
+            name: "Report Information",
+            rows: [
+              [ "Field", "Value" ],
+              [ "Company", report.dig(:meta, :company_name) ],
+              [ "Period basis", "Pay date" ],
+              [ "Generated at", report.dig(:meta, :generated_at) ],
+              [ "Source handling", report[:source_statement] ],
+              [ "Excluded unlinked gross pay", totals[:excluded_unlinked_gross_pay] ],
+              [ "Excluded unlinked net pay", totals[:excluded_unlinked_net_pay] ]
+            ]
+          }
+        end
+
+        def payroll_source_summary_sheet(report)
+          summary = report[:source_summary] || {}
+          cornerstone = summary[:cornerstone] || {}
+          quickbooks = summary[:quickbooks] || {}
+          bridge = summary[:historical_ytd_bridge] || {}
+          adjustments = summary[:adjustments] || {}
+          {
+            name: "Payroll Sources",
+            rows: [
+              [ "Field", "Value" ],
+              [ "Basis", summary[:mode] ],
+              [ "Cornerstone payrolls", cornerstone[:payroll_count] ],
+              [ "Cornerstone paychecks", cornerstone[:paycheck_count] ],
+              [ "QuickBooks payrolls", quickbooks[:payroll_count] ],
+              [ "QuickBooks paychecks", quickbooks[:paycheck_count] ],
+              [ "QuickBooks opening summaries", quickbooks[:opening_summary_count] ],
+              [ "Excluded unlinked QuickBooks paychecks", quickbooks[:excluded_unlinked_paycheck_count] ],
+              [ "Excluded unlinked QuickBooks gross pay", quickbooks[:excluded_unlinked_gross_pay] ],
+              [ "Excluded unlinked QuickBooks net pay", quickbooks[:excluded_unlinked_net_pay] ],
+              [ "Historical ledger adjustments", adjustments[:count] ],
+              [ "Historical adjustment gross delta", adjustments[:gross_pay_delta] ],
+              [ "Historical adjustment net delta", adjustments[:net_pay_delta] ],
+              [ "Historical YTD bridge applied", bridge[:applied] ],
+              [ "Historical YTD through pay date", bridge[:through_pay_date] ],
+              [ "Source handling", summary[:source_statement] ]
+            ]
+          }
+        end
+
+        def payroll_field_totals_for_report_sheet(report)
+          rows = [ [ "Field ID", "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Employees", "Pay Periods", "Amount" ] ]
+          Array(report.dig(:payroll_fields, :totals)).each do |entry|
+            paid_by = entry[:employer_paid] ? "Employer" : "Employee"
+            rows << [
+              entry[:payroll_field_definition_id] ? "definition:#{entry[:payroll_field_definition_id]}" : "entry:#{entry[:payroll_item_field_entry_id]}",
+              entry[:label], entry[:kind], entry[:tax_treatment], entry[:category],
+              report_group_label(entry[:reporting_group]), paid_by, entry[:employee_count],
+              entry[:pay_period_count], entry[:amount]
+            ]
+          end
+          { name: "Payroll Field Totals", rows: rows }
+        end
+
+        def payroll_field_activity_for_report_sheet(report)
+          rows = [ [ "Pay Date", "Period", "Employee", "Type", "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Source", "Amount" ] ]
+          Array(report.dig(:payroll_fields, :entries)).each do |entry|
+            rows << [
+              entry[:pay_date], entry[:period_description], entry[:employee_name], entry[:employment_type],
+              entry[:label], entry[:kind], entry[:tax_treatment], entry[:category],
+              report_group_label(entry[:reporting_group]), entry[:employer_paid] ? "Employer" : "Employee",
+              entry[:source], entry[:amount]
+            ]
+          end
+          { name: "Payroll Field Activity", rows: rows }
+        end
+
+        def form_941_gu_sheets(report)
+          lines = report[:lines] || {}
+          tax_detail = report[:tax_detail] || {}
+          monthly = Array(report[:monthly_liability])
+          [
+            {
+              name: "Federal 941 Lines",
+              rows: [ [ "Line", "Amount" ] ] + lines.map { |key, value| [ key.to_s.humanize, value ] }
+            },
+            {
+              name: "Tax Detail",
+              rows: [ [ "Category", "Amount" ] ] + tax_detail.map { |key, value| [ key.to_s.humanize, value ] }
+            },
+            {
+              name: "Monthly Liability",
+              rows: [ [ "Month", "Guam Withholding For W-1", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Federal Liability Total" ] ] +
+                monthly.map { |row| [ row[:month], row[:guam_withholding_for_w1], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability] ] }
+            },
+            report_info_sheet(report, title: "Federal Form 941", description: REPORT_DESCRIPTIONS[:form_941_gu])
+          ]
+        end
+
+        def quarterly_compliance_packet_sheets(report)
+          form500_deposits = Array(report.dig(:form_500, :deposits))
+          w1_daily = Array(report.dig(:w1, :daily_liabilities))
+          w1_monthly = Array(report.dig(:w1, :monthly_liabilities))
+          swica_employees = Array(report.dig(:swica, :employees))
+          component_rows = Array(report[:component_taxability])
+          federal_lines = report.dig(:federal_941, :report, :lines) || {}
+          checks = Array(report[:review_checks])
+
+          [
+            {
+              name: "Packet Summary",
+              rows: [
+                [ "Field", "Value" ],
+                [ "Company", report.dig(:meta, :company_name) ],
+                [ "EIN", report.dig(:meta, :ein) ],
+                [ "Quarter", report.dig(:meta, :quarter_label) ],
+                [ "Period Basis", report.dig(:meta, :period_basis) ],
+                [ "Official Due Date", report.dig(:due_dates, :official_due_date) ],
+                [ "Internal Target Date", report.dig(:due_dates, :internal_target_date) ],
+                [ "Pay Periods Included", report.dig(:meta, :pay_periods_included) ]
+              ]
+            },
+            {
+              name: "Form 500 Deposits",
+              rows: [ [ "Pay Period ID", "Pay Date", "Quarter Ending", "Amount", "Status", "Payment Date", "Confirmation", "Receipt Attached" ] ] +
+                form500_deposits.map { |row| [ row[:pay_period_id], row[:pay_date], row[:quarter_ending], row[:amount], row[:status], row[:payment_date], row[:confirmation_number], row[:receipt_attached] ] }
+            },
+            {
+              name: "W-1 Daily",
+              rows: [ [ "Pay Date", "Month", "Guam Withholding Liability" ] ] +
+                w1_daily.map { |row| [ row[:pay_date], row[:month], row[:amount] ] }
+            },
+            {
+              name: "W-1 Monthly",
+              rows: [ [ "Month", "Month Number", "Guam Withholding Liability" ] ] +
+                w1_monthly.map { |row| [ row[:month], row[:month_number], row[:amount] ] }
+            },
+            {
+              name: "SWICA Detail",
+              rows: [ [ "Employee", "SSN Last 4", "Status", "Termination Date", "SWICA Wages", "Reported Tips", "Non-Taxable Pay", "Guam Withholding", "Pay Dates" ] ] +
+                swica_employees.map { |row| [ row[:name], row[:ssn_last_four], row[:status], row[:termination_date], row[:swica_wages], row[:reported_tips], row[:non_taxable_pay], row[:guam_withholding], Array(row[:pay_dates]).join(", ") ] }
+            },
+            {
+              name: "Federal 941",
+              rows: [ [ "Line", "Amount" ] ] + federal_lines.map { |key, value| [ key.to_s.humanize, value ] }
+            },
+            {
+              name: "Taxability Map",
+              rows: [ [ "Category", "Label", "Amount", "Guam Wages", "SWICA Wages", "SS Wages", "SS Tips", "Medicare Wages", "Non-Taxable" ] ] +
+                component_rows.map { |row| [ row[:category], row[:label], row[:amount], row[:guam_withholding_wages], row[:swica_wages], row[:social_security_wages], row[:social_security_tips], row[:medicare_wages_tips], row[:non_taxable] ] }
+            },
+            {
+              name: "Review Checks",
+              rows: [ [ "Check", "Status", "Message" ] ] +
+                checks.map { |row| [ row[:key], row[:status], row[:message] ] }
+            },
+            report_info_sheet(report, title: "Quarterly Compliance Packet", description: REPORT_DESCRIPTIONS[:quarterly_compliance_packet])
+          ]
+        end
+
+        def w2_gu_sheets(report)
+          headers = [
+            "Employee Name", "SSN Last 4", "Box 1 Wages Tips Other Comp", "Box 2 FIT",
+            "Box 3 SS Wages", "Box 4 SS Tax", "Box 5 Medicare Wages Tips",
+            "Box 6 Medicare Tax", "Box 7 SS Tips", "Reported Tips", "Non-Taxable Pay"
+          ]
+          rows = Array(report[:employees]).map do |emp|
+            [
+              emp[:employee_name], emp[:employee_ssn_last4], emp[:box1_wages_tips_other_comp],
+              emp[:box2_federal_income_tax_withheld], emp[:box3_social_security_wages],
+              emp[:box4_social_security_tax_withheld], emp[:box5_medicare_wages_tips],
+              emp[:box6_medicare_tax_withheld], emp[:box7_social_security_tips],
+              emp[:reported_tips_total], emp[:non_taxable_total]
+            ]
+          end
+          [
+            { name: "W-2GU", rows: [ headers ] + rows },
+            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            report_info_sheet(report, title: "W-2GU", description: REPORT_DESCRIPTIONS[:w2_gu])
+          ]
+        end
+
+        def form_1099_nec_sheets(report)
+          headers = [
+            "Contractor", "Business Name", "Type", "TIN Type", "TIN Last 4",
+            "Total Compensation", "Federal Withheld", "Payment Count", "Requires Filing", "W-9 On File", "Compliance Issues"
+          ]
+          rows = Array(report[:all_contractors]).map do |contractor|
+            [
+              contractor[:name], contractor[:business_name], contractor[:contractor_type],
+              contractor[:tin_type], contractor[:tin_last_four], contractor[:total_compensation],
+              contractor[:federal_withheld], contractor[:payment_count], contractor[:requires_filing],
+              contractor[:w9_on_file], Array(contractor[:compliance_issues]).join("; ")
+            ]
+          end
+          [
+            { name: "1099-NEC", rows: [ headers ] + rows },
+            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            report_info_sheet(report, title: "1099-NEC", description: REPORT_DESCRIPTIONS[:form_1099_nec])
+          ]
+        end
+
+        def deductions_contributions_sheets(pay_period)
+          report = build_pay_period_payroll_items_report(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          aggregate_rows = [ [ "Description", "Type", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.aggregate_deduction_contribution_rows.map do |entry|
+              employee_amount = entry.employee_amount.to_f
+              company_amount = entry.company_amount.to_f
+              [ entry.description, entry.type, employee_amount, company_amount, employee_amount + company_amount ]
+            end
+          detail_rows = [ [ "Employee", "Description", "Type", "Employee Deductions", "Company Contributions", "Plan Total", "Source" ] ] +
+            qb.deduction_contribution_entries.map do |entry|
+              employee_amount = entry.employee_amount.to_f
+              company_amount = entry.company_amount.to_f
+              [ entry.employee_name, entry.description, entry.type, employee_amount, company_amount, employee_amount + company_amount, entry.source ]
+            end
+          [
+            { name: "QB Ded-Contrib", rows: aggregate_rows },
+            { name: "Employee Detail", rows: detail_rows },
+            deductions_breakdown_sheet(report),
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
+            payroll_field_breakdown_sheet(report),
+            payroll_field_totals_sheet(report),
+            { name: "Payroll Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            report_info_sheet(report, title: "Deductions & Contributions", description: REPORT_DESCRIPTIONS[:deductions_contributions])
+          ]
+        end
+
+        def paycheck_history_sheets(pay_period)
+          report = build_pay_period_payroll_items_report(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          history_rows = [ [ "Pay Date", "Name", "Total Pay", "Net Pay", "Pay Method", "Check #", "Status" ] ] +
+            qb.paycheck_history_rows(include_voided: true).map do |row|
+              [ row[:pay_date], row[:employee_name], row[:total_pay], row[:net_pay], row[:pay_method], row[:check_number], row[:status] ]
+            end
+          detail_rows = [ [ "Pay Date", "Name", "Gross Pay", "Taxes", "Deductions", "Net Pay", "Employer Cost", "Check #", "Status" ] ] +
+            qb.paycheck_history_rows(include_voided: true).map do |row|
+              [ row[:pay_date], row[:employee_name], row[:gross_pay], row[:taxes], row[:deductions], row[:net_pay], row[:employer_cost], row[:check_number], row[:status] ]
+            end
+          [
+            { name: "QB Paycheck History", rows: history_rows },
+            { name: "Payroll Detail", rows: detail_rows },
+            { name: "Payroll Register Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            payroll_adjustment_breakdown_sheet(report),
+            payroll_adjustment_totals_sheet(report),
+            payroll_field_breakdown_sheet(report),
+            report_info_sheet(report, title: "Paycheck History", description: REPORT_DESCRIPTIONS[:paycheck_history])
+          ]
+        end
+
+        def retirement_plans_sheets(pay_period)
+          report = build_pay_period_payroll_items_report(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          retirement_rows = [ [ "Plan Section", "Employee", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.retirement_rows.map do |row|
+              [ PayrollReportingGroups.label(row.group) || row.group, row.employee_name, row.employee_amount, row.company_amount, row.employee_amount.to_f + row.company_amount.to_f ]
+            end
+          aggregate_rows = [ [ "Plan Section", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.retirement_rows.group_by(&:group).map do |group, grouped|
+              employee_amount = grouped.sum { |row| row.employee_amount.to_f }
+              company_amount = grouped.sum { |row| row.company_amount.to_f }
+              [ PayrollReportingGroups.label(group) || group, employee_amount, company_amount, employee_amount + company_amount ]
+            end
+          [
+            { name: "QB Retirement", rows: retirement_rows },
+            { name: "Retirement Totals", rows: aggregate_rows },
+            payroll_field_breakdown_sheet(report),
+            report_info_sheet(report, title: "Retirement Plans Report", description: REPORT_DESCRIPTIONS[:retirement_plans])
+          ]
+        end
+
+        def installment_loans_sheets(company, as_of_date: nil)
+          as_of = as_of_date || Date.current
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance" ] ]
+          InstallmentLoanReportBuilder.new(company, as_of_date: as_of).loans.each do |snapshot|
+            loan = snapshot[:loan]
+            employee = snapshot[:employee]
+            if snapshot[:transactions].empty?
+              rows << [ employee.last_name, employee.first_name, employee.full_name, loan.name, snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, nil, nil, nil, nil, nil ]
+            else
+              snapshot[:transactions].each do |txn|
+                rows << [
+                  employee.last_name, employee.first_name, employee.full_name, loan.name,
+                  snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, txn.transaction_date,
+                  txn.transaction_type, txn.amount, txn.balance_before, txn.balance_after
+                ]
+              end
+            end
+          end
+          [
+            { name: "Installment Loans", rows: rows },
+            report_info_sheet(
+              { meta: report_meta(company, :installment_loans) },
+              title: "Employee Installment Loans",
+              description: REPORT_DESCRIPTIONS[:installment_loans]
+            )
+          ]
+        end
+
+        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
+          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+
+          filing.blocking_count = preflight[:blocking_count]
+          if update_preflight_run_at
+            filing.warning_count = preflight[:warning_count]
+            filing.findings = preflight[:findings]
+            filing.preflight_run_at = Time.current
+          end
+
+          if preflight[:blocking_count].zero?
+            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+          else
+            filing.status = "draft"
+            filing.marked_ready_at = nil
+            filing.marked_ready_by_id = nil
+            filing.notes = nil
+          end
+        end
+
+        def filing_readiness_payload(filing)
+          {
+            year: filing.year,
+            status: filing.status,
+            blocking_count: filing.blocking_count,
+            warning_count: filing.warning_count,
+            preflight_run_at: filing.preflight_run_at,
+            marked_ready_at: filing.marked_ready_at,
+            marked_ready_by_id: filing.marked_ready_by_id,
+            notes: filing.notes,
+            findings: filing.findings,
+            findings_source: "persisted"
+          }
+        end
+
+        def revalidation_payload(preflight)
+          {
+            year: preflight[:year],
+            company_id: preflight[:company_id],
+            company_name: preflight[:company_name],
+            run_at: preflight[:run_at],
+            blocking_count: preflight[:blocking_count],
+            warning_count: preflight[:warning_count],
+            findings: preflight[:findings],
+            findings_source: "revalidation"
+          }
+        end
+
+        def parse_optional_iso_date(value, param_name:)
+          return if value.blank?
+
+          Date.iso8601(value)
+        rescue ArgumentError, Date::Error
+          render json: { error: "Invalid #{param_name} - expected YYYY-MM-DD" }, status: :unprocessable_entity
+          nil
+        end
+
+        def parse_tax_year_param
+          year = params[:year].present? ? Integer(params[:year], exception: false) : Date.current.year
+          return year if year && year > 2000 && year <= Date.current.year + 1
+
+          render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          nil
+        end
+      end
+    end
+  end
+end
