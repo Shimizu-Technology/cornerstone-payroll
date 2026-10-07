@@ -12,6 +12,7 @@ export function payrollPaymentLabel(record: PayrollPaymentRecord): string {
   if (record.payment_method_label) return record.payment_method_label;
   if (record.record_type === 'adjustment') return 'Adjustment — no payment issued';
   if (record.record_type === 'native') {
+    if (record.net_pay !== undefined && record.net_pay < 0) return 'Adjustment — no payment issued';
     if (record.net_pay === 0) return '$0 net · earnings statement only';
     if (record.payment_delivery_method === 'direct_deposit') return 'Direct deposit';
     return record.check_number ? 'Paper check' : 'Paper check · not assigned';

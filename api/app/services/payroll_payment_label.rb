@@ -7,6 +7,7 @@ class PayrollPaymentLabel
   ADJUSTMENT = "Adjustment — no payment issued"
 
   def self.for(item)
+    return ADJUSTMENT if item.net_pay.to_d.negative?
     return ZERO_NET if item.net_pay.to_d.zero?
     return "Direct deposit" if item.effective_payment_delivery_method == "direct_deposit"
 
@@ -18,6 +19,7 @@ class PayrollPaymentLabel
     return ADJUSTMENT if row[:record_type] == "adjustment"
 
     if row[:record_type] == "native"
+      return ADJUSTMENT if row[:net_pay].to_d.negative?
       return ZERO_NET if row[:net_pay].to_d.zero?
       return "Direct deposit" if row[:payment_delivery_method] == "direct_deposit"
 
