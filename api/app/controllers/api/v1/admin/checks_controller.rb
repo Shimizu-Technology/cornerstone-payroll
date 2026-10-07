@@ -50,22 +50,34 @@ module Api
           items = @pay_period.payroll_items
                              .includes(:time_tracking_entry_allocations, { check_events: :user }, employee: :department)
                              .left_outer_joins(:employee)
-                             .with_check_number
+                             .reportable.with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
-          deposit_items = @pay_period.payroll_items
-            .includes(:employee)
-            .where(payment_delivery_method: "direct_deposit", voided: false)
-            .where("net_pay > 0")
+          statement_items = @pay_period.payroll_items.not_voided.reportable
+            .includes(:employee, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries)
+            .select { |item| EarningsStatementEligibility.printable?(item) }
             .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
+          deposit_items = statement_items.select do |item|
+            item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?
+          end
 
           render json: {
             checks: loaded_items.map { |item| check_item_json(item) },
             direct_deposit_items: deposit_items.map do |item|
               { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f }
             end,
+            earnings_statement_items: statement_items.map do |item|
+              {
+                id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name,
+                gross_pay: item.gross_pay.to_f, total_deductions: item.total_deductions.to_f,
+                net_pay: item.net_pay.to_f, payment_delivery_method: item.effective_payment_delivery_method,
+                statement_only: !item.net_pay.to_d.positive?
+              }
+            end,
             meta: {
+              earnings_statement_count: statement_items.size,
+              statement_only_count: statement_items.count { |item| !item.net_pay.to_d.positive? },
               total: loaded_items.size,
               direct_deposit_count: deposit_items.size,
               delivered: loaded_items.count { |i| i.check_status == "delivered" },
@@ -73,7 +85,7 @@ module Api
               printed: loaded_items.count { |i| i.check_status == "printed" },
               unprinted: loaded_items.count { |i| i.check_status == "unprinted" },
               voided: loaded_items.count(&:voided),
-              check_stock_type: @pay_period.company.check_stock_type,
+              check_stock_type: @pay_period.company.check_stock_type
             }
           }
         end
@@ -359,13 +371,19 @@ module Api
           requested_check_number = params[:replacement_check_number].to_s.strip.presence
 
           user    = User.find(current_user_id)
-          company = @payroll_item.pay_period.company
+          period  = @payroll_item.pay_period
+          company = period.company
 
           original_check_number = nil
           new_check_number = nil
 
           ActiveRecord::Base.transaction do
+            # Share the company -> period -> item order with payment-method
+            # changes and check replacement, before reserving a new number.
+            company.lock!
+            period.lock!
             @payroll_item.lock!
+            raise ArgumentError, "Check actions are only available for committed pay periods" unless period.committed?
             raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
             if CheckReconciliationStatus.for(@payroll_item) == "cleared"
               raise ArgumentError, "Reverse the clearing evidence before reissuing this check"
