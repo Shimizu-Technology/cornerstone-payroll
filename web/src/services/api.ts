@@ -1983,7 +1983,7 @@ export const payrollItemsApi = {
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
-  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean }) =>
+  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean; update_employee_default?: boolean; retire_existing_check?: boolean; confirm_check_cancelled?: boolean; cancellation_evidence_reference?: string; expected_check_number?: string | null }) =>
     api.patch<{ payroll_item: PayrollItem; pay_period_status: string }>(
       `/admin/pay_periods/${payPeriodId}/payroll_items/${id}/payment_method`,
       { payment_delivery_method: method, ...options },
@@ -2277,6 +2277,8 @@ export interface EmployeePayHistoryRecord {
   net_pay: number;
   check_number: string | null;
   payment_delivery_method?: import('@/types').PaymentDeliveryMethod;
+  payment_method_label?: string;
+  payment_method?: string | null;
   reason?: string;
   source: {
     system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
