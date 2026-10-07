@@ -63,6 +63,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   });
   await expect(printDialog.getByText('Prepared', { exact: true }).first()).toBeVisible();
   await printDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Record Issued', exact: true }).first()).toBeVisible();
 
   const reconciliation = page.getByLabel('Manual time tracking payroll reconciliation');
   await expect(reconciliation.getByLabel('Exact time tracking time entry')).toBeVisible();

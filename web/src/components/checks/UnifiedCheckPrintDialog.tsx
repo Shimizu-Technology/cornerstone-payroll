@@ -280,11 +280,13 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
         const next = response.check_print_generation;
         setGeneration(next);
         if (next.status === 'ready' && next.check_print_run_id) {
+          // Preparation is persisted already. Notify the parent before preview
+          // loading so closing this dialog cannot leave issuance controls stale.
+          onPackageGenerated();
           await refreshRuns(next.check_print_run_id, false, workspaceToken);
           if (workspaceToken !== workspaceRequestRef.current) return;
           await loadQueue();
           if (workspaceToken !== workspaceRequestRef.current) return;
-          onPackageGenerated();
           return;
         }
         if (next.status === 'failed') return;
@@ -451,12 +453,12 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       setGeneration(response.check_print_generation);
       pendingGenerationKeyRef.current = null;
       if (response.check_print_generation.status === 'ready' && response.check_print_generation.check_print_run_id) {
+        onPackageGenerated();
         try {
           await refreshRuns(response.check_print_generation.check_print_run_id, false, workspaceToken);
           if (workspaceToken !== workspaceRequestRef.current) return;
           await loadQueue();
           if (workspaceToken !== workspaceRequestRef.current) return;
-          onPackageGenerated();
         } catch (runError) {
           if (workspaceToken === workspaceRequestRef.current) {
             setError(runError instanceof Error
