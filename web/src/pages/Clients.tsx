@@ -1,4 +1,4 @@
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, useFeedback, ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Building2, Check, X, Pencil, FlaskConical, ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Archive, RotateCcw, Clock3 } from 'lucide-react';
@@ -136,8 +136,36 @@ export function Clients() {
   const navigate = useNavigate();
   const rehearsalNameId = useId();
   const workspaceNameId = useId();
-  const { refreshCompanies, switchCompany } = useCompany();
-  const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const renameNameId = useId();
+  const { refreshCompanies, switchCompany, activeOrganizationId, activeCompanyId } = useCompany();
+  const { user, isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const { notify } = useFeedback();
+  const renameScope = `${user?.id ?? ''}:${activeOrganizationId ?? ''}:${activeCompanyId ?? ''}:${canManageClients}`;
+  const renameScopeRef = useRef(renameScope);
+  renameScopeRef.current = renameScope;
+  const renameMountedRef = useRef(true);
+  const renameRequestRef = useRef(0);
+  const renameBusyRef = useRef(false);
+  const [renameClient, setRenameClient] = useState<CompanyListItem | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError, renameErrorAttempt] = useFeedbackState<string | null>(null);
+
+  useEffect(() => {
+    renameMountedRef.current = true;
+    return () => {
+      renameMountedRef.current = false;
+      renameRequestRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    renameRequestRef.current += 1;
+    renameBusyRef.current = false;
+    setRenameClient(null);
+    setRenaming(false);
+    setRenameError(null);
+  }, [renameScope, setRenameError]);
   const canEditAssignedClients = canManageClients || isAccountant || isManager;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -551,6 +579,61 @@ export function Clients() {
       setError(err instanceof Error ? err.message : 'Failed to load client details');
     } finally {
       setLoadingEditId(null);
+    }
+  };
+
+  const handleOpenRename = (client: CompanyListItem) => {
+    if (!canManageClients || isReadOnlyWorkspace(client) || client.migration_rehearsal_status === 'pending' || renameBusyRef.current) return;
+    setRenameClient(client);
+    setRenameName(client.name);
+    setRenameError(null);
+  };
+
+  const handleCloseRename = () => {
+    if (renameBusyRef.current) return;
+    renameRequestRef.current += 1;
+    setRenameClient(null);
+    setRenameError(null);
+  };
+
+  const handleRename = async () => {
+    if (!canManageClients || !renameClient || renameBusyRef.current) return;
+    const name = renameName.trim();
+    if (!name) {
+      setRenameError('Enter a client name. This name appears on reports and earnings statements.');
+      return;
+    }
+    if (name === renameClient.name) {
+      handleCloseRename();
+      return;
+    }
+    const clientId = renameClient.id;
+    const scope = renameScopeRef.current;
+    const requestId = ++renameRequestRef.current;
+    const isCurrent = () => renameMountedRef.current && renameScopeRef.current === scope && renameRequestRef.current === requestId;
+    renameBusyRef.current = true;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      await companiesApi.update(clientId, { name });
+      if (!isCurrent()) return;
+      // Publish the save result before refreshing client context or leaving the dialog.
+      notify({ tone: 'success', message: 'Client name updated.' });
+      setCompanies(current => current.map(client => client.id === clientId ? { ...client, name } : client));
+      setRenameClient(null);
+      const results = await Promise.allSettled([companiesApi.list(), refreshCompanies()]);
+      if (!isCurrent()) return;
+      if (results[0].status === 'fulfilled') setCompanies(results[0].value.companies);
+      if (results.some(result => result.status === 'rejected')) {
+        notify({ tone: 'warning', message: 'The client name was saved, but the client list could not fully refresh. Refresh the page before opening a report.' });
+      }
+    } catch (err) {
+      if (isCurrent()) setRenameError(err instanceof Error ? err.message : 'Could not save the client name. Try again.');
+    } finally {
+      if (isCurrent()) {
+        renameBusyRef.current = false;
+        setRenaming(false);
+      }
     }
   };
 
@@ -1070,6 +1153,7 @@ export function Clients() {
                     placeholder="e.g. MoSa's Hotbox, Inc."
                     disabled={!canManageClients}
                   />
+                  <p className="mt-1 text-xs text-neutral-500">Shown on reports and earnings statements.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">EIN</label>
@@ -1343,6 +1427,11 @@ export function Clients() {
                               {loadingEditId === c.id ? 'Loading...' : 'Edit'}
                             </Button>
                           )}
+                          {canManageClients && !isReadOnlyWorkspace(c) && (
+                            <Button size="sm" variant="outline" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                              Rename
+                            </Button>
+                          )}
                           {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
@@ -1482,6 +1571,11 @@ export function Clients() {
                                 )}
                               </Button>
                             )}
+                            {canManageClients && !isReadOnlyWorkspace(c) && (
+                              <Button size="sm" variant="outline" onClick={() => handleOpenRename(c)} aria-label={`Rename ${c.name}`} disabled={renaming || c.migration_rehearsal_status === 'pending'}>
+                                Rename
+                              </Button>
+                            )}
                             {canManageClients && !isTestWorkspace(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                                 Time tracking
@@ -1500,6 +1594,27 @@ export function Clients() {
           </>
         )}
       </div>
+
+      <Dialog open={renameClient !== null} onOpenChange={open => { if (!open) handleCloseRename(); }} dismissOnEscape={!renaming}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename client</DialogTitle>
+            <DialogDescription>Use the employer name that should appear on newly generated reports and earnings statements. Previously downloaded reports and saved print packages keep their original name.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={event => { event.preventDefault(); void handleRename(); }}>
+            <div className="space-y-2 py-4">
+              <label htmlFor={renameNameId} className="text-sm font-medium">Client name</label>
+              <Input id={renameNameId} value={renameName} onChange={event => setRenameName(event.target.value)} disabled={renaming} aria-describedby={`${renameNameId}-help`} aria-invalid={Boolean(renameError)} />
+              <p id={`${renameNameId}-help`} className="text-xs text-neutral-500">Shown on reports and earnings statements.</p>
+              {renameError && <ActionFeedback retryKey={renameErrorAttempt} tone="error" message={renameError} />}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseRename} disabled={renaming}>Cancel</Button>
+              <Button type="submit" disabled={renaming}>{renaming ? 'Saving…' : 'Save client name'}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={archiveWorkspace !== null} onOpenChange={open => { if (!open && workspaceLifecycleId === null) setArchiveWorkspace(null); }}>
         <DialogContent>
