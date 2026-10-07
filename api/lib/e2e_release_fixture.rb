@@ -633,11 +633,11 @@ class E2eReleaseFixture
       period = company.pay_periods.create!(start_date: Date.new(2026, 9, 21), end_date: Date.new(2026, 10, 4),
         pay_date: Date.new(2026, 10, 8), status: "committed", cycle: "regular", committed_at: Time.current)
       records = [
-        ["Zero", "Earnings", 200, 0, "paper_check", nil, false],
-        ["Delivery", "Paper", 600, 500, "paper_check", "9100", false],
-        ["Printed", "Desktop", 600, 500, "paper_check", "9101", true],
-        ["Printed", "Mobile", 600, 500, "paper_check", "9102", true],
-        ["Zero", "Deposit", 200, 0, "direct_deposit", nil, false]
+        [ "Zero", "Earnings", 200, 0, "paper_check", nil, false ],
+        [ "Delivery", "Paper", 600, 500, "paper_check", "9100", false ],
+        [ "Printed", "Desktop", 600, 500, "paper_check", "9101", true ],
+        [ "Printed", "Mobile", 600, 500, "paper_check", "9102", true ],
+        [ "Zero", "Deposit", 200, 0, "direct_deposit", nil, false ]
       ].each_with_index.map do |values, index|
         first, last, gross, net, method, number, printed = values
         employee = create_employee!(company: company, department: department, first_name: first, last_name: last,
