@@ -27,59 +27,72 @@ class PayrollPaymentMethodService
   def call
     raise Error, "Choose paper check or direct deposit" unless Employee::PAYMENT_DELIVERY_METHODS.include?(method)
 
-    ApplicationRecord.transaction do
-      company = Company.lock.find(item.company_id)
-      period = PayPeriod.lock.find(item.pay_period_id)
-      item.lock!
-      raise Error, "Employee payment belongs to a different company" unless period.company_id == company.id
-      raise Error, "Employee payment belongs to a different company" unless item.employee.company_id == company.id
-      raise Error, "Cannot change a voided payment" if item.voided? || period.voided?
-      raise Error, "A payment method cannot be changed in this pay period" unless period.status.in?(%w[draft calculated approved committed])
-      raise Error, "There is no net payment to change. Print the earnings statement instead; no check number is needed." unless item.net_pay.to_d.positive?
-      raise Error, "This check has cleared. Resolve the bank clearing evidence before changing its delivery method." if CheckReconciliationStatus.for(item) == "cleared"
+    TimeTracking::PaymentCancellationBridge.with_item_lock(item.id) do
+      ApplicationRecord.transaction do
+        company = Company.lock.find(item.company_id)
+        period = PayPeriod.lock.find(item.pay_period_id)
+        item.lock!
+        raise Error, "Employee payment belongs to a different company" unless period.company_id == company.id
+        raise Error, "Employee payment belongs to a different company" unless item.employee.company_id == company.id
+        raise Error, "Cannot change a voided payment" if item.voided? || period.voided?
+        raise Error, "A payment method cannot be changed in this pay period" unless period.status.in?(%w[draft calculated approved committed])
+        raise Error, "There is no net payment to change. Print the earnings statement instead; no check number is needed." unless item.net_pay.to_d.positive?
+        raise Error, "This check has cleared. Resolve the bank clearing evidence before changing its delivery method." if CheckReconciliationStatus.for(item) == "cleared"
 
-      old_method = item.effective_payment_delivery_method
-      if !@expected_check_number.equal?(UNSPECIFIED_CHECK_NUMBER) && @expected_check_number.to_s != item.check_number.to_s
-        raise Error, "The original check number changed. Reopen this payroll and review the current check."
-      end
-      if @retire_existing_check && (!period.committed? || old_method != "paper_check" || method != "direct_deposit")
-        raise Error, "Check retirement is only available when changing a committed paper check to direct deposit"
-      end
-      unless old_method == method && item.payment_delivery_method == method
-        if period.committed?
-          change_committed!(company, old_method)
-        else
-          change_uncommitted!(period)
+        old_method = item.effective_payment_delivery_method
+        instrument_changes = old_method != method || item.payment_delivery_method != method
+        if instrument_changes && DirectDepositPaymentConfirmation.exists?(payroll_item_id: item.id)
+          raise Error, "A bank payment has already been confirmed. Its delivery method cannot be changed."
         end
-      end
+        raise Error, "This payment is linked to a duplicate check record. Review that reconciliation before changing its delivery method." if item.duplicate_check_linked?
+        if instrument_changes && (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(item))
+          raise Error, blocker
+        end
 
-      if @update_employee_default
-        default_service = EmployeePaymentDefaultService.new(employee: item.employee, method: method, actor: actor, ip_address: ip_address)
-        default_service.call
-        @reapproval_pay_period_ids |= default_service.reapproval_pay_period_ids
-      end
+        if !@expected_check_number.equal?(UNSPECIFIED_CHECK_NUMBER) && @expected_check_number.to_s != item.check_number.to_s
+          raise Error, "The original check number changed. Reopen this payroll and review the current check."
+        end
+        if @retire_existing_check && (!period.committed? || old_method != "paper_check" || method != "direct_deposit")
+          raise Error, "Check retirement is only available when changing a committed paper check to direct deposit"
+        end
+        unless old_method == method && item.payment_delivery_method == method
+          if period.committed?
+            change_committed!(company, old_method)
+          else
+            change_uncommitted!(period)
+          end
+        end
 
-      AuditLog.record!(
-        user: actor,
-        company_id: company.id,
-        action: "payroll_item#payment_delivery_method_changed",
-        record_type: "PayrollItem",
-        record_id: item.id,
-        subject_name: item.employee_full_name,
-        metadata: {
-          pay_period_id: period.id,
-          from: old_method,
-          to: method,
-          committed: period.committed?,
-          reason: reason.presence,
-          employee_default_updated: @update_employee_default,
-          original_check_retired: @retire_existing_check,
-          cancellation_evidence_reference: @cancellation_evidence_reference.presence
-        },
-        ip_address: ip_address
-      )
+        if @update_employee_default
+          default_service = EmployeePaymentDefaultService.new(employee: item.employee, method: method, actor: actor, ip_address: ip_address)
+          default_service.call
+          @reapproval_pay_period_ids |= default_service.reapproval_pay_period_ids
+        end
+
+        AuditLog.record!(
+          user: actor,
+          company_id: company.id,
+          action: "payroll_item#payment_delivery_method_changed",
+          record_type: "PayrollItem",
+          record_id: item.id,
+          subject_name: item.employee_full_name,
+          metadata: {
+            pay_period_id: period.id,
+            from: old_method,
+            to: method,
+            committed: period.committed?,
+            reason: reason.presence,
+            employee_default_updated: @update_employee_default,
+            original_check_retired: @retire_existing_check,
+            cancellation_evidence_reference: @cancellation_evidence_reference.presence
+          },
+          ip_address: ip_address
+        )
+      end
     end
     item.reload
+  rescue TimeTracking::Client::Error => e
+    raise Error, e.message
   end
 
   private
@@ -131,7 +144,14 @@ class PayrollPaymentMethodService
       if @retire_existing_check
         raise Error, "The original check number changed. Reopen this payroll and review the current check." if @expected_check_number.to_s != old_number.to_s || old_number.blank?
         raise Error, "Confirm that the original check cannot be paid and record its cancellation or recovery evidence." unless @confirm_check_cancelled && @cancellation_evidence_reference.present?
+        if @cancellation_evidence_reference.length > 200
+          raise Error, "Use a cancellation evidence reference of 200 characters or fewer"
+        end
+        if old_number.to_s.length > 200 && (item.time_tracking_entry_allocations.exists? || item.time_tracking_manual_allocations.where.not(status: "voided").exists?)
+          raise Error, "The original check reference exceeds the connected source limit; review it before cancellation"
+        end
       end
+      TimeTracking::PaymentCancellationBridge.validate_original_receipts!(item) if @retire_existing_check
       item.update!(payment_delivery_method: method, check_number: nil,
         check_printed_at: nil, check_print_count: 0, check_prepared_at: nil, check_prepared_source_updated_at: nil)
       if old_number.present?
@@ -139,7 +159,7 @@ class PayrollPaymentMethodService
           user: actor, event_type: "voided", check_number: old_number,
           reason: "Original check retired for direct deposit: #{reason}",
           evidence_reference: @cancellation_evidence_reference.presence,
-          details: { payment_delivery_change: true, confirmed_not_paid: true, original_check_cancelled: @confirm_check_cancelled },
+          details: { payment_delivery_change: true, confirmed_not_paid: true, original_check_cancelled: @retire_existing_check && @confirm_check_cancelled, payroll_obligation_retained: true },
           ip_address: ip_address
         )
       end

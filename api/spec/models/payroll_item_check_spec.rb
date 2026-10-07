@@ -212,6 +212,11 @@ RSpec.describe PayrollItem, type: :model do
     end
 
     it "acknowledges cancellation of an original check when delivery changes, while payroll remains committed and payable" do
+      source = time_tracking_import.time_tracking_source
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_cancellation_v1" ])
+      item.time_tracking_entry_allocations.update_all(source_user_uuid: SecureRandom.uuid)
       committed_acks = AirePayrollEntryAcknowledgement.record_for_import!(
         time_tracking_import: time_tracking_import, status: "committed", occurred_at: Time.current,
         payroll_item_id: item.id
@@ -230,11 +235,11 @@ RSpec.describe PayrollItem, type: :model do
       expect(item.attributes.slice(*money.keys)).to eq(money)
       expect(pay_period.reload).to be_committed
       expect(committed_acks.map { |ack| ack.reload.status }).to eq([ "committed" ])
-      cancellation = item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_voided")
+      cancellation = item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_cancelled")
       expect(cancellation).to have_attributes(payment_method: "paper_check", payment_reference: "5001")
       expect(cancellation.check_event.details).to include("original_check_cancelled" => true)
       expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
-        "committed", "payment_prepared", "payment_issued", "payment_voided"
+        "committed", "payment_prepared", "payment_issued", "payment_cancelled"
       )
       expect(item.aire_payroll_entry_acknowledgements.where(payment_method: "direct_deposit", status: "payment_issued")).to be_empty
     end

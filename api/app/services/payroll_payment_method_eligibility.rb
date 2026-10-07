@@ -43,6 +43,12 @@ class PayrollPaymentMethodEligibility
       "Payment methods cannot be changed in this payroll's current state."
     elsif !item.net_pay.to_d.positive?
       "There is no net payment to change. Print the earnings statement instead; no check number is needed."
+    elsif item.direct_deposit_payment_confirmation.present?
+      "A bank payment has already been confirmed. Its delivery method cannot be changed."
+    elsif item.duplicate_check_linked?
+      "This payment is linked to a duplicate check record. Review that reconciliation before changing its delivery method."
+    elsif (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(item, check_activity: check_has_activity?))
+      blocker
     elsif CheckReconciliationStatus.for(item) == "cleared"
       "This check has cleared. Resolve the bank clearing evidence before changing its delivery method."
     elsif !item.pay_period.committed? && target == "direct_deposit" && item.check_number.present?
@@ -61,6 +67,8 @@ class PayrollPaymentMethodEligibility
   end
 
   def check_has_activity?
+    return true if item.time_tracking_manual_allocations.where.not(status: "voided")
+      .where("status = 'issued' OR payment_issue_intent <> '{}'::jsonb").exists?
     return true if item.check_prepared?
 
     events = item.check_events
