@@ -33,6 +33,14 @@ RSpec.describe PayrollPaymentMethodService do
     expect(company.reload.next_check_number).to eq(2001)
   end
 
+  it "blocks delivery changes for duplicate-linked checks before the protected database trigger is reached" do
+    allow(item).to receive(:duplicate_check_linked?).and_return(true)
+    expect(PayrollPaymentMethodEligibility.new(item).call).to include(eligible: false, reason: /duplicate check/)
+    expect { switch_to("direct_deposit") }.to raise_error(described_class::Error, /duplicate check/)
+    expect(item.reload.check_number).to eq("2000")
+    expect(item.check_events).to be_empty
+  end
+
   it "assigns a fresh check number when an unissued direct deposit becomes paper" do
     item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
 
