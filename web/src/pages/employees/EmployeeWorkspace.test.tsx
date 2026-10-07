@@ -14,6 +14,10 @@ const apiMocks = vi.hoisted(() => ({
   recordActivities: vi.fn(),
 }));
 
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ hasCapability: () => true }),
+}));
+
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({ activeCompanyId: 1 }),
 }));
@@ -169,6 +173,29 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(within(phoneCard).getByText('$800.00')).toBeTruthy();
     expect(screen.queryByText('Not assigned')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'View stub for Sep 19, 2026' })[0]).toBeTruthy();
+  });
+
+  it('keeps a zero-net loan statement discoverable with an accurate payment label on phone and desktop', async () => {
+    apiMocks.employeePayHistory.mockResolvedValue({ report: {
+      summary: {},
+      history: [{
+        key: 'native:4', record_type: 'native', payroll_item_id: 4, pay_period_id: 5,
+        pay_date: '2026-10-08', period_description: 'October payroll',
+        source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+        hours_worked: 21.37, gross_pay: 197.67, total_deductions: 197.67, net_pay: 0,
+        payment_delivery_method: 'paper_check', check_number: null,
+      }],
+    } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/pay-history']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('cell', { name: '$0 net · earnings statement only' })).toBeTruthy();
+    const phoneCard = screen.getByRole('group', { name: 'Pay history for Oct 8, 2026' });
+    expect(within(phoneCard).getByText('$0 net · earnings statement only')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'View stub for Oct 8, 2026' })).toHaveLength(2);
+    expect(screen.queryByText('Paper check · not assigned')).toBeNull();
   });
 
   it('previews a Cornerstone stub from history and offers no stub for imported history', async () => {
