@@ -18,6 +18,16 @@ vi.mock('@/services/api', () => ({
   payStubsApi: { batchPdf: apiMocks.batchPdf, directDepositStubsPdf: apiMocks.directDepositStubsPdf },
 }));
 
+vi.mock('@/components/documents/PdfPreview', () => ({
+  PdfPreview: ({ artifact, onClose }: { artifact: { blob: Blob; filename: string; title?: string } | null; onClose: () => void }) => artifact ? (
+    <section role="dialog" aria-label={artifact.title}>
+      <p>{artifact.filename}</p>
+      <p>Shared PDF preview</p>
+      <button onClick={onClose}>Close PDF preview</button>
+    </section>
+  ) : null,
+}));
+
 const check = {
   id: 42,
   pay_period_id: 8,
@@ -142,12 +152,10 @@ describe('ChecksPanel earnings statements', () => {
     expect((screen.getByRole('button', { name: 'Print all earnings statements' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(statement).getByRole('button', { name: 'View' }));
     const preview = await screen.findByRole('dialog', { name: 'Earnings statement — Casey Zero' });
-    expect(within(preview).getByTitle('Earnings statement PDF for Casey Zero')).toBeTruthy();
-    fireEvent.click(within(preview).getByRole('button', { name: 'Download statement' }));
-    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledTimes(2));
+    expect(within(preview).getByText('Shared PDF preview')).toBeTruthy();
+    await waitFor(() => expect(apiMocks.batchPdf).toHaveBeenCalledTimes(1));
     expect(apiMocks.batchPdf).toHaveBeenNthCalledWith(1, 8, [43]);
-    expect(apiMocks.batchPdf).toHaveBeenNthCalledWith(2, 8, [43]);
-    fireEvent.click(within(preview).getByRole('button', { name: 'Close' }));
+    fireEvent.click(within(preview).getByRole('button', { name: 'Close PDF preview' }));
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:statement-test'));
   });
 

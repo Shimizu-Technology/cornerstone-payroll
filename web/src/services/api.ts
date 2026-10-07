@@ -502,7 +502,7 @@ export const employeesApi = {
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
-    api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
+    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
@@ -1984,7 +1984,7 @@ export const payrollItemsApi = {
   recalculate: (payPeriodId: number, id: number) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
   updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean; update_employee_default?: boolean; retire_existing_check?: boolean; confirm_check_cancelled?: boolean; cancellation_evidence_reference?: string; expected_check_number?: string | null }, companyId?: number) =>
-    api.patch<{ payroll_item: PayrollItem; pay_period_status: string }>(
+    api.patch<{ payroll_item: PayrollItem; pay_period_status: string; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(
       `/admin/pay_periods/${payPeriodId}/payroll_items/${id}/payment_method`,
       { payment_delivery_method: method, ...options },
       { companyId },

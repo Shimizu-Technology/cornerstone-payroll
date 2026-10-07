@@ -11,7 +11,7 @@ import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
@@ -78,7 +78,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [statementItems, setStatementItems] = useState<EarningsStatementItem[]>([]);
   const [statementSearch, setStatementSearch] = useState('');
-  const [statementPreview, setStatementPreview] = useState<{ item: EarningsStatementItem; url: string } | null>(null);
+  const [statementPreview, setStatementPreview] = useState<PdfArtifact | null>(null);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,11 +128,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
-
-  useEffect(() => {
-    const url = statementPreview?.url;
-    return () => { if (url) URL.revokeObjectURL(url); };
-  }, [statementPreview?.url]);
 
   // ---- Preview single check PDF ----
   const handlePreviewPdf = async (item: CheckItem) => {
@@ -433,7 +428,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     setActionLoading({ id: item.id, action: 'stub' });
     try {
       const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
-      if (request === loadRequest.current) setStatementPreview({ item, url: URL.createObjectURL(result.blob) });
+      if (request === loadRequest.current) setStatementPreview({
+        blob: result.blob,
+        filename: result.filename || `earnings_statement_${item.id}.pdf`,
+        title: `Earnings statement — ${item.employee_name}`,
+        note: 'Print on plain paper. This statement does not issue a check or bank transfer.',
+      });
     } catch (err) {
       notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to open earnings statement' });
     } finally {
@@ -860,22 +860,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         />
       )}
 
-      <Dialog open={statementPreview !== null} onOpenChange={(open) => { if (!open) setStatementPreview(null); }}>
-        <DialogContent className="dialog-wide flex h-[90dvh] flex-col">
-          <DialogHeader>
-            <DialogTitle>Earnings statement — {statementPreview?.item.employee_name}</DialogTitle>
-            <DialogDescription>Print on plain paper. This statement does not issue a check or bank transfer.</DialogDescription>
-          </DialogHeader>
-          {statementPreview && <>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void handlePrintStubForItem(statementPreview.item)} disabled={isActionLoading(statementPreview.item.id, 'stub')}>Print statement</Button>
-              <Button size="sm" variant="outline" onClick={() => void handleDownloadStubForItem(statementPreview.item)} disabled={isActionLoading(statementPreview.item.id, 'stub')}>Download statement</Button>
-              <Button size="sm" variant="outline" onClick={() => setStatementPreview(null)}>Close</Button>
-            </div>
-            <iframe src={statementPreview.url} title={`Earnings statement PDF for ${statementPreview.item.employee_name}`} className="min-h-0 flex-1 rounded-lg border bg-neutral-50" />
-          </>}
-        </DialogContent>
-      </Dialog>
+      <PdfPreview artifact={statementPreview} onClose={() => setStatementPreview(null)} />
 
       {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
       {previewUrl && previewItem && createPortal(

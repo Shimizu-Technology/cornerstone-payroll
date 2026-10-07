@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   employeesList: vi.fn(),
   recordActivities: vi.fn(),
   updatePaymentMethod: vi.fn(),
+  getPayrollItem: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
 }));
@@ -42,7 +43,7 @@ vi.mock('@/services/api', () => ({
   employeesApi: { list: apiMocks.employeesList },
   recordActivitiesApi: { list: apiMocks.recordActivities },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
-  payrollItemsApi: { updatePaymentMethod: apiMocks.updatePaymentMethod },
+  payrollItemsApi: { get: apiMocks.getPayrollItem, updatePaymentMethod: apiMocks.updatePaymentMethod },
 }));
 
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
@@ -115,6 +116,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
       filename: 'void_rehearsal_checks_2026-09-24.pdf',
     });
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
     apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
     apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
     apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
@@ -315,6 +317,7 @@ describe('PayRunWorkspace check status refresh', () => {
       payroll_items: [{ ...payrollItem, check_number: '4401', check_status: 'unprinted' }],
     } });
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
 
     render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
       <Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes>
@@ -326,9 +329,9 @@ describe('PayRunWorkspace check status refresh', () => {
     expect(within(phoneCard).getByText('$500.00')).toBeTruthy();
     expect(within(phoneCard).getByText('Assigned')).toBeTruthy();
     expect(within(desktopRow).getByText('Assigned')).toBeTruthy();
-    expect(within(desktopRow).getByRole('button', { name: 'Switch for this run' })).toBeTruthy();
-    fireEvent.click(within(phoneCard).getByRole('button', { name: 'Switch for this run' }));
-    expect(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' })).toBeTruthy();
+    expect(within(desktopRow).getByRole('button', { name: 'Change payment method for Alice Reyes' })).toBeTruthy();
+    fireEvent.click(within(phoneCard).getByRole('button', { name: 'Change payment method for Alice Reyes' }));
+    expect(await screen.findByRole('textbox', { name: 'Reason for changing this payment (at least 10 characters)' })).toBeTruthy();
   });
 
   it('updates the pay-run summary when a check action changes its status', async () => {
@@ -351,6 +354,7 @@ describe('PayRunWorkspace check status refresh', () => {
     };
     apiMocks.getPayPeriod.mockResolvedValueOnce({ pay_period: preparedRun }).mockResolvedValueOnce({ pay_period: issuedRun });
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
 
     render(
       <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>
@@ -372,6 +376,7 @@ describe('PayRunWorkspace check status refresh', () => {
     apiMocks.isAdmin = true;
     apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
     const preparedRun = {
       ...payRun,
       status: 'committed',
@@ -415,6 +420,7 @@ describe('PayRunWorkspace check status refresh', () => {
     apiMocks.isAdmin = true;
     apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
     apiMocks.updatePaymentMethod.mockResolvedValue({});
     const checkRun = {
       ...payRun,
@@ -443,10 +449,10 @@ describe('PayRunWorkspace check status refresh', () => {
 
     expect(await screen.findAllByText('Assigned')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Switch for this run' })[0]);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Reason (at least 10 characters)' }), { target: { value: 'Payment not yet released' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this payment has not been issued/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm switch' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change payment method for Alice Reyes' })[0]);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Reason for changing this payment (at least 10 characters)' }), { target: { value: 'Payment not yet released' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /I verified that this payment has not been paid/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save payment method' }));
     await waitFor(() => expect(apiMocks.getPayPeriod).toHaveBeenCalledTimes(3));
 
     await act(async () => { resolveSwitchRefresh({ pay_period: depositRun }); });
@@ -461,6 +467,7 @@ describe('PayRunWorkspace check status refresh', () => {
     apiMocks.isAdmin = true;
     apiMocks.activeCompany = { id: 7, payroll_environment: 'live' };
     apiMocks.printQueue.mockResolvedValue({ items: [] });
+    apiMocks.getPayrollItem.mockResolvedValue({ payroll_item: { ...payrollItem, check_number: '4401', payment_method_change: { eligible: true, mode: 'simple', target_method: 'direct_deposit', original_check_number: '4401', requires_unpaid_confirmation: true, requires_check_cancellation: false, reason: null } } });
     const preparedRun = {
       ...payRun,
       status: 'committed',

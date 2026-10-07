@@ -1372,6 +1372,7 @@ module Api
             check_number: item.check_number,
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
+            earnings_statement_eligible: EarningsStatementEligibility.printable?(item),
             employee_payment_delivery_method: item.employee&.payment_delivery_method,
             payment_method_change: PayrollPaymentMethodEligibility.new(item).call,
             check_printed_at: item.check_printed_at,
