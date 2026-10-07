@@ -9,6 +9,11 @@ describe('payrollPaymentLabel', () => {
     expect(payrollPaymentLabel({ record_type: 'native', net_pay: 700, check_number: '100' })).toBe('Paper check');
   });
 
+  it('does not describe negative native corrections as deposit or paper-check payments', () => {
+    expect(payrollPaymentLabel({ record_type: 'native', payment_delivery_method: 'direct_deposit', net_pay: -50 })).toBe('Adjustment — no payment issued');
+    expect(payrollPaymentLabel({ record_type: 'native', payment_delivery_method: 'paper_check', net_pay: -50, check_number: '100' })).toBe('Adjustment — no payment issued');
+  });
+
   it('preserves imported evidence and leaves an absent method unknown', () => {
     expect(payrollPaymentLabel({ record_type: 'imported', payment_method: 'Direct Deposit', net_pay: 700 })).toBe('Direct deposit');
     expect(payrollPaymentLabel({ record_type: 'imported', net_pay: 700 })).toBe('Not recorded');
