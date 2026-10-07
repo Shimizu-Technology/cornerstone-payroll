@@ -145,7 +145,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         expect((await selectedDownload).suggestedFilename()).toContain('selected_paystubs');
         const zeroResponse = await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${fixture.delivery_zero_item_id}`);
         expect(zeroResponse.ok()).toBe(true);
-        expect((await zeroResponse.json()).payroll_item).toMatchObject({ check_number: null, check_print_count: 0, net_pay: '0.0' });
+        expect((await zeroResponse.json()).payroll_item).toMatchObject({ check_number: null, net_pay: '0.0' });
+        const zeroRun = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}`)).json()).pay_period;
+        expect(zeroRun.payroll_items.find((row: { id: number }) => row.id === fixture.delivery_zero_item_id)).toMatchObject({ check_number: null, check_print_count: 0 });
 
         const employeeId = width === 390 ? fixture.delivery_mobile_employee_id : fixture.delivery_desktop_employee_id;
         const itemId = width === 390 ? fixture.delivery_mobile_item_id : fixture.delivery_desktop_item_id;
@@ -163,7 +165,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         await expect(change).toHaveCount(0);
         await expect(page.locator('[data-feedback-portal]')).toContainText('Future payroll default also updated');
         const after = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}/payroll_items/${itemId}`)).json()).payroll_item;
-        expect(after).toMatchObject({ check_number: null, payment_delivery_method: 'direct_deposit', voided: false });
+        expect(after).toMatchObject({ check_number: null, payment_delivery_method: 'direct_deposit' });
+        const changedRun = (await (await context.request.get(`${apiBaseUrl}admin/pay_periods/${fixture.delivery_pay_period_id}`)).json()).pay_period;
+        expect(changedRun.payroll_items.find((row: { id: number }) => row.id === itemId)).toMatchObject({ voided: false, check_number: null });
         for (const key of ['gross_pay', 'net_pay', 'withholding_tax', 'social_security_tax', 'medicare_tax', 'loan_payment', 'total_deductions']) expect(after[key]).toEqual(before[key]);
         await page.goto(`/companies/${fixture.delivery_company_id}/employees/${employeeId}/pay-setup`);
         await page.getByRole('button', { name: 'Change future payment method', exact: true }).click();

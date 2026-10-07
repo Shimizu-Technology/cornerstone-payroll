@@ -25,6 +25,7 @@ interface ChecksPanelProps {
   searchTerm?: string;
   refreshToken?: number;
   onChecksChanged?: () => Promise<void>;
+  onChangePaymentMethod?: (payrollItemId: number) => void;
 }
 
 type CheckAction = 'preview' | 'stub';
@@ -72,7 +73,7 @@ function eventLabel(eventType: string): string {
   }
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod }: ChecksPanelProps) {
   const { notify } = useFeedback();
   const loadRequest = useRef(0);
   const [checks, setChecks] = useState<CheckItem[]>([]);
@@ -553,6 +554,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                           <p className="ml-7 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
                         <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end">
+                          {!item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
                           <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
                           <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Print</Button>
                           <Button size="sm" variant="outline" onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
