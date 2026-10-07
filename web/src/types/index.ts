@@ -1417,6 +1417,7 @@ export interface PayrollItem {
   payment_delivery_method?: PaymentDeliveryMethod | null;
   employee_payment_delivery_method?: PaymentDeliveryMethod | null;
   effective_payment_delivery_method?: PaymentDeliveryMethod;
+  payment_method_change?: PaymentMethodChangeEligibility;
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -1733,7 +1734,30 @@ export interface CheckItem {
   events: CheckEvent[];
 }
 
+export interface PaymentMethodChangeEligibility {
+  eligible: boolean;
+  mode: 'simple' | 'retire_check' | 'blocked';
+  reason: string | null;
+  target_method: PaymentDeliveryMethod;
+  requires_unpaid_confirmation: boolean;
+  requires_check_cancellation: boolean;
+  original_check_number: string | null;
+}
+
+export interface EarningsStatementItem {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  gross_pay: number;
+  total_deductions: number;
+  net_pay: number;
+  payment_delivery_method: PaymentDeliveryMethod;
+  statement_only: boolean;
+}
+
 export interface CheckListMeta {
+  earnings_statement_count?: number;
+  statement_only_count?: number;
   total: number;
   direct_deposit_count: number;
   printed: number;
@@ -1745,6 +1769,7 @@ export interface CheckListMeta {
 }
 
 export interface CheckListResponse {
+  earnings_statement_items?: EarningsStatementItem[];
   checks: CheckItem[];
   direct_deposit_items: Array<{ id: number; employee_id: number; employee_name: string; net_pay: number }>;
   meta: CheckListMeta;
