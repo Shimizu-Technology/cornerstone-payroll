@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-71 / CPR-73: Payroll Correction Panel
  *
@@ -142,7 +143,7 @@ export function CorrectionPanel({
   // ---------- History ----------
   const [historyEvents, setHistoryEvents] = useState<PayPeriodCorrectionEvent[] | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyError, setHistoryError, historyErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   // Whether any modal action is in-flight (used to globally disable all action buttons)
@@ -153,14 +154,7 @@ export function CorrectionPanel({
     setHistoryEvents(null);
     setHistoryOpen(false);
     setHistoryError(null);
-  }, [
-    payPeriod.id,
-    payPeriod.pay_date,
-    payPeriod.updated_at,
-    payPeriod.correction_status,
-    payPeriod.superseded_by_id,
-    payPeriod.voided_at,
-  ]);
+  }, [payPeriod.id, payPeriod.pay_date, payPeriod.updated_at, payPeriod.correction_status, payPeriod.superseded_by_id, payPeriod.voided_at, setHistoryError]);
 
   // ----------------------------------------------------------------
   // Void source period / void correction run
@@ -460,9 +454,7 @@ export function CorrectionPanel({
       </div>
 
       {historyError && (
-        <p role="alert" className="text-sm text-red-600 rounded-md bg-red-50 border border-red-200 px-3 py-2">
-          {historyError}
-        </p>
+        <ActionFeedback retryKey={historyErrorFeedbackAttempt} tone="error" message={historyError} />
       )}
 
       {/* ---- Correction History ---- */}
@@ -1088,14 +1080,8 @@ function CorrectionModal({
           <div id={descriptionId}>{description}</div>
 
           {errorMessage && (
-            <div
-              role="alert"
-              aria-live="assertive"
-              className="mt-4 text-sm text-red-700 rounded-md bg-red-50 border border-red-200 px-3 py-2"
-            >
-              <p className="font-medium mb-0.5">Action failed</p>
-              <p>{errorMessage}</p>
-            </div>
+            <ActionFeedback tone="error" message={errorMessage}><p className="font-medium mb-0.5">Action failed</p>
+              <p>{errorMessage}</p></ActionFeedback>
           )}
         </div>
 

@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Building, Users, Check, X, AlertCircle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -32,7 +33,7 @@ export function Departments() {
 
   const [departments, setDepartments] = useState<DepartmentWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   
   // New department form
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -60,7 +61,7 @@ export function Departments() {
     } finally {
       setIsLoading(false);
     }
-  }, [companyId, isClient]);
+  }, [companyId, isClient, setError]);
 
   useEffect(() => {
     fetchDepartments();
@@ -176,10 +177,8 @@ export function Departments() {
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Error State */}
         {error && (
-          <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
-            <p className="text-danger-700">{error}</p>
-          </div>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
+            <p className="text-danger-700">{error}</p></ActionFeedback>
         )}
 
         {/* New Department Form */}

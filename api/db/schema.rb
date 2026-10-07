@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -163,7 +163,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
   end
 
   create_table "annual_retirement_limits", force: :cascade do |t|
+    t.decimal "annual_additions_limit", precision: 14, scale: 2
     t.decimal "catch_up_limit", precision: 14, scale: 2, null: false
+    t.decimal "compensation_limit", precision: 14, scale: 2
     t.datetime "created_at", null: false
     t.decimal "elective_deferral_limit", precision: 14, scale: 2, null: false
     t.decimal "enhanced_catch_up_limit", precision: 14, scale: 2, null: false
@@ -173,6 +175,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
     t.index ["tax_year"], name: "index_annual_retirement_limits_on_tax_year", unique: true
+    t.check_constraint "(annual_additions_limit IS NULL OR annual_additions_limit >= 0::numeric) AND (compensation_limit IS NULL OR compensation_limit >= 0::numeric)", name: "retirement_limits_additional_amounts"
   end
 
   create_table "annual_tax_configs", force: :cascade do |t|
@@ -874,12 +877,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
     t.decimal "employer_match_period_cap", precision: 14, scale: 2
     t.decimal "employer_match_rate", precision: 8, scale: 6, default: "0.0", null: false
     t.decimal "employer_match_ytd_before_system", precision: 14, scale: 2, default: "0.0", null: false
+    t.boolean "employer_roth_available", default: false, null: false
     t.string "limit_priority", default: "proportional", null: false
+    t.string "limitation_year_type", default: "calendar", null: false
     t.boolean "participating", default: false, null: false
     t.decimal "plan_annual_employee_limit", precision: 14, scale: 2
     t.string "plan_name", default: "401(k)", null: false
+    t.text "plan_source_reference"
+    t.string "plan_type", default: "standard_401k", null: false
     t.text "reason", null: false
+    t.decimal "regular_plan_deferral_limit", precision: 14, scale: 2
+    t.boolean "related_plan_review_required", default: false, null: false
     t.decimal "roth_amount", precision: 14, scale: 2, default: "0.0", null: false
+    t.boolean "roth_available", default: false, null: false
     t.string "roth_contribution_type", default: "percentage", null: false
     t.decimal "roth_rate", precision: 8, scale: 6, default: "0.0", null: false
     t.string "source", null: false
@@ -901,6 +911,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
     t.check_constraint "traditional_amount >= 0::numeric AND roth_amount >= 0::numeric AND employer_match_ytd_before_system >= 0::numeric AND (plan_annual_employee_limit IS NULL OR plan_annual_employee_limit >= 0::numeric) AND (employer_match_period_cap IS NULL OR employer_match_period_cap >= 0::numeric) AND (employer_match_annual_cap IS NULL OR employer_match_annual_cap >= 0::numeric)", name: "retirement_elections_amount_ranges"
     t.check_constraint "traditional_rate >= 0::numeric AND traditional_rate <= 1::numeric AND roth_rate >= 0::numeric AND roth_rate <= 1::numeric AND employer_match_rate >= 0::numeric AND employer_match_rate <= 1::numeric AND (employer_match_deferral_cap_rate IS NULL OR employer_match_deferral_cap_rate >= 0::numeric AND employer_match_deferral_cap_rate <= 1::numeric)", name: "retirement_elections_rate_ranges"
     t.check_constraint "true_up_policy::text <> 'year_to_date'::text OR employer_match_mode::text <> 'compensation_percentage'::text OR eligible_compensation::text = 'gross_wages'::text", name: "retirement_elections_true_up_compensation"
+  end
+
+  create_table "employee_retirement_year_inputs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.decimal "eligible_compensation_before_system", precision: 14, scale: 2, default: "0.0", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "employer_additions_before_system", precision: 14, scale: 2, default: "0.0", null: false
+    t.decimal "external_roth_deferrals", precision: 14, scale: 2, default: "0.0", null: false
+    t.decimal "external_traditional_deferrals", precision: 14, scale: 2, default: "0.0", null: false
+    t.decimal "non_roth_after_tax_before_system", precision: 14, scale: 2, default: "0.0", null: false
+    t.boolean "opening_balances_verified", default: false, null: false
+    t.decimal "prior_year_fica_wages", precision: 14, scale: 2
+    t.text "prior_year_wage_source"
+    t.string "prior_year_wage_status", default: "unknown", null: false
+    t.text "reason", null: false
+    t.text "source_reference", null: false
+    t.jsonb "historical_retirement_review", default: {}, null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_employee_retirement_year_inputs_on_company_id"
+    t.index ["created_by_id"], name: "index_employee_retirement_year_inputs_on_created_by_id"
+    t.index ["employee_id", "tax_year", "created_at"], name: "idx_retirement_year_inputs_latest"
+    t.index ["employee_id"], name: "index_employee_retirement_year_inputs_on_employee_id"
+    t.check_constraint "external_traditional_deferrals >= 0::numeric AND external_roth_deferrals >= 0::numeric AND eligible_compensation_before_system >= 0::numeric AND employer_additions_before_system >= 0::numeric AND non_roth_after_tax_before_system >= 0::numeric AND (prior_year_fica_wages IS NULL OR prior_year_fica_wages >= 0::numeric)", name: "retirement_year_input_amounts"
+    t.check_constraint "opening_balances_verified OR eligible_compensation_before_system = 0::numeric AND employer_additions_before_system = 0::numeric AND non_roth_after_tax_before_system = 0::numeric", name: "retirement_year_input_opening_evidence"
+    t.check_constraint "prior_year_wage_status::text = 'unknown'::text AND prior_year_fica_wages IS NULL OR prior_year_wage_status::text <> 'unknown'::text AND prior_year_fica_wages IS NOT NULL AND prior_year_wage_source IS NOT NULL AND btrim(prior_year_wage_source) <> ''::text AND (prior_year_wage_status::text <> 'no_prior_employer_wages'::text OR prior_year_fica_wages = 0::numeric)", name: "retirement_year_input_wage_evidence"
+    t.check_constraint "prior_year_wage_status::text = ANY (ARRAY['unknown'::character varying, 'verified'::character varying, 'no_prior_employer_wages'::character varying]::text[])", name: "retirement_year_input_wage_status"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "retirement_year_input_year"
+    t.check_constraint "jsonb_typeof(historical_retirement_review) = 'object'::text", name: "retirement_year_inputs_review_object"
   end
 
   create_table "employee_status_events", force: :cascade do |t|
@@ -3829,6 +3870,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
   add_foreign_key "employee_retirement_elections", "companies"
   add_foreign_key "employee_retirement_elections", "employees"
   add_foreign_key "employee_retirement_elections", "users", column: "created_by_id"
+  add_foreign_key "employee_retirement_year_inputs", "companies"
+  add_foreign_key "employee_retirement_year_inputs", "employees"
+  add_foreign_key "employee_retirement_year_inputs", "users", column: "created_by_id"
   add_foreign_key "employee_status_events", "companies"
   add_foreign_key "employee_status_events", "employees"
   add_foreign_key "employee_status_events", "users", column: "actor_id"
@@ -4534,5 +4578,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_05_130000) do
     $$ LANGUAGE plpgsql;
     CREATE TRIGGER verified_history_receipt_integrity BEFORE INSERT OR UPDATE OR DELETE
     ON aire_verified_history_rollout_receipts FOR EACH ROW EXECUTE FUNCTION protect_verified_history_receipt();
+  add_foreign_key "invoice_recurrences", "invoices", column: "source_invoice_id"
+  add_foreign_key "invoice_recurrences", "organizations"
+  add_foreign_key "invoice_recurrences", "users", column: "created_by_id"
+  add_foreign_key "invoice_send_schedules", "invoices"
+  add_foreign_key "invoice_send_schedules", "organizations"
+  add_foreign_key "invoice_send_schedules", "users", column: "created_by_id"
+  add_foreign_key "invoices", "invoice_recurrences"
+
+  execute <<~SQL
+    CREATE OR REPLACE FUNCTION prevent_retirement_year_input_mutation()
+    RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION 'employee_retirement_year_inputs are append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TRIGGER retirement_year_inputs_append_only
+    BEFORE UPDATE OR DELETE ON employee_retirement_year_inputs
+    FOR EACH ROW EXECUTE FUNCTION prevent_retirement_year_input_mutation();
   SQL
 end

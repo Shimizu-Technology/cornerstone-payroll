@@ -1,3 +1,67 @@
+const fieldNames: Record<string, string> = {
+  effective_on: 'First pay date',
+  plan_source_reference: 'Plan document or administrator reference',
+  prior_year_fica_wages: 'Prior-year Social Security wages',
+  prior_year_wage_source: 'Employer wage evidence reference',
+  historical_retirement_review: 'Historical contribution review',
+  source_reference: 'Evidence reference',
+  reason: 'Review note',
+  lock_version: 'Record version',
+};
+
+export function errorFieldLabel(field: string): string {
+  return fieldNames[field] || field.replaceAll('_', ' ');
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+function messages(value: unknown): string[] {
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap(messages);
+  if (value === null || typeof value !== 'object') return [];
+  const entry = record(value);
+  return messages(entry.error ?? entry.message);
+}
+
+/** Preserve the server's explanation and validation details in every API path. */
+export function apiErrorMessage(data: unknown, status: number): string {
+  const payload = record(data);
+  const primary = messages(payload.error);
+  const errors = Array.isArray(payload.errors) ? messages(payload.errors) : [];
+  const fields = { ...record(payload.errors), ...record(payload.details) };
+  const details = Object.entries(fields).flatMap(([field, value]) => {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) return [];
+    return value.map((message) => field === 'base' ? message : `${errorFieldLabel(field)}: ${message}`);
+  });
+  const explanations = [...new Set([...primary, ...errors, ...details])];
+  const fallback: Record<number, string> = {
+    400: 'The request could not be accepted. Check the entered values and try again.',
+    401: 'Your session could not be authenticated. Sign in again, then retry.',
+    403: 'You do not have permission for this action. Ask an administrator to check your access.',
+    404: 'This record could not be found. Refresh the list and open it again.',
+    409: 'This record has changed. Reload it and review the latest values before trying again.',
+    413: 'This file is too large. Choose a smaller file and upload it again.',
+    422: 'Some values could not be accepted. Check the form and try again.',
+    429: 'Too many requests were sent. Wait a moment and try again.',
+  };
+  if (!explanations.length) return fallback[status] || (status >= 500
+    ? 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.'
+    : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
+  const message = explanations.join('; ');
+  // These outcomes have a definite recovery step regardless of the endpoint.
+  const recovery: Record<number, string> = {
+    401: 'Sign in again, then retry.',
+    403: 'Ask an administrator to check your access.',
+    409: 'Reload the record and review the latest values before trying again.',
+    429: 'Wait a moment before trying again.',
+  };
+  return recovery[status] && !message.toLowerCase().includes(recovery[status].toLowerCase())
+    ? `${message} ${recovery[status]}` : message;
+}
+
 // ========================================
 // API Client for Cornerstone Payroll
 // ========================================
@@ -31,6 +95,18 @@ function parseContentDispositionFilename(header: string | null): string | undefi
   const standard = header.match(/filename\s*=\s*"?([^";\n]+)"?/i);
   if (standard) return standard[1].trim();
   return undefined;
+}
+
+async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throw new ApiError(
+      'The connection was interrupted. Check your internet connection and whether your changes were saved before trying again.',
+      0,
+    );
+  }
 }
 
 class ApiClient {
@@ -133,7 +209,7 @@ class ApiClient {
       (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithFeedback(url, {
       cache: 'no-store',
       ...fetchOptions,
       headers,
@@ -142,7 +218,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -185,7 +261,7 @@ class ApiClient {
       (headers as Record<string, string>)['X-Company-Id'] = String(initiatingCompanyId);
     }
 
-    const response = await fetch(this.buildUrl(endpoint), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint), {
       method: 'POST',
       headers,
       body: formData,
@@ -194,7 +270,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -212,7 +288,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint, params), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint, params), {
       method: 'GET',
       headers,
     });
@@ -220,7 +296,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -238,7 +314,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint), {
       method: 'POST',
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -247,7 +323,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -277,7 +353,7 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (initiatingCompanyId) headers['X-Company-Id'] = String(initiatingCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint, params), {
+    const response = await fetchWithFeedback(this.buildUrl(endpoint, params), {
       method: 'GET',
       headers,
     });
@@ -285,7 +361,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
+        apiErrorMessage(errorData, response.status),
         response.status,
         errorData.details,
         errorData
@@ -438,8 +514,8 @@ export const employeesApi = {
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/admin/employees/${id}`, undefined, { companyId }),
   create: (data: EmployeeFormData & { company_id: number }) =>
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
-  update: (id: number, data: Partial<EmployeeFormData>) =>
-    api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
+  update: (id: number, data: Partial<EmployeeFormData>, companyId?: number) =>
+    api.patch<{ data: Employee; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(`/admin/employees/${id}`, { employee: data }, { companyId }),
   terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
   reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
@@ -452,6 +528,10 @@ export const employeesApi = {
     api.get<{ data: import('@/types').EmployeeRetirementElection[] }>(`/admin/employees/${id}/retirement_elections`),
   createRetirementElection: (id: number, retirement_election: import('@/types').EmployeeRetirementElectionInput) =>
     api.post<{ data: import('@/types').EmployeeRetirementElection }>(`/admin/employees/${id}/retirement_elections`, { retirement_election }),
+  retirementYearInputs: (id: number) =>
+    api.get<{ data: import('@/types').EmployeeRetirementYearInput[]; historical_retirement_sources?: import('@/types').HistoricalRetirementSource[] }>(`/admin/employees/${id}/retirement_year_inputs`),
+  createRetirementYearInput: (id: number, retirement_year_input: import('@/types').EmployeeRetirementYearInputDraft) =>
+    api.post<{ data: import('@/types').EmployeeRetirementYearInput }>(`/admin/employees/${id}/retirement_year_inputs`, { retirement_year_input }),
   timeRecords: (id: number, params?: { start_date?: string; end_date?: string }) =>
     api.get<{ data: import('@/types').DailyTimeRecord[] }>(`/admin/employees/${id}/time_records`, params),
   createTimeRecord: (id: number, time_record: import('@/types').DailyTimeRecordInput) =>
@@ -884,6 +964,14 @@ export interface TaxConfigAuditLog {
   created_at: string;
 }
 
+export const annualRetirementLimitsApi = {
+  list: () => api.get<{ data: import('@/types').AnnualRetirementLimit[]; can_manage?: boolean }>('/admin/annual_retirement_limits'),
+  create: (annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
+    api.post<{ data: import('@/types').AnnualRetirementLimit }>('/admin/annual_retirement_limits', { annual_retirement_limit }),
+  update: (id: number, annual_retirement_limit: import('@/types').AnnualRetirementLimitInput) =>
+    api.patch<{ data: import('@/types').AnnualRetirementLimit }>(`/admin/annual_retirement_limits/${id}`, { annual_retirement_limit }),
+};
+
 export const taxConfigsApi = {
   list: () =>
     api.get<{ tax_configs: TaxConfig[] }>('/admin/tax_configs'),
@@ -1156,7 +1244,7 @@ export interface RunPayrollResponse {
   results: {
     success: { employee_id: number; name: string }[];
     skipped: { employee_id: number; name: string; reason: string }[];
-    errors: { employee_id: number; error: string }[];
+    errors: { employee_id: number; name?: string; error: string }[];
   };
 }
 
@@ -1184,6 +1272,7 @@ export interface RunPayrollAdjustmentEntry {
 export interface RunPayrollFieldInputEntry {
   mode: 'default' | 'override';
   amount?: number;
+  replace_request?: boolean;
 }
 
 export const payPeriodsApi = {
@@ -1502,7 +1591,7 @@ export interface TimecardImportMapping {
 export interface TimecardImportApplyResponse {
   applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
   skipped: unknown[];
-  errors: { employee_id: number; error: string }[];
+  errors: { employee_id: number; name?: string; error: string }[];
 }
 
 // ──── Full Timecard OCR types ────────────────────────────────
@@ -1961,10 +2050,11 @@ export const payrollItemsApi = {
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
-  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean }) =>
-    api.patch<{ payroll_item: PayrollItem; pay_period_status: string }>(
+  updatePaymentMethod: (payPeriodId: number, id: number, method: import('@/types').PaymentDeliveryMethod, options?: { reason?: string; confirm_not_paid?: boolean; update_employee_default?: boolean; retire_existing_check?: boolean; confirm_check_cancelled?: boolean; cancellation_evidence_reference?: string; expected_check_number?: string | null }, companyId?: number) =>
+    api.patch<{ payroll_item: PayrollItem; pay_period_status: string; payment_method_review?: { reapproval_pay_period_ids: number[] } }>(
       `/admin/pay_periods/${payPeriodId}/payroll_items/${id}/payment_method`,
       { payment_delivery_method: method, ...options },
+      { companyId },
     ),
 };
 
@@ -2260,6 +2350,8 @@ export interface EmployeePayHistoryRecord {
   net_pay: number;
   check_number: string | null;
   payment_delivery_method?: import('@/types').PaymentDeliveryMethod;
+  payment_method_label?: string;
+  payment_method?: string | null;
   reason?: string;
   source: {
     system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';

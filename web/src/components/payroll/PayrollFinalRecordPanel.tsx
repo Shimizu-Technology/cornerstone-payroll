@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -39,7 +40,7 @@ function download(blob: Blob, filename: string) {
 export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
   const [record, setRecord] = useState<PayrollFinalRecord | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
 
@@ -52,7 +53,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load the final payroll record'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [payPeriodId]);
+  }, [payPeriodId, setError]);
 
   const exportRecord = async (format: 'xlsx' | 'pdf') => {
     setExporting(format);
@@ -112,7 +113,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
           </div>
         </div>
 
-        {error && <div role="alert" className="border-t border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">{error}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         {record && (
           <div className="grid grid-cols-2 border-t border-slate-200 md:grid-cols-4">

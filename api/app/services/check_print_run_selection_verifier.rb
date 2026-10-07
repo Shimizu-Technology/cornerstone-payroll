@@ -108,12 +108,9 @@ class CheckPrintRunSelectionVerifier
     stored_digest = entry["render_input_digest"]
     return if stored_digest.blank? # Older packages keep the legacy verification contract.
 
-    current_digest = CheckPrintRenderFingerprint.for_record(
-      record,
-      company: render_company,
-      check_stock_type: run.check_stock_type
-    )
-    raise_stale!(entry, "has different rendered check or stub information") unless current_digest == stored_digest
+    matches = CheckPrintRenderFingerprint.matches_saved_record?(record, run: run,
+      company: render_company, stored_digest: stored_digest)
+    raise_stale!(entry, "has different rendered check or stub information") unless matches
   end
 
   def current_amount(record)

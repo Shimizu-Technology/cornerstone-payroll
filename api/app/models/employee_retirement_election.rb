@@ -8,9 +8,13 @@ class EmployeeRetirementElection < ApplicationRecord
   MATCH_DESTINATIONS = %w[traditional roth].freeze
   TRUE_UP_POLICIES = %w[none year_to_date].freeze
   SOURCES = %w[staff employee_creation quickbooks_history].freeze
+  PLAN_TYPES = %w[standard_401k].freeze
+  LIMITATION_YEAR_TYPES = %w[calendar non_calendar short].freeze
 
   SNAPSHOT_ATTRIBUTES = %i[
-    plan_name eligible participating traditional_contribution_type traditional_rate traditional_amount
+    plan_name plan_type limitation_year_type related_plan_review_required
+    roth_available employer_roth_available plan_source_reference regular_plan_deferral_limit
+    eligible participating traditional_contribution_type traditional_rate traditional_amount
     roth_contribution_type roth_rate roth_amount eligible_compensation catch_up_enabled limit_priority
     plan_annual_employee_limit employer_match_mode employer_match_rate employer_match_deferral_cap_rate
     employer_match_period_cap employer_match_annual_cap employer_match_ytd_before_system
@@ -30,11 +34,13 @@ class EmployeeRetirementElection < ApplicationRecord
   validates :employer_match_destination, inclusion: { in: MATCH_DESTINATIONS }
   validates :true_up_policy, inclusion: { in: TRUE_UP_POLICIES }
   validates :source, inclusion: { in: SOURCES }
+  validates :plan_type, inclusion: { in: PLAN_TYPES, message: "must be a standard 401(k); other plan types require administrator review" }
+  validates :limitation_year_type, inclusion: { in: LIMITATION_YEAR_TYPES }
   validates :traditional_rate, :roth_rate, :employer_match_rate,
     numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 1 }
   validates :employer_match_deferral_cap_rate,
     numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 1 }, allow_nil: true
-  validates :traditional_amount, :roth_amount, :plan_annual_employee_limit,
+  validates :traditional_amount, :roth_amount, :plan_annual_employee_limit, :regular_plan_deferral_limit,
     :employer_match_period_cap, :employer_match_annual_cap, :employer_match_ytd_before_system,
     numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :company_matches_employee
@@ -42,6 +48,7 @@ class EmployeeRetirementElection < ApplicationRecord
   validate :participation_requires_eligibility
   validate :configured_contributions_match_type
   validate :true_up_has_supported_compensation_history
+  validate :verified_plan_features
 
   before_update :prevent_mutation
   before_destroy :prevent_mutation
@@ -69,7 +76,7 @@ class EmployeeRetirementElection < ApplicationRecord
 
   def creator_belongs_to_company_organization
     return if created_by.blank? || company.blank?
-    return if created_by.organization_id == company.organization_id
+    return if created_by.super_admin? || created_by.organization_id == company.organization_id
 
     errors.add(:created_by, "must belong to the same organization")
   end
@@ -88,9 +95,31 @@ class EmployeeRetirementElection < ApplicationRecord
   end
 
   def true_up_has_supported_compensation_history
-    return unless true_up_policy == "year_to_date" && employer_match_mode == "compensation_percentage"
+    return unless true_up_policy == "year_to_date" && employer_match_mode != "none"
     return if eligible_compensation == "gross_wages"
 
-    errors.add(:true_up_policy, "can only reconcile a compensation-based match when all gross wages are eligible")
+    errors.add(:true_up_policy, "can only reconcile a match when all gross wages are eligible")
+  end
+
+  def verified_plan_features
+    return unless participating?
+
+    if limitation_year_type != "calendar" || related_plan_review_required?
+      errors.add(:base, "Non-calendar, short-year, or related-plan limits require retirement administrator review before payroll participation")
+    end
+    if catch_up_enabled?
+      errors.add(:plan_source_reference, "is required to verify plan catch-up permission") if plan_source_reference.blank?
+      if employee&.date_of_birth.blank? || (effective_on.present? && employee.date_of_birth > effective_on.to_date)
+        errors.add(:employee, "must have a verified date of birth before catch-up is enabled")
+      end
+    end
+    if roth_rate.to_d.positive? || roth_amount.to_d.positive?
+      errors.add(:roth_available, "must confirm the plan accepts designated Roth employee contributions") unless roth_available?
+      errors.add(:plan_source_reference, "is required to verify Roth availability") if plan_source_reference.blank?
+    end
+    if employer_match_mode != "none" && employer_match_destination == "roth"
+      errors.add(:employer_roth_available, "must confirm the plan accepts designated Roth employer contributions") unless employer_roth_available?
+      errors.add(:plan_source_reference, "is required to verify employer Roth availability and provider reporting") if plan_source_reference.blank?
+    end
   end
 end

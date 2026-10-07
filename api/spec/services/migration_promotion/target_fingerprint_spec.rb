@@ -55,4 +55,14 @@ RSpec.describe MigrationPromotion::TargetFingerprint do
 
     expect(described_class.call(company)).not_to eq(original)
   end
+
+  it "changes when annual retirement evidence is appended" do
+    employee
+    original = described_class.call(company)
+    employee.employee_retirement_year_inputs.create!(company: company, tax_year: 2026,
+      external_roth_deferrals: 500, source_reference: "Certified provider statement",
+      reason: "New annual evidence")
+
+    expect(described_class.call(company)).not_to eq(original)
+  end
 end

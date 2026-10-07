@@ -1,3 +1,4 @@
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine, CircleDollarSign, FileText, Plus, Receipt, Search, Upload, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -93,7 +94,7 @@ export function ExpenseLedger() {
   const [voidReason, setVoidReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const detailRef = useRef<HTMLElement>(null);
@@ -125,7 +126,7 @@ export function ExpenseLedger() {
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [organizationId, vendorFilter, kindFilter, debouncedSearch, statusFilter]);
+  }, [organizationId, vendorFilter, kindFilter, debouncedSearch, statusFilter, setError]);
 
   useEffect(() => {
     setExpenses([]);
@@ -261,8 +262,8 @@ export function ExpenseLedger() {
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
           Record payments from bank, card, or processor evidence. An invoice or receipt alone does not prove that a bill was paid.
         </div>
-        {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>}
-        {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {notice && <ActionFeedback tone="success" message={notice} />}
 
         <section className="grid gap-3 sm:grid-cols-3" aria-label="Expense summary for current filters">
           <SummaryCard label="Open balance" value={summaryMoney('balance_due')} note="Matching records" icon={<CircleDollarSign className="h-5 w-5" />} />

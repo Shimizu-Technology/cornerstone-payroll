@@ -1,3 +1,4 @@
+import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: VoidCheckModal
  * Confirms void with required written reason (10+ chars).
@@ -19,7 +20,7 @@ interface VoidCheckModalProps {
 export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProps) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const valid = reason.trim().length >= 10;
 
@@ -37,7 +38,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+    <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-black/50`}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-red-700">Void Check #{item.check_number}</h2>
@@ -75,7 +76,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</p>
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
         <div className="flex justify-end gap-2 pt-2">

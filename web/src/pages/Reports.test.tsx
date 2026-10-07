@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ApiError, type YtdSummaryReport } from '@/services/api';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
-import { PayrollRegisterPanel, QuarterlyCompliancePacketPanel, Reports, YtdSummaryPanel } from './Reports';
+import { PayrollRegisterPanel, QuarterlyCompliancePacketPanel, Reports, YtdSummaryPanel, EmployeePayHistoryPanel } from './Reports';
 
 function renderReportPanel(panel: ReactNode) {
   return render(<MemoryRouter><PdfPreviewProvider>{panel}</PdfPreviewProvider></MemoryRouter>);
@@ -16,15 +16,18 @@ const apiMocks = vi.hoisted(() => ({
   ytdSummary: vi.fn(),
   quarterlyCompliancePacket: vi.fn(),
   payrollHistoryList: vi.fn(),
+  employeePayHistory: vi.fn(),
+  employeesList: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
   reportsApi: {
     ytdSummary: apiMocks.ytdSummary,
+    employeePayHistory: apiMocks.employeePayHistory,
     quarterlyCompliancePacket: apiMocks.quarterlyCompliancePacket,
   },
   payrollHistoryApi: { list: apiMocks.payrollHistoryList },
-  employeesApi: {},
+  employeesApi: { list: apiMocks.employeesList },
   ApiError: class ApiError extends Error {
     data?: unknown;
 
@@ -389,5 +392,44 @@ describe('PayrollRegisterPanel', () => {
     expect(apiMocks.payrollHistoryList).toHaveBeenCalledTimes(2);
     expect(apiMocks.payrollHistoryList).toHaveBeenCalledWith(expect.objectContaining({ register_eligible: true, page: 2 }), 42);
     expect(select.querySelectorAll('option')).toHaveLength(2);
+  });
+});
+
+
+describe('EmployeePayHistoryPanel payment presentation', () => {
+  afterEach(cleanup);
+
+  it('shows methods separately from check numbers in desktop and phone history', async () => {
+    apiMocks.employeesList.mockResolvedValue({ data: [{ id: 1, first_name: 'Avery', last_name: 'Example' }] });
+    apiMocks.employeePayHistory.mockResolvedValue({ report: {
+      employee: { name: 'Avery Example', employment_type: 'hourly', pay_rate: 15 },
+      period: { label: '2026' }, summary: {}, payroll_fields: { totals: [] },
+      history: [
+        { key: 'native:1', record_type: 'native', pay_date: '2026-10-08', period_description: 'October',
+          gross_pay: 900, net_pay: 700, total_deductions: 200,
+          payment_delivery_method: 'direct_deposit', check_number: null,
+          source: { label: 'Cornerstone' } },
+        { key: 'native:2', record_type: 'native', pay_date: '2026-09-24', period_description: 'September',
+          gross_pay: 197.67, net_pay: 0, total_deductions: 197.67,
+          payment_delivery_method: 'paper_check', check_number: null,
+          source: { label: 'Cornerstone' } },
+        { key: 'native:3', record_type: 'native', pay_date: '2026-09-10', period_description: 'September',
+          gross_pay: 500, net_pay: 400, total_deductions: 100,
+          payment_delivery_method: 'paper_check', check_number: '1007',
+          source: { label: 'Cornerstone' } },
+        { key: 'imported:4', record_type: 'imported', pay_date: '2026-08-27', period_description: 'August',
+          gross_pay: 500, net_pay: 400, total_deductions: 100,
+          check_number: null, source: { label: 'QuickBooks' } },
+      ],
+    } });
+    renderReportPanel(<EmployeePayHistoryPanel />);
+    await screen.findByRole('combobox', { name: 'Employee' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
+    expect(screen.getAllByText('Direct deposit')).toHaveLength(2);
+    expect(screen.getAllByText('$0 net · earnings statement only')).toHaveLength(2);
+    expect(screen.getAllByText('Paper check')).toHaveLength(2);
+    expect(screen.getAllByText('Check #1007')).toHaveLength(2);
+    expect(screen.getAllByText('Not recorded')).toHaveLength(2);
   });
 });
