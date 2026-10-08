@@ -385,6 +385,11 @@ export function PayPeriodDetail({
   const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
+  const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
+  const invalidateAireSource = useCallback(() => {
+    setAireSourceRefreshToken(token => token + 1);
+    return true;
+  }, []);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
   const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');
@@ -470,7 +475,7 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false): Promise<void> => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -506,10 +511,12 @@ export function PayPeriodDetail({
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
-      syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
+      if (!preserveInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
-      setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
-      syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
+      if (!preserveInputs) {
+        setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
+        syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
+      }
     } catch (err) {
       if (isCurrentRequest()) {
         setError(err instanceof Error ? err.message : 'Failed to load pay period');
@@ -562,9 +569,12 @@ export function PayPeriodDetail({
     lastRefreshTokenRef.current = refreshToken;
     if (payRunId > 0) {
       setCheckPrintRefreshToken((token) => token + 1);
-      void loadPayPeriod(payRunId, true);
+      invalidateAireSource();
+      // Sibling check changes refresh server state, not an operator's drafts.
+      // A superseded initial load or a new run still needs input initialization.
+      void loadPayPeriod(payRunId, true, payPeriod?.id === payRunId);
     }
-  }, [loadPayPeriod, payRunId, refreshToken]);
+  }, [invalidateAireSource, loadPayPeriod, payPeriod?.id, payRunId, refreshToken]);
 
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);
@@ -1847,7 +1857,12 @@ export function PayPeriodDetail({
             payrollHours={hoursMap}
             aireRecord={currentAireRecord}
             calendar={payPeriod.time_tracking.aire_calendar}
-            onRefresh={() => loadPayPeriod(payPeriod.id, true)}
+            refreshToken={aireSourceRefreshToken}
+            onSourceChanged={invalidateAireSource}
+            onRefresh={async () => {
+              invalidateAireSource();
+              await loadPayPeriod(payPeriod.id, true, true);
+            }}
             onReviewFinalizedBatch={() => {
               setTimeTrackingAutoPreview(true);
               setTimeTrackingImportOpen(true);
@@ -1858,10 +1873,12 @@ export function PayPeriodDetail({
         {(payPeriod.time_tracking?.active_source_capabilities?.includes('payroll_cockpit') || payPeriod.time_tracking?.active_source_types.includes('aire_services')) && (
           <div className="space-y-4">
             <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
-              onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
+              refreshToken={aireSourceRefreshToken}
+              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
             <AireManualPaymentReconciliation key={`manual-reconciliation-${payPeriod.id}`} payPeriodId={payPeriod.id}
               payPeriodStatus={payPeriod.status} payPeriodVoided={isVoided} payrollItems={payrollItems}
-              onChanged={() => { void loadPayPeriod(payPeriod.id, true); }} />
+              refreshToken={aireSourceRefreshToken}
+              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
           </div>
         )}
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AireManualHoursReview } from './AireManualHoursReview';
@@ -213,4 +213,37 @@ it('keeps owner-reported historical payments visibly held pending check evidence
   expect(screen.getByText(/excluded from payable hours/)).toBeTruthy();
   expect(screen.getByText(/Supply the issued check/)).toBeTruthy();
   expect(screen.getByText(/source changed after/)).toBeTruthy();
+});
+
+
+it('retains the read-only snapshot and payroll values during same-period source refresh', async () => {
+  const props = { payPeriodId: 67, payPeriodStatus: 'draft' as const, payrollHours: { '7': { regular: 7.25, overtime: 1 } }, aireRecordLinked: false };
+  const view = render(<AireManualHoursReview {...props} />);
+  const retained = (await screen.findAllByText('Includes 6.10 carryover'))[0];
+  let resolveRefresh!: (value: typeof review) => void;
+  apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+  view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
+  expect(screen.getByRole('status').textContent).toContain('Refreshing live time tracking readiness');
+  expect(screen.queryByText(/Comparing time tracking with the hours entered/)).toBeNull();
+  expect(screen.getAllByText('Includes 6.10 carryover')[0]).toBe(retained);
+  expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
+  await act(async () => resolveRefresh({ ...review, summary: { ...review.summary, total_hours: 34.2, regular_hours: 33.2 } }));
+  expect(await screen.findByText('33.20 regular · 1.00 OT')).toBeTruthy();
+  expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('clears the retained snapshot on period change and ignores the old-period response', async () => {
+  const props = { payPeriodId: 67, payPeriodStatus: 'draft' as const, payrollHours: {}, aireRecordLinked: false };
+  const view = render(<AireManualHoursReview {...props} />);
+  await screen.findAllByText('Traven Cruz');
+  let resolveOld!: (value: typeof review) => void;
+  apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+  view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
+  apiMocks.manualReview.mockResolvedValue({ ...review, employees: [] });
+  view.rerender(<AireManualHoursReview {...props} payPeriodId={68} refreshToken={1} />);
+  expect(screen.queryAllByText('Traven Cruz')).toHaveLength(0);
+  await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(3));
+  await act(async () => resolveOld(review));
+  expect(screen.queryAllByText('Traven Cruz')).toHaveLength(0);
 });

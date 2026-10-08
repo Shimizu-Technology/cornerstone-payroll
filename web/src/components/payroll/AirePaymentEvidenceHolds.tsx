@@ -8,7 +8,7 @@ import { payPeriodsApi } from '@/services/api';
 import { formatDate } from '@/lib/utils';
 import type { AirePaymentEvidenceHold, AirePaymentEvidenceReview } from '@/types';
 
-export function AirePaymentEvidenceHolds({ payPeriodId, onChanged }: { payPeriodId: number; onChanged: () => void }) {
+export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken = 0 }: { payPeriodId: number; onChanged: () => void; refreshToken?: number }) {
   const { hasCapability } = useAuth();
   const allowed = hasCapability('manage_historical_time_reconciliation');
   const [review, setReview] = useState<AirePaymentEvidenceReview | null>(null);
@@ -20,6 +20,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged }: { payPeriod
   const [retracting, setRetracting] = useState<AirePaymentEvidenceHold | null>(null);
   const [reason, setReason] = useState('');
   const generation = useRef(0);
+  const actionGeneration = useRef(0);
   const command = useRef<{ key: string; id: string } | null>(null);
   const load = useCallback(async () => {
     const current = ++generation.current;
@@ -32,32 +33,41 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged }: { payPeriod
     } finally { if (current === generation.current) setLoading(false); }
   }, [payPeriodId]);
   useEffect(() => {
+    setReview(null); setNotice(''); setReason(''); setEntryId(''); setRetracting(null); setBusy(false);
+    command.current = null;
+    return () => { generation.current += 1; actionGeneration.current += 1; };
+  }, [allowed, payPeriodId]);
+  useEffect(() => {
     if (allowed) void load();
     return () => { generation.current += 1; };
-  }, [allowed, load]);
+  }, [allowed, load, refreshToken]);
   if (!allowed) return null;
+
+  const currentHold = retracting ? review?.payment_attestations.find(hold => hold.id === retracting.id) : undefined;
+  const selectedEntry = review?.candidates.find(candidate => candidate.source_time_entry_id === entryId);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const entry = review?.candidates.find(candidate => candidate.source_time_entry_id === entryId);
-    if ((!entry && !retracting) || reason.trim().length < 20 || busy) return;
-    const current = generation.current;
-    const payload = { source_user_uuid: retracting?.source_user_uuid || entry!.source_user_uuid,
-      expected_version: retracting?.version ?? entry!.source_time_entry_version, reason: reason.trim() };
+    const entry = selectedEntry;
+    if ((retracting ? !currentHold : !entry) || reason.trim().length < 20 || busy || loading) return;
+    const current = ++actionGeneration.current;
+    const payload = { source_user_uuid: currentHold?.source_user_uuid || entry!.source_user_uuid,
+      expected_version: currentHold?.version ?? entry!.source_time_entry_version, reason: reason.trim() };
     const key = JSON.stringify({ payPeriodId, entryId, holdId: retracting?.id, ...payload });
     if (command.current?.key !== key) command.current = { key, id: crypto.randomUUID() };
     setBusy(true); setError(''); setNotice('');
     try {
       if (retracting) await payPeriodsApi.retractAirePaymentHold(payPeriodId, retracting.id, { ...payload, command_id: command.current.id });
       else await payPeriodsApi.createAirePaymentHold(payPeriodId, { ...payload, source_time_entry_id: entry!.source_time_entry_id, command_id: command.current.id });
-      if (current !== generation.current) return;
+      if (current !== actionGeneration.current) return;
       setNotice(retracting ? 'Payment hold retracted. Review settlement routing in time tracking Time Cards. Frozen payroll batches remain unchanged.'
         : 'Reported-payment hold recorded. Check evidence is still required; no payroll payment was created.');
       setReason(''); setEntryId(''); setRetracting(null); command.current = null;
-      await load(); onChanged();
+      await load();
+      if (current === actionGeneration.current) onChanged();
     } catch (caught) {
-      if (current === generation.current) setError(`${caught instanceof Error ? caught.message : 'Payment evidence command failed'} Refresh the evidence before retrying if the source version changed.`);
-    } finally { setBusy(false); }
+      if (current === actionGeneration.current) setError(`${caught instanceof Error ? caught.message : 'Payment evidence command failed'} Refresh the evidence before retrying if the source version changed.`);
+    } finally { if (current === actionGeneration.current) setBusy(false); }
   };
 
   return <Card aria-label="Reported-payment holds"><CardContent className="space-y-4 py-5">
@@ -89,9 +99,10 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged }: { payPeriod
             {review.candidates.map(entry => <option key={entry.source_time_entry_id} value={entry.source_time_entry_id}>{entry.employee_name} · {formatDate(entry.original_work_date)} · {entry.total_hours.toFixed(2)} hours · entry {entry.source_time_entry_id}</option>)}
           </Select>}
         {!retracting && review.candidates.length === 0 && <p className="text-sm text-neutral-600">No available approved hours. Already batched or allocated hours cannot receive a new hold.</p>}
+        {retracting && !currentHold && <p role="alert" className="text-sm text-warning-900">This hold is no longer available. Cancel retraction and review the current evidence.</p>}
         <label className="block text-sm font-medium" htmlFor={`payment-evidence-reason-${payPeriodId}`}>{retracting ? 'Retraction reason' : 'Reporter and pending payment evidence'}</label>
         <Textarea id={`payment-evidence-reason-${payPeriodId}`} value={reason} onChange={event => setReason(event.target.value)} disabled={busy || loading} required minLength={20} rows={3} placeholder={retracting ? 'Explain why the payment report is being withdrawn (at least 20 characters)' : 'Who reported payment, what they reported, and which check or delivery evidence is still missing (at least 20 characters)'} />
-        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || loading || reason.trim().length < 20 || (!entryId && !retracting)}>{busy ? 'Saving…' : retracting ? 'Confirm retraction' : 'Record reported-payment hold'}</Button>
+        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || loading || reason.trim().length < 20 || (retracting ? !currentHold : !selectedEntry)}>{busy ? 'Saving…' : retracting ? 'Confirm retraction' : 'Record reported-payment hold'}</Button>
           {retracting && <Button type="button" variant="outline" disabled={busy} onClick={() => { setRetracting(null); setReason(''); }}>Cancel retraction</Button>}</div>
       </form>
     </>}
