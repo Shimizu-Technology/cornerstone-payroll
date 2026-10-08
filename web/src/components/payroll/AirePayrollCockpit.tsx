@@ -53,7 +53,8 @@ type Props = {
   payrollHours?: Record<string, { regular: number; overtime: number }>;
   aireRecord?: import('@/types').AirePayrollRecord | null;
   calendar: AirePayrollCalendarState;
-  onRefresh: () => Promise<void> | void;
+  // True means the host owns the refresh through new props or a refresh token.
+  onRefresh: () => Promise<boolean | void> | boolean | void;
   refreshToken?: number;
   // Return true only when the host schedules a refreshToken update.
   // Notification-only consumers can return void and use the local refresh.
@@ -417,9 +418,12 @@ export function AirePayrollCockpit({
     navigate(currentAppPath(location.pathname, location.search), { replace: true, state: null });
   }, [location.pathname, location.search, location.state, navigate, setCommandError]);
 
+  const finalizedBatchState = calendar.finalized_batch
+    ? `${calendar.finalized_batch.event_id}:${calendar.finalized_batch.verification_status}`
+    : null;
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
-    const published = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
+    const published = calendar.publication?.delivery_status === 'delivered' || Boolean(finalizedBatchState);
     if (!calendar.external_pay_period_id || !published) return;
     setLoading(true);
     setRefreshError(null);
@@ -441,7 +445,7 @@ export function AirePayrollCockpit({
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
-  }, [calendar.external_pay_period_id, calendar.finalized_batch, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
+  }, [calendar.external_pay_period_id, finalizedBatchState, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
 
   useEffect(() => {
     void load();
@@ -715,8 +719,7 @@ export function AirePayrollCockpit({
   return (
     <div className="space-y-4">
       <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
-        await onRefresh();
-        await load();
+        if (await onRefresh() !== true) await load();
       }} />
 
       {verifiedBatch ? (
