@@ -518,7 +518,7 @@ export function TimeTrackingImportModal({
                         <p className="mt-2 text-sm leading-6 text-primary-800">
                           {isHistoricalReconciliation
                             ? 'This is a read-only reconciliation. Cornerstone will verify each employee’s regular and overtime hours before it links the records; payroll values, taxes, deductions, and checks will not change.'
-                            : 'Pending, denied, and open entries remain visible as unpaid exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.'}
+                            : 'Pending, denied, and open entries remain visible as held exclusions. Late approvals and corrections arrive in a later finalized batch without changing this one.'}
                         </p>
                       </div>
                       <div className="rounded-xl border border-neutral-200 p-4">
@@ -580,14 +580,14 @@ export function TimeTrackingImportModal({
 
               {isFinalizedBatch && exclusions.length > 0 && (
                 <p className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-900">
-                  <span className="font-semibold">{exclusions.length} held {exclusions.length === 1 ? 'entry' : 'entries'} · {formatHours(heldHours)} unpaid hours.</span> See held entries below; they will not be added to this payroll.
+                  <span className="font-semibold">{exclusions.length} held {exclusions.length === 1 ? 'entry' : 'entries'} · {formatHours(heldHours)} held hours at cutoff.</span> See held entries below; they will not be added to this payroll.
                 </p>
               )}
 
               {(warningCount > 0 || unmappedIncludedCount > 0 || duplicateMappingCount > 0 || rowsNeedingWageRateMapping.length > 0) && (
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">
                   {isFinalizedBatch
-                    ? 'Resolve every employee and earning-type mapping before applying. Finalized time tracking rows cannot be skipped; the source’s exclusions are shown separately and remain unpaid.'
+                    ? 'Resolve every employee and earning-type mapping before applying. Finalized time tracking rows cannot be skipped; the source’s exclusions are shown separately and are not added to this payroll.'
                     : 'Resolve included employee and earning-type mappings before applying. Ordinary import rows may be skipped when they should not be added to this payroll.'}
                 </div>
               )}
@@ -789,9 +789,9 @@ export function TimeTrackingImportModal({
                 <section className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2">
                     <Clock3 className="h-4 w-4 text-neutral-600" aria-hidden="true" />
-                    <h3 className="font-semibold text-neutral-950">Tracked but not paid in this batch</h3>
+                    <h3 className="font-semibold text-neutral-950">Held entries outside this payroll</h3>
                   </div>
-                  <p className="mt-2 text-sm text-neutral-600">These entries stay in time tracking. A later approval can appear as a carryover in a future finalized batch.</p>
+                  <p className="mt-2 text-sm text-neutral-600">These entries remain in time tracking for follow-up. Each reason explains why the entry is outside this payroll.</p>
                   <div className="mt-4 grid gap-2 lg:grid-cols-2">
                     {exclusions.map((exclusion) => (
                       <div key={`${exclusion.source_time_entry_id}-${exclusion.reason}`} className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -802,7 +802,7 @@ export function TimeTrackingImportModal({
                           </div>
                           <span className="rounded-full bg-neutral-100 px-2 text-[11px] font-semibold text-neutral-700">{exclusionLabel(exclusion.reason)}</span>
                         </div>
-                        <div className="mt-2 text-xs text-neutral-600">{formatHours(exclusion.held_total_hours)} held hours</div>
+                        <div className="mt-2 text-xs text-neutral-600">{formatHours(exclusion.held_total_hours)} held hours at cutoff</div>
                       </div>
                     ))}
                   </div>
