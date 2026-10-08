@@ -35,6 +35,7 @@ RSpec.describe TimeTracking::Client do
       { "entry_processing" => receipt.merge("status" => "payment_issued") },
       { "entry_processing" => receipt.merge("payment_method" => "paper_check") },
       { "entry_processing" => receipt.merge("metadata" => receipt["metadata"].merge("accounting_only" => false)) },
+      { "entry_processing" => receipt.merge("metadata" => receipt["metadata"].merge("recovered" => true)) },
       { "entry_processing" => receipt.merge("occurred_at" => "2026-10-01T07:00:00.123455Z") } ]
     request = stub_request(:post, "https://time.example.com/api/v1/payroll/batches/BATCH-1/processing_events")
       .with { |http| body = JSON.parse(http.body); body.keys.grep(/payment|gross|net|tax/).empty? && body["external_pay_period_id"] == "100" }

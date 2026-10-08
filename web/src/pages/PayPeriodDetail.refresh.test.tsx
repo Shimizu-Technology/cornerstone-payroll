@@ -43,14 +43,14 @@ vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecks
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', () => ({ PayrollFinalRecordPanel: () => null }));
 vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
-  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => void }) => {
+  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => void; onCorrectionRecorded?: () => void }) => {
     componentMocks.timeTrackingImport(props);
     return props.open ? (
       <div
         data-testid="time-tracking-import-modal"
         data-auto-preview={String(Boolean(props.autoPreview))}
         data-source-id={props.initialSourceId ?? ''}
-      ><button onClick={props.onImportComplete}>Complete explicit time import</button></div>
+      ><button onClick={props.onImportComplete}>Complete explicit time import</button><button onClick={props.onCorrectionRecorded}>Record accounting correction</button></div>
     ) : null;
   },
 }));
@@ -673,4 +673,26 @@ it('refreshes committed source receipt and history panels once after the canonic
   });
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
   expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12);
+});
+
+
+it('refreshes accounting correction metadata and every source panel while preserving typed payroll drafts', async () => {
+  const { field, regular, bonus } = await editPayrollDrafts();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', notes: 'Accounting correction metadata refreshed',
+    time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Record accounting correction' }));
+  await screen.findByText('Accounting correction metadata refreshed');
+  expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('1');
+  expect(screen.getByTestId('source-holds-revision').getAttribute('data-revision')).toBe('1');
+  expect(screen.getByTestId('source-reconciliation-revision').getAttribute('data-revision')).toBe('1');
+  expect(regular.value).toBe('19');
+  expect(bonus.value).toBe('77.00');
+  expect(field.value).toBe('888.00');
+  expect(screen.getByLabelText('401(k) supplemental')).toBe(field);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual(expect.objectContaining({ regular: 19 }));
+  expect(apiMocks.runPayroll.mock.calls[0][1].bonuses).toEqual({ '30': 77 });
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 888, replace_request: true });
 });

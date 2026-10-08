@@ -393,6 +393,40 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect { ApplicationRecord.connection.execute(sql) }.to raise_error(ActiveRecord::StatementInvalid, /append-only/)
   end
 
+  it "holds supported replacement attention and financial replacement while allowing normal clearing" do
+    disposition = confirm
+    receipt = disposition.time_tracking_correction_receipt
+    receipt.update!(delivered_at: Time.current)
+    original = original_item.reload.attributes
+    ytd = employee.ytd_totals_for(2026).attributes
+    old_checks = original_item.check_events.order(:id).map(&:attributes)
+    original_event_count = CheckReconciliationEvent.count
+    attrs = { source_type: "payroll_item", source_id: original_item.id, event_type: "replacement_required",
+      effective_on: PayrollBusinessClock.today.iso8601, reason: "Synthetic requested replacement",
+      idempotency_key: SecureRandom.uuid }
+    expect { CheckReconciliationEventService.new(company: company, actor: actor, attributes: attrs).call }
+      .to raise_error(CheckReconciliationEventService::Error, /accounting correction/)
+    expect(CheckReconciliationEvent.count).to eq(original_event_count)
+    expect { ReplaceCheckService.preview(payroll_item: original_item, corrected_inputs: { hours_worked: 3 }) }
+      .to raise_error(ReplaceCheckService::InvalidStateError, /accounting correction/)
+    expect { ReplaceCheckService.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 3 },
+      reason: "Synthetic requested replacement", actor: actor) }.to raise_error(ReplaceCheckService::InvalidStateError, /accounting correction/)
+    replacement = ReplaceCheckService.new(payroll_item: original_item, corrected_inputs: { hours_worked: 3 },
+      reason: "Synthetic previously reviewed replacement", actor: actor)
+    # Model a replacement that passed its unlocked preview before the source
+    # accounting posting; the locked guard must still hold financial mutation.
+    allow(replacement).to receive(:validate_for_replace!).and_return(nil)
+    expect { replacement.replace! }.to raise_error(ReplaceCheckService::InvalidStateError, /accounting correction/)
+    expect(original_item.reload.attributes).to eq(original)
+    expect(employee.ytd_totals_for(2026).reload.attributes).to eq(ytd)
+    expect(original_item.check_events.order(:id).map(&:attributes)).to eq(old_checks)
+    CheckReconciliationEventService.new(company: company, actor: actor, attributes: attrs.merge(event_type: "cleared",
+      evidence_type: "bank_statement", evidence_reference: "Synthetic clearing evidence", idempotency_key: SecureRandom.uuid)).call
+    expect(CheckReconciliationStatus.for(original_item.reload)).to eq("cleared")
+    expect(disposition.reload.verified!).to eq(disposition)
+    expect(receipt.reload.delivered_at).to be_present
+  end
+
   it 'holds native voids after delivery so committed source accounting evidence cannot become stale' do
     disposition = confirm
     disposition.time_tracking_correction_receipt.update!(delivered_at: Time.current)
