@@ -12,6 +12,8 @@ const apiMocks = vi.hoisted(() => ({
   preview: vi.fn(),
   apply: vi.fn(),
   reconcile: vi.fn(),
+  correctionPreview: vi.fn(),
+  correctionConfirm: vi.fn(),
   company: { activeCompany: null as { id: number; name: string } | null, companies: [] as Array<{ id: number; name: string }> },
 }));
 
@@ -31,7 +33,7 @@ vi.mock('@/services/api', () => ({
     data?: unknown;
   },
   timeTrackingSourcesApi: { list: apiMocks.listSources },
-  payPeriodsApi: { previewTimeTrackingImport: apiMocks.preview, applyTimeTrackingImport: apiMocks.apply, reconcileTimeTrackingImport: apiMocks.reconcile },
+  payPeriodsApi: { previewTimeTrackingCorrection: apiMocks.correctionPreview, confirmTimeTrackingCorrection: apiMocks.correctionConfirm, previewTimeTrackingImport: apiMocks.preview, applyTimeTrackingImport: apiMocks.apply, reconcileTimeTrackingImport: apiMocks.reconcile },
 }));
 
 const payPeriod = {
@@ -320,4 +322,24 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(within(summary).queryByText('14.00')).toBeNull();
     expect(screen.getByRole('button', { name: 'Apply Import' }).hasAttribute('disabled')).toBe(true);
   });
+});
+
+
+it('requires explicit accounting review and acknowledgment before resolving a negative source line', async () => {
+  const user = userEvent.setup();
+  const line = { source_user_id: '42', source_time_entry_id: '101', line_key: '7:2500', regular_hours: -1, overtime_hours: 0, total_hours: -1 };
+  apiMocks.preview.mockResolvedValue({ import: { id: 99, status: 'previewed', correction_lines: [line], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } } });
+  apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, preview_token: 'signed-proof', source_change: line, employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-11-15', original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 }, deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
+  apiMocks.correctionConfirm.mockResolvedValue({ disposition_id: 1, import: { id: 99, status: 'previewed', correction_lines: [line], correction_dispositions: [{ ...line, id: 1, corrective_pay_period_id: 100, corrective_payroll_item_id: 101, accounting_only: true }], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
+  render(<TimeTrackingImportModal open onClose={() => {}} payPeriod={payPeriod} employees={[]} onImportComplete={() => {}} autoPreview />);
+  await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+  expect(await screen.findByText(/original check 30000/)).toBeTruthy();
+  const confirm = screen.getByRole('button', { name: 'Confirm accounting correction' });
+  expect(confirm.hasAttribute('disabled')).toBe(true);
+  await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Approved source correction');
+  expect(confirm.hasAttribute('disabled')).toBe(true);
+  await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
+  await user.click(confirm);
+  await waitFor(() => expect(apiMocks.correctionConfirm).toHaveBeenCalledWith(17, { import_id: 99, ...{ source_user_id: line.source_user_id, source_time_entry_id: line.source_time_entry_id, line_key: line.line_key }, preview_token: 'signed-proof', reason: 'Approved source correction', acknowledge_accounting_only: true }));
+  expect(await screen.findByText(/Accounting correction committed in supplemental #100/)).toBeTruthy();
 });

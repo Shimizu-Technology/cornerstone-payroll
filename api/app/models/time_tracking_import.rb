@@ -23,6 +23,7 @@ class TimeTrackingImport < ApplicationRecord
   belongs_to :time_tracking_source
   belongs_to :applied_by, class_name: "User", optional: true
   belongs_to :reconciled_by, class_name: "User", optional: true
+  has_many :time_tracking_correction_dispositions, dependent: :restrict_with_error
   has_many :aire_payroll_acknowledgements, dependent: :restrict_with_error
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error

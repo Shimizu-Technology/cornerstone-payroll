@@ -25,6 +25,7 @@ class PayPeriodTimeTrackingSummary
           reconciliation_note: import.reconciliation_note,
           reconciliation_exceptions: import.reconciliation_exceptions,
           payable_line_status: TimeTracking::AllocationStatusSummary.call(import),
+          correction_dispositions: TimeTracking::CorrectionCoverage.new(import).presentation,
           source_processing_status: import.source_processing_status,
           source_processing_synced_at: import.source_processing_synced_at
         }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_09_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3400,6 +3400,53 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_120000) do
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'complete'::character varying::text])", name: "classification_reconciliation_status"
   end
 
+  create_table "time_tracking_correction_dispositions", force: :cascade do |t|
+    t.string "batch_checksum", null: false
+    t.string "batch_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "corrective_payroll_item_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.string "line_key", null: false
+    t.jsonb "line_snapshot", null: false
+    t.bigint "original_allocation_id", null: false
+    t.decimal "overtime_hours", precision: 12, scale: 2, null: false
+    t.string "proof_digest", null: false
+    t.string "reason", null: false
+    t.decimal "regular_hours", precision: 12, scale: 2, null: false
+    t.string "source_instance_id", null: false
+    t.string "source_kind", null: false
+    t.string "source_time_entry_id", null: false
+    t.string "source_user_id", null: false
+    t.string "source_user_uuid", null: false
+    t.bigint "time_tracking_import_id", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.decimal "total_hours", precision: 12, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.check_constraint "source_kind = 'correction' AND total_hours = regular_hours + overtime_hours AND total_hours < 0 AND regular_hours <= 0 AND overtime_hours <= 0", name: "correction_disposition_signed_hours"
+    t.index [ "company_id" ], name: "index_time_tracking_correction_dispositions_on_company_id"
+    t.index [ "corrective_payroll_item_id" ], name: "idx_correction_disposition_corrective_item", unique: true
+    t.index [ "corrective_payroll_item_id" ], name: "idx_on_corrective_payroll_item_id_aed6f65222"
+    t.index [ "created_by_id" ], name: "index_time_tracking_correction_dispositions_on_created_by_id"
+    t.index [ "original_allocation_id" ], name: "idx_on_original_allocation_id_20151555dc"
+    t.index [ "time_tracking_import_id" ], name: "idx_on_time_tracking_import_id_215cf8da20"
+    t.index [ "time_tracking_source_id", "source_instance_id", "batch_id", "source_time_entry_id", "line_key" ], name: "idx_correction_disposition_exact_line", unique: true
+    t.index [ "time_tracking_source_id" ], name: "idx_on_time_tracking_source_id_1f1c8f6a34"
+  end
+
+  create_table "time_tracking_correction_receipts", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "delivered_at"
+    t.datetime "enqueued_at"
+    t.string "event_id", null: false
+    t.text "last_error"
+    t.jsonb "payload", null: false
+    t.bigint "time_tracking_correction_disposition_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "event_id" ], name: "index_time_tracking_correction_receipts_on_event_id", unique: true
+    t.index [ "time_tracking_correction_disposition_id" ], name: "idx_correction_receipt_disposition", unique: true
+  end
+
   create_table "time_tracking_delegations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -4196,6 +4243,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_120000) do
   add_foreign_key "time_tracking_classification_reconciliations", "payroll_items"
   add_foreign_key "time_tracking_classification_reconciliations", "time_tracking_sources"
   add_foreign_key "time_tracking_classification_reconciliations", "users", column: "created_by_id"
+  add_foreign_key "time_tracking_correction_dispositions", "companies"
+  add_foreign_key "time_tracking_correction_dispositions", "payroll_items", column: "corrective_payroll_item_id"
+  add_foreign_key "time_tracking_correction_dispositions", "time_tracking_entry_allocations", column: "original_allocation_id"
+  add_foreign_key "time_tracking_correction_dispositions", "time_tracking_imports"
+  add_foreign_key "time_tracking_correction_dispositions", "time_tracking_sources"
+  add_foreign_key "time_tracking_correction_dispositions", "users", column: "created_by_id"
+  add_foreign_key "time_tracking_correction_receipts", "time_tracking_correction_dispositions"
   add_foreign_key "time_tracking_delegations", "companies", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", column: ["time_tracking_source_id", "company_id"], primary_key: ["id", "company_id"], name: "fk_time_tracking_delegations_source_tenant", on_delete: :cascade
   add_foreign_key "time_tracking_delegations", "time_tracking_sources", on_delete: :cascade
@@ -4595,5 +4649,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_120000) do
     CREATE TRIGGER retirement_year_inputs_append_only
     BEFORE UPDATE OR DELETE ON employee_retirement_year_inputs
     FOR EACH ROW EXECUTE FUNCTION prevent_retirement_year_input_mutation();
+  SQL
+  execute <<~SQL
+    CREATE FUNCTION prevent_time_tracking_correction_evidence_mutation() RETURNS trigger AS $$
+    BEGIN
+    RAISE EXCEPTION 'Exact source accounting correction evidence is append-only';
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER immutable_time_tracking_correction_dispositions
+    BEFORE UPDATE OR DELETE ON time_tracking_correction_dispositions
+    FOR EACH ROW EXECUTE FUNCTION prevent_time_tracking_correction_evidence_mutation();
+    CREATE FUNCTION protect_time_tracking_correction_receipt_evidence() RETURNS trigger AS $$
+    BEGIN
+    IF TG_OP = 'DELETE' OR NEW.payload IS DISTINCT FROM OLD.payload OR
+    NEW.event_id IS DISTINCT FROM OLD.event_id OR
+    NEW.time_tracking_correction_disposition_id IS DISTINCT FROM OLD.time_tracking_correction_disposition_id THEN
+    RAISE EXCEPTION 'Exact source accounting receipt evidence is immutable';
+    END IF;
+    RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER immutable_time_tracking_correction_receipts
+    BEFORE UPDATE OR DELETE ON time_tracking_correction_receipts
+    FOR EACH ROW EXECUTE FUNCTION protect_time_tracking_correction_receipt_evidence();
   SQL
 end
