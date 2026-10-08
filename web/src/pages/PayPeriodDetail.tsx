@@ -344,6 +344,7 @@ export function PayPeriodDetail({
   const initialPayPeriodRef = useRef(initialPayPeriod);
   const loadRequestIdRef = useRef(0);
   const lastRefreshTokenRef = useRef(refreshToken);
+  const loadedPeriodIdRef = useRef<number | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -516,7 +517,11 @@ export function PayPeriodDetail({
       if (!preserveInputs) {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
+        // Canonical reloads after import, commit, or saved check changes must
+        // refresh receipts/history even when the finalized event is unchanged.
+        if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
+      loadedPeriodIdRef.current = periodId;
     } catch (err) {
       if (isCurrentRequest()) {
         setError(err instanceof Error ? err.message : 'Failed to load pay period');
@@ -527,7 +532,7 @@ export function PayPeriodDetail({
         setLoading(false);
       }
     }
-  }, [loadEligibleEmployees, setError, syncDerivedPayrollState, syncPayrollFieldInputs]);
+  }, [invalidateAireSource, loadEligibleEmployees, setError, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect((): (() => void) => {
     // Reset cross-pay-period observer state so divergence indicators don't
@@ -872,6 +877,7 @@ export function PayPeriodDetail({
         ...(employee_ids ? { employee_ids } : {}),
       });
       setPayPeriod(response.pay_period);
+      invalidateAireSource();
       setPayrollItems(response.pay_period.payroll_items || []);
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
@@ -1862,6 +1868,7 @@ export function PayPeriodDetail({
             onRefresh={async () => {
               invalidateAireSource();
               await loadPayPeriod(payPeriod.id, true, true);
+              return true;
             }}
             onReviewFinalizedBatch={() => {
               setTimeTrackingAutoPreview(true);

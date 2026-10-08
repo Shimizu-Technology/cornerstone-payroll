@@ -167,4 +167,68 @@ RSpec.describe AirePayrollCalendar::Presenter do
     expect(state).to include(source_id: source.id, source_name: source.name)
     expect(state.fetch(:source_id)).not_to eq(replacement.id)
   end
+
+  describe "delivered calendar cutoff progression" do
+    let(:cutoff) { Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17) }
+    let!(:calendar_period) { create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period) }
+    let(:cached_state) { "upcoming" }
+    let!(:publication) do
+      create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+        payload: source.connector.calendar_contract(pay_period).payload, delivery_status: "delivered", delivered_at: cutoff - 1.day,
+        source_state: { "cutoff_state" => cached_state })
+    end
+
+    [ nil, "", "upcoming", "scheduled" ].each do |captured|
+      context "with captured #{captured.inspect} state" do
+        let(:cached_state) { captured }
+
+        it "stays upcoming before the exact cutoff" do
+          expected = captured.presence || "scheduled"
+          expect(described_class.call(pay_period, now: cutoff - 1.second)[:cutoff_state]).to eq(expected)
+        end
+
+        [ 0, 1 ].each do |offset|
+          it "is due #{offset.zero? ? 'at' : 'after'} cutoff without changing the delivery snapshot" do
+            original = publication.source_state.deep_dup
+            expect(described_class.call(pay_period, now: cutoff + offset)[:cutoff_state]).to eq("cutoff_due")
+            expect(publication.reload.source_state).to eq(original)
+          end
+        end
+      end
+    end
+
+    %w[finalized attention_required due cutoff_due].each do |captured|
+      context "with captured #{captured} state" do
+        let(:cached_state) { captured }
+
+        it "preserves the source state at and after cutoff" do
+          [ cutoff, cutoff + 1.second ].each do |now|
+            expect(described_class.call(pay_period, now: now)[:cutoff_state]).to eq(captured)
+          end
+        end
+      end
+    end
+
+    %w[failed pending].each do |delivery_status|
+      it "preserves #{delivery_status} publication precedence after cutoff" do
+        other = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+          schedule_version: 2, delivery_status: delivery_status, source_state: { "cutoff_state" => "upcoming" },
+          payload: source.connector.calendar_contract(pay_period).payload)
+        expected = delivery_status == "failed" ? "publication_failed" : "publishing"
+        expect(described_class.call(pay_period.reload, now: cutoff + 1.second)[:cutoff_state]).to eq(expected)
+        expect(other.reload.delivery_status).to eq(delivery_status)
+      end
+    end
+
+    { "verified" => "batch_verified", "rejected" => "batch_rejected", "failed" => "batch_verification_failed", "pending" => "batch_verifying" }.each do |verification, expected|
+      it "keeps #{verification} event precedence over the elapsed calendar" do
+        AirePayrollEvent.create!(aire_payroll_calendar_period: calendar_period, aire_payroll_calendar_publication: publication,
+          time_tracking_source: source, event_id: SecureRandom.uuid, event_type: AirePayrollEvent::EVENT_TYPE,
+          occurred_at: cutoff, payroll_batch_id: SecureRandom.uuid, payroll_batch_checksum: "a" * 64,
+          payload_checksum: "b" * 64, verification_status: verification,
+          payload: { "payroll_batch" => { "summary" => {}, "issues" => {} } })
+        expect(described_class.call(pay_period, now: cutoff + 1.second)[:cutoff_state]).to eq(expected)
+      end
+    end
+  end
 end
