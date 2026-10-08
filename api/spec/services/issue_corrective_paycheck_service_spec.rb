@@ -136,6 +136,117 @@ RSpec.describe IssueCorrectivePaycheckService do
         described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 65 })
       }.to raise_error(described_class::UnsupportedEmployeeError, /multi.rate/i)
     end
+
+    context "with one verified hourly rate row" do
+      let!(:historical_rate) { employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, active: true, is_primary: true) }
+      let(:native_overtime) { 0 }
+      let!(:original_item) do
+        item = original_period.payroll_items.build(employee: employee, company_id: company.id,
+          employment_type: "hourly", pay_rate: 25, hours_worked: 10, overtime_hours: native_overtime)
+        item.wage_rate_hours = [ { employee_wage_rate_id: historical_rate.id, label: "Flight Hours", rate: 25,
+          regular_hours: 10, overtime_hours: native_overtime, holiday_hours: 0, pto_hours: 0, active: true, is_primary: true } ]
+        PayrollCalculator.for(employee, item).calculate
+        item.save!
+        employee.ytd_totals_for(2024).add_payroll_item!(item)
+        CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(item)
+        item.reload
+      end
+
+      it "uses the absolute target in a temporary sole row without changing the paid rate evidence" do
+        frozen = original_item.attributes.deep_dup
+        earnings = original_item.payroll_item_earnings.map(&:attributes)
+        historical_rate.update!(rate: 50, label: "Current renamed rate", active: false)
+        preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+        expect(preview[:corrected]).to include(hours_worked: 9, pay_rate: 25, gross_pay: 225)
+        expect(preview[:deltas][:gross_pay]).to eq(-25)
+        _, correction = described_class.issue!(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 },
+          expected_review_digest: preview[:meta][:review_digest], pay_date: Date.new(2024, 1, 26), reason: "Correct one recorded day", actor: actor)
+        expect(correction.gross_pay).to eq(-25)
+        expect(correction.hours_worked).to eq(-1)
+        expect(original_item.reload.attributes).to eq(frozen)
+        expect(original_item.payroll_item_earnings.reload.map(&:attributes)).to eq(earnings)
+      end
+
+      it "composes successive target changes and zero-change detection using the same frozen rate" do
+        _, first = issue_target({ hours_worked: 12 })
+        preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+        expect(preview[:recorded]).to include(hours_worked: 12, gross_pay: 300)
+        expect(preview[:deltas]).to include(gross_pay: -75, hours_worked_delta: -3)
+        _, second = issue_target({ hours_worked: 9 })
+        expect(first.gross_pay).to eq(50)
+        expect(second.gross_pay).to eq(-75)
+        expect(employee.ytd_totals_for(2024).reload.gross_pay).to eq(225)
+        no_change = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: {})
+        expect(no_change[:meta][:is_zero_change]).to eq(true)
+        expect(no_change[:recorded][:custom_columns_data].fetch("wage_rate_hours").sole.fetch("regular_hours")).to eq(9)
+        expect { issue_target({ hours_worked: 9 }) }.to raise_error(described_class::InvalidStateError, /already recorded/)
+      end
+
+      it "normalizes recorded row hours after an earlier correction is voided" do
+        first_period, = issue_target({ hours_worked: 12 })
+        issue_target({ hours_worked: 9 })
+        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse first adjustment")
+        preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: {})
+        expect(preview[:recorded][:hours_worked]).to eq(7)
+        expect(preview[:recorded][:custom_columns_data].fetch("wage_rate_hours").sole.fetch("regular_hours")).to eq(7)
+        expect(preview[:corrected]).to include(hours_worked: 7, gross_pay: 175)
+      end
+
+      [ -25, 30 ].each do |bad_rate|
+        it "rejects a negative or mismatched historical snapshot rate #{bad_rate}" do
+          columns = original_item.custom_columns_data.deep_dup
+          columns.fetch("wage_rate_hours").sole["rate"] = bad_rate
+          original_item.update_columns(custom_columns_data: columns)
+          expect {
+            described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+          }.to raise_error(described_class::UnsupportedEmployeeError, /rate|snapshot/i)
+        end
+      end
+
+      it "rejects a row with missing native earning proof" do
+        original_item.payroll_item_earnings.delete_all
+        expect {
+          described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+        }.to raise_error(described_class::UnsupportedEmployeeError, /evidence|snapshot/i)
+      end
+
+      it "rejects a rate snapshot owned by another employee" do
+        other = create(:employee, company: company, department: department)
+        foreign_rate = other.employee_wage_rates.create!(label: "Flight Hours", rate: 25, active: true)
+        columns = original_item.custom_columns_data.deep_dup
+        columns.fetch("wage_rate_hours").sole["employee_wage_rate_id"] = foreign_rate.id
+        original_item.update_columns(custom_columns_data: columns)
+        expect {
+          described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+        }.to raise_error(described_class::UnsupportedEmployeeError, /snapshot/i)
+      end
+
+      it "rejects category snapshot hours that disagree with the native original inputs" do
+        columns = original_item.custom_columns_data.deep_dup
+        columns.fetch("wage_rate_hours").sole["regular_hours"] = 11
+        original_item.update_columns(custom_columns_data: columns)
+        expect {
+          described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9 })
+        }.to raise_error(described_class::UnsupportedEmployeeError, /snapshot/i)
+      end
+
+      it "does not silently change the verified categorized rate through a scalar override" do
+        expect {
+          described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9, pay_rate: 30 })
+        }.to raise_error(described_class::UnsupportedEmployeeError, /rate change/i)
+      end
+
+      context "with original overtime at the same frozen rate" do
+        let(:native_overtime) { 2 }
+
+        it "normalizes both absolute regular and overtime targets without altering the original components" do
+          preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 9, overtime_hours: 1 })
+          expect(preview[:original]).to include(hours_worked: 10, overtime_hours: 2, gross_pay: 325)
+          expect(preview[:corrected]).to include(hours_worked: 9, overtime_hours: 1, gross_pay: 262.5)
+          expect(preview[:deltas]).to include(hours_worked_delta: -1, overtime_hours_delta: -1, gross_pay: -62.5)
+        end
+      end
+    end
   end
 
   describe ".preview" do

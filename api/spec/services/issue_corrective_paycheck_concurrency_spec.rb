@@ -42,6 +42,7 @@ RSpec.describe IssueCorrectivePaycheckService, :postgres_concurrency do
     EmployeeYtdTotal.where(employee: employee).delete_all
     CompanyYtdTotal.where(company: company).delete_all
     PayPeriod.where(id: period_ids).delete_all
+    EmployeeWageRate.where(employee: employee).delete_all
     Employee.where(id: employee.id).delete_all
     Department.where(id: department.id).delete_all
     User.where(id: actor.id).delete_all
@@ -50,8 +51,14 @@ RSpec.describe IssueCorrectivePaycheckService, :postgres_concurrency do
     tax_table.destroy!
   end
 
-  [ false, true ].each do |different_target|
-    it "records one financial delta when #{different_target ? 'different reviewed' : 'identical'} targets compete from stale previews" do
+  [ false, true ].product([ false, true ]).each do |different_target, categorized|
+    it "records one financial delta when #{different_target ? 'different reviewed' : 'identical'} targets compete from stale previews with #{categorized ? 'one verified rate row' : 'scalar hours'}" do
+      if categorized
+        rate = employee.employee_wage_rates.create!(label: "Regular Pay", rate: 15, active: true, is_primary: true)
+        item.wage_rate_hours = [ { employee_wage_rate_id: rate.id, label: "Regular Pay", rate: 15,
+          regular_hours: 60, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true, is_primary: true } ]
+        item.save!
+      end
       locked, release, second_ready, results = Array.new(4) { Queue.new }
       allow_any_instance_of(described_class).to receive(:create_supplemental_period!).and_wrap_original do |original, *args|
         if Thread.current[:first_corrective]
