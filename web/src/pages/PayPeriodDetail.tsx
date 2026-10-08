@@ -570,9 +570,11 @@ export function PayPeriodDetail({
     if (payRunId > 0) {
       setCheckPrintRefreshToken((token) => token + 1);
       invalidateAireSource();
-      void loadPayPeriod(payRunId, true);
+      // Sibling check changes refresh server state, not an operator's drafts.
+      // A superseded initial load or a new run still needs input initialization.
+      void loadPayPeriod(payRunId, true, payPeriod?.id === payRunId);
     }
-  }, [invalidateAireSource, loadPayPeriod, payRunId, refreshToken]);
+  }, [invalidateAireSource, loadPayPeriod, payPeriod?.id, payRunId, refreshToken]);
 
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);
