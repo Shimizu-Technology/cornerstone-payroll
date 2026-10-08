@@ -63,6 +63,40 @@ function recordedFormInputs(recorded: CorrectivePaycheckSnapshot) {
     reported_tips: toStr(recorded.reported_tips), tips_paid_out: toStr(recorded.tips_paid_out) };
 }
 
+const HOUR_FIELDS = ['hours_worked', 'overtime_hours', 'holiday_hours', 'pto_hours'] as const;
+
+function baselineFormInputs(result: CorrectivePaycheckPreview) {
+  const recorded = result.recorded ?? result.original;
+  const inputs = recordedFormInputs(recorded);
+  for (const field of HOUR_FIELDS) {
+    if ((recorded[field] ?? 0) >= 0) continue;
+    const original = result.original[field];
+    if (typeof original !== 'number' || !Number.isFinite(original) || original < 0) {
+      throw new Error('The original absolute hours could not be verified. Review the original payroll before correcting it.');
+    }
+    inputs[field] = toStr(original);
+  }
+  return inputs;
+}
+
+async function fetchRecordedBaseline(periodId: number, originalItem: PayrollItem) {
+  const employee_id = originalItem.employee_id;
+  try {
+    return await payPeriodsApi.correctivePaycheckPreview(periodId, { employee_id, corrected_inputs: {} });
+  } catch (error) {
+    if (!(error instanceof Error) || !/the corrected absolute hours must be nonnegative/i.test(error.message)) throw error;
+    const originalHours: CorrectivePaycheckInputs = {};
+    for (const field of HOUR_FIELDS) {
+      const value = originalItem[field];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        throw new Error('The original absolute hours could not be verified. Review the original payroll before correcting it.');
+      }
+      originalHours[field] = value;
+    }
+    return payPeriodsApi.correctivePaycheckPreview(periodId, { employee_id, corrected_inputs: originalHours });
+  }
+}
+
 function todayIsoDate(): string {
   const d = new Date();
   const year = d.getFullYear();
@@ -94,6 +128,7 @@ export function CorrectivePaycheckModal({
   const [baseline, setBaseline] = useState<CorrectivePaycheckSnapshot | null>(null);
   const [baselinePreview, setBaselinePreview] = useState<CorrectivePaycheckPreview | null>(null);
   const previewGeneration = useRef(0);
+  const baselineLoaded = useRef(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError, previewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -103,6 +138,7 @@ export function CorrectivePaycheckModal({
   useEffect(() => {
     if (!open) return;
     const generation = ++previewGeneration.current;
+    baselineLoaded.current = false;
     setBaseline(null);
     setBaselinePreview(null);
     setForm({
@@ -121,20 +157,22 @@ export function CorrectivePaycheckModal({
     setPreviewError(null);
     setIssueError(null);
     setPreviewLoading(true);
-    void payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, { employee_id: originalItem.employee_id, corrected_inputs: {} })
+    void fetchRecordedBaseline(originalPayPeriod.id, originalItem)
       .then(result => {
         if (generation !== previewGeneration.current) return;
         const recorded = result.recorded ?? result.original;
+        const inputs = baselineFormInputs(result);
+        baselineLoaded.current = true;
         setBaseline(recorded);
         setBaselinePreview(result);
-        setForm(current => ({ ...current, ...recordedFormInputs(recorded) }));
+        setForm(current => ({ ...current, ...inputs }));
         setPreview(result);
       }).catch(err => {
         if (generation === previewGeneration.current) setPreviewError(err instanceof Error ? err.message : 'Could not verify the recorded correction baseline');
       }).finally(() => {
         if (generation === previewGeneration.current) setPreviewLoading(false);
       });
-    return () => { previewGeneration.current += 1; };
+    return () => { previewGeneration.current += 1; baselineLoaded.current = false; };
   }, [open, originalItem.id, originalItem.employee_id, originalPayPeriod.id, setIssueError, setPreviewError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const correctedInputs: CorrectivePaycheckInputs = useMemo(
@@ -177,16 +215,18 @@ export function CorrectivePaycheckModal({
     setPreviewError(null);
     const generation = ++previewGeneration.current;
     try {
-      const result = await payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, {
+      const result = baseline ? await payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, {
         employee_id: originalItem.employee_id,
-        corrected_inputs: baseline ? correctedInputs : {},
-      });
+        corrected_inputs: correctedInputs,
+      }) : await fetchRecordedBaseline(originalPayPeriod.id, originalItem);
       if (generation === previewGeneration.current) {
         setPreview(result);
         if (!baseline) {
           const recorded = result.recorded ?? result.original;
+          const inputs = baselineFormInputs(result);
+          baselineLoaded.current = true;
           setBaseline(recorded); setBaselinePreview(result);
-          setForm(current => ({ ...current, ...recordedFormInputs(recorded) }));
+          setForm(current => ({ ...current, ...inputs }));
         }
       }
     } catch (err) {
@@ -197,10 +237,10 @@ export function CorrectivePaycheckModal({
     } finally {
       if (generation === previewGeneration.current) setPreviewLoading(false);
     }
-  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem.employee_id, correctedInputs]);
+  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs]);
 
   useEffect(() => {
-    if (!open || !baseline) return;
+    if (!open || !baseline || !baselineLoaded.current) return;
     previewGeneration.current += 1;
     if (!inputsChanged) {
       setPreview(baselinePreview);
@@ -285,6 +325,12 @@ export function CorrectivePaycheckModal({
               Enter the corrected absolute values. The remaining delta against
               the original plus active corrections will be recorded separately.
             </p>
+            {baseline && HOUR_FIELDS.some(field => (baseline[field] ?? 0) < 0) && (
+              <p className="text-sm text-gray-700" role="status">
+                Voided corrections left a signed recorded balance. Negative hour components start at the verified original hours.
+                Review the desired absolute hours before issuing this correction.
+              </p>
+            )}
 
             <FieldRow label="Regular hours" original={originalItem.hours_worked}>
               <NumericInput

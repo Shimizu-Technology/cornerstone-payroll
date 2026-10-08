@@ -387,14 +387,15 @@ class IssueCorrectivePaycheckService
     raise UnsupportedEmployeeError, "The historical rate snapshot is invalid; review the native earning evidence before correcting this payroll"
   end
 
-  def single_rate_columns(columns, inputs)
+  def single_rate_columns(columns, inputs, recorded: false)
     row = verified_single_rate_row
     if inputs.fetch(:pay_rate).to_d != row.fetch("rate").to_d
       raise UnsupportedEmployeeError, "A categorized rate change needs a category-level review; keep the verified historical rate for this hourly correction"
     end
     SINGLE_RATE_HOUR_FIELDS.each do |key, field|
       hours = inputs.fetch(field).to_d
-      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if hours.negative? || !hours.finite?
+      raise UnsupportedEmployeeError, "The recorded hours must be finite" unless hours.finite?
+      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if !recorded && hours.negative?
       row[key] = hours.to_f
     end
     (columns || {}).deep_dup.merge("wage_rate_hours" => [ row ])
@@ -443,7 +444,9 @@ class IssueCorrectivePaycheckService
       end
     end.tap do |inputs|
       if original_item.wage_rate_hours.present?
-        inputs[:custom_columns_data] = single_rate_columns(inputs[:custom_columns_data], inputs)
+        # A void can leave the remaining signed deltas below zero. This is
+        # recorded accounting history, not the absolute target to calculate.
+        inputs[:custom_columns_data] = single_rate_columns(inputs[:custom_columns_data], inputs, recorded: true)
       end
     end
   rescue ArgumentError, TypeError, KeyError
@@ -556,6 +559,10 @@ class IssueCorrectivePaycheckService
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot
     )
     temp.pay_period = @original_pay_period
+    SINGLE_RATE_HOUR_FIELDS.each_value do |field|
+      hours = temp.public_send(field).to_d
+      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if hours.negative? || !hours.finite?
+    end
     if original_item.wage_rate_hours.present?
       target_inputs = SINGLE_RATE_HOUR_FIELDS.values.index_with { |field| temp.public_send(field) }.merge(pay_rate: temp.pay_rate)
       temp.custom_columns_data = single_rate_columns(temp.custom_columns_data, target_inputs)
