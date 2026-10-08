@@ -85,6 +85,8 @@ class IssueCorrectivePaycheckService
     qualified_overtime_compensation
   ].freeze
   NUMERIC_INPUT_FIELDS = (CORRECTABLE_INPUT_FIELDS - %i[tip_pool custom_earnings custom_deductions custom_columns_data]).freeze
+  SINGLE_RATE_HOUR_FIELDS = { "regular_hours" => :hours_worked, "overtime_hours" => :overtime_hours,
+    "holiday_hours" => :holiday_hours, "pto_hours" => :pto_hours }.freeze
 
   # Fields whose deltas we transcribe onto the supplemental row. These
   # are the calculator's outputs; storing the deltas here is what makes
@@ -208,6 +210,7 @@ class IssueCorrectivePaycheckService
       end
       @original_item = refreshed
       @original_pay_period = locked_original
+      original_item.payroll_item_earnings.order(:id).lock("FOR UPDATE").load
       # A supplemental void takes its period lock before reversing YTD. Lock
       # those periods before reading the effective ledger or acquiring YTD.
       prior_ids = original_item.correction_payroll_items.distinct.pluck(:pay_period_id)
@@ -256,9 +259,10 @@ class IssueCorrectivePaycheckService
     end
     columns = @corrected_inputs[:custom_columns_data]
     categorized_target = columns.is_a?(Hash) && (columns["wage_rate_hours"].present? || columns[:wage_rate_hours].present?)
-    if original_item.wage_rate_hours.present? || categorized_target
+    if categorized_target
       raise UnsupportedEmployeeError, "Categorized or multi-rate payroll corrections require a category-level review; this corrective paycheck cannot safely recompute them"
     end
+    verified_single_rate_row if original_item.wage_rate_hours.present?
 
     unless PayrollCalculationContext.valid_for_correction?(original_item.calculation_context_snapshot)
       raise MissingHistoricalContextError,
@@ -345,6 +349,57 @@ class IssueCorrectivePaycheckService
     CORRECTABLE_INPUT_FIELDS.index_with { |field| original_item.public_send(field) }.deep_dup
   end
 
+  def verified_single_rate_row
+    rows = original_item.wage_rate_hours
+    raw_rows = original_item.custom_columns_data["wage_rate_hours"] || original_item.custom_columns_data[:wage_rate_hours]
+    error = "The categorized or multi-rate historical snapshot is ambiguous or incomplete; review the native rate and earning evidence before correcting this payroll"
+    unless original_item.employment_type == "hourly" && rows.one? && raw_rows.is_a?(Array) && raw_rows.one? && raw_rows.first.is_a?(Hash)
+      raise UnsupportedEmployeeError, error
+    end
+    raw = raw_rows.first.stringify_keys
+    row = rows.first
+    required = %w[employee_wage_rate_id label rate active] + SINGLE_RATE_HOUR_FIELDS.keys
+    valid = required.all? { |key| raw.key?(key) } && raw["label"].is_a?(String) && raw["label"].strip.present? && raw["active"] == true &&
+      row["employee_wage_rate_id"].to_s.match?(/\A[1-9]\d*\z/) &&
+      EmployeeWageRate.exists?(id: row["employee_wage_rate_id"], employee_id: original_item.employee_id)
+    rate = BigDecimal(raw.fetch("rate").to_s)
+    valid &&= rate.finite? && rate.positive? && rate == original_item.pay_rate.to_d
+    valid &&= SINGLE_RATE_HOUR_FIELDS.all? do |key, field|
+      hours = BigDecimal(raw.fetch(key).to_s)
+      hours.finite? && !hours.negative? && hours == original_item.public_send(field).to_d
+    end
+    earnings = original_item.payroll_item_earnings.select { |earning| earning.category.in?(%w[regular overtime holiday pto]) }
+    valid &&= earnings.any? && SINGLE_RATE_HOUR_FIELDS.all? do |key, field|
+      category = key.delete_suffix("_hours")
+      expected_hours = original_item.public_send(field).to_d
+      matches = earnings.select { |earning| earning.category == category }
+      next matches.empty? if expected_hours.zero?
+
+      expected_rate = rate * (category == "overtime" ? 1.5.to_d : 1.to_d)
+      label = category == "regular" ? row["label"] : "#{row['label']} #{category == 'pto' ? 'PTO' : category == 'overtime' ? 'OT' : 'Holiday'}"
+      matches.one? && matches.first.persisted? && matches.first.label == label && matches.first.hours.to_d == expected_hours &&
+        matches.first.rate.to_d == expected_rate && matches.first.amount.to_d == (expected_hours * expected_rate).round(2)
+    end
+    raise UnsupportedEmployeeError, error unless valid
+
+    row
+  rescue ArgumentError, TypeError, KeyError
+    raise UnsupportedEmployeeError, "The historical rate snapshot is invalid; review the native earning evidence before correcting this payroll"
+  end
+
+  def single_rate_columns(columns, inputs)
+    row = verified_single_rate_row
+    if inputs.fetch(:pay_rate).to_d != row.fetch("rate").to_d
+      raise UnsupportedEmployeeError, "A categorized rate change needs a category-level review; keep the verified historical rate for this hourly correction"
+    end
+    SINGLE_RATE_HOUR_FIELDS.each do |key, field|
+      hours = inputs.fetch(field).to_d
+      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if hours.negative? || !hours.finite?
+      row[key] = hours.to_f
+    end
+    (columns || {}).deep_dup.merge("wage_rate_hours" => [ row ])
+  end
+
   def active_correctives
     @active_correctives ||= original_item.correction_payroll_items.not_voided
       .joins(:pay_period).merge(PayPeriod.reportable_committed).order(:id).to_a.tap do |items|
@@ -385,6 +440,10 @@ class IssueCorrectivePaycheckService
           inputs[field] = BigDecimal(inputs[field].to_s)
           raise ArgumentError, "non-finite input" unless inputs[field].finite?
         end
+      end
+    end.tap do |inputs|
+      if original_item.wage_rate_hours.present?
+        inputs[:custom_columns_data] = single_rate_columns(inputs[:custom_columns_data], inputs)
       end
     end
   rescue ArgumentError, TypeError, KeyError
@@ -427,6 +486,7 @@ class IssueCorrectivePaycheckService
       version: 1,
       original_period: @original_pay_period.attributes.slice(*period_fields),
       original_item: original_item.attributes.slice(*item_fields),
+      original_earnings: original_item.payroll_item_earnings.order(:id).map { |earning| earning.attributes.slice("id", "category", "label", "rate", "hours", "amount", "updated_at") },
       active_correctives: active_correctives.map do |item|
         { item: item.attributes.slice(*item_fields), period: item.pay_period.attributes.slice(*period_fields) }
       end,
@@ -496,6 +556,10 @@ class IssueCorrectivePaycheckService
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot
     )
     temp.pay_period = @original_pay_period
+    if original_item.wage_rate_hours.present?
+      target_inputs = SINGLE_RATE_HOUR_FIELDS.values.index_with { |field| temp.public_send(field) }.merge(pay_rate: temp.pay_rate)
+      temp.custom_columns_data = single_rate_columns(temp.custom_columns_data, target_inputs)
+    end
     temp.payroll_adjustments = original_item.payroll_adjustments.deep_dup
     temp.tax_rule_snapshot = original_item.tax_rule_snapshot.deep_dup
     temp.retirement_rule_snapshot = original_item.retirement_rule_snapshot.deep_dup
