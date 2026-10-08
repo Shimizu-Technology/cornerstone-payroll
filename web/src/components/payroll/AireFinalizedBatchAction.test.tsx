@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AireFinalizedBatchAction } from './AireFinalizedBatchAction';
-import type { AirePayrollRecord } from '@/types';
+import type { AirePayrollRecord, PayPeriodStatus } from '@/types';
 
 const batch = {
   event_id: 'event-1',
@@ -158,4 +158,38 @@ describe('AireFinalizedBatchAction', () => {
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText(/failed and voided payments require an explicit follow-up/i)).toBeTruthy();
   });
+});
+
+
+it.each([
+  ['draft', 'Next: select Calculate Payroll.'],
+  ['calculated', 'Next: review the calculated payroll, then select Approve when ready.'],
+  ['approved', 'Next: select Commit & Finalize when the approved payroll is ready.'],
+] as const)('gives an added batch the next action for the actual %s payroll status', (status, nextAction) => {
+  const onReview = vi.fn();
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus={status} aireRecord={linkedRecord()} onReview={onReview} />);
+  expect(screen.getByText(nextAction, { exact: false })).toBeTruthy();
+  if (status !== 'draft') expect(screen.queryByText(/Next: select Calculate Payroll/)).toBeNull();
+  expect(screen.getByText(/Adding the batch records hours in payroll; it does not mark anyone paid/)).toBeTruthy();
+  expect(screen.queryByRole('button')).toBeNull();
+  expect(onReview).not.toHaveBeenCalled();
+});
+
+it('updates guidance through calculation, approval, rollback and commit without treating those stages as payment', () => {
+  const onReview = vi.fn();
+  const view = render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="draft" aireRecord={linkedRecord()} onReview={onReview} />);
+  for (const status of ['calculated', 'approved', 'calculated', 'draft', 'committed'] as PayPeriodStatus[]) {
+    view.rerender(<AireFinalizedBatchAction batch={batch} payPeriodStatus={status} aireRecord={linkedRecord()} onReview={onReview} />);
+    if (status === 'calculated') expect(screen.getByText(/Next: review the calculated payroll, then select Approve when ready/)).toBeTruthy();
+    else if (status === 'approved') expect(screen.getByText(/Next: select Commit & Finalize when the approved payroll is ready/)).toBeTruthy();
+    else if (status === 'draft') expect(screen.getByText(/Next: select Calculate Payroll/)).toBeTruthy();
+    else {
+      expect(screen.queryByText(/Next:/)).toBeNull();
+      expect(screen.getByText('Time tracking hours are linked; payment evidence is pending')).toBeTruthy();
+      expect(screen.getByText(/Delivery or settlement establishes paid status/)).toBeTruthy();
+    }
+    expect(screen.queryByText('Time tracking hours are paid')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  }
+  expect(onReview).not.toHaveBeenCalled();
 });
