@@ -20,6 +20,7 @@ type Props = {
   payPeriodVoided: boolean;
   payrollItems: PayrollItem[];
   onChanged: () => void;
+  refreshToken?: number;
 };
 
 function decimalHours(value: string): Decimal | null {
@@ -36,7 +37,7 @@ const stateLabel = (allocation: AireManualAllocation) => allocation.payment_canc
   voided: 'Allocation voided',
 }[allocation.status] || 'Review allocation status');
 
-export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, payPeriodVoided, payrollItems, onChanged }: Props) {
+export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, payPeriodVoided, payrollItems, onChanged, refreshToken = 0 }: Props) {
   const { hasCapability } = useAuth();
   const { activeCompanyId } = useCompany();
   const location = useLocation();
@@ -57,14 +58,14 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
   const actionGeneration = useRef(0);
   const committed = payPeriodStatus === 'committed' && !payPeriodVoided;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (resetDraft = false) => {
     const current = ++generation.current;
+    if (resetDraft) { setEntryKey(''); setItemId(''); setRegular(''); setOvertime(''); }
     setLoading(true); setError('');
     try {
       const result = await payPeriodsApi.airePayrollManualReview(payPeriodId);
       if (current !== generation.current) return;
       setReview(result); setAllocations(result.cornerstone_manual_allocations || []); setNeedsRefresh(false);
-      setEntryKey(''); setItemId(''); setRegular(''); setOvertime('');
     } catch (caught) {
       if (current === generation.current) {
         setReview(null); setNeedsRefresh(true);
@@ -75,9 +76,14 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
 
   useEffect(() => {
     setReview(null); setAllocations([]); setNotice(''); setNote(''); setBusy(false);
-    if (allowed) void load();
+    setEntryKey(''); setItemId(''); setRegular(''); setOvertime('');
     return () => { generation.current += 1; actionGeneration.current += 1; };
-  }, [allowed, load]);
+  }, [allowed, payPeriodId]);
+
+  useEffect(() => {
+    if (allowed) void load();
+    return () => { generation.current += 1; };
+  }, [allowed, load, refreshToken]);
 
   const candidates = useMemo(() => (review?.employees || []).flatMap(employee => {
     const employeeId = employee.cornerstone.employee_id;
@@ -132,7 +138,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
       });
       if (current !== actionGeneration.current) return;
       remember(allocation); setNotice(stateLabel(allocation)); setNote('');
-      await load();
+      await load(true);
       if (current === actionGeneration.current) onChanged();
     } catch (caught) {
       if (current === actionGeneration.current) {

@@ -14,6 +14,7 @@ type Props = {
   payPeriodStatus: PayPeriodStatus;
   payrollHours: PayrollHours;
   aireRecordLinked: boolean;
+  refreshToken?: number;
 };
 
 const hours = (value: number) => Number(value || 0).toFixed(2);
@@ -31,7 +32,7 @@ const exclusionLabel = (reason: string) => ({
   payment_attested_pending_evidence: 'payment reported; check evidence pending',
 }[reason] || reason.replaceAll('_', ' '));
 
-export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked }: Props) {
+export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked, refreshToken = 0 }: Props) {
   const [review, setReview] = useState<AirePayrollManualReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setReview(null);
     void load();
     return () => { requestGeneration.current += 1; };
-  }, [load]);
+  }, [load, refreshToken]);
 
   const rows = useMemo(() => (review?.employees || []).map((employee) => {
     const employeeId = employee.cornerstone.employee_id;
