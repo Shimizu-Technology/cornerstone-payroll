@@ -96,7 +96,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-display text-lg font-bold text-neutral-950">Live time tracking readiness</h3>
-              <Badge variant="info">Before cutoff</Badge>
+              <Badge variant="info">Live preview</Badge>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-700">
               Review current hours, mappings, carryover, and held entries before cutoff. After time tracking locks the period, this area switches to the verified batch that can be added to payroll.
