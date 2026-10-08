@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Employee, PayPeriod } from '@/types';
@@ -41,14 +42,14 @@ vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecks
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', () => ({ PayrollFinalRecordPanel: () => null }));
 vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
-  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number }) => {
+  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => void }) => {
     componentMocks.timeTrackingImport(props);
     return props.open ? (
       <div
         data-testid="time-tracking-import-modal"
         data-auto-preview={String(Boolean(props.autoPreview))}
         data-source-id={props.initialSourceId ?? ''}
-      />
+      ><button onClick={props.onImportComplete}>Complete explicit time import</button></div>
     ) : null;
   },
 }));
@@ -148,7 +149,14 @@ async function renderCappedFieldWorksheet(withAire = false) {
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   const period = { ...initialPayPeriod, status: 'draft', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { enabled: true, source_id: 12 } } } : {}) } as unknown as PayPeriod;
   apiMocks.get.mockResolvedValue({ pay_period: period });
-  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  function TokenHost() {
+    const [refreshToken, setRefreshToken] = useState(0);
+    const navigate = useNavigate();
+    return <><button onClick={() => setRefreshToken(token => token + 1)}>Sibling checks changed</button>
+      <button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other draft run</button>
+      <PayPeriodDetail initialPayPeriod={period} refreshToken={refreshToken} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<TokenHost />} /></Routes></MemoryRouter>);
   const input = await screen.findByLabelText('401(k) supplemental');
   const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
   fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '8' } });
@@ -530,4 +538,72 @@ it('invalidates every source panel without remounting or resetting payroll draft
     expect(screen.getByLabelText('401(k) supplemental')).toBe(field);
     panels.forEach((panel, panelIndex) => expect(screen.getByTestId(['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision'][panelIndex])).toBe(panel));
   }
+});
+
+
+async function editPayrollDrafts() {
+  const field = await renderCappedFieldWorksheet(true) as HTMLInputElement;
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const regular = within(card).getByLabelText('Regular hours') as HTMLInputElement;
+  const bonus = within(card).getByLabelText('Bonus this payroll for Ana Cruz') as HTMLInputElement;
+  fireEvent.change(regular, { target: { value: '19' } });
+  fireEvent.change(bonus, { target: { value: '77' } });
+  fireEvent.change(field, { target: { value: '888' } });
+  fireEvent.blur(field);
+  return { field, regular, bonus };
+}
+
+it('preserves dirty hours, bonus edits and worksheet requests when the parent check token changes', async () => {
+  const { field, regular, bonus } = await editPayrollDrafts();
+  const period = { ...initialPayPeriod, status: 'draft', notes: 'Latest sibling check metadata', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { enabled: true, source_id: 12 } } } as unknown as PayPeriod;
+  apiMocks.get.mockResolvedValue({ pay_period: period });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
+  await screen.findByText('Latest sibling check metadata');
+  expect(regular.value).toBe('19');
+  expect(bonus.value).toBe('77.00');
+  expect(field.value).toBe('888.00');
+  expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('1');
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual(expect.objectContaining({ regular: 19 }));
+  expect(apiMocks.runPayroll.mock.calls[0][1].bonuses).toEqual({ '30': 77 });
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 888, replace_request: true });
+});
+
+it.each(['import', 'calculation', 'navigation'])('still applies canonical inputs after explicit %s following a passive refresh', async (action) => {
+  await editPayrollDrafts();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' })));
+  const worksheet = (await apiMocks.payrollFieldInputs.mock.results[0].value).payroll_field_inputs;
+  const canonical = { ...initialPayPeriod, id: action === 'navigation' ? 13 : 12, status: 'draft', payroll_items: [{ id: 90, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 26, overtime_hours: 0, bonus: 12, gross_pay: 402, net_pay: 380 }] } as unknown as PayPeriod;
+  apiMocks.get.mockResolvedValue({ pay_period: canonical });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { ...worksheet, assignments: worksheet.assignments.map((assignment: { requested_amount: number }) => ({ ...assignment, requested_amount: 250 })) } });
+  if (action === 'import') {
+    fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
+  } else if (action === 'calculation') {
+    apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...canonical, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  } else {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Other draft run' }));
+    });
+    await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
+  }
+  await waitFor(() => expect(screen.getByLabelText('401(k) supplemental')).toHaveProperty('value', '250.00'));
+  const card = screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(within(card).getByLabelText('Regular hours')).toHaveProperty('value', '26');
+  expect(within(card).getByLabelText('Bonus this payroll for Ana Cruz')).toHaveProperty('value', '12.00');
+});
+
+it('initializes worksheet inputs when a parent token supersedes the first pending load', async () => {
+  let resolveOld!: (value: { data: Employee[]; meta: { total_pages: number } }) => void;
+  apiMocks.employeesList.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+  const ready = renderCappedFieldWorksheet();
+  await waitFor(() => expect(apiMocks.employeesList).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
+  const field = await ready;
+  expect(field).toHaveProperty('value', '1070.00');
+  await act(async () => resolveOld({ data: [], meta: { total_pages: 1 } }));
+  expect(screen.getByLabelText('401(k) supplemental')).toBe(field);
 });
