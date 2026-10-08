@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AirePaymentEvidenceHolds } from './AirePaymentEvidenceHolds';
@@ -68,4 +68,44 @@ describe('reported payment holds', () => {
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.queryByLabelText('Source hours to hold')).toBeNull();
   });
+});
+
+
+it('preserves a hold draft and settles its pending command through sibling refresh', async () => {
+  const user = userEvent.setup(); const onChanged = vi.fn();
+  let resolveCreate!: () => void;
+  mocks.create.mockImplementation(() => new Promise<void>(resolve => { resolveCreate = resolve; }));
+  const view = render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={onChanged} />);
+  await user.selectOptions(await screen.findByLabelText('Source hours to hold'), '41');
+  const reason = screen.getByLabelText('Reporter and pending payment evidence') as HTMLTextAreaElement;
+  await user.type(reason, hold.reason);
+  view.rerender(<AirePaymentEvidenceHolds payPeriodId={12} refreshToken={1} onChanged={onChanged} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Record reported-payment hold' }).hasAttribute('disabled')).toBe(false));
+  expect(reason.value).toBe(hold.reason);
+  expect((screen.getByLabelText('Source hours to hold') as HTMLSelectElement).value).toBe('41');
+  await user.click(screen.getByRole('button', { name: 'Record reported-payment hold' }));
+  view.rerender(<AirePaymentEvidenceHolds payPeriodId={12} refreshToken={2} onChanged={onChanged} />);
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(3));
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [hold] });
+  await act(async () => resolveCreate());
+  expect(await screen.findByText(/no payroll payment was created/)).toBeTruthy();
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(reason.value).toBe('');
+  expect(screen.queryByRole('button', { name: 'Saving…' })).toBeNull();
+});
+
+it('preserves retraction reason while invalidating a hold removed by source refresh', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [hold] });
+  const view = render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Retract hold' }));
+  await user.type(screen.getByLabelText('Retraction reason'), 'Owner withdrew the report after checking delivery records');
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [] });
+  view.rerender(<AirePaymentEvidenceHolds payPeriodId={12} refreshToken={1} onChanged={vi.fn()} />);
+  expect(await screen.findByText(/This hold is no longer available/)).toBeTruthy();
+  expect((screen.getByLabelText('Retraction reason') as HTMLTextAreaElement).value).toBe('Owner withdrew the report after checking delivery records');
+  expect(screen.getByRole('button', { name: 'Confirm retraction' }).hasAttribute('disabled')).toBe(true);
+  expect(mocks.retract).not.toHaveBeenCalled();
+  view.rerender(<AirePaymentEvidenceHolds payPeriodId={13} refreshToken={1} onChanged={vi.fn()} />);
+  expect(await screen.findByLabelText('Reporter and pending payment evidence')).toHaveProperty('value', '');
 });

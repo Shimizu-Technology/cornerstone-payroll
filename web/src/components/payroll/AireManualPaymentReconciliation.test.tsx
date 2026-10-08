@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render as renderView, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render as renderView, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -239,4 +239,64 @@ describe('AireManualPaymentReconciliation', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
+});
+
+
+it('preserves valid reconciliation drafts on source refresh and revalidates changed hours and versions', async () => {
+  const view = render(<AireManualPaymentReconciliation {...props} />);
+  const user = await choose();
+  const note = screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement;
+  const regular = screen.getByLabelText('Regular hours to link') as HTMLInputElement;
+  view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={1} />);
+  await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Link hours to payroll item' }).hasAttribute('disabled')).toBe(false));
+  expect(note.value).toBe('Verified hours against existing check 0012');
+  expect(regular.value).toBe('5.10');
+  expect((screen.getByLabelText('Exact time tracking time entry') as HTMLSelectElement).value).toBe(`${uuid}:40:carryover`);
+  expect((screen.getByLabelText('Existing committed payroll item') as HTMLSelectElement).value).toBe('12');
+  mocks.review.mockResolvedValue({ ...review, employees: [{ ...review.employees[0], adjustments: [{ ...entry, regular_hours: 1, source_time_entry_version: 4 }] }] });
+  view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={2} />);
+  await screen.findByRole('option', { name: /entry 40.*1.00 REG/ });
+  expect(regular.value).toBe('5.10');
+  expect(note.value).toBe('Verified hours against existing check 0012');
+  expect(screen.getByRole('button', { name: 'Link hours to payroll item' }).hasAttribute('disabled')).toBe(true);
+  await user.clear(regular); await user.type(regular, '1.00');
+  mocks.create.mockResolvedValue({ manual_allocation: allocation });
+  await user.click(screen.getByRole('button', { name: 'Link hours to payroll item' }));
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(67, expect.objectContaining({ source_time_entry_version: 4, regular_hours: '1.00' })));
+});
+
+it('settles an allocation command during sibling refresh and clears drafts only for its own success', async () => {
+  let resolveCreate!: (value: { manual_allocation: AireManualAllocation }) => void;
+  mocks.create.mockImplementation(() => new Promise(resolve => { resolveCreate = resolve; }));
+  const view = render(<AireManualPaymentReconciliation {...props} />);
+  const user = await choose();
+  await user.click(screen.getByRole('button', { name: 'Link hours to payroll item' }));
+  view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={1} />);
+  await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
+  mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
+  await act(async () => resolveCreate({ manual_allocation: allocation }));
+  expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(2);
+  await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
+  expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
+  expect((screen.getByLabelText('Regular hours to link') as HTMLInputElement).value).toBe('');
+  expect(screen.queryByRole('button', { name: 'Saving reconciliation…' })).toBeNull();
+});
+
+it('ignores older same-period reviews and clears drafts when the period changes', async () => {
+  const view = render(<AireManualPaymentReconciliation {...props} />);
+  await choose();
+  let resolveOld!: (value: AirePayrollManualReview) => void;
+  mocks.review.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+  view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={1} />);
+  await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
+  mocks.review.mockResolvedValue({ ...review, exclusions: [{ source_time_entry_id: '99', source_user_id: '91', display_name: 'Manual Employee', original_work_date: '2026-08-15', reason: 'pending_approval', held_total_hours: 2, cornerstone: { status: 'mapped', employee_id: 7 } }] });
+  view.rerender(<AireManualPaymentReconciliation {...props} refreshToken={2} />);
+  expect(await screen.findByText(/1 held entries remain outside/)).toBeTruthy();
+  await act(async () => resolveOld(review));
+  expect(screen.getByText(/1 held entries remain outside/)).toBeTruthy();
+  view.rerender(<AireManualPaymentReconciliation {...props} payPeriodId={68} refreshToken={2} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh reconciliation' }).hasAttribute('disabled')).toBe(false));
+  expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
+  expect((screen.getByLabelText('Regular hours to link') as HTMLInputElement).value).toBe('');
 });
