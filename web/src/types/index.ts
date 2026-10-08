@@ -629,6 +629,16 @@ export interface PayDateCorrection {
   corrected_by_name?: string | null;
 }
 
+export interface SourceAccountingReceiptState {
+  id: number;
+  event_id: string;
+  status: 'pending' | 'error' | 'confirmed';
+  queued_at: string | null;
+  confirmed_at: string | null;
+  error: string | null;
+  can_retry: boolean;
+}
+
 export interface AirePayrollRecord {
   id: number;
   source_name: string;
@@ -661,6 +671,7 @@ export interface AirePayrollRecord {
     corrective_pay_period_id: number;
     corrective_payroll_item_id: number;
     accounting_only: true;
+    source_receipt?: SourceAccountingReceiptState | null;
   }>;
   payable_line_status?: {
     line_count: number;
