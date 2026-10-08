@@ -519,7 +519,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
 
       {hasPhysicalChecks && <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-        Saving a check package prepares the selected checks. Record a check as issued only after it was released to the employee.
+        Saving a check package prepares the selected checks. Record a check as issued when it is released to the business or employee. The business&apos;s later distribution does not change the issue date.
         {checks.some((item) => item.aire_linked && !item.voided) && ' Linked time tracking hours are not marked paid until then.'}
       </div>}
 
