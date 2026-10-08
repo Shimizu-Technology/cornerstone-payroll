@@ -51,6 +51,11 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(admin_user.id)
   end
 
+  def review_digest(inputs)
+    IssueCorrectivePaycheckService.preview(original_pay_period: original_period, employee: employee, corrected_inputs: inputs)
+      .fetch(:meta).fetch(:review_digest)
+  end
+
   describe "POST /api/v1/admin/pay_periods/:id/corrective_paycheck_preview" do
     it "returns deltas without persisting" do
       expect {
@@ -111,6 +116,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
              params: {
                employee_id:      employee.id,
                corrected_inputs: { hours_worked: 80 },
+               expected_review_digest: review_digest(hours_worked: 80),
                pay_date:         "2024-01-26",
                reason:           "Wrong hours reported"
              },
@@ -135,6 +141,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
            params: {
              employee_id:      employee.id,
              corrected_inputs: { hours_worked: 60 }, # no change
+             expected_review_digest: review_digest(hours_worked: 60),
              pay_date:         "2024-01-26",
              reason:           "no-op"
            },
@@ -148,6 +155,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
            params: {
              employee_id:      employee.id,
              corrected_inputs: { hours_worked: 80 },
+             expected_review_digest: review_digest(hours_worked: 80),
              pay_date:         "2024-01-26"
            },
            as: :json
@@ -194,6 +202,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
                withholding_tax: 1_234.56     # service-computed — must be dropped
              },
              pay_date: "2024-01-26",
+             expected_review_digest: review_digest(hours_worked: 80, bonus: 50),
              reason:   "Strong-params drop check"
            },
            as: :json
@@ -213,7 +222,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
                employee_id:      employee.id,
                corrected_inputs: { hours_worked: 80 },
                pay_date:         "2024-01-26",
-               reason:           "Audit-log regression"
+               reason:           "Audit-log regression",
+               expected_review_digest: review_digest(hours_worked: 80)
              },
              as: :json
       }.to change { AuditLog.where(action: "pay_periods#corrective_paychecks").count }.by(1)
@@ -223,6 +233,44 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
       expect(log.user_id).to eq(admin_user.id)
       expect(log.record_type).to eq("pay_periods")
       expect(log.record_id.to_s).to eq(original_period.id.to_s)
+    end
+  end
+
+  describe "review proof at issue" do
+    def issue_reviewed(inputs, digest:)
+      post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paychecks",
+        params: { employee_id: employee.id, corrected_inputs: inputs, expected_review_digest: digest,
+          pay_date: "2024-01-26", reason: "Verified target" }, as: :json
+    end
+
+    it "requires proof without changing payroll, checks or YTD" do
+      baseline = employee.ytd_totals_for(2024).reload.attributes
+      expect { issue_reviewed({ hours_worked: 80 }, digest: nil) }.not_to change(PayPeriod, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/Refresh.*preview/i)
+      expect(employee.ytd_totals_for(2024).reload.attributes).to eq(baseline)
+    end
+
+    it "rejects tampered proof and a target different from the reviewed inputs" do
+      proof = review_digest(hours_worked: 80)
+      [ "0" * 64, proof ].each do |digest|
+        expect { issue_reviewed({ hours_worked: 65 }, digest: digest) }.not_to change(PayPeriod, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body)["error"]).to match(/preview changed/i)
+      end
+    end
+
+    it "rejects a stale positive preview after another target was committed and accepts only a refreshed review" do
+      proof = review_digest(hours_worked: 65)
+      IssueCorrectivePaycheckService.issue!(original_pay_period: original_period, employee: employee,
+        corrected_inputs: { hours_worked: 80 }, pay_date: Date.new(2024, 1, 26), reason: "Other operator", actor: admin_user)
+      baseline = employee.ytd_totals_for(2024).reload.attributes
+      expect { issue_reviewed({ hours_worked: 65 }, digest: proof) }.not_to change(PayPeriod, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.ytd_totals_for(2024).reload.attributes).to eq(baseline)
+      issue_reviewed({ hours_worked: 65 }, digest: review_digest(hours_worked: 65))
+      expect(response).to have_http_status(:created)
+      expect(PayrollItem.find(JSON.parse(response.body).dig("corrective_payroll_item", "id")).gross_pay).to eq(-225)
     end
   end
 

@@ -1597,6 +1597,7 @@ export interface CorrectivePaycheckSnapshot {
 
 export interface CorrectivePaycheckPreview {
   original: CorrectivePaycheckSnapshot;
+  recorded?: CorrectivePaycheckSnapshot;
   corrected: CorrectivePaycheckSnapshot;
   deltas: Record<string, number>;
   meta: {
@@ -1604,6 +1605,8 @@ export interface CorrectivePaycheckPreview {
     original_payroll_item_id: number;
     employee_id: number;
     employee_name: string;
+    active_corrective_count?: number;
+    review_digest?: string;
     will_generate_check: boolean;
     is_zero_change: boolean;
   };
