@@ -59,6 +59,28 @@ module Api
           render json: { error: "Time tracking import not found" }, status: :not_found
         end
 
+        def correction_delivery
+          import, disposition = correction_delivery_records
+          render json: { disposition: correction_delivery_json(import, disposition) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Accounting correction not found" }, status: :not_found
+        end
+
+        def correction_delivery_retry
+          import, disposition = correction_delivery_records
+          disposition.verified!
+          receipt = disposition.time_tracking_correction_receipt
+          raise ArgumentError, "Accounting delivery receipt is missing; review this correction with payroll support" unless receipt
+          receipt.dispatch!(retry_failed: true)
+          render json: { disposition: correction_delivery_json(import, disposition) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Accounting correction not found" }, status: :not_found
+        end
+
         def reconcile
           permitted = reconcile_params
           import = @pay_period.time_tracking_imports.find(permitted[:import_id])
@@ -89,6 +111,19 @@ module Api
           return if @pay_period.company_id == current_company_id
 
           render json: { error: "Pay period not found" }, status: :not_found
+        end
+
+        def correction_delivery_records
+          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          disposition = import.time_tracking_correction_dispositions.find(params[:disposition_id])
+          unless disposition.company_id == current_company_id && disposition.time_tracking_source_id == import.time_tracking_source_id
+            raise ActiveRecord::RecordNotFound
+          end
+          [ import, disposition ]
+        end
+
+        def correction_delivery_json(import, disposition)
+          TimeTracking::CorrectionCoverage.new(import).presentation.find { |row| row[:id] == disposition.id }
         end
 
         def correction_service(import)

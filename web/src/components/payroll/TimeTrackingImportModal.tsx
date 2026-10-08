@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
-import type { ExactTimeCorrectionLine, ExactTimeCorrectionPreview, TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
+import type { ExactTimeCorrectionDisposition, ExactTimeCorrectionLine, ExactTimeCorrectionPreview, TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
 interface Props {
@@ -462,6 +462,25 @@ export function TimeTrackingImportModal({
     } finally { if (isCurrentRequest()) setCorrectionBusy(false); }
   };
 
+  const refreshCorrectionDelivery = async (disposition: ExactTimeCorrectionDisposition, retry = false) => {
+    if (!preview) return;
+    const isCurrentRequest = beginScopedRequest();
+    setCorrectionBusy(true);
+    setError(null);
+    try {
+      const params = { import_id: preview.id, disposition_id: disposition.id };
+      const response = retry
+        ? await payPeriodsApi.retryTimeTrackingCorrectionDelivery(payPeriod.id, params)
+        : await payPeriodsApi.timeTrackingCorrectionDelivery(payPeriod.id, params);
+      if (!isCurrentRequest()) return;
+      setPreview(current => current && ({ ...current, correction_dispositions: (current.correction_dispositions || [])
+        .map(row => row.id === response.disposition.id ? response.disposition : row) }));
+      onCorrectionRecorded?.();
+    } catch (err) {
+      if (isCurrentRequest()) setError(err instanceof Error ? err.message : 'Could not refresh the source confirmation');
+    } finally { if (isCurrentRequest()) setCorrectionBusy(false); }
+  };
+
   const handleApply = async () => {
     if (!preview) return;
     const isCurrentRequest = beginScopedRequest();
@@ -684,7 +703,22 @@ export function TimeTrackingImportModal({
                 </section>
               )}
               {(preview.correction_dispositions || []).map((done) => (
-                <div key={done.id} className="rounded-xl border border-success-200 bg-success-50 p-3 text-sm">Accounting correction committed in supplemental #{done.corrective_pay_period_id}, item #{done.corrective_payroll_item_id}: {formatHours(done.total_hours)} hours. No new payment or recovery recorded. Add the remaining ordinary hours below.</div>
+                <section key={done.id} aria-label="Accounting correction delivery" className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                  <p className="font-semibold">Recorded in Payroll supplemental #{done.corrective_pay_period_id}, item #{done.corrective_payroll_item_id}: {formatHours(done.total_hours)} hours.</p>
+                  <p>No new payment or recovery recorded. The accounting entry is already posted; refresh or retry only its source confirmation.</p>
+                  {done.source_receipt?.status === 'confirmed' ? (
+                    <p className="font-medium text-success-800">Source confirmation verified · {formatTimestamp(done.source_receipt.confirmed_at)}</p>
+                  ) : done.source_receipt?.status === 'error' ? (
+                    <div className="rounded-lg border border-warning-200 bg-warning-50 p-2 text-warning-900">
+                      <p className="font-semibold">Source confirmation needs attention.</p>
+                      <p>{done.source_receipt.error || 'The exact accounting receipt could not be verified.'}</p>
+                    </div>
+                  ) : <p className="text-neutral-700">Source confirmation pending.{done.source_receipt?.queued_at ? ` Queued ${formatTimestamp(done.source_receipt.queued_at)}.` : ''}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" disabled={loading || correctionBusy} onClick={() => void refreshCorrectionDelivery(done)}>Refresh source confirmation</Button>
+                    {done.source_receipt?.can_retry && <Button variant="outline" size="sm" disabled={loading || correctionBusy} onClick={() => void refreshCorrectionDelivery(done, true)}>Retry source confirmation</Button>}
+                  </div>
+                </section>
               ))}
               <section aria-label="Hours included in this review" className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                 <div className="grid grid-cols-2 gap-3">

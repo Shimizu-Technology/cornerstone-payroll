@@ -70,7 +70,8 @@ module TimeTracking
           overtime_hours: row.overtime_hours.to_f, original_pay_period_id: row.original_allocation.pay_period_id,
           original_payroll_item_id: row.original_allocation.payroll_item_id,
           corrective_pay_period_id: row.corrective_payroll_item.pay_period_id,
-          corrective_payroll_item_id: row.corrective_payroll_item_id, accounting_only: true }
+          corrective_payroll_item_id: row.corrective_payroll_item_id, accounting_only: true,
+          source_receipt: row.time_tracking_correction_receipt&.delivery_snapshot }
       end
     end
 

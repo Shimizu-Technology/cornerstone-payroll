@@ -11,14 +11,28 @@ class TimeTrackingCorrectionReceipt < ApplicationRecord
     where(delivered_at: nil).where("enqueued_at IS NULL OR enqueued_at < ?", 30.minutes.ago).find_each(&:dispatch!)
   end
 
-  def dispatch!
+  def retryable?
+    delivered_at.blank? && (last_error.present? || enqueued_at.blank? || enqueued_at < 30.minutes.ago)
+  end
+
+  def delivery_snapshot
+    confirmed = delivered_at.present?
+    { id: id, event_id: event_id, status: confirmed ? "confirmed" : (last_error.present? ? "error" : "pending"),
+      queued_at: enqueued_at, confirmed_at: delivered_at, error: confirmed ? nil : last_error.presence,
+      can_retry: retryable? }
+  end
+
+  def dispatch!(retry_failed: false)
     with_lock do
-      return if delivered_at.present? || (enqueued_at.present? && enqueued_at >= 30.minutes.ago)
+      return false if delivered_at.present?
+      return false if enqueued_at.present? && enqueued_at >= 30.minutes.ago && !(retry_failed && last_error.present?)
       TimeTrackingCorrectionReceiptJob.perform_later(id)
       update!(enqueued_at: Time.current, last_error: nil)
     end
+    true
   rescue StandardError => e
-    update_columns(last_error: e.message, updated_at: Time.current)
+    with_lock { update_columns(last_error: e.message, updated_at: Time.current) if delivered_at.blank? }
+    false
   end
 
   private

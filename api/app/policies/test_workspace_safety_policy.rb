@@ -7,7 +7,7 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/pay_periods" => %w[
       commit void create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
     ],
-    "api/v1/admin/time_tracking_imports" => %w[correction_confirm],
+    "api/v1/admin/time_tracking_imports" => %w[correction_confirm correction_delivery_retry],
     "api/v1/admin/check_numbers" => %w[update],
     "api/v1/admin/checks" => %w[batch_pdf mark_all_printed mark_printed mark_delivered void reprint update_check_number replace_check],
     "api/v1/admin/check_print_runs" => %w[create pdf confirm],

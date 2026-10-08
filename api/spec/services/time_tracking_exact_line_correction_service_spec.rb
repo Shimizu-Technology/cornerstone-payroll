@@ -259,6 +259,71 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
       end
     end
 
+    it "queues a failed receipt only once when two operators retry concurrently" do
+      receipt = confirm.time_tracking_correction_receipt
+      receipt.update!(last_error: "Exact source response was not verified", enqueued_at: Time.current)
+      payload = receipt.payload.deep_dup
+      event_id = receipt.event_id
+      outcomes = Queue.new
+      expect(TimeTrackingCorrectionReceiptJob).to receive(:perform_later).with(receipt.id).once
+      workers = 2.times.map do
+        Thread.new do
+          ApplicationRecord.connection_pool.with_connection do
+            outcomes << TimeTrackingCorrectionReceipt.find(receipt.id).dispatch!(retry_failed: true)
+          end
+        end
+      end
+      workers.each { |thread| Timeout.timeout(20) { thread.join } }
+      expect(2.times.map { outcomes.pop }.sort_by(&:to_s)).to eq([ false, true ])
+      expect(receipt.reload.delivery_snapshot[:status]).to eq("pending")
+      expect(receipt.payload).to eq(payload)
+      expect(receipt.event_id).to eq(event_id)
+      expect(PayrollItem.where(correction_for_payroll_item_id: original_item.id).count).to eq(1)
+    ensure
+      workers&.each { |thread| Timeout.timeout(20) { thread.join } }
+    end
+
+    it "serializes receipt delivery workers and never posts accounting money or source event twice" do
+      receipt = confirm.time_tracking_correction_receipt
+      payload = receipt.payload.deep_dup
+      initial_counts = [ PayPeriod.count, PayrollItem.count, TimeTrackingCorrectionDisposition.count, TimeTrackingCorrectionReceipt.count ]
+      entered = Queue.new
+      release = Queue.new
+      outcomes = Queue.new
+      calls = 0
+      mutex = Mutex.new
+      allow_any_instance_of(TimeTracking::Client).to receive(:record_accounting_correction_event).with(**payload.deep_symbolize_keys) do
+        mutex.synchronize { calls += 1 }
+        entered << true
+        release.pop
+        {}
+      end
+      first = Thread.new do
+        ApplicationRecord.connection_pool.with_connection do
+          TimeTrackingCorrectionReceiptJob.new.perform(receipt.id)
+          outcomes << :confirmed
+        end
+      end
+      entered.pop(timeout: 10) || raise(Timeout::Error, "Delivery worker did not start")
+      second = Thread.new do
+        ApplicationRecord.connection_pool.with_connection do
+          TimeTrackingCorrectionReceiptJob.new.perform(receipt.id)
+          outcomes << :confirmed
+        end
+      end
+      release << true
+      [ first, second ].each { |thread| Timeout.timeout(20) { thread.join } }
+      expect(2.times.map { outcomes.pop }).to eq([ :confirmed, :confirmed ])
+      expect(calls).to eq(1)
+      expect(receipt.reload.delivery_snapshot[:status]).to eq("confirmed")
+      expect(receipt.last_error).to be_nil
+      expect(receipt.payload).to eq(payload)
+      expect([ PayPeriod.count, PayrollItem.count, TimeTrackingCorrectionDisposition.count, TimeTrackingCorrectionReceipt.count ]).to eq(initial_counts)
+    ensure
+      release&.push(true)
+      [ first, second ].compact.each { |thread| Timeout.timeout(20) { thread.join } }
+    end
+
     it "returns the same corrective item, disposition and outbox when two confirmations race" do
       preview = service.preview
       ready = Queue.new

@@ -14,6 +14,8 @@ const apiMocks = vi.hoisted(() => ({
   reconcile: vi.fn(),
   correctionPreview: vi.fn(),
   correctionConfirm: vi.fn(),
+  correctionDelivery: vi.fn(),
+  correctionRetry: vi.fn(),
   company: { activeCompany: null as { id: number; name: string } | null, companies: [] as Array<{ id: number; name: string }> },
 }));
 
@@ -33,7 +35,7 @@ vi.mock('@/services/api', () => ({
     data?: unknown;
   },
   timeTrackingSourcesApi: { list: apiMocks.listSources },
-  payPeriodsApi: { previewTimeTrackingCorrection: apiMocks.correctionPreview, confirmTimeTrackingCorrection: apiMocks.correctionConfirm, previewTimeTrackingImport: apiMocks.preview, applyTimeTrackingImport: apiMocks.apply, reconcileTimeTrackingImport: apiMocks.reconcile },
+  payPeriodsApi: { previewTimeTrackingCorrection: apiMocks.correctionPreview, confirmTimeTrackingCorrection: apiMocks.correctionConfirm, timeTrackingCorrectionDelivery: apiMocks.correctionDelivery, retryTimeTrackingCorrectionDelivery: apiMocks.correctionRetry, previewTimeTrackingImport: apiMocks.preview, applyTimeTrackingImport: apiMocks.apply, reconcileTimeTrackingImport: apiMocks.reconcile },
 }));
 
 const payPeriod = {
@@ -341,7 +343,7 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
   await user.click(confirm);
   await waitFor(() => expect(apiMocks.correctionConfirm).toHaveBeenCalledWith(17, { import_id: 99, ...{ source_user_id: line.source_user_id, source_time_entry_id: line.source_time_entry_id, line_key: line.line_key }, preview_token: 'signed-proof', reason: 'Approved source correction', acknowledge_accounting_only: true }));
-  expect(await screen.findByText(/Accounting correction committed in supplemental #100/)).toBeTruthy();
+  expect(await screen.findByText(/Recorded in Payroll supplemental #100/)).toBeTruthy();
 });
 
 
@@ -459,5 +461,95 @@ describe('correction request scopes', () => {
     await act(async () => old.reject(new Error('Old tenant A correction failed')));
     expect(screen.queryByText('Old tenant A correction failed')).toBeNull();
     expect((screen.getByRole('button', { name: 'Review correction' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+
+describe('accounting posting and source delivery are separate', () => {
+  const line = { source_user_id: '42', source_time_entry_id: '101', line_key: '7:2500', regular_hours: -1, overtime_hours: 0, total_hours: -1 };
+  const receipt = (status: 'pending' | 'error' | 'confirmed') => ({ id: 1, event_id: 'same-immutable-event', status,
+    queued_at: '2026-10-31T00:00:00Z', confirmed_at: status === 'confirmed' ? '2026-10-31T00:01:00Z' : null,
+    error: status === 'error' ? 'Exact source acknowledgment could not be verified' : null, can_retry: status === 'error' });
+  const disposition = (status: 'pending' | 'error' | 'confirmed', id = 1) => ({ ...line, id,
+    corrective_pay_period_id: 100 + id, corrective_payroll_item_id: 200 + id, accounting_only: true, source_receipt: receipt(status) });
+  const importData = (status: 'pending' | 'error' | 'confirmed', id = 99, dispositionId = 1) => ({ id, status: 'previewed', time_tracking_source_id: source.id,
+    correction_lines: [line], correction_dispositions: [disposition(status, dispositionId)],
+    processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } });
+
+  it('shows an already posted accounting correction pending/error/verified, and retries only its receipt', async () => {
+    const user = userEvent.setup();
+    const onCorrectionRecorded = vi.fn();
+    const onImportComplete = vi.fn();
+    apiMocks.preview.mockResolvedValue({ import: { ...importData('pending'), correction_dispositions: [], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } } });
+    apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, source_change: line, preview_token: 'verified-original-proof',
+      employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-10-31',
+      original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 },
+      deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
+    apiMocks.correctionConfirm.mockResolvedValue({ disposition_id: 1, import: importData('pending') });
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={onImportComplete} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Reviewed original source correction');
+    await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
+    await user.click(screen.getByRole('button', { name: 'Confirm accounting correction' }));
+    expect(await screen.findByText(/Recorded in Payroll supplemental #101/)).toBeTruthy();
+    expect(screen.getByText(/Source confirmation pending/)).toBeTruthy();
+    expect(screen.queryByText(/Source confirmation verified/)).toBeNull();
+    expect(screen.getByText(/No new payment or recovery recorded/)).toBeTruthy();
+    apiMocks.correctionDelivery.mockResolvedValueOnce({ disposition: disposition('error') });
+    await user.click(screen.getByRole('button', { name: 'Refresh source confirmation' }));
+    expect(await screen.findByText('Source confirmation needs attention.')).toBeTruthy();
+    expect(screen.getByText('Exact source acknowledgment could not be verified')).toBeTruthy();
+    apiMocks.correctionRetry.mockResolvedValue({ disposition: disposition('pending') });
+    await user.click(screen.getByRole('button', { name: 'Retry source confirmation' }));
+    expect(await screen.findByText(/Source confirmation pending/)).toBeTruthy();
+    apiMocks.correctionDelivery.mockResolvedValue({ disposition: disposition('confirmed') });
+    await user.click(screen.getByRole('button', { name: 'Refresh source confirmation' }));
+    expect(await screen.findByText(/Source confirmation verified/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry source confirmation' })).toBeNull();
+    expect(apiMocks.correctionConfirm).toHaveBeenCalledOnce();
+    expect(apiMocks.correctionRetry).toHaveBeenCalledWith(17, { import_id: 99, disposition_id: 1 });
+    expect(apiMocks.apply).not.toHaveBeenCalled();
+    expect(onImportComplete).not.toHaveBeenCalled();
+    expect(onCorrectionRecorded).toHaveBeenCalledTimes(4);
+  });
+
+  it('preserves ordinary employee mappings when only source delivery metadata refreshes', async () => {
+    const user = userEvent.setup();
+    const second = { ...employee, id: 8, first_name: 'Other' };
+    apiMocks.preview.mockResolvedValue({ import: { ...importData('error'), processed_payload: { rows: [{ ...row, categories: [] }], ready: true, validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[employee, second]} onImportComplete={vi.fn()} autoPreview />);
+    const selection = await screen.findByRole('combobox', { name: /^Payroll employee/ });
+    await user.selectOptions(selection, '8');
+    apiMocks.correctionDelivery.mockResolvedValue({ disposition: disposition('confirmed') });
+    await user.click(screen.getByRole('button', { name: 'Refresh source confirmation' }));
+    await screen.findByText(/Source confirmation verified/);
+    expect((selection as HTMLSelectElement).value).toBe('8');
+    apiMocks.apply.mockResolvedValue({ results: { applied: [], skipped: [], errors: [] }, import: { ...importData('confirmed'), status: 'applied' } });
+    await user.click(screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }));
+    await waitFor(() => expect(apiMocks.apply).toHaveBeenCalled());
+    expect(apiMocks.apply.mock.calls[0][1].mappings[0].employee_id).toBe(8);
+    expect(apiMocks.correctionConfirm).not.toHaveBeenCalled();
+  });
+
+  it.each(['scope', 'close'])('ignores late delivery refresh after %s changes, including callbacks', async (change) => {
+    const user = userEvent.setup();
+    let resolve!: (value: { disposition: ReturnType<typeof disposition> }) => void;
+    const pending = new Promise<{ disposition: ReturnType<typeof disposition> }>(yes => { resolve = yes; });
+    apiMocks.preview.mockResolvedValue({ import: importData('pending') });
+    apiMocks.correctionDelivery.mockReturnValue(pending);
+    const onCorrectionRecorded = vi.fn();
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), onCorrectionRecorded, autoPreview: true };
+    const view = render(<TimeTrackingImportModal {...props} />);
+    await user.click(await screen.findByRole('button', { name: 'Refresh source confirmation' }));
+    apiMocks.preview.mockResolvedValue({ import: importData('pending', 199, 2) });
+    if (change === 'close') view.rerender(<TimeTrackingImportModal {...props} open={false} />);
+    view.rerender(<TimeTrackingImportModal {...props} payPeriod={change === 'scope' ? { ...payPeriod, id: 18 } : payPeriod} />);
+    await waitFor(() => expect(apiMocks.preview).toHaveBeenCalledTimes(2));
+    await screen.findByText(/Recorded in Payroll supplemental #102/);
+    await act(async () => resolve({ disposition: disposition('confirmed') }));
+    expect(screen.queryByText(/Source confirmation verified/)).toBeNull();
+    expect(screen.queryByText(/supplemental #101/)).toBeNull();
+    expect(onCorrectionRecorded).not.toHaveBeenCalled();
+    expect(apiMocks.correctionConfirm).not.toHaveBeenCalled();
   });
 });
