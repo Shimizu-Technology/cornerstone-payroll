@@ -78,8 +78,11 @@ module AirePayrollCalendar
       return "batch_verifying" if event
 
       source_state = publication.source_state
-      return source_state["cutoff_state"] if source_state["cutoff_state"].present?
-      return "cutoff_due" if cutoff_at && Time.iso8601(cutoff_at) <= @now
+      captured_state = source_state["cutoff_state"]
+      if (captured_state.blank? || %w[upcoming scheduled].include?(captured_state)) && cutoff_at && Time.iso8601(cutoff_at) <= @now
+        return "cutoff_due"
+      end
+      return captured_state if captured_state.present?
 
       "scheduled"
     end

@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { Employee, PayPeriod } from '@/types';
+import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail } from './PayPeriodDetail';
 
 const apiMocks = vi.hoisted(() => ({
@@ -18,6 +18,7 @@ const apiMocks = vi.hoisted(() => ({
 
 const componentMocks = vi.hoisted(() => ({
   timeTrackingImport: vi.fn(),
+  calendarRefreshCompleted: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
@@ -65,11 +66,11 @@ vi.mock('@/components/payroll/AireManualPaymentReconciliation', () => ({
   ),
 }));
 vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
-  AirePayrollCockpit: ({ onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => void }) => (
+  AirePayrollCockpit: ({ onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => Promise<boolean | void> }) => (
     <div data-testid="source-cockpit-revision" data-revision={refreshToken}>
       <button type="button" onClick={onReviewFinalizedBatch}>Review verified time tracking batch</button>
       <button type="button" onClick={onSourceChanged}>Approve source time</button>
-      <button type="button" onClick={onRefresh}>Refresh source calendar</button>
+      <button type="button" onClick={() => { void onRefresh().then(componentMocks.calendarRefreshCompleted); }}>Refresh source calendar</button>
     </div>
   ),
 }));
@@ -88,6 +89,14 @@ const initialPayPeriod = {
   payroll_items: [],
   time_tracking: { active_source_types: [], linked_aire_records: [] },
 } as unknown as PayPeriod;
+
+const sourceCalendar: AirePayrollCalendarState = {
+  enabled: true, source_id: 12, source_name: 'Synthetic time tracking', eligible: true,
+  external_pay_period_id: 'source-period-12', cutoff_state: 'batch_verified',
+  needs_revision: false, can_publish: false, can_retry: false,
+  finalized_batch: { event_id: 'event-12', verification_status: 'verified', verification_attempts: 1,
+    occurred_at: '2026-09-22T07:00:00Z', payroll_batch_id: 'batch-12', payroll_batch_checksum: 'checksum-12' },
+};
 
 afterEach(cleanup);
 
@@ -147,7 +156,7 @@ async function renderCappedFieldWorksheet(withAire = false) {
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [field], assignments: [assignment], retained_manual_entries: [{ employee_id: 30, field_id: 9, label: 'Previous manual retirement', requested_amount: 1070, applied_amount: 93.04, source: 'manual' }] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
-  const period = { ...initialPayPeriod, status: 'draft', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { enabled: true, source_id: 12 } } } : {}) } as unknown as PayPeriod;
+  const period = { ...initialPayPeriod, status: 'draft', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } : {}) } as unknown as PayPeriod;
   apiMocks.get.mockResolvedValue({ pay_period: period });
   function TokenHost() {
     const [refreshToken, setRefreshToken] = useState(0);
@@ -387,12 +396,12 @@ it('edits the selected active wage rate after an inactive rate', async () => {
   expect(serverHours.value).toBe('0');
 });
 
-function approvedCommitView(refreshToken = 0) {
+function approvedCommitView(refreshToken = 0, withAire = false) {
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   return <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
-    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved' }} refreshToken={refreshToken} />} />
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } : {}) } as PayPeriod} refreshToken={refreshToken} />} />
   </Routes></MemoryRouter>;
 }
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
@@ -555,7 +564,7 @@ async function editPayrollDrafts() {
 
 it('preserves dirty hours, bonus edits and worksheet requests when the parent check token changes', async () => {
   const { field, regular, bonus } = await editPayrollDrafts();
-  const period = { ...initialPayPeriod, status: 'draft', notes: 'Latest sibling check metadata', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { enabled: true, source_id: 12 } } } as unknown as PayPeriod;
+  const period = { ...initialPayPeriod, status: 'draft', notes: 'Latest sibling check metadata', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as unknown as PayPeriod;
   apiMocks.get.mockResolvedValue({ pay_period: period });
   fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
   await screen.findByText('Latest sibling check metadata');
@@ -606,4 +615,62 @@ it('initializes worksheet inputs when a parent token supersedes the first pendin
   expect(field).toHaveProperty('value', '1070.00');
   await act(async () => resolveOld({ data: [], meta: { total_pages: 1 } }));
   expect(screen.getByLabelText('401(k) supplemental')).toBe(field);
+});
+
+
+it('owns calendar refresh completion while keeping all dirty payroll inputs', async () => {
+  const { field, regular, bonus } = await editPayrollDrafts();
+  let finishReload!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockReturnValueOnce(new Promise(resolve => { finishReload = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh source calendar' }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12));
+  expect(componentMocks.calendarRefreshCompleted).not.toHaveBeenCalled();
+  const updated = { ...initialPayPeriod, status: 'draft', notes: 'Delivered calendar metadata',
+    time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as unknown as PayPeriod;
+  await act(async () => finishReload({ pay_period: updated }));
+  await screen.findByText('Delivered calendar metadata');
+  expect(componentMocks.calendarRefreshCompleted).toHaveBeenCalledExactlyOnceWith(true);
+  expect(regular.value).toBe('19');
+  expect(bonus.value).toBe('77.00');
+  expect(field.value).toBe('888.00');
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+
+
+it.each(['import', 'calculation'])('explicitly refreshes every source panel after canonical %s with an unchanged calendar event', async action => {
+  await editPayrollDrafts();
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('0');
+  if (action === 'import') {
+    fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  }
+  await waitFor(() => {
+    for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
+      expect(screen.getByTestId(id).getAttribute('data-revision')).toBe('1');
+    }
+  });
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).toHaveBeenCalledTimes(action === 'calculation' ? 1 : 0);
+});
+
+it('refreshes committed source receipt and history panels once after the canonical commit reload', async () => {
+  vi.clearAllMocks();
+  const committed = { ...initialPayPeriod, time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [],
+    aire_calendar: sourceCalendar } } as PayPeriod;
+  apiMocks.commit.mockResolvedValue({ pay_period: committed });
+  apiMocks.get.mockResolvedValue({ pay_period: committed });
+  render(approvedCommitView(0, true));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+  await waitFor(() => {
+    for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
+      expect(screen.getByTestId(id).getAttribute('data-revision')).toBe('1');
+    }
+  });
+  expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
+  expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12);
 });

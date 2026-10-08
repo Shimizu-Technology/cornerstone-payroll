@@ -942,3 +942,101 @@ it.each([false, true])('falls back to local refresh for notification-only callba
   }
   expect(onSourceChanged).toHaveBeenCalledTimes(provided ? 1 : 0);
 });
+
+
+it('keeps the delivered-state fetch when a host calendar refresh settles after new props arrive', async () => {
+  const user = userEvent.setup();
+  let finishHost!: () => void;
+  let finishOverview!: (value: { aire_payroll_cockpit: AirePayrollCockpitOverview }) => void;
+  const pendingCalendar: AirePayrollCalendarState = { ...calendar, external_pay_period_id: null,
+    publication: { ...calendar.publication!, delivery_status: 'pending' } };
+  const onRefresh = vi.fn(() => new Promise<boolean>(resolve => { finishHost = () => resolve(true); }));
+  apiMocks.overview.mockImplementationOnce(() => new Promise(resolve => { finishOverview = resolve; }));
+  const view = render(<AirePayrollCockpit payPeriodId={17} calendar={pendingCalendar} onRefresh={onRefresh} />);
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  expect(onRefresh).toHaveBeenCalledOnce();
+  view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={1} onRefresh={onRefresh} />);
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledOnce());
+  await act(async () => finishHost());
+  await act(async () => finishOverview({ aire_payroll_cockpit: fixtures().overview }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  expect(await screen.findByText('Malia Cruz')).toBeTruthy();
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledExactlyOnceWith(17, expect.any(Object));
+  }
+});
+
+it('uses one endpoint round when the host reloads the same finalized event as a fresh object', async () => {
+  const user = userEvent.setup();
+  const onRefresh = vi.fn();
+  let finishHost!: () => void;
+  const finalizedCalendar: AirePayrollCalendarState = { ...calendar, finalized_batch: {
+    event_id: 'event-17', verification_status: 'pending', verification_attempts: 0,
+    occurred_at: '2026-10-23T00:01:00+10:00', payroll_batch_id: 'batch-17', payroll_batch_checksum: 'checksum',
+  } };
+  function Host() {
+    const [refreshToken, setRefreshToken] = useState(0);
+    const [currentCalendar, setCalendar] = useState(finalizedCalendar);
+    return <AirePayrollCockpit payPeriodId={17} calendar={currentCalendar} refreshToken={refreshToken} onRefresh={async () => {
+      onRefresh(); setRefreshToken(token => token + 1);
+      await new Promise<void>(resolve => { finishHost = () => {
+        setCalendar({ ...finalizedCalendar, finalized_batch: { ...finalizedCalendar.finalized_batch! } });
+        resolve();
+      }; });
+      return true;
+    }} />;
+  }
+  render(<Host />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+  await act(async () => finishHost());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  expect(onRefresh).toHaveBeenCalledOnce();
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+});
+
+it.each([undefined, false])('retains the local calendar refresh fallback when the host returns %s', async (ownership) => {
+  const user = userEvent.setup();
+  const onRefresh = vi.fn().mockResolvedValue(ownership);
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+  expect(onRefresh).toHaveBeenCalledOnce();
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+});
+
+it('keeps the due-period preview neutral until a locked batch is verified', async () => {
+  render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, cutoff_state: 'cutoff_due' }} onRefresh={vi.fn()} />);
+  expect(await screen.findByText('Live preview')).toBeTruthy();
+  expect(screen.queryByText('Before cutoff')).toBeNull();
+  expect(await screen.findByRole('button', { name: /lock time tracking cutoff/i })).toBeTruthy();
+});
+
+
+it.each(['new event', 'verified status'])('refreshes source state after a meaningful %s change', async variation => {
+  const initial: AirePayrollCalendarState = { ...calendar, finalized_batch: {
+    event_id: 'event-17', verification_status: 'pending', verification_attempts: 0,
+    occurred_at: '2026-10-23T00:01:00+10:00', payroll_batch_id: 'batch-17', payroll_batch_checksum: 'checksum',
+  } };
+  const view = render(<AirePayrollCockpit payPeriodId={17} calendar={initial} onRefresh={vi.fn()} />);
+  await screen.findByText('Malia Cruz');
+  const fresh = fixtures();
+  fresh.entries.time_entries[0] = { ...fresh.entries.time_entries[0], employee: {
+    ...fresh.entries.time_entries[0].employee, name: 'Fresh source entry',
+  } };
+  apiMocks.entries.mockResolvedValue(fresh.entries);
+  view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={{ ...initial, finalized_batch: {
+    ...initial.finalized_batch!, event_id: variation === 'new event' ? 'event-18' : 'event-17',
+    verification_status: variation === 'verified status' ? 'verified' : 'pending',
+  } }} onRefresh={vi.fn()} />);
+  expect(await screen.findByText('Fresh source entry')).toBeTruthy();
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+});
