@@ -18,6 +18,11 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   const employeeCount = Number(summary.employee_count || 0);
   const exclusionCount = Number(summary.exclusion_count || 0);
   const committed = payPeriodStatus === 'committed';
+  const nextAction = payPeriodStatus === 'calculated'
+    ? 'Next: review the calculated payroll, then select Approve when ready.'
+    : payPeriodStatus === 'approved'
+      ? 'Next: select Commit & Finalize when the approved payroll is ready.'
+      : 'Next: select Calculate Payroll.';
   const aireRecordLinked = Boolean(aireRecord);
   const lineStatus = aireRecord?.payable_line_status;
   const attentionLines = lineStatus?.needs_attention.line_count || 0;
@@ -126,7 +131,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                   : allLinesPaid
                     ? 'Paid means Cornerstone recorded check delivery or deposit settlement and sent that exact status back to time tracking.'
                     : 'Check preparation and delivery are reported back to time tracking automatically. Delivery or settlement establishes paid status.'
-                : 'Next: select Calculate Payroll. Adding the batch records hours in payroll; it does not mark anyone paid.'
+                : `${nextAction} Adding the batch records hours in payroll; it does not mark anyone paid.`
               : 'Held entries stay visible in time tracking and Cornerstone and are not added to this payroll.'}
           </p>
         </div>
