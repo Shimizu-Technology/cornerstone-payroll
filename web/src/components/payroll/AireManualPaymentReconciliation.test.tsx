@@ -10,11 +10,12 @@ const render = (element: React.ReactNode) => renderView(element, {
 });
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 7 }) }));
 
-const mocks = vi.hoisted(() => ({ review: vi.fn(), create: vi.fn(), retry: vi.fn(), capability: vi.fn() }));
+const mocks = vi.hoisted(() => ({ review: vi.fn(), create: vi.fn(), retry: vi.fn(), capability: vi.fn(), money: vi.fn() }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: mocks.capability }) }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: {
   airePayrollManualReview: mocks.review, createAireManualAllocation: mocks.create, retryAireManualAllocation: mocks.retry,
-} }));
+  runPayroll: mocks.money, commit: mocks.money,
+}, payrollItemsApi: { create: mocks.money, update: mocks.money, recalculate: mocks.money } }));
 const uuid = '282bf986-dd27-46fa-bd70-65ebbc9d9cea';
 const entry = { source_time_entry_id: '40', source_time_entry_version: 3, source_kind: 'carryover' as const,
   original_work_date: '2026-08-15', total_hours: 6.1, regular_hours: 5.1, overtime_hours: 1 };
@@ -60,9 +61,71 @@ describe('AireManualPaymentReconciliation', () => {
       original_work_date: '2026-08-15', regular_hours: '5.10', overtime_hours: '1.00',
       note: 'Verified hours against existing check 0012',
     }));
-    expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(2);
+    expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(1);
+    expect(screen.getByRole('status').textContent).toBe('The link request was saved. Review its current sync and payment status below.');
     expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
     expect(props.onChanged).toHaveBeenCalled();
+  });
+
+  it('refreshes a saved unpaid link to its issued receipt without retaining a pending banner or changing payroll', async () => {
+    mocks.create.mockResolvedValue({ manual_allocation: allocation });
+    mocks.review.mockResolvedValueOnce(review).mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    const user = await choose();
+    await user.click(screen.getByRole('button', { name: 'Link hours to payroll item' }));
+    await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
+    expect(screen.getAllByText('Linked; payment evidence pending')).toHaveLength(1);
+
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'issued',
+      payment_evidence: { reference: '0012', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    await user.click(screen.getByRole('button', { name: 'Refresh reconciliation' }));
+    expect(await screen.findByText('Payment recorded in time tracking')).toBeTruthy();
+    expect(screen.getByText(/Time tracking issued receipt · reference 0012/)).toBeTruthy();
+    expect(screen.queryByText('Linked; payment evidence pending')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('The link request was saved. Review its current sync and payment status below.');
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.review).toHaveBeenCalledTimes(3);
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'pending sync', current: { ...allocation, status: 'pending_commit' as const, last_sync_error: 'time tracking unavailable' },
+      label: 'Saved locally; time tracking confirmation pending' },
+    { name: 'pending cancellation', current: { ...allocation, status: 'issued' as const, payment_cancellation_pending: true,
+      last_sync_error: 'Cancellation not yet confirmed',
+      payment_evidence: { reference: 'OLD-CHECK', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' as const } },
+      label: 'Cancellation awaiting time tracking confirmation' },
+  ])('keeps the refreshed $name visible after retry without announcing a completed payment', async ({ current, label }) => {
+    mocks.review.mockResolvedValueOnce({ ...review, cornerstone_manual_allocations: [allocation] })
+      .mockResolvedValue({ ...review, cornerstone_manual_allocations: [current] });
+    mocks.retry.mockResolvedValue({ manual_allocation: { ...allocation, status: 'issued' } });
+    render(<AireManualPaymentReconciliation {...props} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Retry sync for entry 40' }));
+    await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
+    expect(screen.getAllByText(label)).toHaveLength(1);
+    expect(screen.getByRole('alert').textContent).toBe(current.last_sync_error);
+    expect(screen.getByRole('status').textContent).toBe('Sync requested. Review the current status below.');
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
+    expect(mocks.retry).toHaveBeenCalledExactlyOnceWith(67, 9);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it('shows a failed retry without a success notice or payment claim', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [{ ...allocation, status: 'pending_commit' }] });
+    mocks.retry.mockRejectedValue(new Error('Sync could not be confirmed'));
+    render(<AireManualPaymentReconciliation {...props} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Retry sync for entry 40' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Sync could not be confirmed');
+    expect(screen.getAllByText('Saved locally; time tracking confirmation pending')).toHaveLength(1);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
+    expect(mocks.retry).toHaveBeenCalledExactlyOnceWith(67, 9);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
   });
 
   it('keeps an outage record visible and retries its existing ID without another allocation', async () => {
@@ -75,7 +138,7 @@ describe('AireManualPaymentReconciliation', () => {
     const user = await choose();
     await user.click(screen.getByRole('button', { name: 'Link hours to payroll item' }));
     expect(await screen.findByText('time tracking unavailable')).toBeTruthy();
-    expect(screen.getAllByText('Saved locally; time tracking confirmation pending')).toHaveLength(2);
+    expect(screen.getAllByText('Saved locally; time tracking confirmation pending')).toHaveLength(1);
     // A failed review removes current authorization, so refresh before retrying.
     mocks.review.mockResolvedValueOnce({ ...review, cornerstone_manual_allocations: [pending] });
     await user.click(screen.getByRole('button', { name: 'Refresh reconciliation' }));
@@ -235,7 +298,7 @@ describe('AireManualPaymentReconciliation', () => {
     mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry sync for entry 40' }));
     await waitFor(() => expect(mocks.retry).toHaveBeenCalledWith(67, 9));
-    expect((await screen.findAllByText('Linked; payment evidence pending')).length).toBeGreaterThan(0);
+    expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(1);
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
@@ -276,7 +339,7 @@ it('settles an allocation command during sibling refresh and clears drafts only 
   await waitFor(() => expect(mocks.review).toHaveBeenCalledTimes(2));
   mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
   await act(async () => resolveCreate({ manual_allocation: allocation }));
-  expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(2);
+  expect(await screen.findAllByText('Linked; payment evidence pending')).toHaveLength(1);
   await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
   expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
   expect((screen.getByLabelText('Regular hours to link') as HTMLInputElement).value).toBe('');
