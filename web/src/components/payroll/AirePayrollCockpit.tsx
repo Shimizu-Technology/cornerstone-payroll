@@ -54,6 +54,10 @@ type Props = {
   aireRecord?: import('@/types').AirePayrollRecord | null;
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
+  refreshToken?: number;
+  // Return true only when the host schedules a refreshToken update.
+  // Notification-only consumers can return void and use the local refresh.
+  onSourceChanged?: () => boolean | void;
   onReviewFinalizedBatch?: () => void;
 };
 
@@ -348,6 +352,8 @@ export function AirePayrollCockpit({
   aireRecord = null,
   calendar,
   onRefresh,
+  refreshToken = 0,
+  onSourceChanged,
   onReviewFinalizedBatch = () => undefined,
 }: Props) {
   const location = useLocation();
@@ -378,9 +384,12 @@ export function AirePayrollCockpit({
   const [employeePage, setEmployeePage] = useState(1);
   const [settlementPage, setSettlementPage] = useState(1);
   const requestGeneration = useRef(0);
+  const actionGeneration = useRef(0);
 
   useEffect(() => {
     requestGeneration.current += 1;
+    actionGeneration.current += 1;
+    setBusy(false);
     setOverview(null);
     setTimeEntries(null);
     setExceptions(null);
@@ -436,10 +445,11 @@ export function AirePayrollCockpit({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshToken]);
 
   useEffect(() => () => {
     requestGeneration.current += 1;
+    actionGeneration.current += 1;
   }, []);
 
   useEffect(() => {
@@ -481,8 +491,14 @@ export function AirePayrollCockpit({
     [overview?.processing_history]
   );
   const historyCount = paymentHistory.length + batchHistory.length;
-  const canCommand = overview?.command_access.can_command === true;
-  const canManageMappings = overview?.command_access.can_manage_mappings === true;
+  const canCommand = overview?.command_access.can_command === true && !loading && !refreshError;
+  const canManageMappings = overview?.command_access.can_manage_mappings === true && !loading && !refreshError;
+
+  const refreshSource = async () => {
+    // Keep commands disabled until the host effect or fallback load settles.
+    setLoading(true);
+    if (onSourceChanged?.() !== true) await load();
+  };
 
   const startEmployeeMapping = (employee: import('@/types').AirePayrollCockpitEmployee) => {
     setEmployeeMapping({
@@ -494,7 +510,8 @@ export function AirePayrollCockpit({
   };
 
   const submitEmployeeMapping = async () => {
-    if (!employeeMapping?.payrollEmployeeId || !employeeMapping.employee.payroll_integration_id) return;
+    if (!canManageMappings || !employeeMapping?.payrollEmployeeId || !employeeMapping.employee.payroll_integration_id) return;
+    const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     setCommandSuccess(null);
@@ -504,13 +521,17 @@ export function AirePayrollCockpit({
         source_user_uuid: employeeMapping.employee.payroll_integration_id,
         employee_id: employeeMapping.payrollEmployeeId,
       });
+      if (current !== actionGeneration.current) return;
       setCommandSuccess(`${employeeMapping.employee.full_name} is now linked to the confirmed payroll employee.`);
       setEmployeeMapping(null);
     } catch (caught) {
+      if (current !== actionGeneration.current) return;
       setCommandError(caught instanceof Error ? caught.message : 'Could not link this time tracking employee');
     } finally {
-      await load();
-      setBusy(false);
+      if (current === actionGeneration.current) {
+        await refreshSource();
+        if (current === actionGeneration.current) setBusy(false);
+      }
     }
   };
 
@@ -528,7 +549,8 @@ export function AirePayrollCockpit({
   };
 
   const submitReview = async () => {
-    if (!review || reason.trim().length < 3) return;
+    if (!canCommand || !review || reason.trim().length < 3) return;
+    const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     setCommandSuccess(null);
@@ -544,24 +566,29 @@ export function AirePayrollCockpit({
       } else {
         await payPeriodsApi.reviewAireTimeEntry(payPeriodId, review.entry.id, request);
       }
+      if (current !== actionGeneration.current) return;
       const subject = review.kind === 'overtime' ? 'Overtime' : 'Time';
       setCommandSuccess(`${subject} ${review.decision === 'approve' ? 'approved' : 'denied'} in time tracking and saved in both audit histories.`);
       setReview(null);
       setReason('');
     } catch (caught) {
+      if (current !== actionGeneration.current) return;
       setCommandError(caught instanceof ApiError && caught.status === 409
         ? 'That time entry changed in time tracking. The latest details have been reloaded; review it again before deciding.'
         : caught instanceof Error ? caught.message : 'Could not update the time entry');
     } finally {
-      await load();
-      setBusy(false);
+      if (current === actionGeneration.current) {
+        await refreshSource();
+        if (current === actionGeneration.current) setBusy(false);
+      }
     }
   };
 
   const submitCorrection = async () => {
-    if (!correction || correction.reason.trim().length < 3 || !correction.workDate
+    if (!canCommand || !correction || correction.reason.trim().length < 3 || !correction.workDate
       || !correction.startTime || !correction.endTime || !correction.timeCategoryId
       || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)) return;
+    const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     setCommandSuccess(null);
@@ -580,9 +607,11 @@ export function AirePayrollCockpit({
         description: correction.description.trim(),
         ...detailedBreaks,
       });
+      if (current !== actionGeneration.current) return;
       setCorrection(null);
       setCommandSuccess('Time corrected in time tracking. It now needs administrator approval before it can be paid.');
     } catch (caught) {
+      if (current !== actionGeneration.current) return;
       if (caught instanceof ApiError && caught.status === 409) {
         setCorrection(null);
         setCommandError('That time entry changed in time tracking. The latest details have been reloaded; open the correction again before saving.');
@@ -590,14 +619,17 @@ export function AirePayrollCockpit({
         setCommandError(caught instanceof Error ? caught.message : 'Could not correct the time entry');
       }
     } finally {
-      await load();
-      setBusy(false);
+      if (current === actionGeneration.current) {
+        await refreshSource();
+        if (current === actionGeneration.current) setBusy(false);
+      }
     }
   };
 
   const submitSettlementRoute = async () => {
-    if (!settlementRoute || settlementRoute.reason.trim().length < 3
+    if (!canCommand || !settlementRoute || settlementRoute.reason.trim().length < 3
       || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)) return;
+    const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     setCommandSuccess(null);
@@ -611,11 +643,13 @@ export function AirePayrollCockpit({
           ? { target_external_pay_period_id: settlementRoute.targetExternalPayPeriodId }
           : {}),
       });
+      if (current !== actionGeneration.current) return;
       setSettlementRoute(null);
       setCommandSuccess(settlementRoute.destinationKind === 'regular'
         ? 'Held time routed to the selected regular payroll in time tracking.'
         : 'Held time marked not payable in time tracking with your review reason.');
     } catch (caught) {
+      if (current !== actionGeneration.current) return;
       if (caught instanceof ApiError && caught.status === 409) {
         setSettlementRoute(null);
         setCommandError('That held-time case changed in time tracking. The latest details have been reloaded; review it again.');
@@ -623,13 +657,16 @@ export function AirePayrollCockpit({
         setCommandError(caught instanceof Error ? caught.message : 'Could not update the held-time destination');
       }
     } finally {
-      await load();
-      setBusy(false);
+      if (current === actionGeneration.current) {
+        await refreshSource();
+        if (current === actionGeneration.current) setBusy(false);
+      }
     }
   };
 
   const finalize = async () => {
-    if (!overview || !finalizeCommand || finalizeReason.trim().length < 3) return;
+    if (!canCommand || !overview || !finalizeCommand || finalizeReason.trim().length < 3) return;
+    const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     let commandSucceeded = false;
@@ -639,25 +676,29 @@ export function AirePayrollCockpit({
         expected_version: finalizeCommand.version,
         reason: finalizeReason.trim(),
       });
+      if (current !== actionGeneration.current) return;
       commandSucceeded = true;
       setShowFinalize(false);
       setFinalizeCommand(null);
     } catch (caught) {
+      if (current !== actionGeneration.current) return;
       setCommandError(caught instanceof ApiError && caught.status === 409
         ? 'The time tracking period changed before it could be locked. The latest details have been reloaded.'
         : caught instanceof Error ? caught.message : 'Could not lock the time tracking payroll period');
     } finally {
-      await load();
-      if (commandSucceeded) {
+      if (current === actionGeneration.current) await refreshSource();
+      if (commandSucceeded && current === actionGeneration.current) {
         try {
           await onRefresh();
         } catch (caught) {
-          setRefreshError(caught instanceof Error
-            ? `Time tracking was locked, but Cornerstone could not refresh: ${caught.message}`
-            : 'Time tracking was locked, but Cornerstone could not refresh its payroll status.');
+          if (current === actionGeneration.current) {
+            setRefreshError(caught instanceof Error
+              ? `Time tracking was locked, but Cornerstone could not refresh: ${caught.message}`
+              : 'Time tracking was locked, but Cornerstone could not refresh its payroll status.');
+          }
         }
       }
-      setBusy(false);
+      if (current === actionGeneration.current) setBusy(false);
     }
   };
 
@@ -691,6 +732,7 @@ export function AirePayrollCockpit({
           payPeriodStatus={payPeriodStatus}
           payrollHours={payrollHours}
           aireRecordLinked={Boolean(aireRecord)}
+          refreshToken={refreshToken}
         />
       )}
 
@@ -709,7 +751,7 @@ export function AirePayrollCockpit({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => void load()} disabled={loading || busy}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void refreshSource()} disabled={loading || busy}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
                   {overview?.payroll_period.status !== 'finalized' && (
@@ -1100,7 +1142,7 @@ export function AirePayrollCockpit({
             </div>
             <DialogFooter className="mt-5 gap-2 pt-0">
               <Button type="button" variant="outline" onClick={() => setEmployeeMapping(null)} disabled={busy}>Cancel</Button>
-              <Button type="button" onClick={() => void submitEmployeeMapping()} disabled={busy || !employeeMapping.payrollEmployeeId}>
+              <Button type="button" onClick={() => void submitEmployeeMapping()} disabled={busy || !canManageMappings || !employeeMapping.payrollEmployeeId}>
                 {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Confirm link
               </Button>
             </DialogFooter>
@@ -1127,7 +1169,7 @@ export function AirePayrollCockpit({
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
+            <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || !canCommand || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>
@@ -1173,7 +1215,7 @@ export function AirePayrollCockpit({
             </div>
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Correction reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Correction reason" value={correction.reason} onChange={(event) => setCorrection({ ...correction, reason: event.target.value })} rows={3} placeholder="What did you verify and why was this changed?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setCorrection(null)} disabled={busy} aria-label="Close correction" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || !canCommand || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>
@@ -1206,7 +1248,7 @@ export function AirePayrollCockpit({
             )}
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : 'Mark not payable'}</Button></DialogFooter>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || !canCommand || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : 'Mark not payable'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>
@@ -1226,7 +1268,7 @@ export function AirePayrollCockpit({
             <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Review note<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={finalizeReason} onChange={(event) => setFinalizeReason(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setShowFinalize(false)} disabled={busy} aria-label="Close cutoff confirmation" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setShowFinalize(false)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void finalize()} disabled={busy || !finalizeCommand || finalizeReason.trim().length < 3}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LockKeyhole className="mr-2 h-4 w-4" />}Lock eligible time</Button></DialogFooter>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setShowFinalize(false)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void finalize()} disabled={busy || !canCommand || !finalizeCommand || finalizeReason.trim().length < 3}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LockKeyhole className="mr-2 h-4 w-4" />}Lock eligible time</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

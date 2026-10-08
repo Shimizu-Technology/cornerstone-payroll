@@ -14,6 +14,7 @@ type Props = {
   payPeriodStatus: PayPeriodStatus;
   payrollHours: PayrollHours;
   aireRecordLinked: boolean;
+  refreshToken?: number;
 };
 
 const hours = (value: number) => Number(value || 0).toFixed(2);
@@ -31,7 +32,7 @@ const exclusionLabel = (reason: string) => ({
   payment_attested_pending_evidence: 'payment reported; check evidence pending',
 }[reason] || reason.replaceAll('_', ' '));
 
-export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked }: Props) {
+export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHours, aireRecordLinked, refreshToken = 0 }: Props) {
   const [review, setReview] = useState<AirePayrollManualReview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,9 +56,12 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
   useEffect(() => {
     setReview(null);
+  }, [payPeriodId]);
+
+  useEffect(() => {
     void load();
     return () => { requestGeneration.current += 1; };
-  }, [load]);
+  }, [load, refreshToken]);
 
   const rows = useMemo(() => (review?.employees || []).map((employee) => {
     const employeeId = employee.cornerstone.employee_id;
@@ -104,6 +108,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           </Button>
         </div>
 
+        {loading && review && !error && <p role="status" className="px-6 py-3 text-sm text-neutral-600">Refreshing live time tracking readiness…</p>}
         {loading && !review ? (
           <div className="flex items-center justify-center gap-4 px-6 py-10 text-sm text-neutral-600">
             <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Comparing time tracking with the hours entered in Payroll…
