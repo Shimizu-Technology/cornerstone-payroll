@@ -56,6 +56,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
   useEffect(() => {
     setReview(null);
+  }, [payPeriodId]);
+
+  useEffect(() => {
     void load();
     return () => { requestGeneration.current += 1; };
   }, [load, refreshToken]);
@@ -105,6 +108,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           </Button>
         </div>
 
+        {loading && review && !error && <p role="status" className="px-6 py-3 text-sm text-neutral-600">Refreshing live time tracking readiness…</p>}
         {loading && !review ? (
           <div className="flex items-center justify-center gap-4 px-6 py-10 text-sm text-neutral-600">
             <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Comparing time tracking with the hours entered in Payroll…

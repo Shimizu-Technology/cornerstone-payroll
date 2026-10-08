@@ -855,7 +855,7 @@ it('updates the live manual readiness and reconciliation exclusions after approv
   });
   function SourcePanels() {
     const [refreshToken, setRefreshToken] = useState(0);
-    const invalidate = () => setRefreshToken(token => token + 1);
+    const invalidate = () => { setRefreshToken(token => token + 1); return true; };
     return <MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} refreshToken={refreshToken} onSourceChanged={invalidate} />
       <AireManualPaymentReconciliation payPeriodId={17} payPeriodStatus="draft" payPeriodVoided={false} payrollItems={[]} refreshToken={refreshToken} onChanged={invalidate} /></MemoryRouter>;
   }
@@ -869,6 +869,9 @@ it('updates the live manual readiness and reconciliation exclusions after approv
   expect(await screen.findByText('14.00 regular · 0.00 OT')).toBeTruthy();
   expect(await screen.findByText(/1 held entries remain outside/)).toBeTruthy();
   expect(screen.queryByText(/2 held entries remain outside/)).toBeNull();
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
 });
 
 it('disables source commands when a same-period refresh fails', async () => {
@@ -902,4 +905,40 @@ it.each([false, true])('settles a pending cockpit approval only for its current 
     expect(onSourceChanged).toHaveBeenCalledOnce();
     expect(screen.queryByRole('dialog')).toBeNull();
   }
+});
+
+
+it('uses one host-driven endpoint round and keeps commands disabled until it settles', async () => {
+  const user = userEvent.setup();
+  function Host() {
+    const [refreshToken, setRefreshToken] = useState(0);
+    return <AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={refreshToken} onRefresh={vi.fn()}
+      onSourceChanged={() => { setRefreshToken(token => token + 1); return true; }} />;
+  }
+  render(<Host />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  let resolveOverview!: (value: { aire_payroll_cockpit: AirePayrollCockpitOverview }) => void;
+  apiMocks.overview.mockImplementationOnce(() => new Promise(resolve => { resolveOverview = resolve; }));
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(true);
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+  await act(async () => resolveOverview({ aire_payroll_cockpit: fixtures().overview }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+});
+
+it.each([false, true])('falls back to local refresh for notification-only callbacks (callback=%s)', async (provided) => {
+  const user = userEvent.setup(); const onSourceChanged = vi.fn();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} onSourceChanged={provided ? onSourceChanged : undefined} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(endpoint).toHaveBeenCalledTimes(2);
+  }
+  expect(onSourceChanged).toHaveBeenCalledTimes(provided ? 1 : 0);
 });

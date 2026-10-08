@@ -386,7 +386,10 @@ export function PayPeriodDetail({
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
-  const invalidateAireSource = useCallback(() => setAireSourceRefreshToken(token => token + 1), []);
+  const invalidateAireSource = useCallback(() => {
+    setAireSourceRefreshToken(token => token + 1);
+    return true;
+  }, []);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
   const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');

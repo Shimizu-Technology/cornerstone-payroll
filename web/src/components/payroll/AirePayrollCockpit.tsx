@@ -55,7 +55,9 @@ type Props = {
   calendar: AirePayrollCalendarState;
   onRefresh: () => Promise<void> | void;
   refreshToken?: number;
-  onSourceChanged?: () => void;
+  // Return true only when the host schedules a refreshToken update.
+  // Notification-only consumers can return void and use the local refresh.
+  onSourceChanged?: () => boolean | void;
   onReviewFinalizedBatch?: () => void;
 };
 
@@ -493,8 +495,9 @@ export function AirePayrollCockpit({
   const canManageMappings = overview?.command_access.can_manage_mappings === true && !loading && !refreshError;
 
   const refreshSource = async () => {
-    onSourceChanged?.();
-    await load();
+    // Keep commands disabled until the host effect or fallback load settles.
+    setLoading(true);
+    if (onSourceChanged?.() !== true) await load();
   };
 
   const startEmployeeMapping = (employee: import('@/types').AirePayrollCockpitEmployee) => {
