@@ -453,7 +453,7 @@ module TimeTracking
         source_time_entry_id source_user_uuid contract_version source_line_key source_kind]
       valid = receipt.is_a?(Hash) && scalar_keys.all? { |key| receipt[key.to_s] == expected[key] }
       valid &&= %i[total_hours regular_hours overtime_hours].all? { |key| exact_decimal?(receipt[key.to_s], expected[key]) }
-      valid &&= receipt["metadata"].is_a?(Hash) && expected[:metadata].deep_stringify_keys.all? { |key, value| receipt["metadata"][key] == value }
+      valid &&= receipt["metadata"] == expected[:metadata].deep_stringify_keys
       valid &&= %w[payment_method payment_reference payment_effective_on].all? { |key| receipt[key].blank? }
       valid &&= Time.iso8601(receipt["occurred_at"].to_s) == Time.iso8601(expected[:occurred_at])
       raise Error, "#{@source.name} did not acknowledge the exact accounting correction" unless valid

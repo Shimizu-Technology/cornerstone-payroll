@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import type { TimeTrackingImportData, TimeTrackingPreviewRow } from '@/services/api';
@@ -68,7 +68,7 @@ const otherSource = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   apiMocks.company.activeCompany = { id: 3, name: 'Mosa Restaurant' };
   apiMocks.company.companies = [];
   apiMocks.listSources.mockResolvedValue({ time_tracking_sources: [source] });
@@ -342,4 +342,122 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   await user.click(confirm);
   await waitFor(() => expect(apiMocks.correctionConfirm).toHaveBeenCalledWith(17, { import_id: 99, ...{ source_user_id: line.source_user_id, source_time_entry_id: line.source_time_entry_id, line_key: line.line_key }, preview_token: 'signed-proof', reason: 'Approved source correction', acknowledge_accounting_only: true }));
   expect(await screen.findByText(/Accounting correction committed in supplemental #100/)).toBeTruthy();
+});
+
+
+describe('correction request scopes', () => {
+  const lineA = { source_user_id: '42', source_time_entry_id: '101', line_key: '7:2500', regular_hours: -1, overtime_hours: 0, total_hours: -1 };
+  const lineB = { ...lineA, source_user_id: '84', source_time_entry_id: '202', line_key: '8:2500' };
+  const detail = (name: string, line = lineA) => ({ ...line, preview_token: `proof-${name}`, source_change: line,
+    employee_name: name, original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000',
+    pay_date: '2026-11-15', original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 },
+    deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true });
+  const importFor = (id: number, line = lineA, sourceId = source.id) => ({ id, status: 'previewed', time_tracking_source_id: sourceId,
+    correction_lines: [line], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } });
+  const committed = (id: number, line = lineA) => ({ disposition_id: id,
+    import: { ...importFor(id, line), correction_dispositions: [{ ...line, id, corrective_pay_period_id: id,
+      corrective_payroll_item_id: id + 1, accounting_only: true }], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+  }
+  const acknowledge = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Reviewed exact source accounting correction');
+    await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
+  };
+
+  it.each(['period', 'company', 'source', 'close'])('ignores a late correction preview after %s changes without replacing the current person or clearing current busy state', async (change) => {
+    const user = userEvent.setup();
+    const old = deferred<{ correction: ReturnType<typeof detail> }>();
+    const current = deferred<{ correction: ReturnType<typeof detail> }>();
+    const onCorrectionRecorded = vi.fn();
+    apiMocks.preview.mockResolvedValue({ import: importFor(99) });
+    apiMocks.correctionPreview.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), onCorrectionRecorded, autoPreview: true };
+    const view = render(<TimeTrackingImportModal {...props} />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    let nextProps = props;
+    let sourceB = source;
+    if (change === 'period') nextProps = { ...props, payPeriod: { ...payPeriod, id: 18 } };
+    if (change === 'company') {
+      apiMocks.company.activeCompany = { id: 4, name: 'Current client B' };
+      sourceB = { ...source, id: 22, company_id: 4 };
+      nextProps = { ...props, payPeriod: { ...payPeriod, id: 18, company_id: 4 } };
+    }
+    if (change === 'source') sourceB = { ...source, id: 22 };
+    apiMocks.listSources.mockResolvedValue({ time_tracking_sources: [sourceB] });
+    apiMocks.preview.mockResolvedValue({ import: importFor(199, lineB, sourceB.id) });
+    if (change === 'close') view.rerender(<TimeTrackingImportModal {...props} open={false} />);
+    view.rerender(<TimeTrackingImportModal {...nextProps} initialSourceId={sourceB.id} />);
+    await waitFor(() => expect(apiMocks.preview).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await act(async () => old.resolve({ correction: detail('Old person A') }));
+    expect(screen.queryByText(/Old person A/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Review correction' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => current.resolve({ correction: detail('Current person B', lineB) }));
+    expect(await screen.findByText(/Current person B/)).toBeTruthy();
+    expect(screen.queryByText(/Old person A/)).toBeNull();
+    expect(onCorrectionRecorded).not.toHaveBeenCalled();
+  });
+
+  it.each(['period', 'company', 'close'])('ignores a late confirm after %s changes and reports only the current accounting posting', async (change) => {
+    const user = userEvent.setup();
+    const old = deferred<ReturnType<typeof committed>>();
+    const current = deferred<ReturnType<typeof committed>>();
+    const onCorrectionRecorded = vi.fn();
+    const onImportComplete = vi.fn();
+    apiMocks.preview.mockResolvedValue({ import: importFor(99) });
+    apiMocks.correctionPreview.mockResolvedValue({ correction: detail('Old person A') });
+    apiMocks.correctionConfirm.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete, onCorrectionRecorded, autoPreview: true };
+    const view = render(<TimeTrackingImportModal {...props} />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await screen.findByText(/Old person A/);
+    await acknowledge(user);
+    await user.click(screen.getByRole('button', { name: 'Confirm accounting correction' }));
+    let nextProps = { ...props, payPeriod: { ...payPeriod, id: change === 'close' ? 17 : 18 } };
+    let sourceB = source;
+    if (change === 'company') {
+      apiMocks.company.activeCompany = { id: 4, name: 'Current client B' };
+      sourceB = { ...source, id: 22, company_id: 4 };
+      nextProps = { ...props, payPeriod: { ...payPeriod, id: 18, company_id: 4 } };
+    }
+    apiMocks.listSources.mockResolvedValue({ time_tracking_sources: [sourceB] });
+    apiMocks.preview.mockResolvedValue({ import: importFor(199, lineB, sourceB.id) });
+    apiMocks.correctionPreview.mockResolvedValue({ correction: detail('Current person B', lineB) });
+    if (change === 'close') view.rerender(<TimeTrackingImportModal {...props} open={false} />);
+    view.rerender(<TimeTrackingImportModal {...nextProps} />);
+    await waitFor(() => expect(apiMocks.preview).toHaveBeenCalledTimes(2));
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await screen.findByText(/Current person B/);
+    await acknowledge(user);
+    await user.click(screen.getByRole('button', { name: 'Confirm accounting correction' }));
+    await act(async () => old.resolve(committed(100)));
+    expect(screen.queryByText(/supplemental #100/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Confirm accounting correction' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onCorrectionRecorded).not.toHaveBeenCalled();
+    await act(async () => current.resolve(committed(200, lineB)));
+    expect(await screen.findByText(/supplemental #200/)).toBeTruthy();
+    expect(screen.queryByText(/supplemental #100/)).toBeNull();
+    expect(onCorrectionRecorded).toHaveBeenCalledOnce();
+    expect(onImportComplete).not.toHaveBeenCalled();
+  });
+
+  it('drops stale preview errors after closing instead of surfacing them in the reopened review', async () => {
+    const user = userEvent.setup();
+    const old = deferred<{ correction: ReturnType<typeof detail> }>();
+    apiMocks.preview.mockResolvedValue({ import: importFor(99) });
+    apiMocks.correctionPreview.mockReturnValue(old.promise);
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), autoPreview: true };
+    const view = render(<TimeTrackingImportModal {...props} />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    view.rerender(<TimeTrackingImportModal {...props} open={false} />);
+    view.rerender(<TimeTrackingImportModal {...props} />);
+    await waitFor(() => expect(apiMocks.preview).toHaveBeenCalledTimes(2));
+    await act(async () => old.reject(new Error('Old tenant A correction failed')));
+    expect(screen.queryByText('Old tenant A correction failed')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Review correction' }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

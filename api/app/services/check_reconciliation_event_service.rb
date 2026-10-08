@@ -67,6 +67,9 @@ class CheckReconciliationEventService
       validate_reason!
       validate_not_before_clearing!(source)
     when "replacement_required"
+      if source.is_a?(PayrollItem) && source.source_accounting_correction_linked?
+        raise Error, "This check has an exact source accounting correction. Replacement is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
+      end
       raise Error, "Only an issued check can require replacement" unless status == "issued"
       validate_reason!
       validate_not_before_issue!(source)

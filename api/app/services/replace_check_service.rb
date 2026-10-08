@@ -227,6 +227,7 @@ class ReplaceCheckService
     # makes nil unreachable in practice, but the service may also be
     # called directly (specs, jobs, console), so order matters.
     raise InvalidStateError, "Original payroll item is missing" if @payroll_item.nil?
+    assert_no_source_accounting_correction!
     raise InvalidStateError, "This payroll check is linked to a duplicate software record and cannot be replaced" if @payroll_item.duplicate_check_linked?
     raise UnsupportedEmployeeError, "Replace flow doesn't support contractor checks" if @payroll_item.contractor?
     if @payroll_item.correction_entry?
@@ -249,7 +250,13 @@ class ReplaceCheckService
     raise InvalidStateError, "No change in financial values — nothing to replace" if zero_change?(simulated_corrected_item)
   end
 
+  def assert_no_source_accounting_correction!
+    return unless @payroll_item.source_accounting_correction_linked?
+    raise InvalidStateError, "This check has an exact source accounting correction. Replacement is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
+  end
+
   def assert_replaceable!
+    assert_no_source_accounting_correction!
     raise InvalidStateError, "This payroll check is linked to a duplicate software record and cannot be replaced" if @payroll_item.duplicate_check_linked?
     period = @payroll_item.pay_period
     unless period.committed?

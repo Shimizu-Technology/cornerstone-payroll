@@ -3684,6 +3684,10 @@ export function PayPeriodDetail({
         payPeriod={payPeriod}
         employees={employees}
         onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+        onCorrectionRecorded={() => {
+          invalidateAireSource();
+          void loadPayPeriod(payPeriod.id, true, true);
+        }}
         initialSourceId={timeTrackingAutoPreview
           ? payPeriod.time_tracking?.aire_calendar?.source_id
           : undefined}
