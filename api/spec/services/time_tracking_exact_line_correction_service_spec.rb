@@ -4,99 +4,7 @@ require 'rails_helper'
 require "timeout"
 
 RSpec.describe TimeTracking::ExactLineCorrectionService do
-  let!(:tax_table) { create(:tax_table, tax_year: 2026) }
-  let(:company) { create(:company, auto_create_fit_check: false) }
-  let(:actor) { create(:user, company: company, role: 'admin') }
-  let(:employee) { create(:employee, company: company, pay_rate: 25, pay_frequency: 'biweekly', filing_status: 'single', allowances: 0) }
-  let(:instance_id) { SecureRandom.uuid }
-  let(:user_uuid) { SecureRandom.uuid }
-  let!(:rate) { create(:employee_wage_rate, employee: employee, rate: 25, label: 'Flight Hours', is_primary: true) }
-  let!(:workweek) { CompanyWorkweek.create!(company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: 'Pacific/Guam', effective_on: '2026-01-01', confirmation_status: 'confirmed', confirmed_by: actor, notes: 'Verified test workweek', confirmed_at: Time.current) }
-  let(:source) do
-    create(:time_tracking_source, company: company, source_type: 'custom',
-      remote_source_identifier: 'fixture_time', expected_source_instance_id: instance_id,
-      source_protocol: 'shimizu_time_payroll', source_protocol_version: '1.0',
-      source_capabilities: %w[finalized_batch_v2 exact_line_receipts_v2], identity_verified_at: Time.current)
-  end
-  let(:original_period) { create(:pay_period, company: company, start_date: '2026-10-01', end_date: '2026-10-15', pay_date: '2026-10-30') }
-  let(:next_period) { create(:pay_period, company: company, start_date: '2026-10-16', end_date: '2026-10-31', pay_date: '2026-11-15') }
-  let(:original_item) do
-    item = create(:payroll_item, company: company, employee: employee, pay_period: original_period,
-      pay_rate: 25, hours_worked: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0)
-    PayrollCalculator.for(employee, item).calculate
-    item.save!
-    original_period.update!(status: 'committed', committed_at: Time.current)
-    employee.ytd_totals_for(2026).add_payroll_item!(item)
-    CompanyYtdTotal.find_or_create_by!(company: company, year: 2026).add_payroll_item!(item)
-    company.assign_check_numbers!([ item ])
-    item.reload
-  end
-  let(:original_import) { make_import(original_period, 4, 'current', 'ORIGINAL', status: 'applied') }
-  let(:next_import) { make_import(next_period, -1, 'correction', 'NEXT') }
-  let!(:allocation) do
-    source
-    item = original_item
-    TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee, source_user_id: '42', source_user_uuid: user_uuid)
-    TimeTracking::EntryAllocationRecorder.new(time_tracking_import: original_import, payroll_item: item,
-      source_employee: original_import.raw_payload['employees'].first).call
-    original_import.time_tracking_entry_allocations.first
-  end
-  let(:service) { described_class.new(import: next_import, actor: actor, source_user_id: '42', source_time_entry_id: '101', line_key: '7:2500') }
-
-  before do
-    allow_any_instance_of(TimeTracking::Client).to receive(:payroll_batch) { |_client, batch_id:| batch_id == 'NEXT' ? next_import.raw_payload : original_import.raw_payload }
-  end
-
-  def make_import(period, hours, kind, batch_id, status: 'previewed', mixed: false, entry_version: nil)
-    raw = build_aire_batch_payload(batch_id: batch_id, start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
-    raw['source'] = 'fixture_time'
-    raw['integration'] = { 'protocol' => 'shimizu_time_payroll', 'protocol_version' => '1.0',
-      'source_instance_id' => instance_id, 'source_type' => 'fixture_time', 'capabilities' => %w[finalized_batch_v2 exact_line_receipts_v2] }
-    raw['exclusions'] = []
-    row = raw['employees'].first
-    row['source_user_uuid'] = user_uuid
-    line = row['adjustments'].first
-    line['source_user_uuid'] = user_uuid
-    line['source_kind'] = kind
-    line['source_time_entry_version'] = entry_version || (kind == 'current' ? 0 : 1)
-    %w[total_hours regular_hours].each { |key| row[key] = hours; line[key] = hours; raw['summary'][key] = hours }
-    raw['summary']['exclusion_count'] = 0
-    raw['summary']['current_count'] = kind == 'current' ? 1 : 0
-    raw['summary']['correction_count'] = kind == 'correction' ? 1 : 0
-    raw['issues']['pending_approval_count'] = 0
-    raw['issues']['negative_adjustment_count'] = hours.negative? ? 1 : 0
-    if mixed
-      2.times do |index|
-        worker = create(:employee, company: company, pay_rate: 25)
-        create(:employee_wage_rate, employee: worker, rate: 25, label: "Flight Hours", is_primary: true)
-        uuid = SecureRandom.uuid
-        id = (50 + index).to_s
-        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: worker, source_user_id: id, source_user_uuid: uuid)
-        positive = row.deep_dup
-        positive["source_user_id"] = id
-        positive["source_user_uuid"] = uuid
-        positive["email"] = worker.email
-        positive["display_name"] = worker.full_name
-        positive_line = positive["adjustments"].first
-        positive_line["source_time_entry_id"] = (200 + index).to_s
-        positive_line["source_user_uuid"] = uuid
-        positive_line["source_kind"] = "carryover"
-        %w[total_hours regular_hours].each { |key| positive[key] = 4; positive_line[key] = 4 }
-        raw["employees"] << positive
-      end
-      raw["summary"].merge!("employee_count" => 3, "adjustment_count" => 3, "carryover_count" => 2, "total_hours" => 7, "regular_hours" => 7)
-    end
-    raw['export']['checksum'] = TimeTracking::CanonicalPayload.checksum(raw.except('export'))
-    processed = TimeTracking::BatchImportPreviewService.new(pay_period: period, source: source).send(:process, raw, workweek: workweek)
-    create(:time_tracking_import, pay_period: period, time_tracking_source: source, status: status,
-      external_batch_id: batch_id, external_batch_checksum: raw['export']['checksum'],
-      source_payload_hash: raw['export']['checksum'], contract_version: '2.0', source_cutoff_at: Time.iso8601(raw['cutoff_at']),
-      raw_payload: raw, processed_payload: processed)
-  end
-
-  def confirm(preview = service.preview, **options)
-    service.confirm!(**{ preview_token: preview[:preview_token], reason: 'Source hours corrected by operator', acknowledge_accounting_only: true }.merge(options))
-  end
+  include_context "exact source correction fixtures"
 
   it 'commits once, preserves original and frozen proof, and reports accounting coverage separately from paid' do
     frozen_original = original_item.attributes
@@ -134,6 +42,195 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(result[:errors]).to eq([])
     expect(next_import.reload.status).to eq('applied')
     expect(next_period.payroll_items.count).to eq(0)
+  end
+
+  %w[unissued prepared voided_payment direct_deposit_unconfirmed].each do |payment_state|
+    context "an original #{payment_state} payment" do
+      let(:original_payment_state) { payment_state }
+
+      it "rejects negative accounting before money changes because original payment is unverified" do
+        original = original_item.attributes
+        expect { service.preview }.to raise_error(ArgumentError, /Original payment not verified/)
+        expect(PayrollItem.where(correction_for_payroll_item_id: original_item.id)).not_to exist
+        expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+        expect(original_item.reload.attributes).to eq(original)
+      end
+    end
+  end
+
+  context "a bank-confirmed original direct deposit" do
+    let(:original_payment_state) { "direct_deposit_confirmed" }
+
+    it "permits the accounting-only negative adjustment without creating a cash instrument" do
+      disposition = confirm
+      expect(disposition.corrective_payroll_item.gross_pay).to eq(-25)
+      expect(disposition.corrective_payroll_item.check_number).to be_nil
+      expect(original_item.reload.direct_deposit_payment_confirmation.bank_reference).to eq("SYNTHETIC-BANK-CONFIRMED")
+      expect(disposition.time_tracking_correction_receipt.payload.keys.grep(/payment/)).to be_empty
+    end
+  end
+
+  it "rejects zero-net original records instead of inventing a cash payment basis" do
+    original_item.update_columns(net_pay: 0)
+    expect { service.preview }.to raise_error(ArgumentError, /Original payment not verified/)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
+
+  it "rejects replaced instrument history even if an older delivery event remains" do
+    original_item.check_events.create!(user: actor, event_type: "replaced", check_number: original_item.check_number)
+    expect { service.preview }.to raise_error(ArgumentError, /Original payment not verified/)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
+
+  it "rejects an original payment evidence head that changed after preview" do
+    preview = service.preview
+    original_item.check_reconciliation_events.create!(company: company, pay_period: original_period, recorded_by: actor,
+      event_type: "cleared", check_number: original_item.check_number, amount: original_item.net_pay,
+      effective_on: PayrollBusinessClock.today, evidence_type: "bank_statement", idempotency_key: SecureRandom.uuid)
+    expect { confirm(preview) }.to raise_error(ArgumentError, /history changed/)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
+
+  context "a paycheck with several verified daily allocations" do
+    let(:original_regular_hours) { 10 }
+    let(:original_import) do
+      make_import(original_period, 4, "current", "ORIGINAL", status: "applied", daily_lines: [
+        { source_time_entry_id: "101", total_hours: 4, regular_hours: 4, overtime_hours: 0 },
+        { source_time_entry_id: "102", line_key: "7:2500:day2", original_work_date: "2026-10-06", total_hours: 6, regular_hours: 6, overtime_hours: 0 }
+      ])
+    end
+
+    it "corrects the target day against whole-paycheck totals and preserves every original daily line and other payroll item" do
+      other_employee = create(:employee, company: company)
+      other_item = create(:payroll_item, company: company, employee: other_employee, pay_period: original_period)
+      frozen_original = original_item.attributes
+      frozen_other = other_item.attributes
+      frozen_allocations = original_item.time_tracking_entry_allocations.order(:id).map(&:attributes)
+      frozen_batch = original_import.raw_payload.deep_dup
+      preview = service.preview
+      expect(preview[:original][:gross_pay]).to eq(250)
+      expect(preview[:corrected][:gross_pay]).to eq(225)
+      disposition = confirm(preview)
+      expect(disposition.original_allocation_id).to eq(allocation.id)
+      expect(disposition.corrective_payroll_item.hours_worked).to eq(-1)
+      expect(disposition.corrective_payroll_item.gross_pay).to eq(-25)
+      expect(original_item.reload.attributes).to eq(frozen_original)
+      expect(other_item.reload.attributes).to eq(frozen_other)
+      expect(original_item.time_tracking_entry_allocations.order(:id).map(&:attributes)).to eq(frozen_allocations)
+      expect(original_import.reload.raw_payload).to eq(frozen_batch)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).verify_complete!).to eq(true)
+    end
+
+    context "overtime on several days" do
+      let(:original_regular_hours) { 16 }
+      let(:original_overtime_hours) { 3 }
+      let(:original_import) do
+        make_import(original_period, 10, "current", "ORIGINAL", status: "applied", daily_lines: [
+          { source_time_entry_id: "101", total_hours: 10, regular_hours: 8, overtime_hours: 2 },
+          { source_time_entry_id: "102", line_key: "7:2500:day2", original_work_date: "2026-10-06", total_hours: 9, regular_hours: 8, overtime_hours: 1 }
+        ])
+      end
+      let(:next_import) do
+        make_import(next_period, -1, "correction", "NEXT", daily_lines: [
+          { source_time_entry_id: "101", total_hours: -1, regular_hours: 0, overtime_hours: -1 }
+        ])
+      end
+
+      it "reduces only the target day's overtime using the historical whole-item overtime total" do
+        preview = service.preview
+        expect(preview[:original][:gross_pay]).to eq(512.5)
+        expect(preview[:corrected][:gross_pay]).to eq(475)
+        disposition = confirm(preview)
+        expect(disposition.corrective_payroll_item.hours_worked).to eq(0)
+        expect(disposition.corrective_payroll_item.overtime_hours).to eq(-1)
+        expect(disposition.corrective_payroll_item.gross_pay).to eq(-37.5)
+        expect(original_item.reload.overtime_hours).to eq(3)
+        expect(original_item.time_tracking_entry_allocations.sum(:overtime_hours)).to eq(3)
+      end
+
+      it "rejects a delta that consumes overtime allocated to another day" do
+        next_import.update_columns(raw_payload: next_import.raw_payload)
+        changed = next_import.raw_payload.deep_dup
+        entry = changed["employees"].first["adjustments"].first
+        entry["total_hours"] = entry["overtime_hours"] = -3
+        changed["employees"].first["total_hours"] = changed["employees"].first["overtime_hours"] = -3
+        changed["summary"]["total_hours"] = changed["summary"]["overtime_hours"] = -3
+        changed["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(changed.except("export"))
+        next_import.update_columns(raw_payload: changed, source_payload_hash: changed["export"]["checksum"], external_batch_checksum: changed["export"]["checksum"])
+        expect { service.preview }.to raise_error(ArgumentError, /original.*line.*hours/)
+      end
+    end
+
+    it "accepts a display-name-only category rename with unchanged stable earning identity" do
+      replacement = make_import(next_period, -1, "correction", "RENAMED", category_name: "Flight time renamed")
+      allow_any_instance_of(TimeTracking::Client).to receive(:payroll_batch).and_return(replacement.raw_payload)
+      renamed_service = described_class.new(import: replacement, actor: actor, source_user_id: "42", source_time_entry_id: "101", line_key: "7:2500")
+      preview = renamed_service.preview
+      expect(preview[:deltas][:gross_pay]).to eq(-25)
+      result = renamed_service.confirm!(preview_token: preview[:preview_token], reason: "Verified renamed category identity", acknowledge_accounting_only: true)
+      expect(result.corrective_payroll_item.gross_pay).to eq(-25)
+      expect(original_item.time_tracking_entry_allocations.count).to eq(2)
+    end
+
+    context "one persisted historical earning row" do
+      let(:original_wage_rate_hours) do
+        [ { "employee_wage_rate_id" => rate.id, "rate" => 25, "regular_hours" => 10, "overtime_hours" => 0,
+          "holiday_hours" => 0, "pto_hours" => 0, "label" => "Flight Hours", "active" => true, "is_primary" => true } ]
+      end
+
+      it "preserves the single-rate earning proof while correcting one day" do
+        original = original_item.attributes
+        preview = service.preview
+        expect(preview[:original][:gross_pay]).to eq(250)
+        expect(preview[:corrected][:gross_pay]).to eq(225)
+        disposition = confirm(preview)
+        expect(disposition.corrective_payroll_item.gross_pay).to eq(-25)
+        expect(original_item.reload.attributes).to eq(original)
+      end
+    end
+
+    context "mixed original source earning identities" do
+      let(:original_import) do
+        make_import(original_period, 4, "current", "ORIGINAL", status: "applied", daily_lines: [
+          { source_time_entry_id: "101", total_hours: 4, regular_hours: 4, overtime_hours: 0 },
+          { source_time_entry_id: "102", line_key: "other-category", original_work_date: "2026-10-06", total_hours: 6,
+            regular_hours: 6, overtime_hours: 0, source_category_id: "8", category: { id: 8, key: "other_earning", name: "Other" } }
+        ])
+      end
+
+      it "rejects a paycheck whose original daily union spans earning categories" do
+        expect { service.preview }.to raise_error(ArgumentError, /one earning\/rate/)
+        expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+      end
+    end
+
+    it "rejects a foreign user identity injected into another original daily allocation" do
+      second = original_item.time_tracking_entry_allocations.where.not(id: allocation.id).first
+      ApplicationRecord.connection.execute("UPDATE time_tracking_entry_allocations SET source_user_uuid = '#{SecureRandom.uuid}' WHERE id = #{Integer(second.id)}")
+      expect { service.preview }.to raise_error(ArgumentError, /Original allocation coverage/)
+      expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+    end
+
+    it "rejects original daily sums that no longer equal the posted paycheck inputs" do
+      original_item.update_columns(hours_worked: 11)
+      expect { service.preview }.to raise_error(ArgumentError, /sum to the original paycheck/)
+      expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+    end
+
+    it "rejects incomplete original allocation coverage" do
+      second = original_item.time_tracking_entry_allocations.where.not(id: allocation.id).first
+      ApplicationRecord.connection.execute("DELETE FROM time_tracking_entry_allocations WHERE id = #{Integer(second.id)}")
+      expect { service.preview }.to raise_error(ArgumentError, /original.*allocation.*coverage|original.*allocation.*union/i)
+      expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+    end
+
+    it "binds every original allocation in the reviewed digest" do
+      preview = service.preview
+      second = original_item.time_tracking_entry_allocations.where.not(id: allocation.id).first
+      ApplicationRecord.connection.execute("UPDATE time_tracking_entry_allocations SET updated_at = updated_at + interval '1 second' WHERE id = #{Integer(second.id)}")
+      expect { confirm(preview) }.to raise_error(ArgumentError, /history changed/)
+      expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+    end
   end
 
   context "concurrent exact-line confirmations", :postgres_concurrency do
@@ -306,5 +403,12 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(item.reload).not_to be_voided
     expect(original_item.reload).not_to be_voided
     expect(original_item.check_events.where(event_type: 'voided')).not_to exist
+    expect(PayrollPaymentMethodEligibility.new(original_item.reload).call[:reason]).to match(/accounting correction/)
+    expect { PayrollPaymentMethodService.new(payroll_item: original_item, method: "direct_deposit", actor: actor,
+      reason: "Synthetic requested payment retirement", confirm_not_paid: true, retire_existing_check: true,
+      confirm_check_cancelled: true, cancellation_evidence_reference: "Synthetic cancellation request",
+      expected_check_number: original_item.check_number).call }.to raise_error(PayrollPaymentMethodService::Error, /accounting correction/)
+    expect(original_item.reload.effective_payment_delivery_method).to eq("paper_check")
+    expect(original_item.check_events.where(event_type: "voided")).not_to exist
   end
 end

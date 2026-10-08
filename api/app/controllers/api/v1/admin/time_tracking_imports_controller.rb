@@ -44,6 +44,8 @@ module Api
           render json: { correction: correction_service(import).preview }
         rescue ArgumentError, TimeTracking::Client::Error, IssueCorrectivePaycheckService::CorrectionError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Time tracking import not found" }, status: :not_found
         end
 
         def correction_confirm
@@ -53,6 +55,8 @@ module Api
           render json: { disposition_id: disposition.id, import: import_json(import.reload) }
         rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTracking::Client::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Time tracking import not found" }, status: :not_found
         end
 
         def reconcile
@@ -104,22 +108,6 @@ module Api
               { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :source_effective_rate_cents, :employee_wage_rate_id ] }
             ]
           )
-        end
-
-        def correction_preview
-          import = @pay_period.time_tracking_imports.find(params[:import_id])
-          render json: { correction: correction_service(import).preview }
-        rescue ArgumentError, TimeTracking::Client::Error, IssueCorrectivePaycheckService::CorrectionError => e
-          render json: { error: e.message }, status: :unprocessable_entity
-        end
-
-        def correction_confirm
-          import = @pay_period.time_tracking_imports.find(params[:import_id])
-          disposition = correction_service(import).confirm!(preview_token: params[:preview_token],
-            reason: params[:reason], acknowledge_accounting_only: params[:acknowledge_accounting_only])
-          render json: { disposition_id: disposition.id, import: import_json(import.reload) }
-        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTracking::Client::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def reconcile_params

@@ -131,15 +131,20 @@ module TimeTracking
       rates = original.wage_rate_hours
       unless original_line && allocation.source_kind.in?(%w[current carryover]) && original.employment_type == "hourly" &&
         original.pay_period.can_issue_corrective_paycheck? && !original.voided? &&
-        allocation.time_tracking_import.status == "applied" && original.time_tracking_entry_allocations.count == 1 &&
+        allocation.time_tracking_import.status == "applied" &&
         mapping&.employee_id == original.employee_id && mapping.source_user_id == @identity[0] &&
         original.employee.active? && original.employee.hourly? && original.employee.active_wage_rates.count == 1 &&
-        rates.size <= 1 && (rates.empty? || rates.first["rate"].to_d == original.pay_rate.to_d) &&
-        line["category"] == original_line["category"] && line["source_category_id"].to_s == original_line["source_category_id"].to_s &&
+        rates.size <= 1 && (rates.empty? || single_rate_hours_reconcile?(rates.first, original)) &&
+        OriginalAllocationProof.earning_identity(line) == OriginalAllocationProof.earning_identity(original_line) &&
         line["original_work_date"] == original_line["original_work_date"] &&
-        %w[total_hours regular_hours overtime_hours].all? { |key| allocation.public_send(key) == original_line[key].to_d } &&
-        original.hours_worked.to_d == allocation.regular_hours && original.overtime_hours.to_d == allocation.overtime_hours
+        %w[total_hours regular_hours overtime_hours].all? { |key| allocation.public_send(key) == original_line[key].to_d }
         raise ArgumentError, "This correction needs review of original identity, category, rate or hours; automatic correction is unavailable"
+      end
+      original_proof = OriginalAllocationProof.new(payroll_item: original, source: @source,
+        source_user_id: @identity[0], source_user_uuid: employee["source_user_uuid"]).call
+      payment_proof = OriginalPaymentProof.call(original)
+      unless allocation.regular_hours + line["regular_hours"].to_d >= 0 && allocation.overtime_hours + line["overtime_hours"].to_d >= 0
+        raise ArgumentError, "Correction exceeds the original source line's REG/OT hours; review other days separately"
       end
       old_version = original_line["source_time_entry_version"]
       new_version = line["source_time_entry_version"]
@@ -153,9 +158,20 @@ module TimeTracking
       inputs = { hours_worked: original.hours_worked.to_d + line["regular_hours"].to_d,
         overtime_hours: original.overtime_hours.to_d + line["overtime_hours"].to_d }
       raise ArgumentError, "Correction exceeds the original paid hours" if inputs.values.any?(&:negative?)
-      { employee: employee, line: line, allocation: allocation, original: original, inputs: inputs }
+      { employee: employee, line: line, allocation: allocation, original: original, inputs: inputs,
+        original_proof: original_proof[:evidence], payment_proof: payment_proof }
     rescue PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error => e
       raise ArgumentError, e.message
+    end
+
+    def single_rate_hours_reconcile?(rate, original)
+      id = rate["employee_wage_rate_id"].to_s
+      id.match?(/\A[1-9]\d*\z/) && original.employee.employee_wage_rates.where(id: id.to_i).exists? &&
+        rate["rate"].to_d == original.pay_rate.to_d &&
+        { "regular_hours" => :hours_worked, "overtime_hours" => :overtime_hours,
+          "holiday_hours" => :holiday_hours, "pto_hours" => :pto_hours }.all? do |key, field|
+          rate[key].to_d == original.public_send(field).to_d
+        end
     end
 
     def validate_batch!(import)
@@ -189,7 +205,7 @@ module TimeTracking
       CanonicalPayload.checksum({ import: @import.attributes.slice("id", "pay_period_id", "external_batch_checksum", "source_payload_hash"),
         source: @source.attributes.slice("id", "company_id", "expected_source_instance_id", "connection_uuid", "remote_source_identifier", "base_url"),
         line: context[:line], original: context[:original].attributes, original_period: context[:original].pay_period.attributes,
-        original_batch: context[:allocation].time_tracking_import.external_batch_checksum,
+        original_batches_and_allocations: context[:original_proof], original_payment: context[:payment_proof],
         employee: context[:original].employee.attributes, wage_rates: context[:original].employee.employee_wage_rates.order(:id).map(&:attributes),
         money: money, pay_date: @import.pay_period.pay_date.to_s }.deep_stringify_keys)
     end
