@@ -108,10 +108,11 @@ class EmployeeHoursEvidence
     path = @source.connector.employee_evidence_path(employee_id: mapping.source_user_id, period_id: @params[:period_id].presence, entry_id: entry_id)
     origin = @source.connector.authorization_origins.first
     return if path.blank? || origin.blank? || !path.start_with?("/") || path.start_with?("//")
+    return unless TimeTracking::Connector.authorization_origin_allowed?(origin, allow_test_loopback: true)
 
     url = URI.join("#{origin}/", path)
     approved = URI.parse(origin)
-    return unless url.scheme == "https" && url.host == approved.host && url.port == approved.port && url.userinfo.nil?
+    return unless url.scheme == approved.scheme && url.host == approved.host && url.port == approved.port && url.userinfo.nil?
 
     query = URI.decode_www_form(url.query.to_s)
     query.concat([ [ "source_user_uuid", mapping.source_user_uuid ], [ "source_instance_id", @source.expected_source_instance_id ] ])

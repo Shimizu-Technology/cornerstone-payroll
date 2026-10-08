@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "uri"
+
 module TimeTracking
   # The wire protocol is shared; a producer's business policy is not. Existing
   # AIRE connections retain their deployed contract while new compatible
@@ -7,6 +9,18 @@ module TimeTracking
   class Connector
     AIRE_CAPABILITIES = %w[time_summary_v1 finalized_batch_v2 payroll_calendar_v2 exact_line_receipts_v2 employee_directory payroll_cockpit account_linking manual_allocations payment_attestations].freeze
     PROTOCOL = "shimizu_time_payroll"
+
+    def self.authorization_origin_allowed?(origin, allow_test_loopback: false)
+      uri = URI.parse(origin.to_s)
+      return false unless uri.is_a?(URI::HTTP) && uri.host.present? && uri.userinfo.nil? &&
+        uri.query.nil? && uri.fragment.nil? && uri.path.in?([ "", "/" ])
+      return true if uri.scheme == "https" && uri.port == 443
+
+      allow_test_loopback && Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" &&
+        uri.scheme == "http" && uri.hostname.in?([ "localhost", "127.0.0.1", "::1" ])
+    rescue URI::InvalidURIError
+      false
+    end
 
     def initialize(source)
       @source = source
@@ -69,10 +83,15 @@ module TimeTracking
 
     def authorization_origins
       configured = @source.authorization_origin.presence
-      return [ configured ] if configured
-      return %w[https://aire-services-guam.netlify.app https://app.aireservicesguam.com] if aire_policy?
+      return self.class.authorization_origin_allowed?(configured) ? [ configured ] : [] if configured
+      return [] unless aire_policy?
 
-      []
+      public_origin = ENV["AIRE_PUBLIC_URL"]
+      unless public_origin.nil?
+        return self.class.authorization_origin_allowed?(public_origin, allow_test_loopback: true) ? [ public_origin ] : []
+      end
+
+      %w[https://aire-services-guam.netlify.app https://app.aireservicesguam.com]
     end
   end
 end
