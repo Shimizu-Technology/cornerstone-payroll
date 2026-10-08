@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
-import type { TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
+import type { ExactTimeCorrectionLine, ExactTimeCorrectionPreview, TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
 interface Props {
@@ -104,6 +104,10 @@ export function TimeTrackingImportModal({
     : companies.find((company) => company.id === payPeriod.company_id);
   const clientLabel = payrollCompany?.name || (payPeriod.company_id ? `Client #${payPeriod.company_id}` : 'This payroll’s client');
   const navigate = useNavigate();
+  const [correction, setCorrection] = useState<ExactTimeCorrectionPreview | null>(null);
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionAcknowledged, setCorrectionAcknowledged] = useState(false);
+  const [correctionBusy, setCorrectionBusy] = useState(false);
   const [step, setStep] = useState<Step>('select');
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [sourceId, setSourceId] = useState<number | ''>('');
@@ -181,6 +185,9 @@ export function TimeTrackingImportModal({
     if (!open) return;
     let cancelled = false;
 
+    setCorrection(null);
+    setCorrectionReason('');
+    setCorrectionAcknowledged(false);
     setStep('select');
     setPreview(null);
     setMappings(new Map());
@@ -364,6 +371,46 @@ export function TimeTrackingImportModal({
     autoPreviewAttemptedRef.current = true;
     void handlePreviewRef.current();
   }, [autoPreview, initialSourceId, open, selectedSource, sourcesLoading, step]);
+
+  const reviewCorrection = async (line: ExactTimeCorrectionLine) => {
+    if (!preview) return;
+    setCorrectionBusy(true);
+    setError(null);
+    setCorrection(null);
+    setCorrectionReason('');
+    setCorrectionAcknowledged(false);
+    try {
+      const response = await payPeriodsApi.previewTimeTrackingCorrection(payPeriod.id, {
+        import_id: preview.id, source_user_id: line.source_user_id,
+        source_time_entry_id: line.source_time_entry_id, line_key: line.line_key,
+      });
+      setCorrection(response.correction);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not review the accounting correction');
+    } finally { setCorrectionBusy(false); }
+  };
+
+  const confirmCorrection = async () => {
+    if (!preview || !correction) return;
+    setCorrectionBusy(true);
+    setError(null);
+    try {
+      const response = await payPeriodsApi.confirmTimeTrackingCorrection(payPeriod.id, {
+        import_id: preview.id, source_user_id: correction.source_user_id,
+        source_time_entry_id: correction.source_time_entry_id, line_key: correction.line_key,
+        preview_token: correction.preview_token, reason: correctionReason,
+        acknowledge_accounting_only: correctionAcknowledged,
+      });
+      setPreview(response.import);
+      setCorrection(null);
+      setAppliedThisSession(true);
+      setIncludedRows(new Set(response.import.processed_payload.rows.map((row) => row.source_user_id)));
+      setNegativeAdjustmentsReviewed(false);
+      setNegativeAdjustmentNote('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not commit the accounting correction');
+    } finally { setCorrectionBusy(false); }
+  };
 
   const handleApply = async () => {
     if (!preview) return;
@@ -558,6 +605,34 @@ export function TimeTrackingImportModal({
                 </div>
               )}
 
+              {!isHistoricalReconciliation && (preview.correction_lines || []).filter((line) => !(preview.correction_dispositions || []).some((done) => done.source_user_id === line.source_user_id && done.source_time_entry_id === line.source_time_entry_id && done.line_key === line.line_key)).map((line) => (
+                <section key={`${line.source_user_id}:${line.source_time_entry_id}:${line.line_key}`} aria-label="Source accounting correction" className="rounded-xl border border-warning-200 bg-warning-50 p-4">
+                  <p className="text-sm font-semibold">Review source correction: {formatHours(line.regular_hours)} REG / {formatHours(line.overtime_hours)} OT</p>
+                  <p className="mt-2 text-sm">Record the correction against the original payroll before adding the remaining ordinary hours.</p>
+                  <Button className="mt-3" variant="outline" disabled={loading || correctionBusy} onClick={() => void reviewCorrection(line)}>Review correction</Button>
+                </section>
+              ))}
+              {correction && (
+                <section aria-label="Confirm accounting correction" className="space-y-3 rounded-xl border border-warning-300 p-4">
+                  <p className="font-semibold">{correction.employee_name} · original check {correction.original_check_number || 'unassigned'}</p>
+                  <p className="text-sm">Original payroll #{correction.original_pay_period_id}, item #{correction.original_payroll_item_id}. Corrective supplemental pay date: {formatDate(correction.pay_date)}.</p>
+                  <p className="text-sm">Source entry #{correction.source_time_entry_id}{correction.original_source_time_entry_version != null && correction.source_change.source_time_entry_version != null ? ` · version ${correction.original_source_time_entry_version} → ${correction.source_change.source_time_entry_version}` : ''}: {formatHours(correction.source_change.regular_hours)} REG / {formatHours(correction.source_change.overtime_hours)} OT.</p>
+                  <dl className="grid grid-cols-2 gap-2 text-sm">
+                    <dt>Gross</dt><dd>{formatCurrency(correction.original.gross_pay)} → {formatCurrency(correction.corrected.gross_pay)} ({formatCurrency(correction.deltas.gross_pay)})</dd>
+                    <dt>Social Security delta</dt><dd>{formatCurrency(correction.deltas.social_security_tax)}</dd>
+                    <dt>Medicare delta</dt><dd>{formatCurrency(correction.deltas.medicare_tax)}</dd>
+                    <dt>Income tax delta</dt><dd>{formatCurrency(correction.deltas.withholding_tax)}</dd>
+                    <dt>Net</dt><dd>{formatCurrency(correction.original.net_pay)} → {formatCurrency(correction.corrected.net_pay)} ({formatCurrency(correction.deltas.net_pay)})</dd>
+                  </dl>
+                  <p className="text-sm font-medium">Accounting correction only. The original check remains. No new payment or recovery is recorded.</p>
+                  <label className="block text-sm">Reason<textarea className="mt-2 w-full rounded-lg border p-2" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
+                  <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={correctionAcknowledged} onChange={(event) => setCorrectionAcknowledged(event.target.checked)} />I reviewed the signed adjustment and understand no new payment or recovery is recorded.</label>
+                  <Button disabled={correctionBusy || !correctionAcknowledged || correctionReason.trim().length < 10} onClick={() => void confirmCorrection()}>Confirm accounting correction</Button>
+                </section>
+              )}
+              {(preview.correction_dispositions || []).map((done) => (
+                <div key={done.id} className="rounded-xl border border-success-200 bg-success-50 p-3 text-sm">Accounting correction committed in supplemental #{done.corrective_pay_period_id}, item #{done.corrective_payroll_item_id}: {formatHours(done.total_hours)} hours. No new payment or recovery recorded. Add the remaining ordinary hours below.</div>
+              ))}
               <section aria-label="Hours included in this review" className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -935,7 +1010,7 @@ export function TimeTrackingImportModal({
           {step === 'review' && (
             <>
               <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
-              <Button onClick={handleApply} disabled={loading || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
+              <Button onClick={handleApply} disabled={loading || correctionBusy || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}
           {step === 'done' && <Button onClick={onClose}>Close</Button>}

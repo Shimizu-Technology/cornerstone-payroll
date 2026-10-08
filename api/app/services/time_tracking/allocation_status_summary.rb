@@ -22,6 +22,10 @@ module TimeTracking
 
     def call
       allocations = import.time_tracking_entry_allocations.to_a
+      dispositions = CorrectionCoverage.new(import).dispositions
+      accounting = empty_bucket
+      dispositions.each { |row| add_allocation!(accounting, row) }
+      correction_receipts = dispositions.filter_map(&:time_tracking_correction_receipt)
       latest_by_line = latest_acknowledgements.index_by { |acknowledgement| line_identity(acknowledgement) }
       buckets = %i[in_payroll payment_pending paid needs_attention].index_with { empty_bucket }
 
@@ -31,12 +35,13 @@ module TimeTracking
         add_allocation!(buckets.fetch(bucket), allocation)
       end
 
-      all_acknowledgements = import.aire_payroll_entry_acknowledgements.to_a
+      all_acknowledgements = import.aire_payroll_entry_acknowledgements.to_a + correction_receipts
       {
-        line_count: allocations.length,
-        total_hours: allocations.sum(&:total_hours),
-        regular_hours: allocations.sum(&:regular_hours),
-        overtime_hours: allocations.sum(&:overtime_hours),
+        line_count: allocations.length + dispositions.length,
+        accounting_corrections: accounting,
+        total_hours: allocations.sum(&:total_hours) + dispositions.sum(&:total_hours),
+        regular_hours: allocations.sum(&:regular_hours) + dispositions.sum(&:regular_hours),
+        overtime_hours: allocations.sum(&:overtime_hours) + dispositions.sum(&:overtime_hours),
         in_payroll: buckets.fetch(:in_payroll),
         payment_pending: buckets.fetch(:payment_pending),
         paid: buckets.fetch(:paid),

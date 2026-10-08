@@ -39,6 +39,22 @@ module Api
           render json: { error: "Time tracking import not found" }, status: :not_found
         end
 
+        def correction_preview
+          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          render json: { correction: correction_service(import).preview }
+        rescue ArgumentError, TimeTracking::Client::Error, IssueCorrectivePaycheckService::CorrectionError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def correction_confirm
+          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          disposition = correction_service(import).confirm!(preview_token: params[:preview_token],
+            reason: params[:reason], acknowledge_accounting_only: params[:acknowledge_accounting_only])
+          render json: { disposition_id: disposition.id, import: import_json(import.reload) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTracking::Client::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def reconcile
           permitted = reconcile_params
           import = @pay_period.time_tracking_imports.find(permitted[:import_id])
@@ -71,6 +87,11 @@ module Api
           render json: { error: "Pay period not found" }, status: :not_found
         end
 
+        def correction_service(import)
+          TimeTracking::ExactLineCorrectionService.new(import: import, actor: current_user,
+            source_user_id: params[:source_user_id], source_time_entry_id: params[:source_time_entry_id], line_key: params[:line_key])
+        end
+
         def apply_params
           params.permit(
             :import_id,
@@ -85,6 +106,22 @@ module Api
           )
         end
 
+        def correction_preview
+          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          render json: { correction: correction_service(import).preview }
+        rescue ArgumentError, TimeTracking::Client::Error, IssueCorrectivePaycheckService::CorrectionError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def correction_confirm
+          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          disposition = correction_service(import).confirm!(preview_token: params[:preview_token],
+            reason: params[:reason], acknowledge_accounting_only: params[:acknowledge_accounting_only])
+          render json: { disposition_id: disposition.id, import: import_json(import.reload) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTracking::Client::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def reconcile_params
           params.permit(
             :import_id,
@@ -94,7 +131,14 @@ module Api
         end
 
         def import_json(import)
+          coverage = import.is_a?(TimeTrackingImport) && import.finalized_batch? ? TimeTracking::CorrectionCoverage.new(import) : nil
           {
+            correction_dispositions: coverage ? coverage.presentation : [],
+            correction_lines: coverage ? Array(import.raw_payload["employees"]).flat_map { |employee|
+              Array(employee["adjustments"]).select { |line| line["source_kind"] == "correction" && line["total_hours"].to_d.negative? }.map { |line|
+                line.merge("source_user_id" => employee["source_user_id"])
+              }
+            } : [],
             id: import.id,
             status: import.status,
             time_tracking_source_id: import.time_tracking_source_id,
@@ -104,7 +148,7 @@ module Api
             fetch_start_date: import.fetch_start_date,
             fetch_end_date: import.fetch_end_date,
             warnings: import.warnings,
-            processed_payload: import.processed_payload,
+            processed_payload: coverage ? coverage.processed_payload : import.processed_payload,
             external_batch_id: import.external_batch_id,
             external_batch_checksum: import.external_batch_checksum,
             contract_version: import.contract_version,

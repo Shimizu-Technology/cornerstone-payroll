@@ -351,6 +351,8 @@ Rails.application.routes.draw do
             post :preview_timecard_import, to: "timecard_imports#preview"
             post :apply_timecard_import, to: "timecard_imports#apply"
             post :preview_time_tracking_import, to: "time_tracking_imports#preview"
+            post :preview_time_tracking_correction, to: "time_tracking_imports#correction_preview"
+            post :confirm_time_tracking_correction, to: "time_tracking_imports#correction_confirm"
             post :apply_time_tracking_import, to: "time_tracking_imports#apply"
             post :reconcile_time_tracking_import, to: "time_tracking_imports#reconcile"
           end

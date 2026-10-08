@@ -36,6 +36,7 @@ class StaffRolePolicy
   }.freeze
 
   CONTROLLER_CAPABILITIES = {
+    "api/v1/admin/time_tracking_imports" => :payroll_operations,
     "api/v1/admin/time_tracking_source_health" => :payroll_operations,
     "api/v1/admin/employee_hours_evidence" => :payroll_operations,
     "api/v1/admin/organizations" => :manage_platform,

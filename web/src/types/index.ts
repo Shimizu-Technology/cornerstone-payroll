@@ -648,6 +648,20 @@ export interface AirePayrollRecord {
     cornerstone_overtime_hours: string;
     total_difference_hours: string;
   }>;
+  correction_dispositions?: Array<{
+    id: number;
+    source_user_id: string;
+    source_time_entry_id: string;
+    line_key: string;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+    original_pay_period_id: number;
+    original_payroll_item_id: number;
+    corrective_pay_period_id: number;
+    corrective_payroll_item_id: number;
+    accounting_only: true;
+  }>;
   payable_line_status?: {
     line_count: number;
     total_hours: number;
@@ -657,6 +671,7 @@ export interface AirePayrollRecord {
     payment_pending: AirePayableLineStatusBucket;
     paid: AirePayableLineStatusBucket;
     needs_attention: AirePayableLineStatusBucket;
+    accounting_corrections?: AirePayableLineStatusBucket;
     held: { entry_count: number; total_hours: number };
     synchronization: {
       pending_event_count: number;

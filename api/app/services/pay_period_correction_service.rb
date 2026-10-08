@@ -51,6 +51,12 @@ class PayPeriodCorrectionService
       if NonEmployeeCheckSupersession.joins(:payroll_item).where(payroll_items: { pay_period_id: locked.id }).exists?
         raise InvalidStateError, "This pay period contains a payroll check linked to a duplicate software record; review that reconciliation before voiding"
       end
+      linked_items = locked.payroll_items.select(:id)
+      linked_originals = TimeTrackingEntryAllocation.where(payroll_item_id: linked_items).select(:id)
+      if TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: linked_items).exists? ||
+        TimeTrackingCorrectionDisposition.where(original_allocation_id: linked_originals).exists?
+        raise InvalidStateError, "This payroll has an exact source accounting correction. Voiding is held until the correction disposition and source receipt can be reversed together; review the linked correction with payroll support."
+      end
       PayrollLiabilityPaymentGuard.ensure_clear!(
         pay_period: locked,
         error_class: InvalidStateError,

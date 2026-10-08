@@ -203,7 +203,13 @@ class PayrollItem < ApplicationRecord
     NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
   end
 
+  def source_accounting_correction_linked?
+    TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: id).exists? ||
+      TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
+  end
+
   def void!(user:, reason:, ip_address: nil)
+    raise ArgumentError, "This item has an exact source accounting correction. Voiding is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support." if source_accounting_correction_linked?
     raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Already voided" if voided?
     raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
@@ -212,6 +218,7 @@ class PayrollItem < ApplicationRecord
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
+      raise ArgumentError, "This item has an exact source accounting correction; review the linked correction before voiding" if source_accounting_correction_linked?
       raise ArgumentError, "Already voided" if voided? # re-check under lock
       raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
