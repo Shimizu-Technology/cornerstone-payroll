@@ -137,7 +137,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
         overtime_hours: enteredOvertime.toFixed(2), note: note.trim(),
       });
       if (current !== actionGeneration.current) return;
-      remember(allocation); setNotice(stateLabel(allocation)); setNote('');
+      remember(allocation); setNotice('The link request was saved. Review its current sync and payment status below.'); setNote('');
       await load(true);
       if (current === actionGeneration.current) onChanged();
     } catch (caught) {
@@ -155,7 +155,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
     try {
       const result = await payPeriodsApi.retryAireManualAllocation(payPeriodId, allocation.id);
       if (current !== actionGeneration.current) return;
-      remember(result.manual_allocation); setNotice(stateLabel(result.manual_allocation));
+      remember(result.manual_allocation); setNotice('Sync requested. Review the current status below.');
       await load();
       if (current === actionGeneration.current) onChanged();
     } catch (caught) {
