@@ -1,4 +1,6 @@
 import { supportsSourceOperation } from '@/lib/time-tracking';
+import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { useCompany } from '@/contexts/CompanyContext';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
@@ -96,6 +98,11 @@ export function TimeTrackingImportModal({
   autoPreview = false,
 }: Props) {
   const { isAdmin } = useAuth();
+  const { activeCompany, companies } = useCompany();
+  const payrollCompany = activeCompany?.id === payPeriod.company_id
+    ? activeCompany
+    : companies.find((company) => company.id === payPeriod.company_id);
+  const clientLabel = payrollCompany?.name || (payPeriod.company_id ? `Client #${payPeriod.company_id}` : 'This payroll’s client');
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select');
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
@@ -138,7 +145,7 @@ export function TimeTrackingImportModal({
       if (event.key !== 'Tab' || !dialogRef.current) return;
 
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], summary, [tabindex]:not([tabindex="-1"])'
       ));
       if (focusable.length === 0) {
         event.preventDefault();
@@ -280,6 +287,9 @@ export function TimeTrackingImportModal({
   });
 
   const includedPreviewRows = rows.filter((row) => includedRows.has(row.source_user_id));
+  const includedRegularHours = includedPreviewRows.reduce((sum, row) => sum + Number(row.regular_hours || 0), 0);
+  const includedOvertimeHours = includedPreviewRows.reduce((sum, row) => sum + Number(row.overtime_hours || 0), 0);
+  const heldHours = exclusions.reduce((sum, exclusion) => sum + Number(exclusion.held_total_hours || 0), 0);
   const mappedIncludedRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id));
   const includedEmployeeIds = mappedIncludedRows.map((row) => mappings.get(row.source_user_id)).filter((id): id is number => Boolean(id));
   const duplicateEmployeeIds = new Set(includedEmployeeIds.filter((id, index) => includedEmployeeIds.indexOf(id) !== index));
@@ -430,25 +440,30 @@ export function TimeTrackingImportModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <button className="fixed inset-0 cursor-default bg-neutral-950/55" onClick={onClose} aria-label="Close time import" />
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="time-import-title" className="relative z-50 flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl outline-none">
-        <header className="flex items-start justify-between gap-4 border-b border-neutral-200 px-6 py-4 sm:px-8 sm:py-6">
-          <div>
+        <header className="flex items-start justify-between gap-3 border-b border-neutral-200 px-4 py-4 sm:px-8 sm:py-6">
+          <div className="min-w-0">
             <h2 id="time-import-title" className="text-lg font-semibold tracking-tight text-neutral-950 sm:text-xl">
-              {isFinalizedBatch ? 'Review time tracking hours for this payroll' : 'Import time tracking'}
+              {isFinalizedBatch ? 'Review time tracking hours' : 'Import time tracking'}
             </h2>
-            <p className="mt-2 max-w-2xl text-sm text-neutral-600">
+            <div className="mt-2 text-sm text-neutral-700">
+              <div className="break-words font-semibold text-neutral-950">{clientLabel}</div>
+              <div>Work period: {formatDateRange(payPeriod.start_date, payPeriod.end_date)}</div>
+              <div>Pay date: {formatDate(payPeriod.pay_date)}</div>
+            </div>
+            <p className="mt-2 max-w-2xl text-xs text-neutral-600">
               {isFinalizedBatch
                 ? isHistoricalReconciliation
-                  ? 'Link this committed payroll to its immutable time tracking cutoff without recalculating or changing any pay.'
-                  : 'Verify the immutable cutoff, employee mappings, and any corrections before adding the batch to this payroll.'
+                  ? 'Link the committed payroll to this cutoff. Pay will stay unchanged.'
+                  : 'Check the hours, employee links, and held entries before adding them.'
                 : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
           </div>
-          <button ref={closeButtonRef} onClick={onClose} className="rounded-full p-2 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900" aria-label="Close">
+          <button ref={closeButtonRef} onClick={onClose} className="shrink-0 rounded-full p-2 text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900" aria-label="Close">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </header>
 
-        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-8">
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
           {error && (
             <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertTriangle className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
               <span>{error}</span></ActionFeedback>
@@ -535,42 +550,39 @@ export function TimeTrackingImportModal({
           )}
 
           {step === 'review' && preview && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {isFinalizedBatch && (
-                <section className="rounded-2xl border border-primary-200 bg-primary-50/50 p-4 sm:p-6">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-primary-950">
-                    <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                    Integrity verified
-                  </div>
-                  <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">Batch ID</div>
-                      <div className="mt-2 break-all font-mono text-xs text-primary-950">{preview.external_batch_id}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">Cutoff</div>
-                      <div className="mt-2 text-primary-950">{formatTimestamp(preview.source_cutoff_at)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">Contract</div>
-                      <div className="mt-2 text-primary-950">Time tracking payroll batch v{preview.contract_version}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-primary-700">SHA-256</div>
-                      <div className="mt-2 break-all font-mono text-[11px] leading-4 text-primary-950">{preview.external_batch_checksum}</div>
-                    </div>
-                  </div>
-                </section>
+                <div className="flex items-start gap-2 text-xs text-primary-900">
+                  <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span><span className="font-semibold">Verified cutoff:</span> {formatTimestamp(preview.source_cutoff_at)}</span>
+                </div>
               )}
 
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="text-neutral-600">
-                  {includedPreviewRows.length} included · {excludedCount} skipped · {readyRows} ready · {unmappedIncludedCount} unmapped · {warningCount} warning{warningCount === 1 ? '' : 's'}
-                </span>
-                <span className="text-xs text-neutral-500">
-                  {isFinalizedBatch ? `Finalized ${formatTimestamp(preview.processed_payload.finalized_at)}` : `OT window: ${preview.fetch_start_date} → ${preview.fetch_end_date}`}
-                </span>
-              </div>
+              <section aria-label="Hours included in this review" className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs font-medium text-neutral-600">Regular hours</div>
+                    <div className="mt-1 font-mono text-lg font-semibold text-neutral-950">{formatHours(includedRegularHours)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-neutral-600">Overtime hours</div>
+                    <div className="mt-1 font-mono text-lg font-semibold text-neutral-950">{formatHours(includedOvertimeHours)}</div>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-neutral-600">
+                  {includedPreviewRows.length} included · {readyRows} ready
+                  {excludedCount > 0 && ` · ${excludedCount} skipped`}
+                  {unmappedIncludedCount > 0 && ` · ${unmappedIncludedCount} unmapped`}
+                  {warningCount > 0 && ` · ${warningCount} warning${warningCount === 1 ? '' : 's'}`}
+                </p>
+                {!isFinalizedBatch && <p className="mt-1 text-xs text-neutral-500">OT window: {formatDateRange(preview.fetch_start_date, preview.fetch_end_date)}</p>}
+              </section>
+
+              {isFinalizedBatch && exclusions.length > 0 && (
+                <p className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-900">
+                  <span className="font-semibold">{exclusions.length} held {exclusions.length === 1 ? 'entry' : 'entries'} · {formatHours(heldHours)} unpaid hours.</span> See held entries below; they will not be added to this payroll.
+                </p>
+              )}
 
               {(warningCount > 0 || unmappedIncludedCount > 0 || duplicateMappingCount > 0 || rowsNeedingWageRateMapping.length > 0) && (
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">
@@ -650,7 +662,7 @@ export function TimeTrackingImportModal({
                           </div>
                           {isFinalizedBatch && !isHistoricalReconciliation && row.estimated_gross_delta != null && (
                             <div className="mt-2 text-xs font-medium text-neutral-600">
-                              Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">${Number(row.estimated_gross_delta).toFixed(2)}</span>
+                              Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">{formatCurrency(row.estimated_gross_delta)}</span>
                             </div>
                           )}
                         </div>
@@ -797,6 +809,36 @@ export function TimeTrackingImportModal({
                 </section>
               )}
 
+              {isFinalizedBatch && (
+                <details className="rounded-xl border border-neutral-200 bg-neutral-50 text-sm">
+                  <summary className="cursor-pointer rounded-xl px-4 py-3 font-medium text-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">
+                    Batch audit details
+                  </summary>
+                  <dl className="grid min-w-0 gap-4 border-t border-neutral-200 p-4 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <dt className="text-xs font-semibold text-neutral-500">Batch ID</dt>
+                      <dd className="mt-1 break-all font-mono text-xs text-neutral-950">{preview.external_batch_id || 'Unavailable'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-neutral-500">Contract version</dt>
+                      <dd className="mt-1 break-all text-neutral-950">{preview.contract_version || 'Unavailable'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-neutral-500">Cutoff</dt>
+                      <dd className="mt-1 text-neutral-950">{formatTimestamp(preview.source_cutoff_at)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-neutral-500">Finalized</dt>
+                      <dd className="mt-1 text-neutral-950">{formatTimestamp(preview.processed_payload.finalized_at)}</dd>
+                    </div>
+                    <div className="min-w-0 sm:col-span-2">
+                      <dt className="text-xs font-semibold text-neutral-500">SHA-256</dt>
+                      <dd className="mt-1 break-all font-mono text-xs leading-5 text-neutral-950">{preview.external_batch_checksum || 'Unavailable'}</dd>
+                    </div>
+                  </dl>
+                </details>
+              )}
+
               {isFinalizedBatch && !isHistoricalReconciliation && negativeAdjustmentCount > 0 && (
                 <section className="rounded-2xl border border-warning-300 bg-warning-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2 font-semibold text-warning-950">
@@ -883,7 +925,7 @@ export function TimeTrackingImportModal({
           )}
         </div>
 
-        <footer className="flex flex-col-reverse gap-4 border-t border-neutral-200 bg-neutral-50 px-6 py-4 sm:flex-row sm:justify-end sm:px-8">
+        <footer className="flex flex-col-reverse gap-3 border-t border-neutral-200 bg-neutral-50 px-4 py-3 sm:flex-row sm:justify-end sm:px-8">
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
