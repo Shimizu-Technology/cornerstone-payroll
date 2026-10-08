@@ -28,6 +28,9 @@ module TimeTracking
 
     def self.blocker_for(item, check_activity: nil)
       return unless item.pay_period.committed?
+      if item.source_accounting_correction_linked?
+        return "This payment has an exact source accounting correction. Payment cancellation is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
+      end
       if item.time_tracking_manual_allocations.where.not(status: "voided").where.not(payment_cancellation_intent: {}).exists?
         return "Finish syncing the earlier check cancellation before changing this payment method again."
       end

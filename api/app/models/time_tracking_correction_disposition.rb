@@ -36,6 +36,9 @@ class TimeTrackingCorrectionDisposition < ApplicationRecord
     item = corrective_payroll_item
     employee = Array(import.raw_payload["employees"]).find { |row| row["source_user_id"].to_s == source_user_id }
     line = Array(employee&.dig("adjustments")).find { |row| row["source_time_entry_id"].to_s == source_time_entry_id && row["line_key"].to_s == line_key }
+    TimeTracking::OriginalAllocationProof.new(payroll_item: original.payroll_item, source: time_tracking_source,
+      source_user_id: source_user_id, source_user_uuid: source_user_uuid).call
+    TimeTracking::OriginalPaymentProof.call(original.payroll_item)
     identity = TimeTracking::ConnectionIdentity.validate!(source: time_tracking_source, payload: import.raw_payload)
     unless company_id == time_tracking_source.company_id && company_id == import.pay_period.company_id &&
       original.company_id == company_id && original.time_tracking_source_id == time_tracking_source_id &&
@@ -54,7 +57,7 @@ class TimeTrackingCorrectionDisposition < ApplicationRecord
       item.hours_worked.to_d == regular_hours && item.overtime_hours.to_d == overtime_hours
       errors.add(:base, "Accounting correction ownership and exact frozen proof must reconcile")
     end
-  rescue TimeTracking::ConnectionIdentity::Error => e
+  rescue TimeTracking::ConnectionIdentity::Error, ArgumentError => e
     errors.add(:base, e.message)
   end
 end
