@@ -45,6 +45,73 @@ RSpec.describe EmployeeHoursEvidence do
     expect(TimeTracking::Client).not_to have_received(:for_payroll_actor)
   end
 
+  describe "AIRE workspace links" do
+    before do
+      allow(source).to receive_messages(source_type: "aire_services", authorization_origin: nil)
+      allow(source).to receive(:connector).and_return(TimeTracking::Connector.new(source))
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("https://aire-staging-v2.shimizu-technology.com")
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return(nil)
+      allow(client).to receive(:payroll_employee_period).and_return({ "period" => {
+        "id" => "2026-08-01", "summary" => {}, "entries" => [ { "id" => "101" } ], "coverage_lines" => [], "settlement_cases" => []
+      } })
+    end
+
+    def evidence
+      described_class.new(employee: employee, actor: actor,
+        params: { period_id: "2026-08-01", start_date: "2026-08-01", end_date: "2026-08-15" }).call
+    end
+
+    def expect_scoped_links(result, origin)
+      workspace = URI(result[:source_workspace_url])
+      entry = URI(result.dig(:evidence, "period", "entries", 0, "source_entry_url"))
+      [ workspace, entry ].each do |url|
+        expect(url.to_s).to start_with("#{origin}/admin/users/42?")
+        expect(URI.decode_www_form(url.query).to_h).to include("tab" => "hours", "period" => "2026-08-01",
+          "source_user_uuid" => mapping.source_user_uuid, "source_instance_id" => source.expected_source_instance_id,
+          "start_date" => "2026-08-01", "end_date" => "2026-08-15")
+      end
+      expect(URI.decode_www_form(entry.query).to_h).to include("entry" => "101")
+    end
+
+    it "preserves employee, installation, period, and entry identity on the environment origin" do
+      expect_scoped_links(evidence, "https://aire-staging-v2.shimizu-technology.com")
+    end
+
+    it "keeps an explicit source origin ahead of the configured environment" do
+      allow(source).to receive(:authorization_origin).and_return("https://source.example.com")
+      expect_scoped_links(evidence, "https://source.example.com")
+    end
+
+    it "builds scoped local links only when E2E test mode is explicitly enabled" do
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("http://localhost:44340")
+      expect(evidence[:source_workspace_url]).to be_nil
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("true")
+      expect_scoped_links(evidence, "http://localhost:44340")
+    end
+
+    it "does not emit workspace or entry links for an invalid configured origin" do
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("https://aire-staging-v2.shimizu-technology.com/admin")
+      result = evidence
+      expect(result[:status]).to eq("available")
+      expect(result[:source_workspace_url]).to be_nil
+      expect(result.dig(:evidence, "period", "entries", 0, "source_entry_url")).to be_nil
+    end
+
+    it "rejects unguarded HTTP origins even when returned by an adapter" do
+      allow(source).to receive(:connector).and_return(connector)
+      allow(connector).to receive(:employee_evidence_path).and_return("/admin/users/42?tab=hours")
+      allow(connector).to receive(:authorization_origins).and_return([ "http://localhost:44340" ])
+      expect(evidence[:source_workspace_url]).to be_nil
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("true")
+      allow(connector).to receive(:authorization_origins).and_return([ "http://external.example.com" ])
+      expect(evidence[:source_workspace_url]).to be_nil
+      allow(connector).to receive(:authorization_origins).and_return([ "http://localhost:44340" ])
+      allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new("production"))
+      expect(evidence[:source_workspace_url]).to be_nil
+    end
+  end
+
   it "requires capability and stable identity before contacting the source" do
     allow(source).to receive(:supports?).with(:employee_period_evidence_v1).and_return(false)
     expect(described_class.new(employee: employee, actor: actor).call[:status]).to eq("unsupported")

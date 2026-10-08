@@ -24,6 +24,74 @@ RSpec.describe TimeTracking::Connector do
     TimeTracking::ConnectionIdentity.verify_and_pin!(source: source, payload: identity)
   end
 
+  describe "authorization origins" do
+    let(:aire) { TimeTrackingSource.new(source_type: "aire_services") }
+
+    before do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return(nil)
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return(nil)
+    end
+
+    it "uses an explicit source origin before the environment fallback" do
+      aire.authorization_origin = "https://source.example.com"
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("https://staging.example.com")
+      expect(aire.connector.authorization_origins).to eq([ "https://source.example.com" ])
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("invalid")
+      expect(aire.connector.authorization_origins).to eq([ "https://source.example.com" ])
+    end
+
+    it "uses the configured public AIRE origin for sources without an explicit origin" do
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("https://aire-staging-v2.shimizu-technology.com")
+      expect(aire.connector.authorization_origins).to eq([ "https://aire-staging-v2.shimizu-technology.com" ])
+    end
+
+    it "retains both legacy production origins when the environment is unset" do
+      expect(aire.connector.authorization_origins).to eq(%w[https://aire-services-guam.netlify.app https://app.aireservicesguam.com])
+    end
+
+    it "fails closed for a malformed or insecure configured public origin" do
+      [ "", " ", "not a url", "https://example.com/admin", "https://user:secret@example.com",
+        "https://example.com?next=1", "https://example.com#hours", "//example.com",
+        "http://example.com", "https://example.com:444" ].each do |origin|
+        allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return(origin)
+        expect(aire.connector.authorization_origins).to eq([]), origin.inspect
+      end
+    end
+
+    it "allows HTTP loopback only for the explicitly enabled test environment" do
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("true")
+      %w[http://localhost:44340 http://127.0.0.1:44340 http://[::1]:44340].each do |origin|
+        allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return(origin)
+        expect(aire.connector.authorization_origins).to eq([ origin ])
+      end
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("http://external.example.com:44340")
+      expect(aire.connector.authorization_origins).to eq([])
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("http://localhost:44340")
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("false")
+      expect(aire.connector.authorization_origins).to eq([])
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("true")
+      %w[development production].each do |environment|
+        allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new(environment))
+        expect(aire.connector.authorization_origins).to eq([])
+      end
+    end
+
+    it "keeps explicit source fields HTTPS-only even during local E2E tests" do
+      aire.authorization_origin = "http://localhost:44340"
+      allow(ENV).to receive(:[]).with("E2E_TEST_MODE").and_return("true")
+      expect(aire.connector.authorization_origins).to eq([])
+    end
+
+    it "does not apply AIRE environment defaults to custom producers" do
+      custom = TimeTrackingSource.new(source_type: "custom")
+      allow(ENV).to receive(:[]).with("AIRE_PUBLIC_URL").and_return("https://staging.example.com")
+      expect(custom.connector.authorization_origins).to eq([])
+      custom.authorization_origin = "https://custom.example.com"
+      expect(custom.connector.authorization_origins).to eq([ "https://custom.example.com" ])
+    end
+  end
+
   def period!
     common = { company: company, source: "operator_confirmed", confirmation_status: "confirmed", confirmed_by: actor,
       confirmed_at: Time.current, effective_on: Date.new(2026, 1, 1), notes: "Operator confirmed neutral policy" }
