@@ -196,7 +196,7 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(within(summary).getByText('14.00')).toBeTruthy();
     expect(within(summary).getByText('0.00')).toBeTruthy();
     expect(screen.getByText('$350.00')).toBeTruthy();
-    expect(screen.getByText('1 held entry · 4.00 unpaid hours.')).toBeTruthy();
+    expect(screen.getByText('1 held entry · 4.00 held hours at cutoff.')).toBeTruthy();
     expect(screen.getByText('Pending Approval')).toBeTruthy();
     const disclosure = screen.getByText('Batch audit details').closest('details')!;
     expect(disclosure.open).toBe(false);
@@ -207,6 +207,30 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     await userEvent.click(screen.getByText('Batch audit details'));
     expect(disclosure.open).toBe(true);
   });
+
+  it.each(['pending_payment_attestation', 'payment_attested_pending_evidence'])(
+    'describes %s neutrally and keeps its held hours out of the apply payload',
+    async (reason) => {
+      const { data } = await review({ exclusions: [{
+        source_time_entry_id: 'reported-paid-entry', source_user_id: 'reported-paid-user',
+        display_name: 'Reported Paid Employee', reason, original_work_date: '2026-10-03',
+        held_total_hours: 8.08, held_regular_hours: 8.08, held_overtime_hours: 0,
+      }] });
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.textContent).not.toMatch(/unpaid|owed|repayment/i);
+      expect(screen.getByText('1 held entry · 8.08 held hours at cutoff.')).toBeTruthy();
+      expect(screen.getByText('8.08 held hours at cutoff')).toBeTruthy();
+      expect(screen.getByText(reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()))).toBeTruthy();
+      expect(within(screen.getByRole('region', { name: 'Hours included in this review' })).getByText('14.00')).toBeTruthy();
+      apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
+      await userEvent.click(screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }));
+      expect(apiMocks.apply).toHaveBeenCalledOnce();
+      const submitted = apiMocks.apply.mock.calls[0][1];
+      expect(submitted.mappings).toHaveLength(1);
+      expect(submitted.mappings.map((mapping: { source_user_id: string }) => mapping.source_user_id)).toEqual(['user-7']);
+      expect(JSON.stringify(submitted)).not.toContain('reported-paid');
+    },
+  );
 
   it('uses the pay period client instead of a mismatched active company, with a readable fallback', async () => {
     apiMocks.company.activeCompany = { id: 9, name: 'Wrong Client' };
