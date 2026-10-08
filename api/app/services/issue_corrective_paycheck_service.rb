@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "openssl"
+
 # Issues a corrective paycheck for a single employee against an
 # already-committed pay period — without voiding the original.
 #
@@ -12,7 +14,7 @@
 #    original was committed, so the tax math matches what would have been
 #    withheld had the corrected inputs been entered originally.
 #
-# 2. We compute deltas: corrected_value - original_value for gross,
+# 2. We compute deltas: corrected_value - already_recorded_value for gross,
 #    FIT, SS, Medicare, employer SS, employer Medicare, retirement,
 #    additional withholding, deductions, and net pay.
 #
@@ -35,7 +37,7 @@
 # CompanyYtdTotal, W-2 boxes, tax sync line items, reports) sums
 # `payroll_items.gross_pay` etc. across `reportable_committed`
 # pay_periods. A delta-valued supplemental therefore *just works*:
-# `original.gross + supplemental.gross_delta = corrected.gross`.
+# `original.gross + active supplementals.gross = corrected.gross`.
 # The check the operator hands the employee is the supplemental's
 # `net_pay` (the net delta), which is exactly what we owe them.
 #
@@ -57,6 +59,7 @@ class IssueCorrectivePaycheckService
   class OriginalNotFoundError   < CorrectionError; end
   class UnsupportedEmployeeError < CorrectionError; end
   class MissingHistoricalContextError < CorrectionError; end
+  class StalePreviewError < CorrectionError; end
 
   # Fields the operator can override when issuing a correction. Anything
   # not provided falls back to the original item's value.
@@ -81,6 +84,7 @@ class IssueCorrectivePaycheckService
     service_charge_wages
     qualified_overtime_compensation
   ].freeze
+  NUMERIC_INPUT_FIELDS = (CORRECTABLE_INPUT_FIELDS - %i[tip_pool custom_earnings custom_deductions custom_columns_data]).freeze
 
   # Fields whose deltas we transcribe onto the supplemental row. These
   # are the calculator's outputs; storing the deltas here is what makes
@@ -130,7 +134,7 @@ class IssueCorrectivePaycheckService
   end
 
   def self.issue!(original_pay_period:, employee:, corrected_inputs:,
-                  pay_date:, reason:, actor: nil, notes: nil)
+                  pay_date:, reason:, actor: nil, notes: nil, expected_review_digest: nil)
     new(
       original_pay_period: original_pay_period,
       employee:            employee,
@@ -138,12 +142,13 @@ class IssueCorrectivePaycheckService
       pay_date:            pay_date,
       reason:              reason,
       actor:               actor,
-      notes:               notes
+      notes:               notes,
+      expected_review_digest: expected_review_digest
     ).issue!
   end
 
   def initialize(original_pay_period:, employee:, corrected_inputs:,
-                 pay_date: nil, reason: nil, actor: nil, notes: nil)
+                 pay_date: nil, reason: nil, actor: nil, notes: nil, expected_review_digest: nil)
     @original_pay_period = original_pay_period
     @employee            = employee
     @corrected_inputs    = (corrected_inputs || {}).symbolize_keys
@@ -152,6 +157,7 @@ class IssueCorrectivePaycheckService
     @reason              = reason
     @actor               = actor
     @notes               = notes
+    @expected_review_digest = expected_review_digest
   end
 
   # Returns the original snapshot, the recomputed corrected snapshot, and
@@ -161,6 +167,7 @@ class IssueCorrectivePaycheckService
     validate_for_preview!
     {
       original:  snapshot(original_item),
+      recorded: recorded_snapshot,
       corrected: snapshot(corrected_item),
       deltas:    delta_hash,
       meta: {
@@ -168,6 +175,8 @@ class IssueCorrectivePaycheckService
         original_payroll_item_id: original_item.id,
         employee_id: @employee.id,
         employee_name: @employee.full_name,
+        active_corrective_count: active_correctives.length,
+        review_digest: review_digest,
         will_generate_check: net_delta.positive?,
         is_zero_change: zero_change?
       }
@@ -176,8 +185,6 @@ class IssueCorrectivePaycheckService
 
   def issue!
     validate_for_issue!
-    raise InvalidStateError, "Corrected inputs do not change anything" if zero_change?
-
     PayPeriod.transaction do
       # Lock the original to prevent a concurrent void/correction on top
       # of us. We also re-read the latest state under lock.
@@ -200,12 +207,23 @@ class IssueCorrectivePaycheckService
               "Original payroll item no longer exists for this employee on the locked period"
       end
       @original_item = refreshed
+      @original_pay_period = locked_original
+      # A supplemental void takes its period lock before reversing YTD. Lock
+      # those periods before reading the effective ledger or acquiring YTD.
+      prior_ids = original_item.correction_payroll_items.distinct.pluck(:pay_period_id)
+      PayPeriod.where(id: prior_ids).order(:id).lock("FOR UPDATE").load
+      original_item.correction_payroll_items.order(:id).lock("FOR UPDATE").load
       # Force corrected_item to be rebuilt against the freshly-locked
       # original (its inputs are derived from `original_item.*`).
       @corrected_item = nil
       @recalculated_original_item = nil
+      @active_correctives = nil
+      @effective_inputs = nil
 
       assert_correctable!(locked_original)
+      validate_for_issue!
+      validate_review_digest!
+      raise InvalidStateError, "The corrected target is already recorded; inputs do not change the remaining financial balance" if zero_change?
 
       supplemental = create_supplemental_period!(locked_original)
       corrective_item = create_corrective_item!(
@@ -235,6 +253,11 @@ class IssueCorrectivePaycheckService
     if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
             "Contractor payroll items don't have a tax surface to correct; edit the contractor item directly"
+    end
+    columns = @corrected_inputs[:custom_columns_data]
+    categorized_target = columns.is_a?(Hash) && (columns["wage_rate_hours"].present? || columns[:wage_rate_hours].present?)
+    if original_item.wage_rate_hours.present? || categorized_target
+      raise UnsupportedEmployeeError, "Categorized or multi-rate payroll corrections require a category-level review; this corrective paycheck cannot safely recompute them"
     end
 
     unless PayrollCalculationContext.valid_for_correction?(original_item.calculation_context_snapshot)
@@ -311,11 +334,127 @@ class IssueCorrectivePaycheckService
   # original was processed.
   # ---------------------------------------------------------------------
   def corrected_item
-    @corrected_item ||= build_and_calculate_item(@corrected_inputs)
+    @corrected_item ||= build_and_calculate_item(effective_inputs.merge(@corrected_inputs))
   end
 
   def recalculated_original_item
-    @recalculated_original_item ||= build_and_calculate_item({})
+    @recalculated_original_item ||= build_and_calculate_item(original_inputs)
+  end
+
+  def original_inputs
+    CORRECTABLE_INPUT_FIELDS.index_with { |field| original_item.public_send(field) }.deep_dup
+  end
+
+  def active_correctives
+    @active_correctives ||= original_item.correction_payroll_items.not_voided
+      .joins(:pay_period).merge(PayPeriod.reportable_committed).order(:id).to_a.tap do |items|
+        items.each do |item|
+          unless item.company_id == original_item.company_id && item.employee_id == original_item.employee_id &&
+              item.pay_period.company_id == original_item.company_id && item.pay_period.supplemental? &&
+              item.pay_period.corrects_pay_period_id == original_item.pay_period_id
+            raise MissingHistoricalContextError, "A prior correction has inconsistent payroll ownership; review its history before issuing another correction"
+          end
+        end
+      end
+  end
+
+  def effective_inputs
+    @effective_inputs ||= active_correctives.each_with_object(original_inputs) do |item, inputs|
+      context = item.calculation_context_snapshot["corrective_paycheck"]
+      unless context.is_a?(Hash) && context["version"] == 1 && context["input_adjustments"].is_a?(Hash)
+        raise MissingHistoricalContextError, "A prior correction is missing its verified input history; review the earlier corrective payroll before creating another correction"
+      end
+      context.fetch("input_adjustments").each do |key, operation|
+        field = key.to_sym
+        unless CORRECTABLE_INPUT_FIELDS.include?(field) && operation.is_a?(Hash)
+          raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+        end
+        inputs[field] = case operation["mode"]
+        when "delta"
+          unless NUMERIC_INPUT_FIELDS.include?(field) && operation["value"].is_a?(String)
+            raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+          end
+          raise MissingHistoricalContextError, "A prior correction's input baseline is no longer available; review its voided correction history" if inputs[field].nil?
+          inputs[field].to_d + BigDecimal(operation.fetch("value"))
+        when "set"
+          operation.fetch("value").deep_dup
+        else
+          raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+        end
+        if NUMERIC_INPUT_FIELDS.include?(field) && !inputs[field].nil?
+          inputs[field] = BigDecimal(inputs[field].to_s)
+          raise ArgumentError, "non-finite input" unless inputs[field].finite?
+        end
+      end
+    end
+  rescue ArgumentError, TypeError, KeyError
+    raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+  end
+
+  def input_adjustments
+    CORRECTABLE_INPUT_FIELDS.each_with_object({}) do |field, adjustments|
+      before = effective_inputs[field]
+      after = corrected_item.public_send(field)
+      next if before == after
+
+      adjustments[field.to_s] = if before.is_a?(Numeric) && after.is_a?(Numeric)
+        { "mode" => "delta", "value" => (after.to_d - before.to_d).to_s("F") }
+      else
+        { "mode" => "set", "value" => after.as_json }
+      end
+    end
+  end
+
+  def recorded_value(field)
+    original_value = REPORTING_DELTA_FIELDS.include?(field) ? original_reporting_value(field) : original_item.public_send(field).to_d
+    original_value + active_correctives.sum { |item| item.public_send(field).to_d }
+  end
+
+  def recorded_snapshot
+    snapshot(original_item).merge(
+      (DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS).index_with { |field| recorded_value(field).round(2).to_f },
+      effective_inputs.slice(:hours_worked, :overtime_hours, :holiday_hours, :pto_hours, :bonus, :reported_tips, :tips_paid_out, :pay_rate)
+        .transform_values { |value| value.to_f },
+      effective_inputs.slice(:custom_earnings, :custom_deductions, :custom_columns_data)
+    )
+  end
+
+  def review_digest
+    item_fields = CORRECTABLE_INPUT_FIELDS.map(&:to_s) + DELTA_OUTPUT_FIELDS.map(&:to_s) + REPORTING_DELTA_FIELDS.map(&:to_s) +
+      %w[id company_id employee_id pay_period_id updated_at voided voided_at calculation_context_snapshot tax_rule_snapshot retirement_rule_snapshot]
+    period_fields = %w[id company_id pay_date status correction_status committed_at voided_at updated_at]
+    state = {
+      version: 1,
+      original_period: @original_pay_period.attributes.slice(*period_fields),
+      original_item: original_item.attributes.slice(*item_fields),
+      active_correctives: active_correctives.map do |item|
+        { item: item.attributes.slice(*item_fields), period: item.pay_period.attributes.slice(*period_fields) }
+      end,
+      corrected_snapshot: snapshot(corrected_item),
+      intended_inputs: CORRECTABLE_INPUT_FIELDS.index_with { |field| corrected_item.public_send(field) }
+    }
+    OpenSSL::HMAC.hexdigest("SHA256", Rails.application.secret_key_base, JSON.generate(canonical_review_state(state.as_json)))
+  end
+
+  def canonical_review_state(value)
+    case value
+    when Hash
+      value.sort.to_h.transform_values { |entry| canonical_review_state(entry) }
+    when Array
+      value.map { |entry| canonical_review_state(entry) }
+    else
+      value
+    end
+  end
+
+  def validate_review_digest!
+    return if @expected_review_digest.nil?
+
+    valid = @expected_review_digest.is_a?(String) && @expected_review_digest.match?(/\A[0-9a-f]{64}\z/) &&
+      ActiveSupport::SecurityUtils.secure_compare(@expected_review_digest, review_digest)
+    return if valid
+
+    raise StalePreviewError, "The correction preview changed. Refresh and review the current remaining balance before issuing this correction"
   end
 
   def build_and_calculate_item(overrides)
@@ -491,19 +630,19 @@ class IssueCorrectivePaycheckService
 
   def delta_hash
     financial_deltas = DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
-      h[field] = (corrected_item.public_send(field).to_f - original_item.public_send(field).to_f).round(2)
+      h[field] = (corrected_item.public_send(field).to_d - recorded_value(field)).round(2).to_f
     end
     reporting_deltas = REPORTING_DELTA_FIELDS.each_with_object({}) do |field, deltas|
-      deltas[field] = (corrected_item.public_send(field).to_d - original_reporting_value(field)).round(2)
+      deltas[field] = (corrected_item.public_send(field).to_d - recorded_value(field)).round(2)
     end
 
     financial_deltas.merge(reporting_deltas).merge(
-      hours_worked_delta:   (corrected_item.hours_worked.to_f - original_item.hours_worked.to_f).round(2),
-      overtime_hours_delta: (corrected_item.overtime_hours.to_f - original_item.overtime_hours.to_f).round(2),
-      holiday_hours_delta:  (corrected_item.holiday_hours.to_f - original_item.holiday_hours.to_f).round(2),
-      pto_hours_delta:      (corrected_item.pto_hours.to_f - original_item.pto_hours.to_f).round(2),
-      reported_tips_delta:  (corrected_item.reported_tips.to_f - original_item.reported_tips.to_f).round(2),
-      tips_paid_out_delta:  (corrected_item.tips_paid_out.to_f - original_item.tips_paid_out.to_f).round(2)
+      hours_worked_delta:   (corrected_item.hours_worked.to_d - effective_inputs[:hours_worked].to_d).round(2),
+      overtime_hours_delta: (corrected_item.overtime_hours.to_d - effective_inputs[:overtime_hours].to_d).round(2),
+      holiday_hours_delta:  (corrected_item.holiday_hours.to_d - effective_inputs[:holiday_hours].to_d).round(2),
+      pto_hours_delta:      (corrected_item.pto_hours.to_d - effective_inputs[:pto_hours].to_d).round(2),
+      reported_tips_delta:  (corrected_item.reported_tips.to_d - effective_inputs[:reported_tips].to_d).round(2),
+      tips_paid_out_delta:  (corrected_item.tips_paid_out.to_d - effective_inputs[:tips_paid_out].to_d).round(2)
     )
   end
 
@@ -515,7 +654,7 @@ class IssueCorrectivePaycheckService
   end
 
   def net_delta
-    (corrected_item.net_pay.to_f - original_item.net_pay.to_f).round(2)
+    (corrected_item.net_pay.to_d - recorded_value(:net_pay)).round(2)
   end
 
   # No meaningful change → nothing to do.
@@ -570,6 +709,9 @@ class IssueCorrectivePaycheckService
       pto_hours:       deltas[:pto_hours_delta],
       timekeeping_source: "correction_reference",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
+      calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
+        "corrective_paycheck" => { "version" => 1, "input_adjustments" => input_adjustments }
+      ),
 
       # Tip deltas are stored too because W-2GU / 941 / SWICA reporting derives
       # Social Security tips and YTD tip totals from these input columns, while

@@ -1516,6 +1516,7 @@ export const payPeriodsApi = {
     data: {
       employee_id: number;
       corrected_inputs: CorrectivePaycheckInputs;
+      expected_review_digest: string;
       pay_date: string;
       reason: string;
       notes?: string;

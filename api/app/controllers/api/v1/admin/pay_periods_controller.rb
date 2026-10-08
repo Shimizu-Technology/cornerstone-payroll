@@ -822,7 +822,7 @@ module Api
         end
 
         # POST /api/v1/admin/pay_periods/:id/corrective_paychecks
-        # Body: { employee_id, corrected_inputs: {...}, pay_date, reason, notes }
+        # Body: { employee_id, corrected_inputs: {...}, expected_review_digest, pay_date, reason, notes }
         # Creates and commits a supplemental pay_period containing one
         # corrective payroll_item linked to the original. Returns the
         # supplemental pay_period and the corrective item.
@@ -832,6 +832,10 @@ module Api
             return render json: { error: "Employee not found in this company" }, status: :not_found
           end
 
+          if params[:expected_review_digest].blank?
+            return render json: { error: "Refresh the correction preview and review the current remaining balance before issuing this correction" }, status: :unprocessable_entity
+          end
+
           supplemental, corrective_item = IssueCorrectivePaycheckService.issue!(
             original_pay_period: @pay_period,
             employee:            employee,
@@ -839,7 +843,8 @@ module Api
             pay_date:            params[:pay_date],
             reason:              params[:reason],
             actor:               current_user,
-            notes:               params[:notes]
+            notes:               params[:notes],
+            expected_review_digest: params[:expected_review_digest]
           )
 
           render json: {
