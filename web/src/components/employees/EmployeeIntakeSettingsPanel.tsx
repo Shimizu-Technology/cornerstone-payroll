@@ -25,7 +25,7 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
     try {
       await employeeIntakeApi.updateSettings(requestedCompany, {
         enabled,
-        ...(enabled ? { reason: reason.trim(), expires_at: new Date(Date.now() + Number(hours) * 3_600_000).toISOString() } : {}),
+        ...(enabled ? { reason: reason.trim(), duration_hours: Number(hours) } : {}),
       });
       if (companyRef.current !== requestedCompany) return;
       setReason('');

@@ -288,7 +288,7 @@ class ClientEmployeeUpdateService
     candidate.require_ssn_confirmation = employee.require_ssn_confirmation
     candidate.ssn_confirmation = employee.ssn_confirmation
     EmployeeIntakePolicy.prepare!(candidate, actor: requested_by) if creation
-    validate_received_withholding!(candidate_attrs) unless creation
+    validate_received_withholding!(candidate_attrs, candidate: candidate)
     validate_tax_classification_change!(candidate)
     validate_department_scope!(candidate_attrs)
     normalized_wage_rates_payload(candidate_attrs[WAGE_RATES_KEY]) if candidate_attrs.key?(WAGE_RATES_KEY)
@@ -298,8 +298,11 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def validate_received_withholding!(candidate_attrs)
+  def validate_received_withholding!(candidate_attrs, candidate:)
     w4_attrs = candidate_attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+    EmployeeW4ElectionChangeService.new(employee: candidate, actor: requested_by, source: "client_approved",
+      reason: "Client submitted withholding election", attributes: w4_attrs,
+      election_received: candidate_attrs[:w4_election_received]).validate_received_election!
     return if w4_attrs.empty?
 
     EmployeeW4ElectionChangeService.new(employee: employee, actor: requested_by, source: "client_approved",

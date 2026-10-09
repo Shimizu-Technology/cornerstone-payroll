@@ -31,7 +31,7 @@ export const employeeIntakeApi = {
   settings: (companyId: number, isClient = false): Promise<{ data: EmployeeIntakeSettings }> => apiClient.get<{ data: EmployeeIntakeSettings }>(
     `/${isClient ? 'client' : 'admin'}/employee_intake_settings`, undefined, { companyId },
   ),
-  updateSettings: (companyId: number, employee_intake_settings: { enabled: boolean; reason?: string; expires_at?: string }): Promise<{ data: EmployeeIntakeSettings }> =>
+  updateSettings: (companyId: number, employee_intake_settings: { enabled: boolean; reason?: string; duration_hours?: number; expires_at?: string }): Promise<{ data: EmployeeIntakeSettings }> =>
     apiClient.patch<{ data: EmployeeIntakeSettings }>('/admin/employee_intake_settings', { employee_intake_settings }, { companyId }),
   updateException: (companyId: number, employeeId: number, intake_exception: {
     follow_up_due_on?: string;

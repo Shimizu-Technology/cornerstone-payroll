@@ -12,6 +12,29 @@ RSpec.describe EmployeeW4ElectionChangeService do
       .merge(overrides)
   end
 
+  [ {}, { w4_effective_on: "2026-01-01" }, { w4_effective_on: "2026-01-01", w4_signed_on: "bad" },
+    { w4_signed_on: "2026-01-01" }, { w4_effective_on: "bad", w4_source_reference: "Synthetic" } ].each do |attributes|
+    it "rejects explicit received intent #{attributes.inspect} before any election write or early return" do
+      service = described_class.new(employee: employee, attributes: attributes, actor: actor, source: "employee_creation", reason: "Received election", election_received: true)
+      expect { service.call! }.to raise_error(described_class::Error, /received election/i)
+      expect(employee.employee_w4_elections).to be_empty
+    end
+  end
+
+  it "requires evidence for asserted non-default update without changing cached profile/history" do
+    described_class.new(employee: employee, attributes: election_attributes, actor: actor, source: "employee_creation", reason: "Initial").call!
+    before = employee.reload.attributes.deep_dup
+    expect { described_class.new(employee: employee, attributes: election_attributes(filing_status: "married"), actor: actor,
+      source: "staff", reason: "Received", election_received: true).call! }.to raise_error(described_class::Error, /received election/i)
+    expect(employee.reload.attributes).to eq(before)
+    expect(employee.employee_w4_elections.count).to eq(1)
+  end
+
+  it "continues to ignore W-4 receipt fields for a contractor" do
+    contractor = create(:employee, :contractor, company: company)
+    expect(described_class.new(employee: contractor, attributes: {}, actor: actor, source: "employee_creation", reason: "", election_received: true).call!).to be_nil
+  end
+
   it "appends a dated election and preserves the prior version" do
     described_class.new(
       employee: employee,

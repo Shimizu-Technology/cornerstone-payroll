@@ -25,6 +25,81 @@ RSpec.describe "Employee incomplete intake", type: :request do
     expect(response).to have_http_status(:ok), response.body
   end
 
+  [ 1, 4, 24 ].each do |hours|
+    it "computes a selected #{hours}-hour intake window from server time" do
+      travel_to(Time.utc(2026, 10, 10, 1, 2, 3)) do
+        patch "/api/v1/admin/employee_intake_settings", params: { employee_intake_settings: {
+          enabled: true, reason: "Employer details pending", duration_hours: hours
+        } }
+        expect(response).to have_http_status(:ok), response.body
+        expect(company.reload.employee_intake_expires_at).to eq(Time.current + hours.hours)
+        audit = AuditLog.where(action: "employee_intake_settings#update", company_id: company.id).last
+        expect(Time.iso8601(audit.metadata.fetch("expires_at"))).to eq(company.employee_intake_expires_at)
+      end
+    end
+  end
+
+  [ 0, -1, 2, 25, "4.5", "junk", nil, "", true ].each do |duration|
+    it "rejects unsupported duration #{duration.inspect} without granting an intake window" do
+      patch "/api/v1/admin/employee_intake_settings", params: { employee_intake_settings: {
+        enabled: true, reason: "Employer details pending", duration_hours: duration
+      } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(company.reload.employee_intake_expires_at).to be_nil
+      expect(AuditLog.where(action: "employee_intake_settings#update", company_id: company.id)).to be_empty
+    end
+  end
+
+  it "preserves legitimate explicit expiration callers within the strict 24-hour maximum" do
+    expiration = 2.hours.from_now.change(usec: 0)
+    patch "/api/v1/admin/employee_intake_settings", params: { employee_intake_settings: {
+      enabled: true, reason: "Existing integration caller", expires_at: expiration.iso8601
+    } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(company.reload.employee_intake_expires_at).to eq(expiration)
+  end
+
+  it "rejects conflicting duration and explicit expiry instead of silently choosing either" do
+    patch "/api/v1/admin/employee_intake_settings", params: { employee_intake_settings: {
+      enabled: true, reason: "Employer details pending", duration_hours: 1, expires_at: 2.hours.from_now.iso8601
+    } }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(company.reload.employee_intake_expires_at).to be_nil
+  end
+
+  it "rejects an asserted creation receipt without evidence and rolls back employee and election" do
+    complete = attributes_for(:employee).except(:ssn_encrypted).merge(ssn: "900-70-1234", ssn_confirmation: "900-70-1234",
+      w4_effective_on: "2026-01-01", w4_election_received: true)
+    post "/api/v1/admin/employees", params: { employee: complete }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(company.employees).to be_empty
+    expect(EmployeeW4Election.where(company: company)).to be_empty
+  end
+
+  it "rejects undated asserted receipt even in an authorized incomplete-entry window" do
+    enable_window
+    post "/api/v1/admin/employees", params: { employee: minimal.merge(w4_election_received: true) }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(company.employees).to be_empty
+  end
+
+  [ { w4_signed_on: "2025-12-31" }, { w4_source_reference: "Synthetic received W-4" } ].each do |evidence|
+    it "accepts creation receipt with an explicit date and #{evidence.keys.first}" do
+      complete = attributes_for(:employee).except(:ssn_encrypted).merge(ssn: "900-70-1234", ssn_confirmation: "900-70-1234",
+        w4_effective_on: "2026-01-01", w4_election_received: true).merge(evidence)
+      post "/api/v1/admin/employees", params: { employee: complete }
+      expect(response).to have_http_status(:created), response.body
+      expect(company.employees.sole.employee_w4_elections.sole.source).to eq("employee_creation")
+    end
+  end
+
+  it "preserves ordinary strict initial date-only creation without receipt assertion" do
+    complete = attributes_for(:employee).except(:ssn_encrypted).merge(ssn: "900-70-1234", ssn_confirmation: "900-70-1234", w4_effective_on: "2026-01-01")
+    post "/api/v1/admin/employees", params: { employee: complete }
+    expect(response).to have_http_status(:created), response.body
+    expect(company.employees.sole.employee_w4_elections.sole.w4_signed_on).to be_nil
+  end
+
   it "requires strict data by default" do
     post "/api/v1/admin/employees", params: { employee: minimal }
     expect(response).to have_http_status(:unprocessable_entity)
