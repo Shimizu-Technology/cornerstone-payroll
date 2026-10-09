@@ -80,6 +80,7 @@ function requirementStatusLabel(value: EmployeeDocumentRequirementStatus) {
 
 export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, className, headerAction, onReadinessChange }: EmployeeDocumentsPanelProps) {
   const { user } = useAuth();
+  const canReviewDocuments = ['super_admin', 'org_admin', 'admin', 'manager'].includes(user?.role || '');
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [requirements, setRequirements] = useState<EmployeeDocumentRequirement[]>([]);
   const [readyForPayroll, setReadyForPayroll] = useState<boolean | null>(null);
@@ -163,7 +164,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
           requirement.id,
           {
-            status: requirement.status === 'missing' ? 'received' : requirement.status,
+            status: requirement.status === 'missing' || !canReviewDocuments ? 'received' : requirement.status,
             clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
             reviewNote: requirement.review_note || '',
           },
@@ -180,7 +181,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
       ) setLoading(false);
     }
-  }, [api, employeeId, isClient, onReadinessChange, setError]);
+  }, [api, employeeId, isClient, canReviewDocuments, onReadinessChange, setError]);
 
   useEffect(() => {
     void loadDocuments();
@@ -406,7 +407,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                       </span>
                     </div>
 
-                    {!isClient && draft && (
+                    {!isClient && draft && (canReviewDocuments || ['missing', 'received'].includes(requirement.status)) && (
                       <>
                         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
                           <div>
@@ -427,9 +428,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                               }}
                             >
                               <option value="received">Received — review needed</option>
-                              <option value="verified">Verified</option>
-                              <option value="rejected">Rejected — replacement needed</option>
-                              <option value="waived">Waived with reason</option>
+                              {canReviewDocuments && <><option value="verified">Verified</option><option value="rejected">Rejected — replacement needed</option><option value="waived">Waived with reason</option></>}
                             </Select>
                           </div>
                           <div>

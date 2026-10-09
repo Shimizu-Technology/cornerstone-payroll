@@ -204,6 +204,7 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
   id: number;
   company_id: number;
   department_id?: number;
@@ -297,7 +298,7 @@ export interface Employee {
   updated_at: string;
 }
 
-export type EmployeeW4ElectionSource = 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
+export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
 
 export interface EmployeeW4Election {
   id: number;
@@ -538,6 +539,7 @@ export interface EmployeeClassificationTransition {
 }
 
 export interface EmployeeFormData {
+  w4_election_received?: boolean;
   first_name: string;
   middle_name?: string;
   last_name: string;

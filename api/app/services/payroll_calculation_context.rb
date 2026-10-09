@@ -67,7 +67,7 @@ class PayrollCalculationContext
     # rewriting the immutable evidence on committed payroll items.
     def intake_setup_fingerprint(employee:)
       scalar_fields = SCALAR_ATTRIBUTES + %w[
-        pay_rate hire_date contractor_type default_custom_earnings default_payroll_adjustments
+        pay_rate hire_date intake_payroll_eligible_from contractor_type default_custom_earnings default_payroll_adjustments
       ]
       stable_rows = lambda do |association|
         association.reorder(:id).map { |row| row.attributes.except("created_at", "updated_at") }
@@ -76,7 +76,9 @@ class PayrollCalculationContext
         "employee" => employee.attributes.slice(*scalar_fields),
         "wage_rates" => stable_rows.call(employee.employee_wage_rates),
         "deductions" => deduction_snapshots(employee.employee_deductions.includes(:deduction_type).reorder(:id)),
+        "deduction_assignments" => stable_rows.call(employee.employee_deductions),
         "payroll_fields" => payroll_field_snapshots(employee.employee_payroll_fields.includes(:payroll_field_definition).reorder(:id)),
+        "payroll_field_assignments" => stable_rows.call(employee.employee_payroll_fields),
         "retirement_elections" => stable_rows.call(employee.employee_retirement_elections),
         "retirement_year_inputs" => stable_rows.call(employee.employee_retirement_year_inputs),
         "loans" => stable_rows.call(employee.employee_loans)

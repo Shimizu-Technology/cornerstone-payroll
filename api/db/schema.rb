@@ -451,7 +451,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_010000) do
     t.datetime "updated_at", null: false
     t.string "zip"
     t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
-    t.index ["employee_intake_enabled_by_id"], name: "index_companies_on_employee_intake_enabled_by_id"
+    t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index ["id", "organization_id"], name: "index_companies_on_id_and_organization_id", unique: true
     t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"

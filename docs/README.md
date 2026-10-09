@@ -20,6 +20,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 ## Current authority
 
+- [Incomplete employee entry](EMPLOYEE_INCOMPLETE_INTAKE.md) — scoped temporary intake, persistent profile gaps, payroll review and document permissions.
+
 - [Retirement limits and evidence](RETIREMENT_LIMITS_AND_EVIDENCE.md) — supported 401(k) rules, annual evidence, staff workflow, administrator-review boundaries and rollout verification.
 
 - [Product strategy and platform boundaries](PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md) — product position, module ownership, packaging, and accounting decision boundary.

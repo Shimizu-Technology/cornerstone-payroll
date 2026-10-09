@@ -222,6 +222,50 @@ RSpec.describe EmployeeIntakePolicy do
     expect(PayrollCalculationContext.intake_setup_fingerprint(employee: employee)).not_to eq(fingerprint)
   end
 
+  def calculated_intake_payroll
+    create(:tax_table, tax_year: 2026)
+    employee = incomplete_employee
+    yield employee if block_given?
+    confirm(employee)
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: accountant)
+    employee.employee_document_requirements.each do |requirement|
+      EmployeeDocumentRequirementReviewService.new(requirement: requirement, actor: manager,
+        attributes: { status: "waived", review_note: "Synthetic reviewed document exception", lock_version: requirement.lock_version }).call!
+    end
+    period = create(:pay_period, company: company, start_date: "2026-01-01", end_date: "2026-01-14", pay_date: "2026-01-19")
+    item = create(:payroll_item, employee: employee, pay_period: period, pay_rate: employee.pay_rate)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
+    [ employee, period, item ]
+  end
+
+  it "blocks a calculated deduction after its assignment is disabled" do
+    assignment = nil
+    _employee, period, _item = calculated_intake_payroll do |employee|
+      type = DeductionType.create!(company: company, name: "Synthetic deduction", category: "post_tax", active: true)
+      assignment = employee.employee_deductions.create!(deduction_type: type, amount: 25, active: true)
+    end
+    assignment.update!(active: false)
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
+  end
+
+  it "blocks a calculated payroll field after its assignment is disabled" do
+    assignment = nil
+    _employee, period, _item = calculated_intake_payroll do |employee|
+      field = create(:payroll_field_definition, company: company, kind: "deduction", tax_treatment: "post_tax_deduction")
+      assignment = employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 25, active: true)
+    end
+    assignment.update!(active: false)
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
+  end
+
+  it "requires recalculation after the earliest participation date is changed within the period" do
+    employee, period, _item = calculated_intake_payroll
+    confirm(employee, payroll_eligible_from: "2026-01-07")
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
+  end
+
   it "does not allow accountants to waive or regress reviewed document outcomes" do
     employee = incomplete_employee
     EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: accountant)
