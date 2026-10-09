@@ -115,6 +115,7 @@ class Employee < ApplicationRecord
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
   before_validation :normalize_w4_source_reference
+  before_validation :normalize_intake_blank_details
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
@@ -518,6 +519,14 @@ class Employee < ApplicationRecord
 
   def normalize_w4_source_reference
     self.w4_source_reference = w4_source_reference.to_s.strip.presence
+  end
+
+  def normalize_intake_blank_details
+    return if intake_exception.blank?
+
+    %w[ssn_encrypted contractor_ein address_line1 city state zip].each do |attribute|
+      self[attribute] = nil if self[attribute].blank?
+    end
   end
 
   def plausible_hire_date
