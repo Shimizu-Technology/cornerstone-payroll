@@ -56,7 +56,7 @@ class PayrollRetirementCalculation
     snapshot["catch_up_amount"] = ((@annual_additions || {}).fetch(:prior_catch_up, 0).to_d + (@annual_additions || {}).fetch(:current_catch_up, 0).to_d).to_s("F")
     snapshot["employer_match"] = { "traditional" => payroll_item.employer_retirement_match.to_d.to_s("F"),
       "roth" => payroll_item.employer_roth_retirement_match.to_d.to_s("F"), "prior_ytd" => prior_employer_match.to_s("F") }
-    if previous != snapshot["applied"]
+    if applied.values.sum(&:to_d) < previous.values.sum(&:to_d)
       snapshot["explanations"] = Array(snapshot["explanations"]) | [ "Employee contributions were reduced because the paycheck did not have enough available pay." ]
     end
     snapshot["sources"] = Array(snapshot["sources"]).map do |saved|
