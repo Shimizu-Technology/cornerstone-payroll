@@ -59,6 +59,35 @@ RSpec.describe EmployeeIntakePolicy do
     expect(findings).to include(a_hash_including(code: "EMPLOYEE_SSN_MISSING"), a_hash_including(code: "EMPLOYEE_ADDRESS_INCOMPLETE"))
   end
 
+  it "invalidates the current database confirmation despite a stale loaded wage employee" do
+    employee = create(:employee, company: company)
+    rate = employee.employee_wage_rates.create!(label: "Secondary", rate: 20)
+    stale_employee = rate.employee
+    Employee.where(id: employee.id).update_all(intake_exception: { "deferred_fields" => [ "ssn" ] }, intake_payroll_confirmed_at: Time.current)
+    expect(stale_employee.intake_exception).to be_empty
+    rate.send(:invalidate_intake_confirmation!)
+    expect(employee.reload.intake_payroll_confirmed_at).to be_nil
+    expect(rate.employee).not_to be_changed
+    expect { rate.employee.with_lock { } }.not_to raise_error
+  end
+
+  it "lists a legacy individual contractor with NULL contractor type and missing SSN" do
+    employee = create(:employee, :contractor, company: company)
+    employee.update_columns(contractor_type: nil, ssn_encrypted: nil, intake_exception: { "deferred_fields" => [ "ssn" ] })
+    expect(company.employees.intake_incomplete).to include(employee)
+    expect(described_class.summary(employee.reload)[:missing_fields]).to include("ssn")
+  end
+
+  it "compares equivalent raw date formats without losing malformed input validation" do
+    employee = create(:employee, company: company, hire_date: "2026-01-01")
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { hire_date: "2026/01/01" })
+    result = service.update!
+    expect(result.changed_fields).to be_empty
+    expect(employee.reload.hire_date).to eq(Date.new(2026, 1, 1))
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { hire_date: "not a date" })
+    expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid, /valid date/)
+  end
+
   it "defaults to strict intake and fails closed after expiration" do
     expect(described_class.enabled?(company)).to be false
     enable_window

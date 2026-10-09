@@ -167,8 +167,8 @@ class Employee < ApplicationRecord
 
   scope :intake_incomplete, -> {
     where.not(intake_exception: {}).where(<<~SQL.squish)
-      (ssn_encrypted IS NULL AND NOT (employment_type = 'contractor' AND contractor_type = 'business'))
-      OR (employment_type = 'contractor' AND contractor_type = 'business' AND COALESCE(contractor_ein, '') = '')
+      (ssn_encrypted IS NULL AND NOT (employment_type = 'contractor' AND COALESCE(contractor_type, '') = 'business'))
+      OR (employment_type = 'contractor' AND COALESCE(contractor_type, '') = 'business' AND COALESCE(contractor_ein, '') = '')
       OR hire_date IS NULL OR COALESCE(address_line1, '') = '' OR COALESCE(city, '') = ''
       OR COALESCE(state, '') = '' OR COALESCE(zip, '') = ''
       OR (employment_type <> 'contractor' AND (w4_effective_on IS NULL OR NOT EXISTS (
