@@ -47,6 +47,31 @@ RSpec.describe EmployeeIntakePolicy do
     expect(employee.intake_exception.fetch("deferred_fields")).to include("withholding_election")
   end
 
+  it "keeps a blank encrypted identifier visible in the incomplete roster after other details are supplied" do
+    enable_window
+    employee = build(:employee, company: company, ssn_encrypted: "", w4_effective_on: "2026-01-01")
+    described_class.prepare!(employee, actor: accountant)
+    employee.save!
+    EmployeeW4ElectionChangeService.new(employee: employee, actor: accountant,
+      source: "employee_creation", reason: "Synthetic received election",
+      attributes: { w4_effective_on: "2026-01-01" }).call!
+    expect(described_class.summary(employee)[:missing_fields]).to eq([ "ssn" ])
+    expect(company.employees.intake_incomplete).to include(employee)
+  end
+
+  it "keeps whitespace-only address details visible in the incomplete roster" do
+    enable_window
+    employee = build(:employee, company: company, city: "   ", w4_effective_on: "2026-01-01")
+    described_class.prepare!(employee, actor: accountant)
+    employee.save!
+    EmployeeW4ElectionChangeService.new(employee: employee, actor: accountant,
+      source: "employee_creation", reason: "Synthetic received election",
+      attributes: { w4_effective_on: "2026-01-01" }).call!
+    expect(employee.reload.city).to be_nil
+    expect(described_class.summary(employee)[:missing_fields]).to eq([ "city" ])
+    expect(company.employees.intake_incomplete).to include(employee)
+  end
+
   it "prints a check without an address while retaining W-2GU blockers" do
     require "pdf/reader"
     employee = incomplete_employee
