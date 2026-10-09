@@ -1,5 +1,7 @@
 # Incomplete employee entry
 
+Implementation: [PR #310](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/310). The final PR release comment records the merge revision and deployment verification.
+
 ## Scope and behavior
 
 Full employee details remain required by default. In the selected client's Employees page, an organization or system administrator can allow incomplete entry for 1, 4, or 24 hours with a reason. The server enforces expiry; the administrator can restore strict entry immediately. The window does not authorize payroll payments or waive documents.
