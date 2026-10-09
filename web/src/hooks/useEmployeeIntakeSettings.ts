@@ -4,7 +4,7 @@ import { employeeIntakeApi, type EmployeeIntakeSettings } from '@/services/emplo
 export function useEmployeeIntakeSettings(companyId: number, isClient: boolean, enabled = true) {
   const [result, setResult] = useState<{ companyId: number; isClient: boolean; data: EmployeeIntakeSettings } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const requestId = useRef(0);
   const scope = `${companyId}:${isClient}`;
   const scopeRef = useRef(scope);
