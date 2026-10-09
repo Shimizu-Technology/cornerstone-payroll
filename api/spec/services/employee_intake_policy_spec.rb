@@ -351,6 +351,44 @@ RSpec.describe EmployeeIntakePolicy do
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
   end
 
+  it "rejects an explicit client creation receipt lacking proof before queuing or saving anything" do
+    enable_window
+    service = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_election_received: true, w4_effective_on: "2026-01-01" })
+    expect { service.create! }.to raise_error(ActiveRecord::RecordInvalid, /received election/i)
+    expect(company.employees).to be_empty
+    expect(EmployeeChangeRequest.where(company: company)).to be_empty
+  end
+
+  it "retains valid explicit client receipt through approval without making incomplete payroll setup ready" do
+    enable_window
+    result = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_election_received: true, w4_effective_on: "2026-01-01", w4_source_reference: "Synthetic received W-4" }).create!
+    expect(result.employee).to be_portal_pending_approval
+    result.change_request.apply!(actor: manager)
+    election = result.employee.reload.employee_w4_elections.sole
+    expect(election).to have_attributes(source: "client_approved", effective_on: Date.new(2026, 1, 1), w4_source_reference: "Synthetic received W-4")
+    expect(result.employee.intake_payroll_confirmed_at).to be_nil
+    expect(EmployeeIntakePolicy.payroll_ready?(result.employee, Date.new(2026, 1, 14))).to be false
+    expect(EmployeeDocumentReadiness.summary(result.employee)[:ready_for_payroll]).to be false
+  end
+
+  it "revalidates client creation receipt on approval while keeping a bad request and employee unchanged" do
+    enable_window
+    result = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_effective_on: "2026-01-01" }).create!
+    request = result.change_request
+    request.update!(proposed_changes: request.proposed_changes.merge("w4_election_received" => true))
+    before = result.employee.reload.attributes.deep_dup
+    expect { request.apply!(actor: manager) }.to raise_error(EmployeeW4ElectionChangeService::Error, /received election/i)
+    expect(result.employee.reload.attributes).to eq(before)
+    expect(request.reload.status).to eq("pending")
+    expect(result.employee.employee_w4_elections).to be_empty
+  end
+
   it "applies intake exceptions and document requirements to new client entries and approval" do
     enable_window
     result = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,

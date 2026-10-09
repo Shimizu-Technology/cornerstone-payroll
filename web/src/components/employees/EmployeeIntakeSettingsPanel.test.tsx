@@ -9,7 +9,7 @@ const strict = { enabled: false, can_manage: true, expires_at: null, reason: nul
 
 describe('Company-scoped incomplete entry window', () => {
   afterEach(cleanup);
-  beforeEach(() => { vi.clearAllMocks(); mocks.settings.mockResolvedValue({ data: strict }); mocks.update.mockResolvedValue({ data: strict }); });
+  beforeEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); mocks.settings.mockResolvedValue({ data: strict }); mocks.update.mockResolvedValue({ data: strict }); });
 
   it('requires a reason and submits an expiring window for the selected company', async () => {
     render(<EmployeeIntakeSettingsPanel companyId={4} isClient={false} />);
@@ -19,9 +19,18 @@ describe('Company-scoped incomplete entry window', () => {
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Employer information pending' } });
     fireEvent.click(enable);
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(4, expect.objectContaining({ enabled: true, reason: 'Employer information pending' })));
-    const expiry = new Date(mocks.update.mock.calls[0][1].expires_at).getTime();
-    expect(expiry - Date.now()).toBeGreaterThan(3_500_000);
-    expect(expiry - Date.now()).toBeLessThanOrEqual(3_600_000);
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({ duration_hours: 1 });
+    expect(mocks.update.mock.calls[0][1]).not.toHaveProperty('expires_at');
+  });
+
+  it.each([1, 4, 24])('submits %s hours without a browser clock-derived expiration', async (hours) => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2030-01-01T00:00:00Z').getTime());
+    render(<EmployeeIntakeSettingsPanel companyId={4} isClient={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow incomplete entry temporarily' }));
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Employer information pending' } });
+    fireEvent.change(screen.getByLabelText('Automatically require full details after'), { target: { value: String(hours) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enable incomplete entry' }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(4, { enabled: true, reason: 'Employer information pending', duration_hours: hours }));
   });
 
   it('fails closed when entry settings cannot be loaded', async () => {

@@ -843,26 +843,11 @@ export function EmployeeForm() {
       return;
     }
     if (!loadedEmployee) return;
-    const values = {
-      additional_withholding: toNumberOrZero(loadedEmployee.additional_withholding),
-      w4_dependent_credit: toNumberOrZero(loadedEmployee.w4_dependent_credit),
-      w4_step4a_other_income: toNumberOrZero(loadedEmployee.w4_step4a_other_income),
-      w4_step4b_deductions: toNumberOrZero(loadedEmployee.w4_step4b_deductions),
-    };
-    setForm((previous) => ({ ...previous, ...values,
-      filing_status: normalizeFilingStatus(loadedEmployee.filing_status),
-      allowances: toNumberOrZero(loadedEmployee.allowances),
-      w4_step2_multiple_jobs: toBoolean(loadedEmployee.w4_step2_multiple_jobs),
-      w4_form_version: loadedEmployee.w4_form_version,
+    setForm((previous) => ({ ...previous,
       w4_effective_on: loadedEmployee.w4_effective_on || '',
       w4_signed_on: loadedEmployee.w4_signed_on || null,
       w4_source_reference: loadedEmployee.w4_source_reference || '',
     }));
-    setW4CurrencyDrafts({ additional_withholding: toCurrencyDraft(values.additional_withholding),
-      w4_dependent_credit: toCurrencyDraft(values.w4_dependent_credit),
-      w4_step4a_other_income: toCurrencyDraft(values.w4_step4a_other_income),
-      w4_step4b_deductions: toCurrencyDraft(values.w4_step4b_deductions) });
-    setW4ChangeReason('');
   };
 
   const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field)
