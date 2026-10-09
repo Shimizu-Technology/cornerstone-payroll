@@ -17,7 +17,7 @@ class CreateEmployeeLoans < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :employee_loans, [:employee_id, :status]
-    add_index :employee_loans, [:company_id, :status]
+    add_index :employee_loans, [ :employee_id, :status ]
+    add_index :employee_loans, [ :company_id, :status ]
   end
 end

@@ -21,7 +21,7 @@ class CheckSignoffPdfGenerator
     pdf = Prawn::Document.new(
       page_size: "LETTER",
       page_layout: :landscape,
-      margin: [36, 40, 36, 40]
+      margin: [ 36, 40, 36, 40 ]
     )
     render_document(pdf)
     pdf.render
@@ -64,10 +64,10 @@ class CheckSignoffPdfGenerator
       { content: "CHECK NO.", font_style: :bold },
       { content: "PRINT", font_style: :bold },
       { content: "SIGN", font_style: :bold },
-      { content: "DATE", font_style: :bold },
+      { content: "DATE", font_style: :bold }
     ]
 
-    table_data = [header]
+    table_data = [ header ]
 
     rows.each_with_index do |row, i|
       table_data << [
@@ -76,16 +76,16 @@ class CheckSignoffPdfGenerator
         { content: row[:check_number].to_s },
         { content: "" },
         { content: "" },
-        { content: "" },
+        { content: "" }
       ]
     end
 
     pdf.table(table_data, column_widths: col_widths, cell_style: {
       size: 9,
-      padding: [6, 8, 6, 8],
+      padding: [ 6, 8, 6, 8 ],
       border_width: 0.5,
       border_color: BORDER_COLOR,
-      inline_format: true,
+      inline_format: true
     }) do |t|
       t.row(0).background_color = HEADER_BG
       t.row(0).text_color = "333333"
@@ -121,7 +121,7 @@ class CheckSignoffPdfGenerator
   def compute_column_widths(pdf)
     total = pdf.bounds.width
     name_width = total - 430
-    [35, name_width, 75, 90, 120, 110]
+    [ 35, name_width, 75, 90, 120, 110 ]
   end
 
   def employee_check_rows
@@ -164,7 +164,7 @@ class CheckSignoffPdfGenerator
     return custom if custom.present?
 
     default_notes = options[:default_notes]
-    return [default_notes] if default_notes.present?
+    return [ default_notes ] if default_notes.present?
 
     []
   end

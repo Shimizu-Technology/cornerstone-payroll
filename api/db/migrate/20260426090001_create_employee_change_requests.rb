@@ -17,7 +17,7 @@ class CreateEmployeeChangeRequests < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :employee_change_requests, [:company_id, :status]
-    add_index :employee_change_requests, [:employee_id, :created_at]
+    add_index :employee_change_requests, [ :company_id, :status ]
+    add_index :employee_change_requests, [ :employee_id, :created_at ]
   end
 end

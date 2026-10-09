@@ -13,7 +13,7 @@ class CreatePayrollItemEarnings < ActiveRecord::Migration[8.0]
     end
 
     add_index :payroll_item_earnings,
-              [:payroll_item_id, :category, :label],
+              [ :payroll_item_id, :category, :label ],
               unique: true,
               name: "idx_pi_earnings_on_pi_cat_label"
   end

@@ -21,7 +21,7 @@ class PunchEntry < ApplicationRecord
       (end_time - pin) / 3600.0
     end
 
-    [worked, 0].max.round(2)
+    [ worked, 0 ].max.round(2)
   end
 
   def calculate_hours
@@ -39,7 +39,7 @@ class PunchEntry < ApplicationRecord
   end
 
   def all_punch_fields
-    [clock_in, lunch_out, lunch_in, clock_out, in3, out3]
+    [ clock_in, lunch_out, lunch_in, clock_out, in3, out3 ]
   end
 
   def blank_day?
@@ -70,7 +70,7 @@ class PunchEntry < ApplicationRecord
 
   def sync_day_of_week
     return unless date_changed? && date.present?
-    self.day_of_week = date.strftime('%a')
+    self.day_of_week = date.strftime("%a")
   end
 
   def sync_review_audit_fields
@@ -85,14 +85,14 @@ class PunchEntry < ApplicationRecord
   def punch_pairs
     pairs = []
     if lunch_out.present? && lunch_in.present?
-      pairs << [clock_in, lunch_out] if clock_in.present?
-      pairs << [lunch_in, clock_out] if clock_out.present?
+      pairs << [ clock_in, lunch_out ] if clock_in.present?
+      pairs << [ lunch_in, clock_out ] if clock_out.present?
     elsif clock_in.present? && clock_out.present?
-      pairs << [clock_in, clock_out]
+      pairs << [ clock_in, clock_out ]
     elsif clock_in.present? && lunch_out.present?
-      pairs << [clock_in, lunch_out]
+      pairs << [ clock_in, lunch_out ]
     end
-    pairs << [in3, out3] if in3.present? && out3.present?
+    pairs << [ in3, out3 ] if in3.present? && out3.present?
     pairs
   end
 

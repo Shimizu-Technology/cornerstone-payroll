@@ -66,9 +66,9 @@ module TimecardOcr
         row_crop: Base64.strict_encode64(File.read(row_crop_tmp.path))
       }
 
-      [images, preprocessed_url]
+      [ images, preprocessed_url ]
     ensure
-      [original_tmp, reference_tmp, enhanced_tmp, row_crop_tmp].each do |tmp|
+      [ original_tmp, reference_tmp, enhanced_tmp, row_crop_tmp ].each do |tmp|
         tmp&.close
         tmp&.unlink
       end
@@ -98,7 +98,7 @@ module TimecardOcr
       end
 
       image.format "jpeg"
-      out = Tempfile.new(["processed-#{variant}", ".jpg"])
+      out = Tempfile.new([ "processed-#{variant}", ".jpg" ])
       out.binmode
       image.write(out.path)
       out
@@ -116,7 +116,7 @@ module TimecardOcr
       cropped.crop("#{width}x#{crop_height}+0+#{top}")
       cropped.format "jpeg"
 
-      out = Tempfile.new(["row-crop", ".jpg"])
+      out = Tempfile.new([ "row-crop", ".jpg" ])
       out.binmode
       cropped.write(out.path)
       out
@@ -182,7 +182,7 @@ module TimecardOcr
           merged[field] = correction[field] if correction.key?(field)
         end
         if correction["confidence"].present?
-          merged["confidence"] = [entry["confidence"].to_f, correction["confidence"].to_f].max.round(2)
+          merged["confidence"] = [ entry["confidence"].to_f, correction["confidence"].to_f ].max.round(2)
         end
         merged
       end
