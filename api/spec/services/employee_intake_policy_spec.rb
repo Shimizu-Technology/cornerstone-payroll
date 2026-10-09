@@ -37,6 +37,16 @@ RSpec.describe EmployeeIntakePolicy do
     expect(employee.update(contractor_ein: "123")).to be false
   end
 
+  it "uses one admission decision when the clock crosses the window expiration" do
+    enable_window
+    actor = accountant
+    employee = build(:employee, company: company, w4_effective_on: nil)
+    expiry = company.employee_intake_expires_at
+    allow(Time).to receive(:current).and_return(expiry - 0.000001, expiry + 0.000001)
+    described_class.prepare!(employee, actor: actor)
+    expect(employee.intake_exception.fetch("deferred_fields")).to include("withholding_election")
+  end
+
   it "prints a check without an address while retaining W-2GU blockers" do
     require "pdf/reader"
     employee = incomplete_employee
