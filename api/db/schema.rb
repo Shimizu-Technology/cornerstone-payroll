@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_09_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -423,6 +423,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
     t.datetime "created_at", null: false
     t.string "ein"
     t.string "email"
+    t.bigint "employee_intake_enabled_by_id"
+    t.datetime "employee_intake_expires_at"
+    t.text "employee_intake_reason"
     t.boolean "historical_payroll_enabled", default: false, null: false
     t.datetime "migration_rehearsal_completed_at"
     t.datetime "migration_rehearsal_created_at"
@@ -448,6 +451,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
     t.datetime "updated_at", null: false
     t.string "zip"
     t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
+    t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index ["ein"], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
     t.index ["id", "organization_id"], name: "index_companies_on_id_and_organization_id", unique: true
     t.index ["migration_rehearsal_created_by_id"], name: "index_companies_on_migration_rehearsal_created_by_id"
@@ -982,7 +986,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
     t.index ["employee_id", "effective_on", "created_at"], name: "idx_employee_w4_elections_effective"
     t.index ["employee_id"], name: "index_employee_w4_elections_on_employee_id"
     t.check_constraint "filing_status::text = ANY (ARRAY['single'::character varying::text, 'married'::character varying::text, 'married_separate'::character varying::text, 'head_of_household'::character varying::text])", name: "employee_w4_elections_filing_status_check"
-    t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text])", name: "employee_w4_elections_source_check"
+    t.check_constraint "source::text = ANY (ARRAY['staff'::character varying::text, 'client_approved'::character varying::text, 'employee_creation'::character varying::text, 'legacy_profile'::character varying::text, 'quickbooks_history'::character varying::text, 'default_withholding'::character varying::text])", name: "employee_w4_elections_source_check"
   end
 
   create_table "employee_wage_rates", force: :cascade do |t|
@@ -1086,6 +1090,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
     t.string "filing_status", default: "single"
     t.string "first_name", null: false
     t.date "hire_date"
+    t.jsonb "intake_exception", default: {}, null: false
+    t.date "intake_payroll_eligible_from"
+    t.datetime "intake_payroll_confirmed_at"
     t.string "job_title"
     t.string "last_name", null: false
     t.string "middle_name"
@@ -3702,6 +3709,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_07_010000) do
   add_foreign_key "companies", "historical_import_batches", column: "migration_source_batch_id"
   add_foreign_key "companies", "organizations"
   add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
+  add_foreign_key "companies", "users", column: "employee_intake_enabled_by_id"
   add_foreign_key "companies", "users", column: "migration_rehearsal_created_by_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"

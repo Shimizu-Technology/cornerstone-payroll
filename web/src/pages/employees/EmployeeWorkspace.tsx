@@ -54,6 +54,7 @@ import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
+import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
 import { EmployeeRetirementYearPanel } from '@/components/employees/EmployeeRetirementYearPanel';
@@ -295,6 +296,7 @@ export function EmployeeWorkspace(): ReactElement {
           </Badge>
           <Badge variant="default">{employee.tax_classification?.toUpperCase() || (employee.employment_type === 'contractor' ? '1099' : 'W-2')}</Badge>
           <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{employeePaymentDelivery(employee).label}</Badge>
+          {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
           {employee.configuration_source === 'quickbooks_history' && <Badge variant={employee.configuration_review_status === 'needs_review' ? 'warning' : 'success'}>{employee.configuration_review_status === 'needs_review' ? 'Imported setup review' : 'Imported setup reviewed'}</Badge>}
           <span className="text-sm font-medium text-neutral-500">Employee #{employee.id}</span>
         </div>
@@ -319,6 +321,7 @@ export function EmployeeWorkspace(): ReactElement {
             </Button>
           </div>
         )}
+        <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <EmployeeOverview
             companyId={companyId}

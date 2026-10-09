@@ -33,6 +33,12 @@ This is the approved staff authorization contract for Cornerstone Payroll. The b
 
 “Organization administration” includes users and invitations, client assignments and creation, audit history, tax configuration and effective-dated pay-component tax rules, external time-source secrets, and the organization-wide invoice center.
 
+## Employee intake and document exceptions
+
+Organization/system administrators can enable or disable a company-specific incomplete-entry window, with a reason and expiration. Assigned staff can use an active window; client requests keep their staff-approval boundary. Managers/admins review an admitted employee's payroll setup and follow-up. The exception preserves only approved missing fields after strict entry returns.
+
+Operators can record receipt of employee documents. Verified, rejected and waived outcomes require client-configuration permission (manager/admin); operators cannot regress a reviewed outcome to received. Every review retains its actor and reason. Intake permission does not waive documents or filing readiness.
+
 ## High-impact endpoint contract
 
 Every endpoint below is registered in `StaffRolePolicy` and is enforced by `Admin::BaseController` before the controller action runs:

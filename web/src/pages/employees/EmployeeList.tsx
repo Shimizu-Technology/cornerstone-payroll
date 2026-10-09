@@ -38,6 +38,7 @@ import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi 
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
+import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
@@ -105,6 +106,7 @@ export function EmployeeList() {
   const status = searchParams.get('status') ?? 'active';
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
+  const intakeStatus = searchParams.get('intake_status') || '';
   const configurationReviewStatus = searchParams.get('configuration_review_status') || '';
   const sortBy = (searchParams.get('sort_by') as 'name' | 'department' | 'rate' | 'status' | null) ?? 'name';
   const sortDirection = (searchParams.get('sort_direction') as 'asc' | 'desc' | null) ?? 'asc';
@@ -143,6 +145,7 @@ export function EmployeeList() {
             status: status === 'all' ? undefined : (status || undefined),
             department_id: departmentId ? parseInt(departmentId, 10) : undefined,
             employment_type: employmentType || undefined,
+            intake_status: intakeStatus === 'incomplete' ? 'incomplete' : undefined,
             configuration_review_status: configurationReviewStatus === 'needs_review' ? 'needs_review' : undefined,
             page,
             per_page: 500,
@@ -163,7 +166,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
+  }, [companyId, intakeStatus, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -284,7 +287,7 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [companyEmployees]);
 
-  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || status !== 'active');
+  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || intakeStatus || status !== 'active');
 
   return (
     <div>
@@ -310,6 +313,7 @@ export function EmployeeList() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        <EmployeeIntakeSettingsPanel key={companyId} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row">
           <div className="relative flex-1 sm:max-w-md">
@@ -359,6 +363,7 @@ export function EmployeeList() {
               ))}
             </Select>
 
+            {!isClient && <Select value={intakeStatus} onChange={(event) => updateFilter('intake_status', event.target.value)} className="w-full sm:w-44" aria-label="Profile completeness"><option value="">All profiles</option><option value="incomplete">Incomplete profiles</option></Select>}
             {!isClient && (
               <Select
                 value={configurationReviewStatus}
@@ -612,6 +617,7 @@ function EmployeeMobileCard({
               >
                 {statusConfig.label}
               </Badge>
+              {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
               {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
             </div>
           </div>
@@ -732,7 +738,8 @@ function EmployeeTableRow({
           >
             {statusConfig.label}
           </Badge>
-          {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
+          {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
+              {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
         </div>
       </TableCell>
       <TableCell className="text-right">
