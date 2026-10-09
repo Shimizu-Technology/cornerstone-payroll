@@ -68,9 +68,10 @@ class EmployeeWageRate < ApplicationRecord
   end
 
   def invalidate_intake_confirmation!
-    return if employee.intake_exception.blank? || employee.intake_payroll_confirmed_at.blank?
-
-    employee.update_columns(intake_payroll_confirmed_at: nil, updated_at: Time.current)
+    changed = Employee.where(id: employee_id).where.not(intake_exception: {})
+      .where.not(intake_payroll_confirmed_at: nil)
+      .update_all(intake_payroll_confirmed_at: nil, updated_at: Time.current)
+    employee.reload if changed.positive? && association(:employee).loaded?
   end
 
   def normalize_rate_precision

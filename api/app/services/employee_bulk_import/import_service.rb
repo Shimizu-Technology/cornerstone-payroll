@@ -197,9 +197,10 @@ module EmployeeBulkImport
     end
 
     def validate_headers(headers)
-      missing = required_columns - headers
+      required = required_columns
+      missing = required - headers
       if missing.any?
-        @errors << "Missing required columns: #{missing.join(', ')}. Required: #{REQUIRED_COLUMNS.join(', ')}"
+        @errors << "Missing required columns: #{missing.join(', ')}. Required: #{required.join(', ')}"
       end
     end
 

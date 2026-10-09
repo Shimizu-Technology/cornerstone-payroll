@@ -22,6 +22,12 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
     }
   end
 
+  it "shows only the active intake requirements in missing-header errors" do
+    service.company.update!(employee_intake_expires_at: 1.hour.from_now)
+    service.send(:validate_headers, [ "first_name" ])
+    expect(service.errors.first).to eq("Missing required columns: last_name, employment_type, pay_rate, pay_frequency. Required: first_name, last_name, employment_type, pay_rate, pay_frequency")
+  end
+
   it "accepts complete W-2 filing data" do
     expect(service.send(:validate_row_data, complete_row)).to be_empty
   end

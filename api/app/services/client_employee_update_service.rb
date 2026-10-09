@@ -199,6 +199,13 @@ class ClientEmployeeUpdateService
 
   def attribute_changed?(key, value)
     current = key.to_sym == :w4_election_received ? false : employee.public_send(key)
+    type = employee.class.attribute_types[key.to_s]
+    if type&.type == :date && value.present?
+      cast_date = type.cast(value)
+      return true if cast_date.nil? # Keep malformed raw input for model validation.
+
+      value = cast_date
+    end
     normalize_compare_value(current) != normalize_compare_value(value)
   end
 
