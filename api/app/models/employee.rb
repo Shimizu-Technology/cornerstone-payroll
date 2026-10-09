@@ -111,7 +111,7 @@ class Employee < ApplicationRecord
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
 
-  attr_accessor :intake_original_employee
+  attr_accessor :intake_original_employee, :require_initial_w4_effective_on
   validate :valid_supplied_intake_dates
   before_update :invalidate_intake_payroll_confirmation
   before_validation :normalize_w4_source_reference
@@ -592,6 +592,9 @@ class Employee < ApplicationRecord
   end
 
   def valid_supplied_intake_dates
+    if require_initial_w4_effective_on && w2_employee? && w4_effective_on.blank?
+      errors.add(:w4_effective_on, "is required unless incomplete employee entry is enabled")
+    end
     if intake_exception.present? && !new_record? && w4_effective_on.blank? && w4_effective_on_in_database.present?
       errors.add(:w4_effective_on, "cannot clear a completed withholding effective date")
     end

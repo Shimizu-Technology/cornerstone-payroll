@@ -13,6 +13,7 @@ RSpec.describe EmployeeBulkImport::ImportService, type: :service do
       "pay_rate" => "15.00",
       "pay_frequency" => "biweekly",
       "hire_date" => "2026-01-01",
+      "w4_effective_on" => "2026-01-01",
       "address_line1" => "123 Marine Corps Dr",
       "city" => "Hagatna",
       "state" => "GU",

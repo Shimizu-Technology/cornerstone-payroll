@@ -35,6 +35,7 @@ class ClientEmployeeUpdateService
     w4_signed_on
     w4_source_reference
     w4_effective_on
+    w4_election_received
     retirement_rate
     roth_retirement_rate
     employer_retirement_match_rate
@@ -136,6 +137,9 @@ class ClientEmployeeUpdateService
       employee.lock!
       direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
       approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
+      if ActiveModel::Type::Boolean.new.cast(attrs[:w4_election_received])
+        approval_attrs.merge!(attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES))
+      end
       prevent_legacy_retirement_change!(approval_attrs)
       if attrs.key?(WAGE_RATES_KEY)
         normalized_wage_rates = normalized_wage_rates_payload(attrs[WAGE_RATES_KEY])
@@ -194,7 +198,7 @@ class ClientEmployeeUpdateService
   end
 
   def attribute_changed?(key, value)
-    current = employee.public_send(key)
+    current = key.to_sym == :w4_election_received ? false : employee.public_send(key)
     normalize_compare_value(current) != normalize_compare_value(value)
   end
 
@@ -219,7 +223,13 @@ class ClientEmployeeUpdateService
 
   def original_values_for(keys)
     keys.each_with_object({}) do |key, values|
-      values[key] = key == WAGE_RATES_KEY ? current_wage_rates_payload : employee.public_send(key)
+      values[key] = if key == WAGE_RATES_KEY
+        current_wage_rates_payload
+      elsif key.to_sym == :w4_election_received
+        false
+      else
+        employee.public_send(key)
+      end
     end
   end
 
@@ -264,19 +274,32 @@ class ClientEmployeeUpdateService
   def build_validated_candidate!(candidate_attrs, creation: false)
     candidate = creation ? Employee.new : employee.dup
     candidate.intake_original_employee = employee unless creation
-    candidate.assign_attributes(candidate_attrs.except(WAGE_RATES_KEY))
+    candidate.assign_attributes(candidate_attrs.except(WAGE_RATES_KEY, :w4_election_received))
     candidate.company = company
     candidate.status = "active" if creation || employee.portal_pending_approval?
     candidate.portal_pending_approval = false
     candidate.require_ssn_confirmation = employee.require_ssn_confirmation
     candidate.ssn_confirmation = employee.ssn_confirmation
     EmployeeIntakePolicy.prepare!(candidate, actor: requested_by) if creation
+    validate_received_withholding!(candidate_attrs) unless creation
     validate_tax_classification_change!(candidate)
     validate_department_scope!(candidate_attrs)
     normalized_wage_rates_payload(candidate_attrs[WAGE_RATES_KEY]) if candidate_attrs.key?(WAGE_RATES_KEY)
     return candidate if candidate.valid?
 
     candidate.errors.each { |error| employee.errors.add(error.attribute, error.message) }
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def validate_received_withholding!(candidate_attrs)
+    w4_attrs = candidate_attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+    return if w4_attrs.empty?
+
+    EmployeeW4ElectionChangeService.new(employee: employee, actor: requested_by, source: "client_approved",
+      reason: "Client submitted withholding election", attributes: w4_attrs,
+      election_received: candidate_attrs[:w4_election_received]).validate_default_replacement!
+  rescue EmployeeW4ElectionChangeService::Error => e
+    employee.errors.add(:w4_election_received, e.message)
     raise ActiveRecord::RecordInvalid, employee
   end
 

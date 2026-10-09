@@ -3,10 +3,11 @@
 class EmployeeW4ElectionChangeService
   class Error < StandardError; end
 
-  def initialize(employee:, attributes:, actor:, source:, reason:)
+  def initialize(employee:, attributes:, actor:, source:, reason:, election_received: false)
     @employee = employee
     @attributes = attributes.to_h.symbolize_keys.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
     @attributes[:w4_source_reference] = @attributes[:w4_source_reference].to_s.strip.presence if @attributes.key?(:w4_source_reference)
+    @election_received = ActiveModel::Type::Boolean.new.cast(election_received)
     @actor = actor
     @source = source
     @reason = reason.to_s.strip
@@ -21,7 +22,11 @@ class EmployeeW4ElectionChangeService
     end
     values = complete_values
     prior = employee.employee_w4_elections.recent_first.first
-    return prior unless changed_from?(prior, values) || (prior&.source == "default_withholding" && source != "default_withholding")
+    changed = changed_from?(prior, values)
+    replacing_default = prior&.source == "default_withholding" && source != "default_withholding"
+    return prior unless changed || (replacing_default && election_received)
+
+    validate_default_replacement!(prior: prior, values: values) if replacing_default
 
     raise Error, "W-4 effective date is required when withholding elections change" if values[:effective_on].blank?
     if prior.present? && reason.blank?
@@ -38,11 +43,29 @@ class EmployeeW4ElectionChangeService
     )
     sync_employee_cache!
     election
+  rescue Date::Error
+    raise Error, "Provide a valid received election signed date"
+  end
+
+  def validate_default_replacement!(prior: employee.employee_w4_elections.recent_first.first, values: complete_values)
+    return unless prior&.source == "default_withholding" && source != "default_withholding"
+    return unless changed_from?(prior, values) || election_received
+
+    raise Error, "Explicitly record receipt of the employee withholding election" unless election_received
+    source_reference = attributes[:w4_source_reference].to_s.strip
+    evidence = attributes[:w4_signed_on].present? ||
+      (source_reference.present? && source_reference != prior.w4_source_reference)
+    Date.iso8601(attributes[:w4_signed_on].to_s) if attributes[:w4_signed_on].present?
+    unless attributes[:w4_effective_on].present? && evidence
+      raise Error, "Provide the received election effective date and signed date or source reference"
+    end
+  rescue Date::Error
+    raise Error, "Provide a valid received election signed date"
   end
 
   private
 
-  attr_reader :employee, :attributes, :actor, :source, :reason
+  attr_reader :employee, :attributes, :actor, :source, :reason, :election_received
 
   def complete_values
     baseline = employee.employee_w4_elections.recent_first.first&.profile_attributes ||

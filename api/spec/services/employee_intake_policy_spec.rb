@@ -141,8 +141,8 @@ RSpec.describe EmployeeIntakePolicy do
   it "records a real election separately from the acknowledged default" do
     employee = incomplete_employee
     confirm(employee)
-    EmployeeW4ElectionChangeService.new(employee: employee, actor: manager, source: "staff", reason: "Signed form received",
-      attributes: { w4_effective_on: "2026-01-01" }).call!
+    EmployeeW4ElectionChangeService.new(employee: employee, actor: manager, source: "staff", reason: "Signed form received", election_received: true,
+      attributes: { w4_effective_on: "2026-01-01", w4_source_reference: "Signed employee W-4 document" }).call!
     expect(employee.employee_w4_elections.count).to eq(2)
     expect(described_class.summary(employee)[:missing_fields]).not_to include("withholding_election")
   end
@@ -155,13 +155,71 @@ RSpec.describe EmployeeIntakePolicy do
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Confirm payroll setup/)
     confirm(employee)
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
-    item.update!(tax_rule_snapshot: { "w4" => { "election_id" => employee.employee_w4_elections.first.id } })
+    item.update!(calculation_context_snapshot: { "intake_setup_fingerprint" => PayrollCalculationContext.intake_setup_fingerprint(employee: employee) }, tax_rule_snapshot: { "w4" => { "election_id" => employee.employee_w4_elections.first.id } })
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /new-hire documents/)
     employee.employee_document_requirements.each do |requirement|
       EmployeeDocumentRequirementReviewService.new(requirement: requirement, actor: manager,
         attributes: { status: "waived", review_note: "Manager reviewed missing document exception", lock_version: requirement.lock_version }).call!
     end
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
+  end
+
+  it "preserves received-election intent and evidence through client approval" do
+    employee = incomplete_employee
+    confirm(employee)
+    profile = EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+    result = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+      attrs: profile.merge(w4_election_received: true, w4_source_reference: "Signed employee W-4 uploaded")).update!
+    result.change_request.apply!(actor: manager)
+    expect(employee.reload.employee_w4_elections.count).to eq(2)
+    expect(employee.employee_w4_elections.recent_first.first.source).to eq("client_approved")
+  end
+
+  it "rejects client withholding changes without received-election intent before queuing approval" do
+    employee = incomplete_employee
+    confirm(employee)
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+      attrs: { filing_status: "married" })
+    expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid, /record receipt/)
+    expect(employee.employee_change_requests).to be_empty
+  end
+
+  it "blocks stale compensation even after manager reconfirmation" do
+    create(:tax_table, tax_year: 2026)
+    employee = incomplete_employee
+    employee.update!(pay_rate: 20)
+    confirm(employee)
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: accountant)
+    employee.employee_document_requirements.each do |requirement|
+      EmployeeDocumentRequirementReviewService.new(requirement: requirement, actor: manager,
+        attributes: { status: "waived", review_note: "Manager reviewed outstanding document", lock_version: requirement.lock_version }).call!
+    end
+    period = create(:pay_period, company: company, start_date: "2026-01-01", end_date: "2026-01-14", pay_date: "2026-01-19")
+    item = create(:payroll_item, employee: employee, pay_period: period, pay_rate: 20)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
+    employee.update!(pay_rate: 30)
+    confirm(employee)
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.to raise_error(EmployeeDocumentReadiness::BlockedError, /Recalculate/)
+    item.update!(pay_rate: 30)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
+  end
+
+  it "invalidates setup when the sync service changes a secondary wage" do
+    employee = incomplete_employee
+    primary = employee.employee_wage_rates.create!(label: "Primary", rate: 20, is_primary: true)
+    secondary = employee.employee_wage_rates.create!(label: "Secondary", rate: 25, is_primary: false)
+    confirm(employee)
+    fingerprint = PayrollCalculationContext.intake_setup_fingerprint(employee: employee)
+    EmployeeWageRateSyncService.new(employee: employee, wage_rates: [
+      { id: primary.id, label: "Primary", rate: 20, is_primary: true },
+      { id: secondary.id, label: "Secondary", rate: 30, is_primary: false }
+    ]).sync!
+    expect(employee.reload.intake_payroll_confirmed_at).to be_nil
+    expect(PayrollCalculationContext.intake_setup_fingerprint(employee: employee)).not_to eq(fingerprint)
   end
 
   it "does not allow accountants to waive or regress reviewed document outcomes" do
