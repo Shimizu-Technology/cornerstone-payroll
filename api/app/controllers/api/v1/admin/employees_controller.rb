@@ -53,7 +53,7 @@ module Api
 
         # POST /api/v1/admin/employees
         def create
-          attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
+          attributes, w4_attributes, w4_reason, election_received = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(nil, attributes)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
@@ -67,7 +67,7 @@ module Api
               attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| @employee.public_send(attribute) },
               actor: current_user,
               source: "employee_creation",
-              reason: w4_reason
+              reason: w4_reason, election_received: election_received
             ).call!
             EmployeeDocumentReadiness.seed_new_hire!(employee: @employee, actor: current_user)
           end
@@ -92,7 +92,7 @@ module Api
 
         # PATCH /api/v1/admin/employees/:id
         def update
-          attributes, w4_attributes, w4_reason = split_w4_attributes(employee_params)
+          attributes, w4_attributes, w4_reason, election_received = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(@employee, attributes)
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
 
@@ -112,7 +112,7 @@ module Api
               attributes: w4_attributes,
               actor: current_user,
               source: "staff",
-              reason: w4_reason
+              reason: w4_reason, election_received: election_received
             ).call!
           end
 
@@ -294,6 +294,7 @@ module Api
             :w4_source_reference,
             :w4_effective_on,
             :w4_change_reason,
+            :w4_election_received,
             :retirement_rate,
             :roth_retirement_rate,
             :employer_retirement_match_rate,
@@ -338,8 +339,9 @@ module Api
         def split_w4_attributes(permitted)
           attributes = permitted.to_h.symbolize_keys
           reason = attributes.delete(:w4_change_reason)
+          election_received = attributes.delete(:w4_election_received)
           w4_attributes = attributes.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
-          [ attributes, w4_attributes, reason ]
+          [ attributes, w4_attributes, reason, election_received ]
         end
 
         def classification_transition_params

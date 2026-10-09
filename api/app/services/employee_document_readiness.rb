@@ -33,6 +33,15 @@ class EmployeeDocumentReadiness
   def self.require_payroll_ready!(pay_period)
     employee_ids = pay_period.payroll_items.not_voided.select(:employee_id)
     items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    stale_setup = items.select do |item|
+      employee = item.employee
+      next false if employee.intake_exception.blank? || employee.intake_payroll_confirmed_at.blank?
+      recorded = item.calculation_context_snapshot.to_h["intake_setup_fingerprint"]
+      recorded.blank? || recorded != PayrollCalculationContext.intake_setup_fingerprint(employee: employee)
+    end
+    if stale_setup.any?
+      raise BlockedError, "Recalculate payroll after employee intake setup changed for: #{stale_setup.map(&:employee_full_name).join(', ')}."
+    end
     stale_withholding = items.select do |item|
       employee = item.employee
       next false if employee.intake_exception.blank? || employee.contractor?

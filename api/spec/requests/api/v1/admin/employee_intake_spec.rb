@@ -12,7 +12,7 @@ RSpec.describe "Employee incomplete intake", type: :request do
   let(:minimal) { { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly" } }
 
   before do
-    [ Api::V1::Admin::EmployeeIntakeSettingsController, Api::V1::Admin::EmployeesController ].each do |controller|
+    [ Api::V1::Admin::EmployeeIntakeSettingsController, Api::V1::Admin::EmployeesController, Api::V1::Admin::EmployeeWageRatesController ].each do |controller|
       allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
       allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
     end
@@ -80,6 +80,73 @@ RSpec.describe "Employee incomplete intake", type: :request do
     get "/api/v1/admin/employees", params: { intake_status: "incomplete" }
     expect(response.parsed_body.fetch("data").map { |employee| employee["id"] }).to eq([ id ])
     expect(response.parsed_body.dig("meta", "total_count")).to eq(1)
+  end
+
+  def default_withholding_employee
+    enable_window
+    post "/api/v1/admin/employees", params: { employee: minimal }
+    employee = Employee.find(response.parsed_body.dig("data", "id"))
+    EmployeeIntakeExceptionReviewService.call!(employee: employee, actor: admin, attributes: {
+      confirm_payroll_setup: true, reason: "Confirmed employer setup", payroll_eligible_from: "2026-01-01", acknowledge_default_withholding: true
+    })
+    employee.reload
+  end
+
+  it "requires an explicit withholding effective date for strict W-2 intake" do
+    complete = attributes_for(:employee).except(:ssn_encrypted).merge(ssn: "900-70-1234", ssn_confirmation: "900-70-1234")
+    post "/api/v1/admin/employees", params: { employee: complete }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.dig("details", "w4_effective_on")).to be_present
+  end
+
+  it "preserves default withholding on an ordinary full-profile address update" do
+    employee = default_withholding_employee
+    profile = EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: profile.merge(city: "Hagatna") }
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.employee_w4_elections.count).to eq(1)
+    expect(employee.reload.intake_payroll_confirmed_at).to be_present
+    expect(employee.employee_w4_elections.first.source).to eq("default_withholding")
+  end
+
+  it "rejects a fallback replacement without both receipt intent and actual evidence" do
+    employee = default_withholding_employee
+    profile = EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: profile.merge(filing_status: "married", w4_change_reason: "Changed profile") }
+    expect(response).to have_http_status(:unprocessable_entity)
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: profile.merge(w4_election_received: true, w4_change_reason: "Received form") }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(employee.employee_w4_elections.count).to eq(1)
+    expect(employee.reload.filing_status).to eq("single")
+  end
+
+  it "records a received same-value election only with evidence and reason" do
+    employee = default_withholding_employee
+    profile = EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: profile.merge(
+      w4_election_received: true, w4_source_reference: "Signed W-4 document uploaded", w4_change_reason: "Employer delivered the signed election"
+    ) }
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.employee_w4_elections.count).to eq(2)
+    expect(response.parsed_body.dig("data", "intake_readiness", "missing_fields")).not_to include("withholding_election")
+  end
+
+  it "invalidates manager confirmation through wage-rate creation, changes, and deletion" do
+    employee = default_withholding_employee
+    post "/api/v1/admin/employee_wage_rates", params: { employee_wage_rate: { employee_id: employee.id, label: "Secondary", rate: 25, active: true, is_primary: false } }
+    expect(response).to have_http_status(:created), response.body
+    rate_id = response.parsed_body.dig("wage_rate", "id")
+    expect(employee.reload.intake_payroll_confirmed_at).to be_nil
+    [ { rate: 30 }, { active: false }, { is_primary: true } ].each do |changes|
+      employee.update_columns(intake_payroll_confirmed_at: Time.current)
+      patch "/api/v1/admin/employee_wage_rates/#{rate_id}", params: { employee_wage_rate: changes }
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload.intake_payroll_confirmed_at).to be_nil
+    end
+    employee.update_columns(intake_payroll_confirmed_at: Time.current)
+    delete "/api/v1/admin/employee_wage_rates/#{rate_id}"
+    expect(response).to have_http_status(:ok)
+    expect(employee.reload.intake_payroll_confirmed_at).to be_nil
   end
 
   context "as accountant" do

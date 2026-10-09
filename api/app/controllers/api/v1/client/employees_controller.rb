@@ -125,6 +125,7 @@ module Api
             :w4_signed_on,
             :w4_source_reference,
             :w4_effective_on,
+            :w4_election_received,
             :retirement_rate,
             :roth_retirement_rate,
             :employer_retirement_match_rate,

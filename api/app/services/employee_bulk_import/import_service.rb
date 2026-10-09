@@ -275,6 +275,10 @@ module EmployeeBulkImport
         end
       end
 
+      if data["employment_type"] != "contractor" && data["w4_effective_on"].blank? && !EmployeeIntakePolicy.enabled?(company)
+        errors << "w4_effective_on is required for W-2 employees unless incomplete employee entry is enabled"
+      end
+
       contractor_type = data["contractor_type"].presence || "individual"
       business_contractor = data["employment_type"] == "contractor" && contractor_type == "business"
 
