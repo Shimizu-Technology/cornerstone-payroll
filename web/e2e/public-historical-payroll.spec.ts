@@ -516,6 +516,9 @@ async function browserToday(page: Page): Promise<string> {
 }
 
 async function mockEmployeeFormDependencies(page: Page): Promise<void> {
+  await page.route('**/api/v1/admin/employee_intake_settings', (route) => fulfillJson(route, {
+    data: { enabled: false, can_manage: true, expires_at: null, reason: null, enabled_by_name: null },
+  }));
   await page.route('**/api/v1/admin/departments**', (route) => fulfillJson(route, { data: [] }));
   await page.route('**/api/v1/admin/payroll_fields**', (route) => fulfillJson(route, { payroll_fields: [] }));
   await page.route('**/api/v1/admin/employees/900/payroll_fields', (route) => fulfillJson(route, { employee_payroll_fields: [] }));

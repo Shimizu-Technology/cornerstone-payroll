@@ -24,7 +24,10 @@ class EmployeeChangeRequest < ApplicationRecord
     w4_step4a_other_income
     w4_step4b_deductions
     w4_form_version
+    w4_signed_on
+    w4_source_reference
     w4_effective_on
+    w4_election_received
     retirement_rate
     roth_retirement_rate
     employer_retirement_match_rate
@@ -121,6 +124,7 @@ class EmployeeChangeRequest < ApplicationRecord
     safe_attrs = attrs.slice(*PERMITTED_EMPLOYEE_UPDATE_KEYS)
     validate_department_scope!(safe_attrs)
 
+    election_received = safe_attrs.delete(:w4_election_received)
     w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
 
     employee.update!(safe_attrs) if safe_attrs.present?
@@ -129,7 +133,7 @@ class EmployeeChangeRequest < ApplicationRecord
       attributes: w4_attrs,
       actor: actor,
       source: "client_approved",
-      reason: "Approved client employee change request ##{id}"
+      reason: "Approved client employee change request ##{id}", election_received: election_received
     ).call! if w4_attrs.present?
     return unless wage_rates.present?
 
@@ -180,6 +184,7 @@ class EmployeeChangeRequest < ApplicationRecord
 
   def current_value_for(key)
     return current_wage_rates_payload if key.to_sym == :wage_rates
+    return false if key.to_sym == :w4_election_received
 
     employee.public_send(key)
   end

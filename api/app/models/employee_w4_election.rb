@@ -15,7 +15,7 @@ class EmployeeW4Election < ApplicationRecord
     w4_effective_on
   ].freeze
   SNAPSHOT_ATTRIBUTES = PROFILE_ATTRIBUTES - [ :w4_effective_on ]
-  SOURCES = %w[staff client_approved employee_creation legacy_profile quickbooks_history].freeze
+  SOURCES = %w[default_withholding staff client_approved employee_creation legacy_profile quickbooks_history].freeze
 
   belongs_to :company
   belongs_to :employee
@@ -62,6 +62,7 @@ class EmployeeW4Election < ApplicationRecord
   def creator_belongs_to_company_organization
     return if created_by.blank? || company.blank?
     return if created_by.organization_id == company.organization_id
+    return if created_by.super_admin? && created_by.can_access_company?(company.id)
 
     errors.add(:created_by, "must belong to the same organization")
   end
