@@ -706,7 +706,13 @@ export function TimeTrackingImportModal({
                 <section key={done.id} aria-label="Accounting correction delivery" className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                   <p className="font-semibold">Recorded in Payroll supplemental #{done.corrective_pay_period_id}, item #{done.corrective_payroll_item_id}: {formatHours(done.total_hours)} hours.</p>
                   <p>No new payment or recovery recorded. The accounting entry is already posted; refresh or retry only its source confirmation.</p>
-                  {done.source_receipt?.status === 'confirmed' ? (
+                  {done.verification_error ? (
+                    <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-2 text-warning-900">
+                      <p className="font-semibold">Accounting correction needs review. Current source or payroll proof could not be verified.</p>
+                      <p>{done.verification_error}</p>
+                      <p>The stored posting and receipt remain available for review. No new payment or recovery is recorded.</p>
+                    </div>
+                  ) : done.source_receipt?.status === 'confirmed' ? (
                     <p className="font-medium text-success-800">Source confirmation verified · {formatTimestamp(done.source_receipt.confirmed_at)}</p>
                   ) : done.source_receipt?.status === 'error' ? (
                     <div className="rounded-lg border border-warning-200 bg-warning-50 p-2 text-warning-900">

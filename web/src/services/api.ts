@@ -1161,6 +1161,8 @@ export interface ExactTimeCorrectionPreview extends ExactTimeCorrectionLine {
 }
 
 export interface ExactTimeCorrectionDisposition extends ExactTimeCorrectionLine {
+  verification_status?: 'verified' | 'needs_review';
+  verification_error?: string | null;
   id: number;
   corrective_pay_period_id: number;
   corrective_payroll_item_id: number;
@@ -1577,13 +1579,13 @@ export const payPeriodsApi = {
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
   previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
-  previewTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string }) =>
+  previewTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string }): Promise<{ correction: ExactTimeCorrectionPreview }> =>
     api.post<{ correction: ExactTimeCorrectionPreview }>(`/admin/pay_periods/${id}/preview_time_tracking_correction`, data),
-  confirmTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string; preview_token: string; reason: string; acknowledge_accounting_only: boolean }) =>
+  confirmTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string; preview_token: string; reason: string; acknowledge_accounting_only: boolean }): Promise<{ disposition_id: number; import: TimeTrackingImportData }> =>
     api.post<{ disposition_id: number; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/confirm_time_tracking_correction`, data),
-  timeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }) =>
+  timeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }): Promise<{ disposition: ExactTimeCorrectionDisposition }> =>
     api.get<{ disposition: ExactTimeCorrectionDisposition }>(`/admin/pay_periods/${id}/time_tracking_correction_delivery`, data),
-  retryTimeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }) =>
+  retryTimeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }): Promise<{ disposition: ExactTimeCorrectionDisposition }> =>
     api.post<{ disposition: ExactTimeCorrectionDisposition }>(`/admin/pay_periods/${id}/retry_time_tracking_correction_delivery`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),

@@ -12,22 +12,26 @@ module TimeTracking
       "payment_cancelled" => :in_payroll
     }.freeze
 
-    def self.call(import)
-      new(import).call
+    def self.call(import, coverage: CorrectionCoverage.new(import))
+      new(import, coverage: coverage).call
     end
 
-    def initialize(import)
+    def initialize(import, coverage: CorrectionCoverage.new(import))
       @import = import
+      @coverage = coverage
     end
 
     def call
       allocations = import.time_tracking_entry_allocations.to_a
-      dispositions = CorrectionCoverage.new(import).dispositions
+      states = @coverage.disposition_states
+      dispositions = states.map { |state| state[:record] }
       accounting = empty_bucket
-      dispositions.each { |row| add_allocation!(accounting, row) }
+      states.reject { |state| state[:verification_error] }.each { |state| add_allocation!(accounting, state[:record]) }
       correction_receipts = dispositions.filter_map(&:time_tracking_correction_receipt)
       latest_by_line = latest_acknowledgements.index_by { |acknowledgement| line_identity(acknowledgement) }
       buckets = %i[in_payroll payment_pending paid needs_attention].index_with { empty_bucket }
+
+      states.select { |state| state[:verification_error] }.each { |state| add_allocation!(buckets.fetch(:needs_attention), state[:record]) }
 
       allocations.each do |allocation|
         acknowledgement = latest_by_line[line_identity(allocation)]
@@ -39,6 +43,7 @@ module TimeTracking
       {
         line_count: allocations.length + dispositions.length,
         accounting_corrections: accounting,
+        accounting_corrections_need_review: states.count { |state| state[:verification_error] },
         total_hours: allocations.sum(&:total_hours) + dispositions.sum(&:total_hours),
         regular_hours: allocations.sum(&:regular_hours) + dispositions.sum(&:regular_hours),
         overtime_hours: allocations.sum(&:overtime_hours) + dispositions.sum(&:overtime_hours),

@@ -94,4 +94,52 @@ RSpec.describe "Authenticated accounting receipt delivery", type: :request do
     expect(TimeTrackingCorrectionReceipt.count).to eq(1)
     expect(TimeTrackingCorrectionDisposition.count).to eq(1)
   end
+  it "keeps stored history readable after installation drift while retry and projection remain strict" do
+    receipt = disposition.time_tracking_correction_receipt
+    receipt.update!(delivered_at: Time.current)
+    original = original_item.attributes
+    source.update_columns(expected_source_instance_id: SecureRandom.uuid)
+    read_delivery
+    expect(response).to have_http_status(:ok)
+    row = JSON.parse(response.body).fetch("disposition")
+    expect(row).to include("verification_status" => "needs_review")
+    expect(row["verification_error"]).to be_present
+    expect(row.dig("source_receipt", "can_retry")).to eq(false)
+    retry_delivery
+    expect(response).to have_http_status(:unprocessable_entity)
+    fresh_import = TimeTrackingImport.find(next_import.id)
+    coverage = TimeTracking::CorrectionCoverage.new(fresh_import)
+    expect(coverage.read_processed_payload).to eq(fresh_import.processed_payload)
+    expect { coverage.processed_payload }.to raise_error(ArgumentError)
+    expect { coverage.verify_complete! }.to raise_error(ArgumentError)
+    expect { TimeTracking::ApplyImportService.new(import: fresh_import, mappings: [], applied_by: actor).call }.to raise_error(ArgumentError)
+    # The import serializer itself must remain nonraising, not just its delivery DTO.
+    controller = Api::V1::Admin::TimeTrackingImportsController.new
+    expect(controller.send(:import_json, fresh_import)[:correction_dispositions].first[:verification_status]).to eq("needs_review")
+    next_import.update!(status: "applied")
+    history = PayPeriodTimeTrackingSummary.call(next_period)[:linked_source_records].first
+    expect(history[:correction_dispositions].first[:verification_status]).to eq("needs_review")
+    expect(history[:payable_line_status][:accounting_corrections][:line_count]).to eq(0)
+    expect(history[:payable_line_status][:needs_attention][:line_count]).to eq(1)
+    expect(history[:payable_line_status][:paid][:line_count]).to eq(0)
+    get "/api/v1/admin/pay_periods/#{next_period.id}", headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("needs_review")
+    expect(original_item.reload.attributes).to eq(original)
+  end
+  it "keeps unconfirmed stored history readable after payment-proof drift and holds delivery" do
+    receipt = disposition.time_tracking_correction_receipt
+    original_item.update_columns(net_pay: 0)
+    read_delivery
+    expect(response).to have_http_status(:ok)
+    row = JSON.parse(response.body).fetch("disposition")
+    expect(row).to include("verification_status" => "needs_review")
+    expect(row["verification_error"]).to match(/Original payment not verified/)
+    expect(row.dig("source_receipt", "can_retry")).to eq(false)
+    expect { TimeTrackingCorrectionReceiptJob.new.perform(receipt.id) }.to raise_error(TimeTracking::Client::Error, /evidence no longer matches/)
+    expect(receipt.reload.delivered_at).to be_nil
+    retry_delivery
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(1)
+  end
 end

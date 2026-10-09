@@ -476,6 +476,16 @@ describe('accounting posting and source delivery are separate', () => {
     correction_lines: [line], correction_dispositions: [disposition(status, dispositionId)],
     processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } });
 
+  it('shows proof drift as needs review rather than resolving an old confirmed receipt', async () => {
+    apiMocks.preview.mockResolvedValue({ import: { ...importData('confirmed'), correction_dispositions: [{ ...disposition('confirmed'),
+      verification_status: 'needs_review', verification_error: 'Source installation changed', source_receipt: { ...receipt('confirmed'), can_retry: false } }] } });
+    render(<TimeTrackingImportModal open payPeriod={payPeriod} employees={[]} onClose={vi.fn()} onImportComplete={vi.fn()} autoPreview />);
+    await screen.findByText('Source installation changed');
+    expect(screen.queryByText(/Source confirmation verified/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry source confirmation' })).toBeNull();
+    expect(apiMocks.correctionConfirm).not.toHaveBeenCalled();
+  });
+
   it('shows an already posted accounting correction pending/error/verified, and retries only its receipt', async () => {
     const user = userEvent.setup();
     const onCorrectionRecorded = vi.fn();

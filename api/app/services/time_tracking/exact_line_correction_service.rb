@@ -12,7 +12,7 @@ module TimeTracking
     end
 
     def preview
-      context = validated_context!
+      context = validated_context!(remote_proof: fetch_remote_proof)
       money = financial_preview(context)
       proof = proof_digest(context, money)
       {
@@ -38,6 +38,8 @@ module TimeTracking
         raise ArgumentError, "Acknowledge no new payment or recovery and enter a reason of at least 10 characters"
       end
       validate_actor!
+      # Committed replay remains available while the remote source is offline.
+      remote_proof = fetch_remote_proof unless existing_disposition
       disposition = nil
       @import.pay_period.with_lock do
         @source.lock!
@@ -52,10 +54,10 @@ module TimeTracking
           raise ArgumentError, "Correction preview does not match the committed disposition" unless disposition.proof_digest == token["proof_digest"]
           next
         end
-        context = validated_context!
+        context = validated_context!(remote_proof: remote_proof)
         context[:original].pay_period.lock!
         context[:original].lock!
-        context = validated_context!
+        context = validated_context!(remote_proof: remote_proof)
         money = financial_preview(context)
         proof = proof_digest(context, money)
         raise ArgumentError, "Source or payroll history changed; review the accounting correction again" unless proof == token["proof_digest"]
@@ -96,15 +98,24 @@ module TimeTracking
       end
     end
 
-    def validated_context!
+    def remote_binding
+      CanonicalPayload.checksum({ source: @source.attributes.except("updated_at"),
+        import: @import.attributes.slice("id", "pay_period_id", "time_tracking_source_id", "external_batch_id",
+          "external_batch_checksum", "source_payload_hash", "raw_payload") }.deep_stringify_keys)
+    end
+
+    def fetch_remote_proof
+      @source.reload
+      @import.reload
       validate_actor!
-      raise ArgumentError, "Only an editable previewed finalized import can resolve a correction" unless @import.finalized_batch? && @import.status == "previewed" && @import.pay_period.can_edit?
-      raise ArgumentError, "Source ownership or availability changed" unless @source.active? && @source.company_id == @import.pay_period.company_id && @actor&.active?
-      @source.connector.require!(:finalized_batch_v2)
-      @source.connector.require!(:exact_line_receipts_v2)
-      raise ArgumentError, "Verify this source installation and approve historical reconciliation first" unless @source.remote_identity_pinned? && @source.historical_reconciliation_complete?
       validate_batch!(@import)
-      remote = Client.new(@source).payroll_batch(batch_id: @import.external_batch_id)
+      binding = remote_binding
+      payload = Client.new(@source).payroll_batch(batch_id: @import.external_batch_id)
+      verify_remote_payload!(payload)
+      { binding: binding }
+    end
+
+    def verify_remote_payload!(remote)
       PayrollBatchPayloadValidator.new(payload: remote, start_date: @import.start_date,
         end_date: @import.end_date, expected_source: @source.connector.source_identifier).validate!
       remote_identity = ConnectionIdentity.validate!(source: @source, payload: remote)
@@ -112,6 +123,21 @@ module TimeTracking
         remote.dig("export", "checksum") == @import.external_batch_checksum &&
         CanonicalPayload.checksum(remote.except("export")) == CanonicalPayload.checksum(@import.raw_payload.except("export"))
         raise ArgumentError, "The frozen source batch changed; investigate before resolving this correction"
+      end
+    rescue PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error => e
+      raise ArgumentError, e.message
+    end
+
+    def validated_context!(remote_proof:)
+      validate_actor!
+      raise ArgumentError, "Only an editable previewed finalized import can resolve a correction" unless @import.finalized_batch? && @import.status == "previewed" && @import.pay_period.can_edit?
+      raise ArgumentError, "Source ownership or availability changed" unless @source.active? && @source.company_id == @import.pay_period.company_id && @actor&.active?
+      @source.connector.require!(:finalized_batch_v2)
+      @source.connector.require!(:exact_line_receipts_v2)
+      raise ArgumentError, "Verify this source installation and approve historical reconciliation first" unless @source.remote_identity_pinned? && @source.historical_reconciliation_complete?
+      validate_batch!(@import)
+      unless remote_proof && remote_proof[:binding] == remote_binding
+        raise ArgumentError, "Source connection or frozen import changed; review the accounting correction again"
       end
       employee = Array(@import.raw_payload["employees"]).find { |row| row["source_user_id"].to_s == @identity[0] }
       line = Array(employee&.dig("adjustments")).find { |row| row["source_time_entry_id"].to_s == @identity[1] && row["line_key"].to_s == @identity[2] }

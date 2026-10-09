@@ -510,4 +510,33 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(original_item.reload.effective_payment_delivery_method).to eq("paper_check")
     expect(original_item.check_events.where(event_type: "voided")).not_to exist
   end
+  it "fetches the frozen source once outside locks and preserves committed replay when offline" do
+    reviewed = service.preview
+    client = TimeTracking::Client.new(source)
+    allow(TimeTracking::Client).to receive(:new).and_return(client)
+    financial_locks_entered = false
+    allow(next_import.pay_period).to receive(:with_lock).and_wrap_original do |method, *args, &block|
+      financial_locks_entered = true
+      method.call(*args, &block)
+    end
+    expect(client).to receive(:payroll_batch).once do
+      expect(financial_locks_entered).to eq(false)
+      next_import.raw_payload
+    end
+    posted = confirm(reviewed)
+    allow(client).to receive(:payroll_batch).and_raise(TimeTracking::Client::Error, "Source offline")
+    expect(confirm(reviewed).id).to eq(posted.id)
+  end
+
+  it "rejects connection changes during the unlocked fetch before posting money" do
+    reviewed = service.preview
+    client = TimeTracking::Client.new(source)
+    allow(TimeTracking::Client).to receive(:new).and_return(client)
+    allow(client).to receive(:payroll_batch) do
+      source.update!(base_url: "http://localhost:39876")
+      next_import.raw_payload
+    end
+    expect { confirm(reviewed) }.to raise_error(ArgumentError, /connection or frozen import changed/)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
 end

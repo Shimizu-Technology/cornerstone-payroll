@@ -2,16 +2,42 @@
 
 module TimeTracking
   class CorrectionCoverage
-    def initialize(import)
+    def initialize(import, locked_snapshot: false)
       @import = import
+      @locked_snapshot = locked_snapshot
     end
 
     def dispositions
-      @dispositions ||= TimeTrackingCorrectionDisposition.where(time_tracking_import: @import).map(&:verified!)
+      @dispositions ||= TimeTrackingCorrectionDisposition.where(time_tracking_import: @import).to_a
+    end
+
+    # Read snapshots keep historical records visible when current proof needs
+    # review. Mutation paths never use this nonraising result.
+    def disposition_states
+      @disposition_states ||= dispositions.map do |row|
+        error = begin
+          row.valid? ? nil : row.errors.full_messages.join("; ")
+        rescue ArgumentError => e
+          e.message
+        end
+        { record: row, verification_error: error }
+      end
+    end
+
+    def verified_dispositions
+      return @verified_dispositions if @locked_snapshot && @verified_dispositions
+      rows = dispositions.map(&:verified!)
+      @verified_dispositions = rows if @locked_snapshot
+      rows
+    end
+
+    def read_processed_payload
+      return @import.processed_payload if disposition_states.any? { |state| state[:verification_error] }
+      processed_payload
     end
 
     def ordinary_employees
-      covered = dispositions.map { |row| identity(row) }.to_set
+      covered = verified_dispositions.map { |row| identity(row) }.to_set
       Array(@import.raw_payload["employees"]).filter_map do |employee|
         projected = employee.deep_dup
         projected["adjustments"] = Array(projected["adjustments"]).reject do |line|
@@ -26,7 +52,7 @@ module TimeTracking
     end
 
     def processed_payload
-      return @import.processed_payload if dispositions.empty?
+      return @import.processed_payload if verified_dispositions.empty?
       raw = @import.raw_payload.deep_dup
       raw["employees"] = ordinary_employees
       raw["issues"]["negative_adjustment_count"] = raw["employees"].sum do |employee|
@@ -47,7 +73,7 @@ module TimeTracking
       end
       allocations = @import.time_tracking_entry_allocations.reload.to_a
       ordinary = allocations.map { |row| identity(row) }
-      covered = dispositions.map { |row| identity(row) }
+      covered = verified_dispositions.map { |row| identity(row) }
       unless (ordinary & covered).empty? && (ordinary + covered).sort == raw_lines.sort &&
         allocations.all? { |row|
           employee, line = frozen_by_identity[identity(row)]
@@ -64,14 +90,16 @@ module TimeTracking
     end
 
     def presentation
-      dispositions.map do |row|
-        { id: row.id, source_user_id: row.source_user_id, source_time_entry_id: row.source_time_entry_id,
+      disposition_states.map do |state|
+        row = state[:record]
+        error = state[:verification_error]
+        { verification_status: error ? "needs_review" : "verified", verification_error: error, id: row.id, source_user_id: row.source_user_id, source_time_entry_id: row.source_time_entry_id,
           line_key: row.line_key, total_hours: row.total_hours.to_f, regular_hours: row.regular_hours.to_f,
           overtime_hours: row.overtime_hours.to_f, original_pay_period_id: row.original_allocation.pay_period_id,
           original_payroll_item_id: row.original_allocation.payroll_item_id,
           corrective_pay_period_id: row.corrective_payroll_item.pay_period_id,
           corrective_payroll_item_id: row.corrective_payroll_item_id, accounting_only: true,
-          source_receipt: row.time_tracking_correction_receipt&.delivery_snapshot }
+          source_receipt: row.time_tracking_correction_receipt&.delivery_snapshot&.merge(verification_error: error, can_retry: error ? false : row.time_tracking_correction_receipt.retryable?) }
       end
     end
 
