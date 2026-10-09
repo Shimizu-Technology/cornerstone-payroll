@@ -47,8 +47,8 @@ class Form1099NecAggregator
       payer: {
         name: company.name,
         ein: company.ein,
-        address: [company.address_line1, company.address_line2].compact_blank.join(", "),
-        city_state_zip: [company.city, company.state, company.zip].compact_blank.join(", ")
+        address: [ company.address_line1, company.address_line2 ].compact_blank.join(", "),
+        city_state_zip: [ company.city, company.state, company.zip ].compact_blank.join(", ")
       },
       all_contractors: rows,
       reportable_contractors: reportable,

@@ -11,6 +11,6 @@ class CreateEmployeeWageRates < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :employee_wage_rates, [:employee_id, :label], unique: true
+    add_index :employee_wage_rates, [ :employee_id, :label ], unique: true
   end
 end

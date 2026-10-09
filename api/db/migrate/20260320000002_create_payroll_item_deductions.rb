@@ -12,7 +12,7 @@ class CreatePayrollItemDeductions < ActiveRecord::Migration[8.0]
     end
 
     add_index :payroll_item_deductions,
-              [:payroll_item_id, :deduction_type_id],
+              [ :payroll_item_id, :deduction_type_id ],
               unique: true,
               name: "idx_pi_deductions_on_pi_and_dt"
   end

@@ -12,7 +12,7 @@ class CreatePayrollReminderLogs < ActiveRecord::Migration[8.0]
     end
 
     add_index :payroll_reminder_logs,
-              [:company_id, :pay_period_id, :reminder_type],
+              [ :company_id, :pay_period_id, :reminder_type ],
               unique: true,
               name: "idx_reminder_logs_unique_per_type"
   end

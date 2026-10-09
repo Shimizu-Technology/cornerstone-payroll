@@ -183,8 +183,8 @@ class NonEmployeeCheckVoucherGenerator
       pdf.fill_color "FFCCCC"
       pdf.transparent(0.25) do
         pdf.font_size(96) do
-          pdf.rotate(30, origin: [306, 396]) do
-            pdf.draw_text "VOID", at: [180, 360], style: :bold
+          pdf.rotate(30, origin: [ 306, 396 ]) do
+            pdf.draw_text "VOID", at: [ 180, 360 ], style: :bold
           end
         end
       end

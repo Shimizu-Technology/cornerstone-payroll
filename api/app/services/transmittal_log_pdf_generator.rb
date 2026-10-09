@@ -24,7 +24,7 @@ class TransmittalLogPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 50, 36, 50])
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 50, 36, 50 ])
     render_document(pdf)
     pdf.render
   end
@@ -56,7 +56,7 @@ class TransmittalLogPdfGenerator
     left_bottom = pdf.cursor
 
     pdf.font_size(9) do
-      pdf.bounding_box([pdf.bounds.width - 200, y_start], width: 200) do
+      pdf.bounding_box([ pdf.bounds.width - 200, y_start ], width: 200) do
         pdf.text "Received by: _____________________"
         pdf.move_down 6
         pdf.text "Date Rec'd: ______________________"
@@ -68,14 +68,14 @@ class TransmittalLogPdfGenerator
   def render_dates(pdf)
     pdf.font_size(10) do
       label_width = 80
-      pdf.text_box "Date:", at: [0, pdf.cursor], width: label_width
-      pdf.text_box transmittal_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
+      pdf.text_box "Date:", at: [ 0, pdf.cursor ], width: label_width
+      pdf.text_box transmittal_date.strftime("%m/%d/%Y"), at: [ label_width, pdf.cursor ]
       pdf.move_down 16
-      pdf.text_box "Pay Day:", at: [0, pdf.cursor], width: label_width
-      pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
+      pdf.text_box "Pay Day:", at: [ 0, pdf.cursor ], width: label_width
+      pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [ label_width, pdf.cursor ]
       pdf.move_down 16
-      pdf.text_box "PPE:", at: [0, pdf.cursor], width: label_width
-      pdf.text_box "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}", at: [label_width, pdf.cursor]
+      pdf.text_box "PPE:", at: [ 0, pdf.cursor ], width: label_width
+      pdf.text_box "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}", at: [ label_width, pdf.cursor ]
       pdf.move_down 16
     end
     pdf.move_down 10
@@ -91,7 +91,7 @@ class TransmittalLogPdfGenerator
       .where.not(check_number: nil)
       .pluck(:check_number)
       .map(&:to_s)
-      .sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+      .sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] }
   end
 
   def format_check_type(value)
@@ -221,7 +221,7 @@ class TransmittalLogPdfGenerator
       y_top = pdf.cursor
 
       # Left column: FIT
-      pdf.bounding_box([0, y_top], width: col_width) do
+      pdf.bounding_box([ 0, y_top ], width: col_width) do
         pdf.text "FEDERAL / GUAM INCOME TAX", style: :bold, size: 8
         pdf.move_down 4
         tax_row(pdf, "Employee FIT Withheld", fmt(total_fit))
@@ -232,7 +232,7 @@ class TransmittalLogPdfGenerator
       end
 
       # Right column: FICA
-      pdf.bounding_box([col_width + 20, y_top], width: col_width) do
+      pdf.bounding_box([ col_width + 20, y_top ], width: col_width) do
         pdf.text "SOCIAL SECURITY & MEDICARE (FICA)", style: :bold, size: 8
         pdf.move_down 4
         tax_row(pdf, "Employee Social Security (6.2%)", fmt(emp_ss))
@@ -257,8 +257,8 @@ class TransmittalLogPdfGenerator
   def tax_row(pdf, label, amount, bold: false)
     style = bold ? :bold : :normal
     label_w = pdf.bounds.width - 70
-    pdf.text_box label, at: [0, pdf.cursor], width: label_w, style: style
-    pdf.text_box amount, at: [label_w, pdf.cursor], width: 70, align: :right, style: style
+    pdf.text_box label, at: [ 0, pdf.cursor ], width: label_w, style: style
+    pdf.text_box amount, at: [ label_w, pdf.cursor ], width: 70, align: :right, style: style
     pdf.move_down 12
   end
 

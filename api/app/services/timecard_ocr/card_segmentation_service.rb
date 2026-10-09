@@ -38,7 +38,7 @@ module TimecardOcr
       ratio = image.width.to_f / image.height.to_f
       count = estimated_card_count(image.width, image.height)
       Rails.logger.info("CardSegmentation: #{image.width}x#{image.height} ratio=#{ratio.round(2)} → #{count} card(s)")
-      return [copy_as_jpeg(image)] if count == 1
+      return [ copy_as_jpeg(image) ] if count == 1
 
       split_into_columns(image, count)
     ensure
@@ -46,7 +46,7 @@ module TimecardOcr
     end
 
     def source_image_paths
-      return [@file_path] unless pdf_source?
+      return [ @file_path ] unless pdf_source?
 
       @rendered_page_paths = render_pdf_pages
     end
@@ -74,13 +74,13 @@ module TimecardOcr
       return count if count.positive?
 
       image = MiniMagick::Image.open(@file_path)
-      [image["%n"].to_i, 1].max
+      [ image["%n"].to_i, 1 ].max
     ensure
       image&.destroy!
     end
 
     def render_pdf_page(page_index)
-      output = Tempfile.new(["timecard-pdf-page", ".jpg"])
+      output = Tempfile.new([ "timecard-pdf-page", ".jpg" ])
       output.binmode
       output.close
 
@@ -109,7 +109,7 @@ module TimecardOcr
     end
 
     def identify_command(path)
-      magick_binary == "magick" ? ["magick", "identify", path] : ["identify", path]
+      magick_binary == "magick" ? [ "magick", "identify", path ] : [ "identify", path ]
     end
 
     def identify_pdf_pages_output
@@ -124,7 +124,7 @@ module TimecardOcr
       ratio = width.to_f / height.to_f
       return 1 if ratio <= MULTI_CARD_RATIO_THRESHOLD
 
-      [(ratio / TARGET_CARD_RATIO).round, 1].max.clamp(1, MAX_CARD_COUNT)
+      [ (ratio / TARGET_CARD_RATIO).round, 1 ].max.clamp(1, MAX_CARD_COUNT)
     end
 
     def split_into_columns(image, count)
@@ -135,8 +135,8 @@ module TimecardOcr
         right = (slice_width * (index + 1)).round
         trim = (slice_width * HORIZONTAL_TRIM_RATIO).round
 
-        crop_left = [left + trim, 0].max
-        crop_width = [right - left - (trim * 2), 1].max
+        crop_left = [ left + trim, 0 ].max
+        crop_width = [ right - left - (trim * 2), 1 ].max
 
         segment = MiniMagick::Image.open(image.path)
         segment.crop("#{crop_width}x#{image.height}+#{crop_left}+0")
@@ -152,7 +152,7 @@ module TimecardOcr
         end
       end
 
-      segments.empty? ? [copy_as_jpeg(image)] : segments
+      segments.empty? ? [ copy_as_jpeg(image) ] : segments
     end
 
     def segment_has_content?(tempfile)
@@ -175,7 +175,7 @@ module TimecardOcr
 
     def normalize_to_tempfile(image)
       image.format("jpeg")
-      output = Tempfile.new(["timecard-segment", ".jpg"])
+      output = Tempfile.new([ "timecard-segment", ".jpg" ])
       output.binmode
       image.write(output.path)
       output
