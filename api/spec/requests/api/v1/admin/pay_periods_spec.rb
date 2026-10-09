@@ -81,6 +81,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       json = JSON.parse(response.body)
       period = json["pay_periods"].first
       expect(period["processed_at"]).to be_present
+      expect(period["processed_at"]).to match(/(?:Z|[+-]\d{2}:\d{2})\z/)
+      expect(Time.iso8601(period["processed_at"])).to eq(committed_at)
       expect(period["processed_by_name"]).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "created", "actor_name")).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
