@@ -484,6 +484,9 @@ function validateRowData(data: BulkImportEmployeeData, allowIncomplete = false):
     errors.push('employment_type must be hourly, salary, or contractor');
   }
   if (!data.pay_frequency?.trim()) errors.push('pay_frequency is required');
+  if (!allowIncomplete && data.employment_type !== 'contractor' && !data.w4_effective_on?.trim()) {
+    errors.push('w4_effective_on is required for W-2 employees');
+  }
   if (!allowIncomplete && !data.hire_date?.trim()) errors.push('hire_date is required');
   if (!allowIncomplete && !data.address_line1?.trim()) errors.push('address_line1 is required');
   if (!allowIncomplete && !data.city?.trim()) errors.push('city is required');
