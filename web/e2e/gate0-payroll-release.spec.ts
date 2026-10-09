@@ -2424,7 +2424,7 @@ test('admits an incomplete employee through the real operator UI and preserves i
       await page.getByRole('link', { name: 'Edit employee', exact: true }).click();
       await page.locator('[name="city"]').fill('Hagatna');
       await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
-      await expect(page).toHaveURL(/overview/);
+      await expect(page).toHaveURL((url) => url.pathname === `/companies/${fixture.company_id}/employees/${employeeId}/overview`);
       const confirmation = await adminApi.patch(`admin/employees/${employeeId}/intake_exception`, { data: { intake_exception: {
         confirm_payroll_setup: true, payroll_eligible_from: '2026-10-09', reason: 'Synthetic pay setup reviewed', acknowledge_default_withholding: true,
       } } });
@@ -2434,7 +2434,7 @@ test('admits an incomplete employee through the real operator UI and preserves i
       await expect(page.getByText('Approved default withholding', { exact: true })).toBeVisible();
       await page.locator('[name="city"]').fill('Tamuning');
       await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
-      await expect(page).toHaveURL(/overview/);
+      await expect(page).toHaveURL((url) => url.pathname === `/companies/${fixture.company_id}/employees/${employeeId}/overview`);
       const employee = (await (await adminApi.get(`admin/employees/${employeeId}`)).json()).data;
       expect(employee.city).toBe('Tamuning');
       expect(employee.current_w4_election.source).toBe('default_withholding');
