@@ -15,9 +15,13 @@ class EmployeeW4ElectionChangeService
   def call!
     return if employee.contractor? || attributes.empty?
 
+    # Never manufacture an initial election for an intake exception lacking a dated election.
+    if employee.intake_exception.present? && employee.employee_w4_elections.none? && attributes[:w4_effective_on].blank? && employee.w4_effective_on.blank?
+      return
+    end
     values = complete_values
     prior = employee.employee_w4_elections.recent_first.first
-    return prior unless changed_from?(prior, values)
+    return prior unless changed_from?(prior, values) || (prior&.source == "default_withholding" && source != "default_withholding")
 
     raise Error, "W-4 effective date is required when withholding elections change" if values[:effective_on].blank?
     if prior.present? && reason.blank?
@@ -84,6 +88,7 @@ class EmployeeW4ElectionChangeService
     changes = latest.profile_attributes.each_with_object({}) do |(attribute, value), updates|
       updates[attribute] = value if comparable(employee.public_send(attribute)) != comparable(value)
     end
+    changes[:intake_payroll_confirmed_at] = nil if employee.intake_exception.present? && changes.present?
     employee.update_columns(changes.merge(updated_at: Time.current)) if changes.present?
   end
 end

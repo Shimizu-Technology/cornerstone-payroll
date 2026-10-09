@@ -66,6 +66,7 @@ module EmployeeBulkImport
       results = { created: 0, failed: 0, errors: [] }
 
       ActiveRecord::Base.transaction do
+        company.lock!
         dept_cache = company.departments.index_by { |d| d.name.downcase.strip }
 
         validated_rows.each do |row_data|
@@ -85,8 +86,10 @@ module EmployeeBulkImport
           end
 
           employee = company.employees.new(attrs)
+          EmployeeIntakePolicy.prepare!(employee, actor: actor)
           if employee.save
             create_w4_election!(employee)
+            EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
             results[:created] += 1
           else
             results[:failed] += 1
@@ -101,6 +104,7 @@ module EmployeeBulkImport
 
       if results[:failed] > 0
         results[:created] = 0
+        company.employees.reset
       end
 
       results
@@ -188,8 +192,12 @@ module EmployeeBulkImport
       end
     end
 
+    def required_columns
+      EmployeeIntakePolicy.enabled?(company) ? REQUIRED_COLUMNS - %w[hire_date address_line1 city state zip] : REQUIRED_COLUMNS
+    end
+
     def validate_headers(headers)
-      missing = REQUIRED_COLUMNS - headers
+      missing = required_columns - headers
       if missing.any?
         @errors << "Missing required columns: #{missing.join(', ')}. Required: #{REQUIRED_COLUMNS.join(', ')}"
       end
@@ -226,7 +234,7 @@ module EmployeeBulkImport
     def validate_row_data(data)
       errors = []
 
-      REQUIRED_COLUMNS.each do |col|
+      required_columns.each do |col|
         errors << "#{col} is required" if data[col].blank?
       end
 
@@ -272,12 +280,12 @@ module EmployeeBulkImport
 
       if business_contractor
         errors << "business_name is required for business contractors" if data["business_name"].blank?
-        if data["contractor_ein"].blank?
+        if data["contractor_ein"].blank? && !EmployeeIntakePolicy.enabled?(company)
           errors << "contractor_ein is required for business contractors"
-        elsif data["contractor_ein"].gsub(/\D/, "").length != 9
+        elsif data["contractor_ein"].present? && data["contractor_ein"].gsub(/\D/, "").length != 9
           errors << "contractor_ein must be exactly 9 digits"
         end
-      elsif data["ssn"].blank?
+      elsif data["ssn"].blank? && !EmployeeIntakePolicy.enabled?(company)
         errors << "ssn is required for W-2 employees and individual contractors"
       end
 
