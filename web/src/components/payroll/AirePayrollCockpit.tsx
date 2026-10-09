@@ -655,7 +655,11 @@ export function AirePayrollCockpit({
       });
       if (current !== actionGeneration.current) return;
       setSettlementRoute(null);
-      setCommandSuccess(settlementRoute.destinationKind === 'regular'
+      setCommandSuccess(isCorrectionSettlementCase(settlementRoute.settlementCase)
+        ? settlementRoute.destinationKind === 'regular'
+          ? 'Correction routed to the selected payroll for review. The original payment remains unchanged.'
+          : 'Correction marked not applied with your review reason. The original payment remains unchanged.'
+        : settlementRoute.destinationKind === 'regular'
         ? 'Held time routed to the selected regular payroll in time tracking.'
         : 'Held time marked not payable in time tracking with your review reason.');
     } catch (caught) {

@@ -1109,6 +1109,9 @@ it.each(['regular', 'not_payable'] as const)('scopes correction routing copy wit
     ...(destination === 'regular' ? { target_external_pay_period_id: fixtures().overview.routing_options[0].external_pay_period_id } : {}),
   })));
   if (destination === 'not_payable') expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
+  await screen.findByText(destination === 'regular'
+    ? 'Correction routed to the selected payroll for review. The original payment remains unchanged.'
+    : 'Correction marked not applied with your review reason. The original payment remains unchanged.');
   expect(apiMocks.correct).not.toHaveBeenCalled();
   expect(apiMocks.finalize).not.toHaveBeenCalled();
 });

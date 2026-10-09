@@ -175,6 +175,10 @@ export function CorrectivePaycheckModal({
     return () => { previewGeneration.current += 1; baselineLoaded.current = false; };
   }, [open, originalItem.id, originalItem.employee_id, originalPayPeriod.id, setIssueError, setPreviewError]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const precisionError = Object.entries(form).filter(([key]) => !['pay_date', 'reason', 'notes'].includes(key))
+    .some(([, value]) => value !== '' && (!Number.isFinite(Number(value)) || !/^-?\d+(?:\.\d{1,2})?$/.test(value)))
+    ? 'Hours and money must use no more than two decimal places. Review the value before requesting a preview or issuing.' : null;
+
   const correctedInputs: CorrectivePaycheckInputs = useMemo(
     () => ({
       hours_worked: num(form.hours_worked),
@@ -206,6 +210,7 @@ export function CorrectivePaycheckModal({
 
   // Debounced preview fetch when corrected inputs change.
   const fetchPreview = useCallback(async (force = false) => {
+    if (precisionError) return;
     if ((!baseline || !inputsChanged) && !force) {
       setPreview(null);
       setPreviewError(null);
@@ -237,10 +242,16 @@ export function CorrectivePaycheckModal({
     } finally {
       if (generation === previewGeneration.current) setPreviewLoading(false);
     }
-  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs]);
+  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs, precisionError]);
 
   useEffect(() => {
     if (!open || !baseline || !baselineLoaded.current) return;
+    if (precisionError) {
+      previewGeneration.current += 1;
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
     previewGeneration.current += 1;
     if (!inputsChanged) {
       setPreview(baselinePreview);
@@ -251,10 +262,11 @@ export function CorrectivePaycheckModal({
     setPreviewLoading(inputsChanged);
     const handle = setTimeout(fetchPreview, 350);
     return () => clearTimeout(handle);
-  }, [open, baseline, baselinePreview, inputsChanged, fetchPreview]);
+  }, [open, baseline, baselinePreview, inputsChanged, fetchPreview, precisionError]);
 
   const canSubmit =
     !!baseline &&
+    !precisionError &&
     !!preview &&
     /^[0-9a-f]{64}$/.test(preview.meta.review_digest ?? '') &&
     Object.entries(correctedInputs).every(([key, value]) => preview.corrected[key as keyof CorrectivePaycheckSnapshot] === value) &&
@@ -331,6 +343,8 @@ export function CorrectivePaycheckModal({
                 Review the desired absolute hours before issuing this correction.
               </p>
             )}
+
+            {precisionError && <p role="alert" className="text-sm text-red-700">{precisionError}</p>}
 
             <FieldRow label="Regular hours" original={originalItem.hours_worked}>
               <NumericInput

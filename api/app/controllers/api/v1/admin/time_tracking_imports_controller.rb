@@ -171,7 +171,7 @@ module Api
             fetch_start_date: import.fetch_start_date,
             fetch_end_date: import.fetch_end_date,
             warnings: import.warnings,
-            processed_payload: coverage ? coverage.processed_payload : import.processed_payload,
+            processed_payload: coverage ? coverage.read_processed_payload : import.processed_payload,
             external_batch_id: import.external_batch_id,
             external_batch_checksum: import.external_batch_checksum,
             contract_version: import.contract_version,

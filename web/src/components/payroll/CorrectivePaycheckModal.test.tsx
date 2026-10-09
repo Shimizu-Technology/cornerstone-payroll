@@ -195,3 +195,27 @@ describe('CorrectivePaycheckModal recorded baseline', () => {
     expect(api.issue).not.toHaveBeenCalled();
   });
 });
+
+
+it.each([['Regular hours', '7.333', '7.33', 'hours_worked'], ['Bonus', '1.005', '1.01', 'bonus']] as const)(
+  'explains excessive precision for %s and submits only the explicitly reviewed two-decimal value', async (label, invalid, valid, field) => {
+    api.preview.mockImplementation((_period, request) => {
+      const inputs = request.corrected_inputs;
+      return Promise.resolve({ ...preview(inputs.hours_worked ?? 80), corrected: { ...preview(inputs.hours_worked ?? 80).corrected, ...inputs },
+        meta: { ...preview().meta, review_digest: 'a'.repeat(64), is_zero_change: Object.keys(inputs).length === 0 } });
+    });
+    const { user } = setup();
+    const input = screen.getByLabelText(label) as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    await user.clear(input); await user.type(input, invalid);
+    await screen.findByText(/Hours and money must use no more than two decimal places/);
+    await user.type(screen.getByLabelText(/Reason/), 'Reviewed exact precision');
+    expect((screen.getByRole('button', { name: 'Issue corrective paycheck' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(api.issue).not.toHaveBeenCalled();
+    await user.clear(input); await user.type(input, valid);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Issue corrective paycheck' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText(/Hours and money must use no more than two decimal places/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Issue corrective paycheck' }));
+    expect(api.issue).toHaveBeenCalledWith(12, expect.objectContaining({ corrected_inputs: expect.objectContaining({ [field]: Number(valid) }) }));
+    expect(api.preview.mock.calls.some(([, request]) => request.corrected_inputs[field] === Number(invalid))).toBe(false);
+  });

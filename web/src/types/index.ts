@@ -630,6 +630,7 @@ export interface PayDateCorrection {
 }
 
 export interface SourceAccountingReceiptState {
+  verification_error?: string | null;
   id: number;
   event_id: string;
   status: 'pending' | 'error' | 'confirmed';
@@ -659,6 +660,8 @@ export interface AirePayrollRecord {
     total_difference_hours: string;
   }>;
   correction_dispositions?: Array<{
+    verification_status?: 'verified' | 'needs_review';
+    verification_error?: string | null;
     id: number;
     source_user_id: string;
     source_time_entry_id: string;

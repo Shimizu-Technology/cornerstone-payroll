@@ -12,6 +12,7 @@ class PayPeriodTimeTrackingSummary
     summary = {
       active_source_types: pay_period.company.time_tracking_sources.active.distinct.pluck(:source_type),
       linked_aire_records: imports.select(&:finalized_batch?).map do |import|
+        coverage = TimeTracking::CorrectionCoverage.new(import)
         {
           id: import.id,
           source_name: import.time_tracking_source.name,
@@ -24,8 +25,8 @@ class PayPeriodTimeTrackingSummary
           reconciled_at: import.reconciled_at,
           reconciliation_note: import.reconciliation_note,
           reconciliation_exceptions: import.reconciliation_exceptions,
-          payable_line_status: TimeTracking::AllocationStatusSummary.call(import),
-          correction_dispositions: TimeTracking::CorrectionCoverage.new(import).presentation,
+          payable_line_status: TimeTracking::AllocationStatusSummary.call(import, coverage: coverage),
+          correction_dispositions: coverage.presentation,
           source_processing_status: import.source_processing_status,
           source_processing_synced_at: import.source_processing_synced_at
         }
