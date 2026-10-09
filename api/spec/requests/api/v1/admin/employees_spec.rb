@@ -374,6 +374,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           ssn: "123-45-6789",
           ssn_confirmation: "123-45-6789",
           hire_date: "2024-01-15",
+          w4_effective_on: "2024-01-15",
           date_of_birth: "1990-05-20",
           employment_type: "hourly",
           pay_rate: 15.00,

@@ -19,7 +19,9 @@ class EmployeeClassificationTransitionService
       employee.lock!
       validate_transition!
 
-      new_employee = Employee.create!(new_employee_attributes)
+      new_employee = Employee.new(new_employee_attributes)
+      EmployeeIntakePolicy.prepare!(new_employee, actor: actor)
+      new_employee.save!
       create_w4_election!(new_employee)
       create_primary_wage_rate!(new_employee)
       EmployeeDocumentReadiness.seed_new_hire!(employee: new_employee, actor: actor)

@@ -141,6 +141,8 @@ class StaffRolePolicy
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#reject" => :manage_client_configuration,
+    "api/v1/admin/employee_intake_settings#update" => :manage_organization,
+    "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#reactivate" => :manage_client_configuration,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,
