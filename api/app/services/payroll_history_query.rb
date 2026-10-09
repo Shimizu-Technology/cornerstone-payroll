@@ -66,6 +66,8 @@ class PayrollHistoryQuery
 
   def union_sql
     company = connection.quote(@company_id)
+    # Rails stores these timestamp columns in UTC. Preserve that instant when
+    # PostgreSQL aggregates the history into JSON for browsers in other zones.
     <<~SQL.squish
       SELECT
         ('native:' || pp.id::text) AS key,
@@ -84,7 +86,7 @@ class PayrollHistoryQuery
         COUNT(pi.id)::bigint AS employee_count,
         COALESCE(SUM(pi.gross_pay), 0)::numeric AS total_gross,
         COALESCE(SUM(pi.net_pay), 0)::numeric AS total_net,
-        pp.committed_at AS processed_at,
+        pp.committed_at AT TIME ZONE 'UTC' AS processed_at,
         committed_user.name::text AS processed_by_name,
         'cornerstone'::text AS source_system,
         'Cornerstone'::text AS source_label,
@@ -117,7 +119,7 @@ class PayrollHistoryQuery
         historical_period.paycheck_count::bigint AS employee_count,
         COALESCE(NULLIF(historical_period.totals ->> 'gross_pay', '')::numeric, 0) AS total_gross,
         COALESCE(NULLIF(historical_period.totals ->> 'net_pay', '')::numeric, 0) AS total_net,
-        historical_batch.locked_at AS processed_at,
+        historical_batch.locked_at AT TIME ZONE 'UTC' AS processed_at,
         locked_user.name::text AS processed_by_name,
         'quickbooks_online'::text AS source_system,
         historical_period.source_label::text AS source_label,
