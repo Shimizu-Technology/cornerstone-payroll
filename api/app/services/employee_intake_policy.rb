@@ -20,8 +20,9 @@ class EmployeeIntakePolicy
   # Caller must hold the company lock through employee persistence.
   def self.prepare!(employee, actor:)
     return unless employee.new_record?
-    employee.require_initial_w4_effective_on = !enabled?(employee.company)
-    return unless enabled?(employee.company)
+    entry_enabled = enabled?(employee.company)
+    employee.require_initial_w4_effective_on = !entry_enabled
+    return unless entry_enabled
 
     missing = missing_fields(employee)
     return if missing.empty?
