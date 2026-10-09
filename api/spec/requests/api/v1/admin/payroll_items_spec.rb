@@ -818,6 +818,22 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
+    it "returns saved zero contribution evidence without a false available-pay warning" do
+      create(:tax_table, tax_year: pay_period.pay_date.year)
+      employee.update!(pay_rate: 25)
+      payroll_item.update!(hours_worked: 4, pay_rate: 25)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:ok)
+      snapshot = response.parsed_body.dig("payroll_item", "retirement_rule_snapshot")
+      expect(snapshot).to eq(payroll_item.reload.retirement_rule_snapshot)
+      expect(snapshot.fetch("requested").values.sum(&:to_d)).to eq(0)
+      expect(snapshot.fetch("applied").values.sum(&:to_d)).to eq(0)
+      expect(snapshot.fetch("explanations")).not_to include(/enough available pay/)
+      expect(response.parsed_body.dig("payroll_item", "gross_pay")).to eq("100.0")
+    end
+
     it "refreshes changed employee defaults on a calculated non-overridden item" do
       employee.update!(
         default_payroll_adjustments: [
