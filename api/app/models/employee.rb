@@ -111,7 +111,11 @@ class Employee < ApplicationRecord
   has_many :historical_employee_ytd_balances, dependent: :restrict_with_error
   has_many :employee_configuration_review_resolutions, dependent: :restrict_with_error
 
+  attr_accessor :intake_original_employee, :require_initial_w4_effective_on
+  validate :valid_supplied_intake_dates
+  before_update :invalidate_intake_payroll_confirmation
   before_validation :normalize_w4_source_reference
+  before_validation :normalize_intake_blank_details
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
@@ -162,13 +166,26 @@ class Employee < ApplicationRecord
     validates :w4_form_version, numericality: { only_integer: true, greater_than_or_equal_to: 1987, less_than_or_equal_to: ->(_) { Date.current.year + 1 } }
   end
 
+  scope :intake_incomplete, -> {
+    where.not(intake_exception: {}).where(<<~SQL.squish)
+      (ssn_encrypted IS NULL AND NOT (employment_type = 'contractor' AND COALESCE(contractor_type, '') = 'business'))
+      OR (employment_type = 'contractor' AND COALESCE(contractor_type, '') = 'business' AND COALESCE(contractor_ein, '') = '')
+      OR hire_date IS NULL OR COALESCE(address_line1, '') = '' OR COALESCE(city, '') = ''
+      OR COALESCE(state, '') = '' OR COALESCE(zip, '') = ''
+      OR (employment_type <> 'contractor' AND (w4_effective_on IS NULL OR NOT EXISTS (
+        SELECT 1 FROM employee_w4_elections WHERE employee_id = employees.id AND source <> 'default_withholding'
+      )))
+    SQL
+  }
+
   scope :active, -> { where(status: "active") }
   scope :hourly, -> { where(employment_type: "hourly") }
   scope :salary, -> { where(employment_type: "salary") }
   scope :contractor, -> { where(employment_type: "contractor") }
   scope :w2_employees, -> { where(employment_type: %w[hourly salary]) }
   scope :eligible_for_period, ->(period_start, period_end) {
-    where("hire_date IS NULL OR hire_date <= ?", period_end)
+    where("intake_exception = '{}'::jsonb OR (intake_payroll_confirmed_at IS NOT NULL AND intake_payroll_eligible_from <= ?)", period_end)
+      .where("hire_date IS NULL OR hire_date <= ?", period_end)
       .where("termination_date IS NULL OR termination_date >= ?", period_start)
       .where(status: %w[active terminated])
       .where(
@@ -258,6 +275,7 @@ class Employee < ApplicationRecord
 
   def eligible_on?(date)
     date = date.to_date
+    return false unless EmployeeIntakePolicy.payroll_ready?(self, date)
     return false if hire_date.present? && date < hire_date
 
     event = employee_status_events.where("effective_date <= ?", date).order(effective_date: :desc, id: :desc).first
@@ -503,6 +521,14 @@ class Employee < ApplicationRecord
     self.w4_source_reference = w4_source_reference.to_s.strip.presence
   end
 
+  def normalize_intake_blank_details
+    return if intake_exception.blank?
+
+    %w[ssn_encrypted contractor_ein address_line1 city state zip].each do |attribute|
+      self[attribute] = nil if self[attribute].blank?
+    end
+  end
+
   def plausible_hire_date
     if hire_date.blank?
       errors.add(:hire_date, "must be a valid date") if hire_date_before_type_cast.present?
@@ -556,13 +582,13 @@ class Employee < ApplicationRecord
       state: state,
       zip: zip
     }.each do |field, value|
-      errors.add(field, "can't be blank") if value.blank? && !configuration_review_allows_blank?(field)
+      errors.add(field, "can't be blank") if value.blank? && !configuration_review_allows_blank?(field) && !intake_allows_blank?(field)
     end
 
     if business_contractor?
       errors.add(:business_name, "can't be blank") if business_name.blank?
-      errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank?
-    elsif ssn_encrypted.blank?
+      errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank? && !intake_allows_blank?(:contractor_ein)
+    elsif ssn_encrypted.blank? && !intake_allows_blank?(:ssn)
       errors.add(:ssn, "can't be blank")
     end
   end
@@ -572,6 +598,33 @@ class Employee < ApplicationRecord
     return true if new_record?
 
     (changes_to_save.keys - %w[status termination_date updated_at]).any?
+  end
+
+  def valid_supplied_intake_dates
+    if require_initial_w4_effective_on && w2_employee? && w4_effective_on.blank?
+      errors.add(:w4_effective_on, "is required unless incomplete employee entry is enabled")
+    end
+    if intake_exception.present? && !new_record? && w4_effective_on.blank? && w4_effective_on_in_database.present?
+      errors.add(:w4_effective_on, "cannot clear a completed withholding effective date")
+    end
+    %w[date_of_birth hire_date w4_effective_on w4_signed_on].each do |field|
+      if public_send(field).blank? && public_send("#{field}_before_type_cast").present?
+        errors.add(field, "must be a valid date")
+      end
+    end
+  end
+
+  def intake_allows_blank?(field)
+    return false unless Array(intake_exception["deferred_fields"]).include?(field.to_s)
+    attribute = field.to_s == "ssn" ? "ssn_encrypted" : field.to_s
+    baseline = intake_original_employee || self
+    baseline.new_record? || baseline.attribute_in_database(attribute).blank?
+  end
+
+  def invalidate_intake_payroll_confirmation
+    return if intake_exception.blank? || will_save_change_to_intake_payroll_confirmed_at?
+    sensitive = %w[employment_type salary_type contractor_type contractor_pay_type pay_rate pay_frequency hire_date ssn_encrypted contractor_ein] + EmployeeW4Election::PROFILE_ATTRIBUTES.map(&:to_s)
+    self.intake_payroll_confirmed_at = nil if (changes_to_save.keys & sensitive).any?
   end
 
   def configuration_review_allows_blank?(field)
@@ -611,7 +664,7 @@ class Employee < ApplicationRecord
   end
 
   def ssn_confirmation_required?
-    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && individual_filer?
+    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && individual_filer? && ssn_encrypted.present?
   end
 
   def matching_ssn_confirmation

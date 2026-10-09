@@ -502,6 +502,7 @@ export const employeesApi = {
     department_id?: number;
     employment_type?: string;
     configuration_review_status?: 'complete' | 'needs_review';
+    intake_status?: 'incomplete';
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';

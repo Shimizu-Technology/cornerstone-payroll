@@ -46,6 +46,7 @@ Rails.application.routes.draw do
       end
 
       namespace :client do
+        resource :employee_intake_settings, only: :show
         resources :employees, only: [ :index, :show, :create, :update ] do
           resources :document_requirements, only: :index, controller: :employee_document_requirements
         end
@@ -86,6 +87,8 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
+        resource :employee_intake_settings, only: [ :show, :update ]
         resource :pay_schedule_settings, only: [ :show, :update ]
         resource :payroll_go_live, only: [ :show ], controller: :payroll_go_live do
           post :preview_setup

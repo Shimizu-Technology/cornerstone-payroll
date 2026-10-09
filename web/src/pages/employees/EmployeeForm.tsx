@@ -18,6 +18,8 @@ import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumen
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
+import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
@@ -248,6 +250,7 @@ export function EmployeeForm() {
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const intake = useEmployeeIntakeSettings(companyId, isClient);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
   const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
@@ -278,6 +281,7 @@ export function EmployeeForm() {
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
   const [w4ChangeReason, setW4ChangeReason] = useState('');
+  const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -390,6 +394,7 @@ export function EmployeeForm() {
       setStoredSsnLastFour(employee.ssn_last_four || null);
       setInitialEmploymentType(employee.employment_type);
       setW4ChangeReason('');
+      setW4ElectionReceived(false);
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -831,7 +836,37 @@ export function EmployeeForm() {
     });
   };
 
-  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field);
+  const toggleReceivedWithholding = (received: boolean) => {
+    setW4ElectionReceived(received);
+    if (received) {
+      setForm((previous) => ({ ...previous, w4_effective_on: '', w4_signed_on: null, w4_source_reference: '' }));
+      return;
+    }
+    if (!loadedEmployee) return;
+    const values = {
+      additional_withholding: toNumberOrZero(loadedEmployee.additional_withholding),
+      w4_dependent_credit: toNumberOrZero(loadedEmployee.w4_dependent_credit),
+      w4_step4a_other_income: toNumberOrZero(loadedEmployee.w4_step4a_other_income),
+      w4_step4b_deductions: toNumberOrZero(loadedEmployee.w4_step4b_deductions),
+    };
+    setForm((previous) => ({ ...previous, ...values,
+      filing_status: normalizeFilingStatus(loadedEmployee.filing_status),
+      allowances: toNumberOrZero(loadedEmployee.allowances),
+      w4_step2_multiple_jobs: toBoolean(loadedEmployee.w4_step2_multiple_jobs),
+      w4_form_version: loadedEmployee.w4_form_version,
+      w4_effective_on: loadedEmployee.w4_effective_on || '',
+      w4_signed_on: loadedEmployee.w4_signed_on || null,
+      w4_source_reference: loadedEmployee.w4_source_reference || '',
+    }));
+    setW4CurrencyDrafts({ additional_withholding: toCurrencyDraft(values.additional_withholding),
+      w4_dependent_credit: toCurrencyDraft(values.w4_dependent_credit),
+      w4_step4a_other_income: toCurrencyDraft(values.w4_step4a_other_income),
+      w4_step4b_deductions: toCurrencyDraft(values.w4_step4b_deductions) });
+    setW4ChangeReason('');
+  };
+
+  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field)
+    || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -862,12 +897,12 @@ export function EmployeeForm() {
         }
       }
     }
-    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain) {
+    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain && !allowsUnverifiedBlank('ssn')) {
       newErrors.ssn = ['Social Security Number is required'];
     } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
     }
-    if (usesSsn && (!isEditing || ssnChanged)) {
+    if (usesSsn && Boolean(form.ssn?.trim()) && (!isEditing || ssnChanged)) {
       if (!form.ssn_confirmation?.trim()) {
         newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
       } else if (canonicalSsn(form.ssn_confirmation) !== canonicalSsn(form.ssn)) {
@@ -896,9 +931,9 @@ export function EmployeeForm() {
     }
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
       if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
-      if (!form.contractor_ein?.trim()) {
+      if (!form.contractor_ein?.trim() && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
-      } else if (!/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
+      } else if (form.contractor_ein?.trim() && !/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
       }
     }
@@ -912,12 +947,14 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
-    if (form.employment_type !== 'contractor' && !form.w4_effective_on) {
+    if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
-    if (isEditing && !isClient && form.employment_type !== 'contractor' && w4HasChanged && !w4ChangeReason.trim()) {
+    if (isEditing && !isClient && form.employment_type !== 'contractor' && (w4HasChanged || w4ElectionReceived) && !w4ChangeReason.trim()) {
       newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
     }
+    if (loadedEmployee?.current_w4_election?.source === 'default_withholding' && w4HasChanged && !w4ElectionReceived) newErrors.w4_election_received = ['Confirm that the employee withholding election was received before replacing the approved default.'];
+    if (w4ElectionReceived && (!form.w4_effective_on || (!form.w4_signed_on && !form.w4_source_reference?.trim()))) newErrors.w4_election_received = ['Enter the received election effective date and its signed date or source reference.'];
     const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
     const employerRothMatch = form.employer_roth_match_rate ?? 0;
     if (form.employment_type !== 'contractor' && (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1)) {
@@ -996,7 +1033,8 @@ export function EmployeeForm() {
           label: earning.label.trim(),
           amount: roundCurrencyValue(Number(earning.amount) || 0),
         })),
-        w4_change_reason: w4HasChanged ? w4ChangeReason.trim() : undefined,
+        w4_election_received: w4ElectionReceived || undefined,
+        w4_change_reason: (w4HasChanged || w4ElectionReceived) ? w4ChangeReason.trim() : undefined,
         w4_source_reference: form.w4_source_reference?.trim() || null,
       };
 
@@ -1138,6 +1176,7 @@ export function EmployeeForm() {
       if (!isCurrentSubmission()) return;
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
+        setGeneralError(`Employee could not be saved. ${Object.values(err.fieldErrors).flat().join(' ')}`);
         focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
@@ -1154,7 +1193,7 @@ export function EmployeeForm() {
   const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
   const isW2Employee = form.employment_type !== 'contractor';
   const taxIdUsesSsn = isW2Employee || form.contractor_type !== 'business';
-  const ssnConfirmationRequired = taxIdUsesSsn
+  const ssnConfirmationRequired = taxIdUsesSsn && Boolean(form.ssn?.trim())
     && (!isEditing || canonicalSsn(form.ssn) !== canonicalSsn(initialSsn));
   const ssnDigits = (form.ssn || '').replace(/\D/g, '');
   const ssnConfirmationDigits = (form.ssn_confirmation || '').replace(/\D/g, '');
@@ -1181,6 +1220,10 @@ export function EmployeeForm() {
           </Button>
         }
       />
+
+      {(intake.settings?.enabled && !isEditing) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Incomplete employee entry is enabled for this client.</p><p>Enter the name and valid pay setup. Unknown personal details may stay blank and will remain on a follow-up checklist. Payroll setup and documents need separate review.</p></div>}
+      {loadedEmployee?.intake_readiness?.profile_incomplete && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Complete this profile as information arrives</p><p>Still missing: {loadedEmployee.intake_readiness.missing_fields.map((field) => intakeFieldLabels[field] || field).join(', ')}. You can save the approved missing fields incrementally.</p></div>}
+      {intake.error && <div className="mx-4 mt-4 sm:mx-6 lg:mx-8"><ActionFeedback tone="error" message="Employee entry settings could not be loaded. Full details are required for new entries." /><Button variant="outline" onClick={() => void intake.reload()}>Retry entry settings</Button></div>}
 
       <nav aria-label="Employee form sections" className="overflow-x-auto border-b border-neutral-200 bg-white px-4 py-2 sm:hidden">
         <div className="flex w-max gap-2 text-xs font-semibold">
@@ -1290,11 +1333,11 @@ export function EmployeeForm() {
                 <>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">
-                      Social Security Number <span className="text-danger-600">*</span>
+                      Social Security Number {!allowsUnverifiedBlank('ssn') && <span className="text-danger-600">*</span>}
                     </label>
                     <Input
                       name="ssn"
-                      required={!(isClient && storedSsnLastFour && !form.ssn)}
+                      required={!allowsUnverifiedBlank('ssn') && !(isClient && storedSsnLastFour && !form.ssn)}
                       placeholder={isClient && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
                       value={form.ssn || ''}
                       onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
@@ -1370,7 +1413,7 @@ export function EmployeeForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Hire Date <span className="text-danger-600">*</span>
+                  Hire Date {!allowsUnverifiedBlank('hire_date') && <span className="text-danger-600">*</span>}
                 </label>
                 <Input
                   name="hire_date"
@@ -2162,11 +2205,11 @@ export function EmployeeForm() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      EIN (Employer Identification Number) <span className="text-danger-600">*</span>
+                      EIN (Employer Identification Number) {!allowsUnverifiedBlank('contractor_ein') && <span className="text-danger-600">*</span>}
                     </label>
                     <Input
                       name="contractor_ein"
-                      required
+                      required={!allowsUnverifiedBlank('contractor_ein')}
                       value={form.contractor_ein || ''}
                       onChange={(e) => handleChange('contractor_ein', formatEIN(e.target.value))}
                       placeholder="XX-XXXXXXX"
@@ -2192,7 +2235,7 @@ export function EmployeeForm() {
             <CardHeader>
               <CardTitle>W-4 Tax Withholding</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
-                Based on IRS Form W-4 (2020+). Each saved change becomes a dated, read-only election in the employee&apos;s history.
+                {allowsUnverifiedBlank('withholding_election') ? 'The employee withholding election is outstanding. Payroll requires an explicitly reviewed withholding decision.' : <>Based on IRS Form W-4 (2020+). Each saved change becomes a dated, read-only election in the employee&apos;s history.</>}
               </p>
             </CardHeader>
             <CardContent>
@@ -2200,7 +2243,7 @@ export function EmployeeForm() {
                 <div className="mb-5 rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-primary-950">Current election</p>
+                      <p className="text-sm font-semibold text-primary-950">{loadedEmployee.current_w4_election.source === 'default_withholding' ? 'Approved default withholding' : 'Current employee election'}</p>
                       <p className="mt-1 text-sm text-primary-800">
                         Effective {new Date(`${loadedEmployee.current_w4_election.effective_on}T00:00:00`).toLocaleDateString()} · Form {loadedEmployee.current_w4_election.w4_form_version}
                       </p>
@@ -2212,6 +2255,11 @@ export function EmployeeForm() {
               )}
 
               {/* Step 1: Filing Status */}
+              {loadedEmployee?.intake_readiness?.missing_fields.includes('withholding_election') && <div className="mb-4 rounded-lg border border-warning-200 bg-warning-50 p-3">
+                <label className="flex items-start gap-2 text-sm leading-6 text-warning-900"><input name="w4_election_received" type="checkbox" checked={w4ElectionReceived} onChange={(event) => toggleReceivedWithholding(event.target.checked)} className="mt-1 h-4 w-4" />Record a received employee withholding election</label>
+                <p className="mt-1 text-xs leading-5 text-warning-900">Use the received form's effective date and signed date or source reference. Ordinary profile edits preserve the approved default treatment.</p>
+                {getFieldError('w4_election_received') && <p className="mt-2 text-sm text-danger-700">{getFieldError('w4_election_received')}</p>}
+              </div>}
               <div className="mb-4">
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 1: Filing Status</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2253,7 +2301,7 @@ export function EmployeeForm() {
                       onChange={(e) => handleChange('w4_effective_on', e.target.value || null)}
                       aria-invalid={Boolean(getFieldError('w4_effective_on'))}
                     />
-                    <p className="mt-1 text-xs text-gray-500">Record the date this withholding election became effective.</p>
+                    <p className="mt-1 text-xs text-gray-500">{allowsUnverifiedBlank('withholding_election') ? 'Leave blank if the employee withholding election has not been received. Payroll needs a separate reviewed withholding decision.' : 'Record the date this withholding election became effective.'}</p>
                     {getFieldError('w4_effective_on') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_effective_on')}</p>}
                   </div>
                 </div>
@@ -2362,7 +2410,7 @@ export function EmployeeForm() {
                 </div>
               </div>
 
-              {isEditing && !isClient && w4HasChanged && (
+              {isEditing && !isClient && (w4HasChanged || w4ElectionReceived) && (
                 <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                   <label htmlFor="w4-change-reason" className="block text-sm font-semibold text-amber-950">
                     Reason for this W-4 change <span className="text-danger-600">*</span>
@@ -2484,14 +2532,14 @@ export function EmployeeForm() {
           <CardHeader>
             <CardTitle>Address</CardTitle>
             <CardDescription>
-              Required for payroll checks and W-2/1099 filing. Address line 2 remains optional.
+              Used on payroll checks and required for W-2/1099 filing. Missing address lines are omitted from checks when incomplete entry is authorized.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1 <span className="text-danger-600">*</span>
+                  Address Line 1 {!allowsUnverifiedBlank('address_line1') && <span className="text-danger-600">*</span>}
                 </label>
                 <Input
                   name="address_line1"
@@ -2515,7 +2563,7 @@ export function EmployeeForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City <span className="text-danger-600">*</span>
+                    City {!allowsUnverifiedBlank('city') && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     name="city"
@@ -2527,7 +2575,7 @@ export function EmployeeForm() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State <span className="text-danger-600">*</span>
+                    State {!allowsUnverifiedBlank('state') && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     name="state"
@@ -2541,7 +2589,7 @@ export function EmployeeForm() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code <span className="text-danger-600">*</span>
+                    ZIP Code {!allowsUnverifiedBlank('zip') && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     name="zip"
