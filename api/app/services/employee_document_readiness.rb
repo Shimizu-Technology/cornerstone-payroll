@@ -11,7 +11,13 @@ class EmployeeDocumentReadiness
   # The explicit employee flag lets this gate fail closed for new hires without
   # retroactively blocking legacy and QuickBooks-cutover rosters at deployment.
   def self.seed_new_hire!(employee:, actor:)
-    employee.update!(document_readiness_required: true) unless employee.document_readiness_required?
+    newly_seeded = !employee.document_readiness_required?
+    employee.update!(document_readiness_required: true) if newly_seeded
+    if newly_seeded && employee.intake_exception.present?
+      AuditLog.record!(user: actor, company_id: employee.company_id, action: "employee_intake_exception#create",
+        record_type: "employees", record_id: employee.id,
+        metadata: employee.intake_exception.slice("reason", "authorized_by_id", "deferred_fields", "follow_up_owner_id", "follow_up_due_on"))
+    end
     DEFAULT_REQUIREMENTS.fetch(employee.tax_classification).each do |requirement_type|
       employee.employee_document_requirements.create_or_find_by!(requirement_type: requirement_type) do |requirement|
         requirement.company = employee.company
@@ -26,6 +32,22 @@ class EmployeeDocumentReadiness
 
   def self.require_payroll_ready!(pay_period)
     employee_ids = pay_period.payroll_items.not_voided.select(:employee_id)
+    items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    stale_withholding = items.select do |item|
+      employee = item.employee
+      next false if employee.intake_exception.blank? || employee.contractor?
+      election = employee.w4_election_on(pay_period.pay_date)
+      election && (item.tax_rule_snapshot || {}).dig("w4", "election_id") != election.id
+    end
+    if stale_withholding.any?
+      raise BlockedError, "Recalculate payroll after confirming or changing withholding setup for: #{stale_withholding.map(&:employee_full_name).join(', ')}."
+    end
+    incomplete = Employee.where(company_id: pay_period.company_id, id: employee_ids).to_a.reject do |employee|
+      EmployeeIntakePolicy.payroll_ready?(employee, pay_period.end_date)
+    end
+    if incomplete.any?
+      raise BlockedError, "Confirm payroll setup and the eligible date before approving or committing payroll: #{incomplete.map(&:full_name).join(', ')}."
+    end
     employees = Employee.where(
       company_id: pay_period.company_id,
       id: employee_ids,

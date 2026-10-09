@@ -83,18 +83,22 @@ class ClientEmployeeUpdateService
   def create!
     direct_attrs = attrs.slice(*DIRECT_FIELDS)
     approval_attrs = attrs.slice(*APPROVAL_FIELDS)
-    candidate = build_validated_candidate!(direct_attrs.merge(approval_attrs), creation: true)
+    candidate = nil
     change_request = nil
 
     ActiveRecord::Base.transaction do
+      company.lock!
+      candidate = build_validated_candidate!(direct_attrs.merge(approval_attrs), creation: true)
       @employee = Employee.new(direct_attrs.merge(
         company: company,
         pay_rate: 0,
         status: "inactive",
         portal_pending_approval: true
       ))
+      employee.intake_exception = candidate.intake_exception
       validate_department_scope!(direct_attrs)
       employee.save!
+      EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: requested_by)
 
       approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)
       change_request = create_change_request!(
@@ -128,6 +132,7 @@ class ClientEmployeeUpdateService
     change_request = nil
 
     ActiveRecord::Base.transaction do
+      company.lock!
       employee.lock!
       direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
       approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
@@ -258,12 +263,14 @@ class ClientEmployeeUpdateService
 
   def build_validated_candidate!(candidate_attrs, creation: false)
     candidate = creation ? Employee.new : employee.dup
+    candidate.intake_original_employee = employee unless creation
     candidate.assign_attributes(candidate_attrs.except(WAGE_RATES_KEY))
     candidate.company = company
     candidate.status = "active" if creation || employee.portal_pending_approval?
     candidate.portal_pending_approval = false
     candidate.require_ssn_confirmation = employee.require_ssn_confirmation
     candidate.ssn_confirmation = employee.ssn_confirmation
+    EmployeeIntakePolicy.prepare!(candidate, actor: requested_by) if creation
     validate_tax_classification_change!(candidate)
     validate_department_scope!(candidate_attrs)
     normalized_wage_rates_payload(candidate_attrs[WAGE_RATES_KEY]) if candidate_attrs.key?(WAGE_RATES_KEY)
@@ -378,6 +385,7 @@ class ClientEmployeeUpdateService
   def cast_attribute_value(key, value)
     type = employee.class.attribute_types[key.to_s]
     return value unless type
+    return value if type.type == :date
 
     type.cast(value)
   end
