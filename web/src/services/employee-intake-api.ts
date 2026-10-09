@@ -28,10 +28,10 @@ export interface EmployeeIntakeReadiness {
 }
 
 export const employeeIntakeApi = {
-  settings: (companyId: number, isClient = false) => apiClient.get<{ data: EmployeeIntakeSettings }>(
+  settings: (companyId: number, isClient = false): Promise<{ data: EmployeeIntakeSettings }> => apiClient.get<{ data: EmployeeIntakeSettings }>(
     `/${isClient ? 'client' : 'admin'}/employee_intake_settings`, undefined, { companyId },
   ),
-  updateSettings: (companyId: number, employee_intake_settings: { enabled: boolean; reason?: string; expires_at?: string }) =>
+  updateSettings: (companyId: number, employee_intake_settings: { enabled: boolean; reason?: string; expires_at?: string }): Promise<{ data: EmployeeIntakeSettings }> =>
     apiClient.patch<{ data: EmployeeIntakeSettings }>('/admin/employee_intake_settings', { employee_intake_settings }, { companyId }),
   updateException: (companyId: number, employeeId: number, intake_exception: {
     follow_up_due_on?: string;
@@ -39,5 +39,5 @@ export const employeeIntakeApi = {
     confirm_payroll_setup?: boolean;
     acknowledge_default_withholding?: boolean;
     reason?: string;
-  }) => apiClient.patch<{ data: Employee }>(`/admin/employees/${employeeId}/intake_exception`, { intake_exception }, { companyId }),
+  }): Promise<{ data: Employee }> => apiClient.patch<{ data: Employee }>(`/admin/employees/${employeeId}/intake_exception`, { intake_exception }, { companyId }),
 };

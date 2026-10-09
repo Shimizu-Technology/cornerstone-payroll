@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function fixture(page: Page, enabled = false, canManage = true) {
+async function fixture(page: Page, enabled = false, canManage = true): Promise<Record<string, unknown>[]> {
   let settings = { enabled, can_manage: canManage, reason: enabled ? 'Employer information pending' : null, expires_at: enabled ? new Date(Date.now() + 3_600_000).toISOString() : null, enabled_by_name: enabled ? 'Synthetic Admin' : null };
   const saved: Record<string, unknown>[] = [];
   const employee = {

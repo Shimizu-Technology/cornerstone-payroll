@@ -2172,7 +2172,7 @@ export function EmployeeForm() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      EIN (Employer Identification Number) <span className="text-danger-600">*</span>
+                      EIN (Employer Identification Number) {!allowsUnverifiedBlank('contractor_ein') && <span className="text-danger-600">*</span>}
                     </label>
                     <Input
                       name="contractor_ein"
