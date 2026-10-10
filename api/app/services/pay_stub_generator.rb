@@ -145,6 +145,7 @@ class PayStubGenerator
     # Non-taxable earnings are printed in their own section because they increase
     # net pay but are intentionally excluded from gross pay.
     item_earnings = payroll_item.payroll_item_earnings.reject { |earning| earning.category.to_s == "non_taxable" }
+    correction_earnings = SignedCorrectionEarnings.call(payroll_item)
 
     if item_earnings.any?
       item_earnings.each do |earning|
@@ -155,6 +156,13 @@ class PayStubGenerator
           format_currency(earning.amount),
           "—"
         ]
+      end
+    elsif correction_earnings
+      correction_earnings.each do |earning|
+        earnings_data << [ earning.label,
+          earning.hours.nil? ? "—" : format_hours(earning.hours),
+          earning.rate.nil? ? "—" : format_currency(earning.rate),
+          format_currency(earning.amount), "—" ]
       end
     elsif payroll_item.hourly?
       # Regular pay
@@ -212,42 +220,45 @@ class PayStubGenerator
       ]
     end
 
-    existing_earning_categories = item_earnings.map { |earning| earning.category.to_s }
-    existing_other_labels = item_earnings
-      .select { |earning| earning.category.to_s == "other" }
-      .map { |earning| earning.label.to_s.strip.downcase }
+    if correction_earnings.nil?
+      existing_earning_categories = item_earnings.map { |earning| earning.category.to_s }
+      existing_other_labels = item_earnings
+        .select { |earning| earning.category.to_s == "other" }
+        .map { |earning| earning.label.to_s.strip.downcase }
 
-    # Bonus
-    if payroll_item.bonus.to_f > 0 && !existing_earning_categories.include?("bonus")
-      earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
-    end
-
-    # Tips
-    if payroll_item.reported_tips.to_f > 0 && !existing_earning_categories.include?("tips")
-      earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
-    end
-
-    # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
-    Array(payroll_item.custom_earnings).each do |ce|
-      label = ce["label"].presence || "Other Earning"
-      amt = ce["amount"].to_f
-      if amt > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
-        earnings_data << [ label, "—", "—", format_currency(amt), "—" ]
+      # Bonus
+      if payroll_item.bonus.to_f > 0 && !existing_earning_categories.include?("bonus")
+        earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
       end
-    end
 
-    payroll_item.active_payroll_adjustments.each do |adjustment|
-      next unless adjustment["treatment"] == "taxable_addition"
-
-      label = adjustment["label"].presence || "Taxable Adjustment"
-      amount = adjustment["amount"].to_f
-      if amount > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
-        earnings_data << [ label, "—", "—", format_currency(amount), "—" ]
+      # Tips
+      if payroll_item.reported_tips.to_f > 0 && !existing_earning_categories.include?("tips")
+        earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
       end
-    end
 
-    payroll_field_entries_for("taxable_addition").each do |entry|
-      earnings_data << [ entry.label, "—", "—", format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
+      # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
+      Array(payroll_item.custom_earnings).each do |ce|
+        label = ce["label"].presence || "Other Earning"
+        amt = ce["amount"].to_f
+        if amt > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
+          earnings_data << [ label, "—", "—", format_currency(amt), "—" ]
+        end
+      end
+
+      payroll_item.active_payroll_adjustments.each do |adjustment|
+        next unless adjustment["treatment"] == "taxable_addition"
+
+        label = adjustment["label"].presence || "Taxable Adjustment"
+        amount = adjustment["amount"].to_f
+        if amount > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
+          earnings_data << [ label, "—", "—", format_currency(amount), "—" ]
+        end
+      end
+
+      payroll_field_entries_for("taxable_addition").each do |entry|
+        earnings_data << [ entry.label, "—", "—", format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
+      end
+
     end
 
     # Gross total

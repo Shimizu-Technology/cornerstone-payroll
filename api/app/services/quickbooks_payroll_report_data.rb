@@ -67,6 +67,11 @@ class QuickbooksPayrollReportData
   end
 
   def earnings_lines_for(item)
+    correction = SignedCorrectionEarnings.call(item)
+    unless correction.nil?
+      return [ Line.new(label: "Gross", amount: item.gross_pay.to_f, hours: item.total_hours.to_f) ] +
+        correction.map { |line| Line.new(label: line.label, amount: line.amount, hours: line.hours, source: line.source) }
+    end
     flexible = flexible_addition_lines(item, "taxable_addition")
     remaining = item.payroll_item_earnings.reject { |earning| earning.category == "non_taxable" }
     remove_mirrored_earnings!(remaining, flexible, category: "other")
