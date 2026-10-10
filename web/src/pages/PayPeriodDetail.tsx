@@ -1,5 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
+import { NamedLoanInputs, type NamedLoanDraft } from '@/components/payroll/NamedLoanInputs';
 import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
@@ -54,7 +55,7 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, NamedLoanOption } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -403,6 +404,11 @@ export function PayPeriodDetail({
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [tipsPaidOutMap, setTipsPaidOutMap] = useState<Record<string, number>>({});
   const tipsPaidOutMapRef = useRef<Record<string, number>>({});
+  const [namedLoanOptions, setNamedLoanOptions] = useState<NamedLoanOption[]>([]);
+  const [namedLoanDrafts, setNamedLoanDrafts] = useState<Record<string, Record<string, NamedLoanDraft>>>({});
+  const [refreshSetupOpen, setRefreshSetupOpen] = useState(false);
+  const [refreshRecurring, setRefreshRecurring] = useState(false);
+  const [refreshBaseSalary, setRefreshBaseSalary] = useState(false);
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
   const [showPayrollFields, setShowPayrollFields] = useState(false);
@@ -427,6 +433,12 @@ export function PayPeriodDetail({
   }, []);
 
   const syncPayrollFieldInputs = useCallback((worksheet: PayPeriodPayrollFieldInputs) => {
+    setNamedLoanOptions(worksheet.named_loan_options || []);
+    setNamedLoanDrafts((worksheet.named_loan_options || []).reduce<Record<string, Record<string, NamedLoanDraft>>>((drafts, option) => {
+      drafts[String(option.employee_id)] ||= {};
+      drafts[String(option.employee_id)][String(option.loan_id)] = { mode: option.mode, amount: option.requested_amount ?? option.scheduled_amount };
+      return drafts;
+    }, {}));
     setPayrollFields(worksheet.fields);
     setPayrollFieldAssignments(worksheet.assignments);
     setRetainedRetirementEntries(worksheet.retained_manual_entries || []);
@@ -750,9 +762,40 @@ export function PayPeriodDetail({
         return;
       }
 
+      const selectedEmployeeIds = new Set([...payrollItems.map(item => item.employee_id), ...additionalEmployeeIds]);
+      if (payPeriod.status === 'draft' && payrollItems.length === 0 && payPeriod.run_purpose === 'regular') {
+        employees.forEach(employee => {
+          if (!(payPeriod.excluded_employee_ids || []).includes(employee.id)) selectedEmployeeIds.add(employee.id);
+        });
+      }
+      Object.entries(hoursMap).forEach(([employeeId, entry]) => {
+        if (entry.regular > 0 || entry.overtime > 0) selectedEmployeeIds.add(Number(employeeId));
+      });
+      [salaryOverrideMap, bonusMap, tipsPaidOutMap].forEach(values => {
+        Object.entries(values).forEach(([employeeId, amount]) => {
+          if (toNumber(amount) > 0) selectedEmployeeIds.add(Number(employeeId));
+        });
+      });
+      Object.entries(tipsMap).forEach(([employeeId, entry]) => {
+        if (entry.amount > 0) selectedEmployeeIds.add(Number(employeeId));
+      });
+      const named_loan_payments: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
+      Object.entries(namedLoanDrafts).forEach(([employeeId, drafts]) => {
+        if (!selectedEmployeeIds.has(Number(employeeId))) return;
+        named_loan_payments[employeeId] = {};
+        Object.entries(drafts).forEach(([loanId, draft]) => {
+          if (draft.mode === 'override' && draft.amount == null) throw new Error('Enter the linked loan repayment amount, or choose the scheduled default.');
+          named_loan_payments[employeeId][loanId] = draft.mode === 'override' ? { mode: 'override', amount: draft.amount ?? 0 } : { mode: 'default' };
+        });
+        if (toNumber(loansMap[employeeId]) > 0 && namedLoanOptions.some(option => String(option.employee_id) === employeeId && option.eligible)) {
+          throw new Error('Use Linked loan repayments to credit the saved loan. Clear the separate one-time deduction before calculating.');
+        }
+      });
+
       // Build hours payload
       const hours: Record<string, { regular?: number; overtime?: number; wage_rates?: PayrollItemWageRateHours[] }> = {};
       Object.entries(hoursMap).forEach(([empId, entry]) => {
+        if (!selectedEmployeeIds.has(Number(empId))) return;
         hours[empId] = entry.wage_rates && entry.wage_rates.length > 1
           ? {
               regular: entry.regular,
@@ -836,19 +879,20 @@ export function PayPeriodDetail({
       });
 
       // Include any manually-added employees who were missing from the import
-      const employee_ids = additionalEmployeeIds.size > 0
-        ? [...new Set([...payrollItems.map(pi => pi.employee_id), ...additionalEmployeeIds])]
-        : undefined;
+      const employee_ids = [...selectedEmployeeIds];
+      if (employee_ids.length === 0) throw new Error('Enter pay or add an employee before calculating this payroll.');
+      const selectedRecords = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([employeeId]) => selectedEmployeeIds.has(Number(employeeId))));
 
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
-        ...(Object.keys(bonusEdits).length > 0 ? { bonuses: bonusEdits } : {}),
-        ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
-        ...(Object.keys(tips).length > 0 ? { tips } : {}),
-        ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out } : {}),
-        ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions } : {}),
-        ...(Object.keys(payroll_field_inputs).length > 0 ? { payroll_field_inputs } : {}),
-        ...(employee_ids ? { employee_ids } : {}),
+        ...(Object.keys(bonusEdits).length > 0 ? { bonuses: selectedRecords(bonusEdits) } : {}),
+        ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides: selectedRecords(salary_overrides) } : {}),
+        ...(Object.keys(tips).length > 0 ? { tips: selectedRecords(tips) } : {}),
+        ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out: selectedRecords(tips_paid_out) } : {}),
+        ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions: selectedRecords(loan_deductions) } : {}),
+        ...(Object.keys(payroll_field_inputs).length > 0 ? { payroll_field_inputs: selectedRecords(payroll_field_inputs) } : {}),
+        employee_ids,
+        named_loan_payments,
       });
       setPayPeriod(response.pay_period);
       setPayrollItems(response.pay_period.payroll_items || []);
@@ -881,6 +925,20 @@ export function PayPeriodDetail({
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handleRefreshSetup = async () => {
+    if (!payPeriod) return;
+    setProcessing(true);
+    setError(null);
+    try {
+      const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
+      setRefreshSetupOpen(false);
+      await loadPayPeriod(payPeriod.id, true);
+      setCalculationFailures(response.results.errors);
+      setCalculationNotice('Current setup applied to the saved employees and inputs. Review the recalculated payroll and obtain approval again.');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to refresh payroll setup.'); }
+    finally { setProcessing(false); }
   };
 
   const handleAdoptConfirmedWorkweek = async (): Promise<void> => {
@@ -1203,7 +1261,7 @@ export function PayPeriodDetail({
       || currentDraft.mode !== calculatedMode
       || !payrollFieldAmountsEqual(currentDraft.amount, calculatedAmount);
   });
-  const hasPendingCalculationChanges = isCalculated && (
+  const hasStagedWorksheetChanges = (
     additionalEmployeeIds.size > 0
     || !hoursRecordsEqual(hoursMap, calculatedHoursMap)
     || !numericRecordsEqual(salaryOverrideMap, calculatedUiState.salaryOverrides)
@@ -1211,8 +1269,15 @@ export function PayPeriodDetail({
     || !tipRecordsEqual(tipsMap, calculatedUiState.tips)
     || !numericRecordsEqual(tipsPaidOutMap, calculatedUiState.tipsPaidOut)
     || !numericRecordsEqual(loansMap, calculatedUiState.loans)
+    || namedLoanOptions.some(option => {
+      const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
+      return draft && (draft.mode !== option.mode || (draft.mode === 'override'
+        && Math.abs(toNumber(draft.amount) - toNumber(option.requested_amount)) > 0.005));
+    })
     || payrollFieldDraftsChanged
   );
+  const hasPendingCalculationChanges = isCalculated && hasStagedWorksheetChanges;
+  const standaloneLoanConflicts = namedLoanOptions.filter(option => option.eligible && toNumber(loansMap[String(option.employee_id)]) > 0);
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;
@@ -1517,6 +1582,23 @@ export function PayPeriodDetail({
           )}
         </>
       )}
+      {canEditPayPeriod && payrollItems.length > 0 && (
+        <div>
+          <Button
+            variant="outline"
+            disabled={processing || hasStagedWorksheetChanges}
+            title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}
+            onClick={() => {
+              setRefreshRecurring(payPeriod.includes_recurring_items);
+              setRefreshBaseSalary(payPeriod.includes_base_salary);
+              setRefreshSetupOpen(true);
+            }}
+          >
+            Refresh current setup
+          </Button>
+          {hasStagedWorksheetChanges && <p className="mt-1 text-xs text-slate-600">Calculate your worksheet edits first, then refresh current setup.</p>}
+        </div>
+      )}
       {isDraft && (
         <>
           <Button onClick={handleRunPayroll} disabled={processing}>
@@ -1531,7 +1613,7 @@ export function PayPeriodDetail({
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            disabled={processing || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
             title={calculationFailures.length > 0
               ? 'Resolve the employee calculation errors and calculate again before approval'
               : payrollItems.length === 0
@@ -1945,6 +2027,73 @@ export function PayPeriodDetail({
           </div>
         </Card>
 
+        {refreshSetupOpen && (
+          <Dialog open onOpenChange={open => { if (!processing) setRefreshSetupOpen(open); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Refresh current setup</DialogTitle>
+                <DialogDescription>
+                  Apply current employee and client setup to the saved payroll. Hours, selected employees,
+                  and manual overrides are preserved. Existing approval and client review will be withdrawn;
+                  review and approve the new calculation.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <label className="flex min-h-11 items-center gap-3">
+                  <input type="checkbox" checked={refreshRecurring} onChange={event => setRefreshRecurring(event.target.checked)} disabled={processing} />
+                  Include recurring employee setup
+                </label>
+                <p className="text-xs text-slate-600">
+                  Includes configured deductions and recurring additions. For only one saved loan,
+                  use Linked loan repayments in the worksheet instead.
+                </p>
+                <label className="flex min-h-11 items-center gap-3">
+                  <input type="checkbox" checked={refreshBaseSalary} onChange={event => setRefreshBaseSalary(event.target.checked)} disabled={processing} />
+                  Include ordinary base salary
+                </label>
+                {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" disabled={processing} onClick={() => setRefreshSetupOpen(false)}>Cancel</Button>
+                <Button disabled={processing} onClick={handleRefreshSetup}>{processing ? 'Refreshing…' : 'Refresh and recalculate'}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {standaloneLoanConflicts.length > 0 && canEditPayPeriod && (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Use Linked loan repayments to credit the saved loan balance. Clear the standalone one-time deduction
+            for {Array.from(new Set(standaloneLoanConflicts.map(option => {
+              const employee = employees.find(candidate => candidate.id === option.employee_id);
+              return employee ? `${employee.first_name} ${employee.last_name}` : `employee #${option.employee_id}`;
+            }))).join(', ')} before calculating and approving.
+          </div>
+        )}
+        {(isDraft || isCalculated) && namedLoanOptions.length > 0 && (
+          <section className="hidden space-y-3 md:block" aria-label="Linked loan repayments">
+            <h3 className="font-semibold text-slate-900">Linked loan repayments</h3>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {employees.filter(employee => namedLoanOptions.some(option => option.employee_id === employee.id)
+                && (isDraft || payrollItems.some(item => item.employee_id === employee.id) || additionalEmployeeIds.has(employee.id)))
+                .map(employee => (
+                  <div key={employee.id}>
+                    <p className="mb-1 text-sm font-semibold">{employee.first_name} {employee.last_name}</p>
+                    <NamedLoanInputs
+                      options={namedLoanOptions.filter(option => option.employee_id === employee.id)}
+                      drafts={namedLoanDrafts[String(employee.id)] || {}}
+                      includesRecurring={payPeriod.includes_recurring_items}
+                      onChange={(loanId, draft) => setNamedLoanDrafts(previous => ({
+                        ...previous,
+                        [String(employee.id)]: { ...previous[String(employee.id)], [String(loanId)]: draft },
+                      }))}
+                    />
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
+
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
@@ -2318,7 +2467,8 @@ export function PayPeriodDetail({
                   </label>
                   {payrollItemByEmployeeId.get(emp.id)?.imported_bonus != null && <p className="text-xs text-neutral-500">Workbook bonus: {formatCurrency(toNumber(payrollItemByEmployeeId.get(emp.id)?.imported_bonus))}{bonusEdits[String(emp.id)] != null && ' · Manual amount retained'}</p>}
                   {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && <p className="text-xs text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>}
-                  {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">One-time loan deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
+                  <NamedLoanInputs options={namedLoanOptions.filter(option => option.employee_id === emp.id)} drafts={namedLoanDrafts[String(emp.id)] || {}} includesRecurring={payPeriod.includes_recurring_items} onChange={(loanId, draft) => setNamedLoanDrafts(previous => ({ ...previous, [String(emp.id)]: { ...previous[String(emp.id)], [String(loanId)]: draft } }))} />
+                  {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Standalone one-time deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
                   {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
@@ -2341,7 +2491,7 @@ export function PayPeriodDetail({
                     <TableHead className={`w-[180px] min-w-[180px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Bonus this payroll</TableHead>
                     {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Standalone deduction</TableHead>}
                     {showPayrollFields && worksheetPayrollFields.map((field) => (
                       <TableHead
                         key={`worksheet-field-${field.id}`}
@@ -2619,7 +2769,7 @@ export function PayPeriodDetail({
                               fixedDecimalsOnBlur={2}
                             />
                           </div>
-                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">Separate one-time deduction. Configured loan columns also apply.</p>
+                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">Standalone deduction. Does not credit a saved loan.</p>
                         </TableCell>
                         )}
                         {showPayrollFields && worksheetPayrollFields.map((field) => {
@@ -2844,7 +2994,7 @@ export function PayPeriodDetail({
                     ))}
                     {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
-                    {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Standalone deduction</TableHead>}
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
