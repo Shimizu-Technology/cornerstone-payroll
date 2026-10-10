@@ -240,7 +240,7 @@ export function PayrollItemDetail(): ReactElement {
         )}
 
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
-        {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} />}
+        {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} provenance={disclosure?.w4_provenance} />}
         {payrollItem.employment_type !== 'contractor' && <PaycheckRetirementContext item={payrollItem} />}
 
         <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
