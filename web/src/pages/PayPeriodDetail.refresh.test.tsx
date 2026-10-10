@@ -317,11 +317,11 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
 });
 
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown) {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
-  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15, loan_deduction: 0 };
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: 0, loan_payment: loanPayment };
   const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item], ...(comparisonResponse ? { cycle: 'regular' } : {}) } as unknown as PayPeriod;
   const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: 0, eligible: true, mode: 'default' }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
@@ -450,4 +450,14 @@ it('submits a single captured wage bucket with updated hours instead of clearing
   fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 10 }]);
+});
+
+
+it('labels the saved loan total as loan deductions while keeping standalone entry distinct', async () => {
+  await renderLoanWorksheet('calculated', undefined, 300);
+  const header = screen.getByRole('columnheader', { name: 'Loan deductions' });
+  expect(header.title).toBe('Calculated total of linked loan repayments and any standalone loan deduction.');
+  expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '+ Tips & Deductions' }));
+  expect(await screen.findByRole('columnheader', { name: 'Standalone deduction' })).toBeTruthy();
 });
