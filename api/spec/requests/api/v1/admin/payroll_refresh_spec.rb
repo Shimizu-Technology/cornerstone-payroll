@@ -150,6 +150,54 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     expect(copied.wage_rate_hours.map { |entry| entry["rate"] }).to eq([ 12.0, 20.0 ])
   end
 
+  it "rejects invented legacy rates and stripped original IDs through calculation and item editing" do
+    rate = employee.employee_wage_rates.create!(label: "Captured", rate: 12)
+    bucket = { "employee_wage_rate_id" => rate.id, "label" => "Captured", "rate" => 12, "regular_hours" => 80 }
+    item.update!(wage_rate_hours: [ bucket ])
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction = PayPeriod.find(response.parsed_body.dig("correction_run", "id"))
+    copied = correction.payroll_items.sole
+    before = copied.attributes
+    controller = Api::V1::Admin::PayrollItemsController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+
+    [ bucket.except("employee_wage_rate_id"), bucket.except("employee_wage_rate_id").merge("label" => "Injected", "rate" => 999) ].each do |input|
+      post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+        employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ input ] } }
+      }, as: :json
+      expect(response.parsed_body.dig("results", "errors").size).to eq(1)
+      expect(copied.reload.attributes).to eq(before)
+      patch "/api/v1/admin/pay_periods/#{correction.id}/payroll_items/#{copied.id}",
+        params: { payroll_item: { wage_rate_hours: [ input ] }, auto_calculate: true }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(copied.reload.attributes).to eq(before)
+    end
+  end
+
+  it "recalculates legitimate original legacy buckets while rejecting requested rate changes" do
+    bucket = { "label" => "Legacy", "rate" => 12, "regular_hours" => 80, "is_primary" => true }
+    item.update!(wage_rate_hours: [ bucket ])
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction = PayPeriod.find(response.parsed_body.dig("correction_run", "id"))
+    post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ bucket.merge("regular_hours" => 40) ] } }
+    }, as: :json
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    copied = correction.payroll_items.sole
+    expect(copied.reload.gross_pay).to eq(480.to_d)
+    post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ bucket.merge("rate" => 99) ] } }
+    }, as: :json
+    expect(response.parsed_body.dig("results", "errors").sole["error"]).to include("reviewed wage-rate correction")
+    expect(copied.reload.gross_pay).to eq(480.to_d)
+    expect(item.reload.wage_rate_hours.sole["rate"]).to eq(12.0)
+  end
+
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
     period.update!(status: "calculated")
     package = PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
