@@ -74,7 +74,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="font-semibold text-neutral-900">Reported-payment holds</h2>
         <p className="mt-1 max-w-3xl text-sm text-neutral-600">Use this when an owner reports payment but check evidence is pending. A hold prevents repayment; it does not verify payment. Match the actual payroll item, check, amount, and delivery date through historical review.</p></div>
-      <Button type="button" variant="outline" size="sm" disabled={loading || busy} onClick={() => void load()}>Refresh payment evidence</Button>
+      <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" disabled={loading || busy} onClick={() => void load()}>Refresh payment evidence</Button>
     </div>
     {loading && <p role="status" className="text-sm">Loading payment evidence…</p>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
@@ -87,7 +87,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
             <p>Payment reported; evidence pending · source entry {hold.source_time_entry_id}</p>
             <p className="mt-1 whitespace-pre-wrap">{hold.reason}</p>
             {hold.source_changed && <p className="mt-1 font-medium">Source changed after this hold. Review identity, date, and hours before routing.</p>}
-          </div><Button type="button" variant="outline" size="sm" disabled={busy || loading} onClick={() => { setRetracting(hold); setEntryId(''); setReason(''); setNotice(''); }}>Retract hold</Button></div>
+          </div><Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" disabled={busy || loading} onClick={() => { setRetracting(hold); setEntryId(''); setReason(''); setNotice(''); }}>Retract hold</Button></div>
         </li>)}
       </ul>
       {review.payment_attestations.length === 0 && <p className="text-sm text-neutral-600">No pending reported-payment holds for this work period.</p>}
@@ -102,8 +102,8 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
         {retracting && !currentHold && <p role="alert" className="text-sm text-warning-900">This hold is no longer available. Cancel retraction and review the current evidence.</p>}
         <label className="block text-sm font-medium" htmlFor={`payment-evidence-reason-${payPeriodId}`}>{retracting ? 'Retraction reason' : 'Reporter and pending payment evidence'}</label>
         <Textarea id={`payment-evidence-reason-${payPeriodId}`} value={reason} onChange={event => setReason(event.target.value)} disabled={busy || loading} required minLength={20} rows={3} placeholder={retracting ? 'Explain why the payment report is being withdrawn (at least 20 characters)' : 'Who reported payment, what they reported, and which check or delivery evidence is still missing (at least 20 characters)'} />
-        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || loading || reason.trim().length < 20 || (retracting ? !currentHold : !selectedEntry)}>{busy ? 'Saving…' : retracting ? 'Confirm retraction' : 'Record reported-payment hold'}</Button>
-          {retracting && <Button type="button" variant="outline" disabled={busy} onClick={() => { setRetracting(null); setReason(''); }}>Cancel retraction</Button>}</div>
+        <div className="flex flex-wrap gap-2"><Button className="max-sm:min-h-[44px]" type="submit" disabled={busy || loading || reason.trim().length < 20 || (retracting ? !currentHold : !selectedEntry)}>{busy ? 'Saving…' : retracting ? 'Confirm retraction' : 'Record reported-payment hold'}</Button>
+          {retracting && <Button className="max-sm:min-h-[44px]" type="button" variant="outline" disabled={busy} onClick={() => { setRetracting(null); setReason(''); }}>Cancel retraction</Button>}</div>
       </form>
     </>}
   </CardContent></Card>;

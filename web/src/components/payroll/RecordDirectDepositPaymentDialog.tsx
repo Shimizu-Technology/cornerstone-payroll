@@ -62,9 +62,9 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
         <span>I verified this transfer completed at the bank. Recording it will mark any linked time tracking hours paid.</span>
       </label>
       {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button onClick={() => void submit()} disabled={saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button className="max-sm:min-h-[44px]" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button className="max-sm:min-h-[44px]" onClick={() => void submit()} disabled={saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;
