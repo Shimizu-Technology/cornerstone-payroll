@@ -591,7 +591,7 @@ export function PayPeriodDetail({
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [loadPayPeriod, payRunId, setError]);
+  }, [companyId, loadPayPeriod, payRunId, setError]);
 
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) return;
@@ -1218,6 +1218,8 @@ export function PayPeriodDetail({
       };
     });
   };
+
+  const correctionRouteGeneration = commitRouteGenerationRef.current;
 
   if (loading) {
     return <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />;
@@ -3834,10 +3836,14 @@ export function PayPeriodDetail({
                 payPeriod={payPeriod}
                 returnTo={returnTo}
                 onPayPeriodChange={(updated) => {
-                  setPayPeriod(updated);
-                  if (updated.payroll_items) {
-                    setPayrollItems(updated.payroll_items);
-                  }
+                  if (updated.id !== payRunId || updated.company_id !== payPeriod.company_id ||
+                      correctionRouteGeneration !== commitRouteGenerationRef.current) return;
+                  setPayPeriod(current => current?.id === updated.id ? {
+                    ...current, ...updated, payroll_items: updated.payroll_items ?? current.payroll_items,
+                  } : current);
+                  if (updated.payroll_items) setPayrollItems(updated.payroll_items);
+                  setCheckPrintRefreshToken(token => token + 1);
+                  void loadPayPeriod(updated.id, true);
                 }}
               />
             </div>
