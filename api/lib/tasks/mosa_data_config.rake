@@ -78,7 +78,7 @@ namespace :mosa do
         { first_name: "Kaya", middle_name: "Mari", last_name: "Tubiera Dunn", type: "hourly", rate: 9.25, filing: "single" },
         { first_name: "Regina", last_name: "Umoumoch", type: "hourly", rate: 16.00, filing: "single" },
         { first_name: "Elain Diane", last_name: "Umwech", type: "hourly", rate: 15.50, filing: "single" },
-        { first_name: "Johnny", middle_name: "Jr.", last_name: "Worswick", type: "hourly", rate: 11.00, filing: "single" },
+        { first_name: "Johnny", middle_name: "Jr.", last_name: "Worswick", type: "hourly", rate: 11.00, filing: "single" }
       ]
 
       emp_map = {}
@@ -121,7 +121,7 @@ namespace :mosa do
         "Jared Quichocho" => 39.69,
         "Madela Severin" => 11.37,
         "Mayleen Severin" => 14.52,
-        "Ryan Shisler" => 10.18,
+        "Ryan Shisler" => 10.18
       }
 
       additional_wh.each do |name, amount|
@@ -140,20 +140,20 @@ namespace :mosa do
       puts "\n--- Configuring Roth 401(k) ---"
 
       roth_configs = {
-        "Zachary Camacho"   => [0.04, 0.04],
-        "Chad Cruz"         => [0.04, 0.04],
-        "Dennis Doctor"     => [0.10, 0.04],
-        "Nena Joe"          => [0.04, 0.04],
-        "Verna John"        => [0.05, 0.04],
-        "Heather Likiaksa"  => [0.10, 0.04],
-        "Iuver Likiaksa"    => [0.03, 0.03],
-        "Stephanie Likiaksa" => [0.03, 0.03],
-        "Addison Moyer"     => [0.06, 0.04],
-        "Charles Phillip"   => [0.05, 0.04],
-        "Emma Pleadwell"    => [0.04, 0.04],
-        "Madela Severin"    => [0.04, 0.04],
-        "Mayleen Severin"   => [0.04, 0.04],
-        "Ryan Shisler"      => [0.04, 0.04],
+        "Zachary Camacho"   => [ 0.04, 0.04 ],
+        "Chad Cruz"         => [ 0.04, 0.04 ],
+        "Dennis Doctor"     => [ 0.10, 0.04 ],
+        "Nena Joe"          => [ 0.04, 0.04 ],
+        "Verna John"        => [ 0.05, 0.04 ],
+        "Heather Likiaksa"  => [ 0.10, 0.04 ],
+        "Iuver Likiaksa"    => [ 0.03, 0.03 ],
+        "Stephanie Likiaksa" => [ 0.03, 0.03 ],
+        "Addison Moyer"     => [ 0.06, 0.04 ],
+        "Charles Phillip"   => [ 0.05, 0.04 ],
+        "Emma Pleadwell"    => [ 0.04, 0.04 ],
+        "Madela Severin"    => [ 0.04, 0.04 ],
+        "Mayleen Severin"   => [ 0.04, 0.04 ],
+        "Ryan Shisler"      => [ 0.04, 0.04 ]
       }
 
       roth_configs.each do |name, (roth_rate, er_match)|
@@ -167,7 +167,7 @@ namespace :mosa do
       end
 
       # Owner employer match (pre-tax 401k match, handled via DeductionType)
-      ["Monique Amani", "Sara Doctor"].each do |name|
+      [ "Monique Amani", "Sara Doctor" ].each do |name|
         emp = emp_map[name]
         emp&.update!(employer_retirement_match_rate: 0.04)
         puts "  ER_MATCH: #{name.ljust(25)} 4% (pre-tax 401k)"
@@ -190,7 +190,7 @@ namespace :mosa do
         { name: "401(k) Pre-Tax",        category: "pre_tax",  sub_category: "retirement" },
         { name: "Loan (EH)",             category: "post_tax", sub_category: "loan" },
         { name: "Loan (Nena Joe)",       category: "post_tax", sub_category: "loan" },
-        { name: "Loan (Douglas Phillip)", category: "post_tax", sub_category: "loan" },
+        { name: "Loan (Douglas Phillip)", category: "post_tax", sub_category: "loan" }
       ]
 
       dt_map = {}
@@ -215,7 +215,7 @@ namespace :mosa do
         "Heather Likiaksa" => 157.50, "Stephanie Likiaksa" => 157.50,
         "Billy Ray Pedro" => 157.50, "Johnny Worswick" => 157.50,
         "Addison Moyer" => 157.50,
-        "Douglas Phillip" => 112.50, "Mayleen Severin" => 112.50,
+        "Douglas Phillip" => 112.50, "Mayleen Severin" => 112.50
       }.each do |name, amount|
         emp = emp_map[name]
         next unless emp
@@ -244,7 +244,7 @@ namespace :mosa do
         "Madela Severin" => 376.50, "Mayleen Severin" => 138.90,
         "Dorleen Songeni" => 47.50, "Atsy Toreph" => 38.40,
         "Kaya Tubiera Dunn" => 11.00, "Elain Diane Umwech" => 28.50,
-        "Sara Doctor" => 40.00,
+        "Sara Doctor" => 40.00
       }
 
       loan_amounts.each do |name, amount|
@@ -270,7 +270,7 @@ namespace :mosa do
         { emp: "Douglas Phillip", dt: "Allotment",               amount: 482.08 },
         { emp: "Emma Pleadwell",  dt: "Auto Loan",               amount: 51.00 },
         { emp: "Verna John",      dt: "Case No. 2952492",        amount: 168.00 },
-        { emp: "Jared Quichocho", dt: "Remittance CS0018",       amount: 184.62 },
+        { emp: "Jared Quichocho", dt: "Remittance CS0018",       amount: 184.62 }
       ]
 
       named_deductions.each do |config|

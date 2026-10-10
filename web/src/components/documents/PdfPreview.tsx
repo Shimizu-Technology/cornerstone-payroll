@@ -19,47 +19,38 @@ function downloadPdf(artifact: PdfArtifact, url: string) {
   link.remove();
 }
 
-export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null; onClose: () => void }) {
-  const [urlState, setUrlState] = useState<{ artifact: PdfArtifact; url: string } | null>(null);
-  const url = urlState?.artifact === artifact ? urlState.url : null;
+export function PdfDocumentView({ blob, className }: { blob: Blob | null; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [documentState, setDocumentState] = useState<{ blob: Blob; document: PDFDocumentProxy } | null>(null);
+  const pdfDocument = documentState?.blob === blob ? documentState.document : null;
   const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [paintedPage, setPaintedPage] = useState<{ document: PDFDocumentProxy; pageNumber: number } | null>(null);
+  const pagePainted = paintedPage?.document === pdfDocument && paintedPage?.pageNumber === pageNumber;
   const [zoomed, setZoomed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!artifact) {
-      setUrlState(null);
-      return;
-    }
-    const objectUrl = URL.createObjectURL(artifact.blob);
-    setUrlState({ artifact, url: objectUrl });
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [artifact]);
-
-  useEffect(() => {
-    if (!artifact) {
-      setPdfDocument(null);
+    if (!blob) {
+      setDocumentState(null);
       return;
     }
 
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | null = null;
-    setPdfDocument(null);
+    setDocumentState(null);
     setPageNumber(1);
     setZoomed(false);
     setError(null);
     setLoading(true);
-    void artifact.blob.arrayBuffer().then((data) => {
+    void blob.arrayBuffer().then((data) => {
       if (cancelled) return;
       loadingTask = getDocument({ data: new Uint8Array(data) });
       return loadingTask.promise;
     }).then((pdf) => {
       if (!pdf) return;
       if (cancelled) return;
-      setPdfDocument(pdf);
+      setDocumentState({ blob, document: pdf });
     }).catch(() => {
       if (!cancelled) setError('This PDF could not be displayed. You can still download and open it in a PDF viewer.');
     }).finally(() => {
@@ -69,13 +60,14 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
       cancelled = true;
       if (loadingTask) void loadingTask.destroy();
     };
-  }, [artifact]);
+  }, [blob]);
 
   useEffect(() => {
     if (!pdfDocument || !canvasRef.current) return;
     let cancelled = false;
     let task: RenderTask | null = null;
     setRendering(true);
+    setPaintedPage(null);
     setError(null);
     void pdfDocument.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
@@ -86,7 +78,10 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
       task = page.render({ canvas, viewport });
       return task.promise;
     }).then(() => {
-      if (!cancelled) setRendering(false);
+      if (!cancelled) {
+        setPaintedPage({ document: pdfDocument, pageNumber });
+        setRendering(false);
+      }
     }).catch(() => {
       if (!cancelled) {
         setRendering(false);
@@ -98,6 +93,39 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
       task?.cancel();
     };
   }, [pdfDocument, pageNumber]);
+
+  return (
+    <div className={`flex min-h-0 flex-col bg-slate-100 ${className || 'flex-1'}`}>
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-center gap-4 border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
+        <Button variant="ghost" size="sm" className="max-sm:min-h-[44px]" disabled={!pdfDocument || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous</Button>
+        <span role="status">{pdfDocument ? `Page ${pageNumber} of ${pdfDocument.numPages}` : loading ? 'Loading PDF…' : 'PDF preview'}</span>
+        <Button variant="ghost" size="sm" className="max-sm:min-h-[44px]" disabled={!pdfDocument || pageNumber >= pdfDocument.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next</Button>
+        <Button variant="ghost" size="sm" className="max-sm:min-h-[44px]" disabled={!pdfDocument} onClick={() => setZoomed((value) => !value)}>
+          <Search className="mr-2 h-4 w-4" />{zoomed ? 'Fit page' : 'Zoom in'}
+        </Button>
+      </div>
+      {error && <p role="alert" className="px-4 py-3 text-center text-sm text-red-700">{error}</p>}
+      <div className="min-h-0 flex-1 overflow-auto p-4 text-center sm:p-6">
+        {rendering && <p role="status" className="text-sm text-slate-600">Rendering page…</p>}
+        {loading && <p className="py-12 text-sm text-slate-600">Rendering PDF preview…</p>}
+        {pdfDocument && <canvas ref={canvasRef} aria-label={`Page ${pageNumber} preview`} aria-hidden={!pagePainted || rendering || Boolean(error)} style={{ visibility: pagePainted && !rendering && !error ? 'visible' : 'hidden' }} className={`mx-auto h-auto bg-white shadow-lg ${zoomed ? 'max-w-none' : 'max-w-full'}`} />}
+      </div>
+    </div>
+  );
+}
+
+export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null; onClose: () => void }) {
+  const [urlState, setUrlState] = useState<{ artifact: PdfArtifact; url: string } | null>(null);
+  const url = urlState?.artifact === artifact ? urlState.url : null;
+  useEffect(() => {
+    if (!artifact) {
+      setUrlState(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(artifact.blob);
+    setUrlState({ artifact, url: objectUrl });
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [artifact]);
 
   return (
     <Dialog open={Boolean(artifact)} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -117,21 +145,7 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
             </div>
           </div>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col bg-slate-100">
-          <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-center gap-4 border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
-            <Button variant="ghost" size="sm" disabled={!pdfDocument || pageNumber <= 1} onClick={() => setPageNumber((page) => page - 1)}>Previous</Button>
-            <span role="status">{pdfDocument ? `Page ${pageNumber} of ${pdfDocument.numPages}` : loading ? 'Loading PDF…' : 'PDF preview'}</span>
-            <Button variant="ghost" size="sm" disabled={!pdfDocument || pageNumber >= pdfDocument.numPages} onClick={() => setPageNumber((page) => page + 1)}>Next</Button>
-            <Button variant="ghost" size="sm" disabled={!pdfDocument} onClick={() => setZoomed((value) => !value)}>
-              <Search className="mr-2 h-4 w-4" />{zoomed ? 'Fit page' : 'Zoom in'}
-            </Button>
-          </div>
-          {error && <p role="alert" className="px-4 py-3 text-center text-sm text-red-700">{error}</p>}
-          <div className="min-h-0 flex-1 overflow-auto p-4 text-center sm:p-6">
-            {loading && <p className="py-12 text-sm text-slate-600">Rendering PDF preview…</p>}
-            {pdfDocument && <canvas ref={canvasRef} aria-label={`Page ${pageNumber} preview`} className={`mx-auto h-auto bg-white shadow-lg ${zoomed ? 'max-w-none' : 'max-w-full'} ${rendering ? 'opacity-50' : ''}`} />}
-          </div>
-        </div>
+        <PdfDocumentView blob={artifact?.blob || null} />
       </DialogContent>
     </Dialog>
   );

@@ -19,6 +19,10 @@ module TimeTracking
       AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
       AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries]) if acknowledgement_ids[:entries].any?
       results
+    ensure
+      @correction_coverage = nil
+      @ordinary_processed_payload = nil
+      @source_employees_by_id = nil
     end
 
     private
@@ -39,10 +43,13 @@ module TimeTracking
 
       @import.with_lock(requires_new: true) do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
+        @correction_coverage = CorrectionCoverage.new(@import, locked_snapshot: true)
+        @ordinary_processed_payload = nil
+        @source_employees_by_id = nil
         validate_preview_provenance!
         validate_negative_adjustment_acknowledgement!
 
-        rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
+        rows = Array(ordinary_processed_payload["rows"] || ordinary_processed_payload[:rows])
         mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
         employee_ids = rows.filter_map do |row|
           source_user_id = row["source_user_id"].to_s
@@ -171,6 +178,7 @@ module TimeTracking
           raise ActiveRecord::Rollback
         end
 
+        correction_coverage.verify_complete! if finalized_batch?
         @import.update!(
           status: "applied",
           applied_at: Time.current,
@@ -253,8 +261,16 @@ module TimeTracking
       end
     end
 
+    def correction_coverage
+      @correction_coverage || raise(ArgumentError, "Correction coverage requires the locked import")
+    end
+
+    def ordinary_processed_payload
+      @ordinary_processed_payload ||= finalized_batch? ? correction_coverage.processed_payload : @import.processed_payload
+    end
+
     def negative_adjustment_count
-      @import.processed_payload["negative_adjustment_count"].to_i
+      ordinary_processed_payload["negative_adjustment_count"].to_i
     end
 
     def finalized_batch?
@@ -666,7 +682,7 @@ module TimeTracking
     end
 
     def source_employee_for(row)
-      @source_employees_by_id ||= Array(@import.raw_payload["employees"]).index_by { |employee| employee.fetch("source_user_id").to_s }
+      @source_employees_by_id ||= correction_coverage.ordinary_employees.index_by { |employee| employee.fetch("source_user_id").to_s }
       @source_employees_by_id.fetch(row.fetch("source_user_id").to_s)
     end
 

@@ -29,7 +29,7 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     change_column_null :printer_profiles, :user_id, false
 
     # Old indexes / fk are scoped to company — replace with user-scoped ones.
-    if index_exists?(:printer_profiles, [:company_id, :name], name: "index_printer_profiles_on_company_id_and_name")
+    if index_exists?(:printer_profiles, [ :company_id, :name ], name: "index_printer_profiles_on_company_id_and_name")
       remove_index :printer_profiles, name: "index_printer_profiles_on_company_id_and_name"
     end
     if index_exists?(:printer_profiles, :company_id, name: "index_printer_profiles_one_default_per_company")
@@ -50,7 +50,7 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     # default-per-user index.
     dedupe_for_user_scoped_indexes!
 
-    add_index :printer_profiles, [:user_id, :name], unique: true,
+    add_index :printer_profiles, [ :user_id, :name ], unique: true,
               name: "index_printer_profiles_on_user_id_and_name"
     add_index :printer_profiles, :user_id, unique: true,
               where: "is_default = TRUE",
@@ -73,7 +73,7 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     execute "DELETE FROM printer_profiles WHERE company_id IS NULL"
     change_column_null :printer_profiles, :company_id, false
 
-    if index_exists?(:printer_profiles, [:user_id, :name], name: "index_printer_profiles_on_user_id_and_name")
+    if index_exists?(:printer_profiles, [ :user_id, :name ], name: "index_printer_profiles_on_user_id_and_name")
       remove_index :printer_profiles, name: "index_printer_profiles_on_user_id_and_name"
     end
     if index_exists?(:printer_profiles, :user_id, name: "index_printer_profiles_one_default_per_user")
@@ -92,7 +92,7 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     # raise `PG::UniqueViolation` and the entire rollback would fail.
     dedupe_for_company_scoped_indexes!
 
-    add_index :printer_profiles, [:company_id, :name], unique: true,
+    add_index :printer_profiles, [ :company_id, :name ], unique: true,
               name: "index_printer_profiles_on_company_id_and_name"
     add_index :printer_profiles, :company_id, unique: true,
               where: "is_default = TRUE",

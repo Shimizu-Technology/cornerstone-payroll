@@ -164,7 +164,22 @@ export interface PayPeriodPayrollFieldAssignment {
   skipped_reason?: string | null;
 }
 
+export interface NamedLoanOption {
+  employee_id: number;
+  loan_id: number;
+  name: string;
+  tracking_mode: LoanTrackingMode;
+  current_balance: number | null;
+  scheduled_amount: number;
+  eligible: boolean;
+  unavailable_reason?: string | null;
+  current_amount: number;
+  mode: 'default' | 'override';
+  requested_amount?: number | null;
+}
+
 export interface PayPeriodPayrollFieldInputs {
+  named_loan_options?: NamedLoanOption[];
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
   retained_manual_entries?: Array<{ employee_id: number; field_id: number | null; label: string; requested_amount: number; applied_amount: number; source: 'manual' | 'import' }>;
@@ -204,6 +219,7 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
   id: number;
   company_id: number;
   department_id?: number;
@@ -297,7 +313,7 @@ export interface Employee {
   updated_at: string;
 }
 
-export type EmployeeW4ElectionSource = 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
+export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
 
 export interface EmployeeW4Election {
   id: number;
@@ -538,6 +554,7 @@ export interface EmployeeClassificationTransition {
 }
 
 export interface EmployeeFormData {
+  w4_election_received?: boolean;
   first_name: string;
   middle_name?: string;
   last_name: string;
@@ -629,6 +646,17 @@ export interface PayDateCorrection {
   corrected_by_name?: string | null;
 }
 
+export interface SourceAccountingReceiptState {
+  verification_error?: string | null;
+  id: number;
+  event_id: string;
+  status: 'pending' | 'error' | 'confirmed';
+  queued_at: string | null;
+  confirmed_at: string | null;
+  error: string | null;
+  can_retry: boolean;
+}
+
 export interface AirePayrollRecord {
   id: number;
   source_name: string;
@@ -648,6 +676,23 @@ export interface AirePayrollRecord {
     cornerstone_overtime_hours: string;
     total_difference_hours: string;
   }>;
+  correction_dispositions?: Array<{
+    verification_status?: 'verified' | 'needs_review';
+    verification_error?: string | null;
+    id: number;
+    source_user_id: string;
+    source_time_entry_id: string;
+    line_key: string;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+    original_pay_period_id: number;
+    original_payroll_item_id: number;
+    corrective_pay_period_id: number;
+    corrective_payroll_item_id: number;
+    accounting_only: true;
+    source_receipt?: SourceAccountingReceiptState | null;
+  }>;
   payable_line_status?: {
     line_count: number;
     total_hours: number;
@@ -657,6 +702,7 @@ export interface AirePayrollRecord {
     payment_pending: AirePayableLineStatusBucket;
     paid: AirePayableLineStatusBucket;
     needs_attention: AirePayableLineStatusBucket;
+    accounting_corrections?: AirePayableLineStatusBucket;
     held: { entry_count: number; total_hours: number };
     synchronization: {
       pending_event_count: number;
@@ -1385,7 +1431,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
-  comparison_kind: 'previous_period' | 'training_benchmark';
+  comparison_kind: 'previous_period' | 'training_benchmark' | 'selected_employees';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;
@@ -1410,6 +1456,7 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  named_loan_payments?: Record<string, number>;
   id: number;
   pay_period_id?: number;
   employee_id: number;
@@ -1523,6 +1570,7 @@ export interface PayrollItem {
   effective_payment_delivery_method?: PaymentDeliveryMethod;
   payment_method_change?: PaymentMethodChangeEligibility;
   earnings_statement_eligible?: boolean;
+  payment_confirmation?: DirectDepositItem['payment_confirmation'];
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -1597,6 +1645,7 @@ export interface CorrectivePaycheckSnapshot {
 
 export interface CorrectivePaycheckPreview {
   original: CorrectivePaycheckSnapshot;
+  recorded?: CorrectivePaycheckSnapshot;
   corrected: CorrectivePaycheckSnapshot;
   deltas: Record<string, number>;
   meta: {
@@ -1604,6 +1653,8 @@ export interface CorrectivePaycheckPreview {
     original_payroll_item_id: number;
     employee_id: number;
     employee_name: string;
+    active_corrective_count?: number;
+    review_digest?: string;
     will_generate_check: boolean;
     is_zero_change: boolean;
   };
@@ -1816,7 +1867,17 @@ export interface CheckEvent {
   created_at: string;
 }
 
+export interface PaymentCancellationSync {
+  status: 'pending' | 'error' | 'acknowledged';
+  pending_count: number;
+  acknowledged_count: number;
+  oldest_pending_at: string | null;
+  errors: string[];
+  hours_reserved: boolean;
+}
+
 export interface CheckItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   pay_period_id: number;
   employee_id: number;
@@ -1850,6 +1911,7 @@ export interface PaymentMethodChangeEligibility {
 }
 
 export interface EarningsStatementItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   employee_id: number;
   employee_name: string;
@@ -1874,6 +1936,7 @@ export interface CheckListMeta {
 }
 
 export interface DirectDepositItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number; employee_id: number; employee_name: string; net_pay: number;
   payment_confirmation?: { settled_on: string; bank_reference: string; confirmed_at: string } | null;
 }

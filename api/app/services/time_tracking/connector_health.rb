@@ -21,7 +21,11 @@ module TimeTracking
           batch: delivery_summary(AirePayrollAcknowledgement.where(time_tracking_import_id: imports.select(:id))),
           entry: delivery_summary(AirePayrollEntryAcknowledgement.where(time_tracking_import_id: imports.select(:id))
             .joins(:payroll_item, :time_tracking_import).where(payroll_items: { company_id: source.company_id })
-            .where("payroll_items.pay_period_id = time_tracking_imports.pay_period_id"))
+            .where("payroll_items.pay_period_id = time_tracking_imports.pay_period_id")),
+          accounting_correction: delivery_summary(TimeTrackingCorrectionReceipt.joins(:time_tracking_correction_disposition)
+            .where(time_tracking_correction_dispositions: { time_tracking_import_id: imports.select(:id),
+              company_id: source.company_id, time_tracking_source_id: source.id }),
+            import_column: "time_tracking_correction_dispositions.time_tracking_import_id")
         },
         calendar: calendar_summary,
         latest_import_mapping_review: mapping_review,
@@ -40,7 +44,7 @@ module TimeTracking
         .where(pay_periods: { company_id: source.company_id })
     end
 
-    def delivery_summary(scope)
+    def delivery_summary(scope, import_column: :time_tracking_import_id)
       pending = scope.where(delivered_at: nil)
       failed = pending.where.not(last_error: [ nil, "" ])
       oldest = pending.minimum(:created_at)
@@ -49,7 +53,7 @@ module TimeTracking
         last_success_at: scope.maximum(:delivered_at),
         failure_record_updated_at: failed.maximum(:updated_at),
         oldest_pending_at: oldest, oldest_pending_age_seconds: age(oldest),
-        pay_period_ids: pay_period_links(imports.where(id: pending.select(:time_tracking_import_id)))
+        pay_period_ids: pay_period_links(imports.where(id: pending.select(import_column)))
       }
     end
 

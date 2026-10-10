@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PayrollReminderConfigsController < BaseController
-        before_action :require_manager_or_admin!, only: [:update, :test]
+        before_action :require_manager_or_admin!, only: [ :update, :test ]
 
         # GET /api/v1/admin/payroll_reminder_config
         def show

@@ -48,14 +48,14 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:time_tracking_entry_allocations, { check_events: :user }, employee: :department)
+                             .includes(:time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements, :time_tracking_manual_allocations, { check_events: :user }, employee: :department)
                              .left_outer_joins(:employee)
                              .reportable.with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
           statement_items = @pay_period.payroll_items.not_voided.reportable
-            .includes(:employee, :direct_deposit_payment_confirmation, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries)
+            .includes(:employee, :direct_deposit_payment_confirmation, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries, :check_events, :aire_payroll_entry_acknowledgements, :time_tracking_manual_allocations)
             .select { |item| EarningsStatementEligibility.printable?(item) }
             .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
           deposit_items = statement_items.select do |item|
@@ -66,6 +66,7 @@ module Api
             checks: loaded_items.map { |item| check_item_json(item) },
             direct_deposit_items: deposit_items.map do |item|
               { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f,
+                payment_cancellation_sync: PaymentCancellationSyncState.for(item),
                 payment_confirmation: item.direct_deposit_payment_confirmation && {
                   settled_on: item.direct_deposit_payment_confirmation.settled_on.iso8601,
                   bank_reference: item.direct_deposit_payment_confirmation.bank_reference,
@@ -77,7 +78,8 @@ module Api
                 id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name,
                 gross_pay: item.gross_pay.to_f, total_deductions: item.total_deductions.to_f,
                 net_pay: item.net_pay.to_f, payment_delivery_method: item.effective_payment_delivery_method,
-                statement_only: !item.net_pay.to_d.positive?
+                statement_only: !item.net_pay.to_d.positive?,
+                payment_cancellation_sync: PaymentCancellationSyncState.for(item)
               }
             end,
             meta: {
@@ -865,6 +867,7 @@ module Api
             gross_pay: item.gross_pay,
             check_status: item.check_status,
             reconciliation_status: CheckReconciliationStatus.for(item),
+            payment_cancellation_sync: PaymentCancellationSyncState.for(item),
             aire_linked: item.time_tracking_entry_allocations.any?,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,

@@ -249,7 +249,7 @@ RSpec.describe CheckGenerator do
       end
     end
 
-    [12.0, 1_000.0].each do |offset|
+    [ 12.0, 1_000.0 ].each do |offset|
       it "keeps the summary readable and within the right column with a #{offset} point offset" do
         company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
         summary_boxes = []

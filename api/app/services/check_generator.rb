@@ -35,7 +35,7 @@ class CheckGenerator
     check_face: {
       date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
       payee:        { x: 64.0,  y: 168.0, width: 320.0, font_size: 10.0 },
-      payee_address:{ x: 64.0,  y: 102.0, width: 240.0, font_size: 9.0 },
+      payee_address: { x: 64.0,  y: 102.0, width: 240.0, font_size: 9.0 },
       amount:       { x: 467.0, y: 182.0, width: 120.0, font_size: 10.0 },
       amount_words: { x: 52.0,  y: 136.0, width: 492.0, font_size: 9.0 },
       memo:         { x: 22.0,  y: 64.0,  width: 260.0, font_size: 7.5 },
@@ -205,7 +205,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   def render_document(voided: false, rehearsal_preview: false)
     Prawn::Document.new(
-      page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN
+      page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)
       draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
@@ -237,15 +237,15 @@ class CheckGenerator
 
     # ---- Date (top-right) — use per-item override if set ----
     effective_check_date = payroll_item.check_date || pay_period.pay_date
-    pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
+    pdf.bounding_box([ date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy ], width: date_cfg["width"].to_f) do
       pdf.font_size(date_cfg["font_size"].to_f) { pdf.text format_date(effective_check_date), align: :right }
     end
 
     # ---- Payee name (left) + amount (right) ----
-    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f, height: 18) do
+    pdf.bounding_box([ payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy ], width: payee_cfg["width"].to_f, height: 18) do
       pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.full_name }
     end
-    pdf.bounding_box([payee_address_cfg["x"].to_f + ox, sect_bot + payee_address_cfg["y"].to_f + oy], width: payee_address_cfg["width"].to_f, height: 32) do
+    pdf.bounding_box([ payee_address_cfg["x"].to_f + ox, sect_bot + payee_address_cfg["y"].to_f + oy ], width: payee_address_cfg["width"].to_f, height: 32) do
       address_lines = employee.full_address.to_s.split("\n").map(&:strip).reject(&:blank?).first(3)
       if address_lines.any?
         pdf.font_size(payee_address_cfg["font_size"].to_f) do
@@ -253,17 +253,17 @@ class CheckGenerator
         end
       end
     end
-    pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
+    pdf.bounding_box([ amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy ], width: amount_cfg["width"].to_f) do
       pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(payroll_item.net_pay), align: :right }
     end
 
     # ---- Amount in words ----
-    pdf.bounding_box([words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy], width: words_cfg["width"].to_f) do
+    pdf.bounding_box([ words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy ], width: words_cfg["width"].to_f) do
       pdf.font_size(words_cfg["font_size"].to_f) { pdf.text NumberToWords.convert(payroll_item.net_pay) }
     end
 
     # ---- Memo (bottom of check stock face) ----
-    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
+    pdf.bounding_box([ memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy ], width: memo_cfg["width"].to_f) do
       pdf.font_size(memo_cfg["font_size"].to_f) do
         pdf.text resolve_memo_text
       end
@@ -291,7 +291,7 @@ class CheckGenerator
     # ROW 1:  PAY (left)  |  TAXES (right)
     # ================================================================
     pdf.font_size(7) do
-      pdf.draw_text employee.full_name, at: [lx, row1_top], style: :bold
+      pdf.draw_text employee.full_name, at: [ lx, row1_top ], style: :bold
     end
 
     table_y1 = row1_top + stub_cfg["pay_table_y_offset"].to_f
@@ -300,7 +300,7 @@ class CheckGenerator
       x: lx, y: table_y1, w: left_w - 8,
       title: "PAY",
       columns: %w[Hours Rate Current YTD],
-      col_ratios: [0.28, 0.14, 0.14, 0.22, 0.22],
+      col_ratios: [ 0.28, 0.14, 0.14, 0.22, 0.22 ],
       rows: pay_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
@@ -311,7 +311,7 @@ class CheckGenerator
       x: rx, y: table_y1, w: right_w,
       title: "TAXES",
       columns: %w[Current YTD],
-      col_ratios: [0.46, 0.27, 0.27],
+      col_ratios: [ 0.46, 0.27, 0.27 ],
       rows: tax_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
@@ -327,7 +327,7 @@ class CheckGenerator
       x: lx, y: table_y2, w: left_w - 8,
       title: "OTHER PAY",
       columns: %w[Current YTD],
-      col_ratios: [0.46, 0.27, 0.27],
+      col_ratios: [ 0.46, 0.27, 0.27 ],
       rows: other_pay_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
@@ -338,7 +338,7 @@ class CheckGenerator
       x: rx, y: table_y2, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
-      col_ratios: [0.46, 0.27, 0.27],
+      col_ratios: [ 0.46, 0.27, 0.27 ],
       rows: deduction_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
@@ -368,9 +368,9 @@ class CheckGenerator
     # SUMMARY box (bordered)
     # Keep the summary inside the right column without making its table too
     # narrow to print monetary values. Legacy offsets may be negative or large.
-    requested_shift = [stub_cfg["summary_x_offset"].to_f, 0.0].max
-    maximum_shift = [right_w - MIN_SUMMARY_BOX_WIDTH, 0.0].max
-    summary_x = rx + [requested_shift, maximum_shift].min
+    requested_shift = [ stub_cfg["summary_x_offset"].to_f, 0.0 ].max
+    maximum_shift = [ right_w - MIN_SUMMARY_BOX_WIDTH, 0.0 ].max
+    summary_x = rx + [ requested_shift, maximum_shift ].min
     draw_summary_box(
       pdf,
       x: summary_x,
@@ -386,26 +386,26 @@ class CheckGenerator
   # Section table helper
   # -----------------------------------------------------------------------
   def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:, table_height:, padding_y:, padding_x:)
-    header = [{ content: title, font_style: :bold }] +
+    header = [ { content: title, font_style: :bold } ] +
       columns.map { |c| { content: c, font_style: :bold, align: :right } }
 
-    data = [header] + rows
+    data = [ header ] + rows
     col_widths = col_ratios.map { |r| w * r }
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
     rendered_height = 0.0
-    pdf.bounding_box([x, y], width: w) do
+    pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6.5) do
         table = pdf.table(data, column_widths: col_widths, cell_style: {
-          padding: [padding_y, padding_x], borders: [], size: 6.5, overflow: :shrink_to_fit
+          padding: [ padding_y, padding_x ], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
-          row(0).borders = [:bottom]
+          row(0).borders = [ :bottom ]
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1..-1).align = :right
           if has_total
-            row(last_idx).borders = [:top]
+            row(last_idx).borders = [ :top ]
             row(last_idx).border_color = "999999"
           end
         end
@@ -414,7 +414,7 @@ class CheckGenerator
     end
     rendered_height
   rescue Prawn::Errors::CannotFit
-    pdf.bounding_box([x, y], width: w) do
+    pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
     table_height
@@ -455,7 +455,7 @@ class CheckGenerator
     rows = []
 
     # Build FIT label with W-4 context
-    fit_parts = ["Federal Income Tax"]
+    fit_parts = [ "Federal Income Tax" ]
     w4_notes = []
     w4_notes << "Step2" if employee.w4_step2_multiple_jobs?
     w4_notes << "4a" if employee.w4_step4a_other_income.to_f > 0
@@ -467,12 +467,12 @@ class CheckGenerator
     elsif w4_notes.any?
       fit_parts << "(#{w4_notes.join(',')})"
     end
-    rows << [fit_parts.join(" "), fn(payroll_item.withholding_tax), fn(ytd[:fit])]
+    rows << [ fit_parts.join(" "), fn(payroll_item.withholding_tax), fn(ytd[:fit]) ]
 
-    rows << ["Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss])]
-    rows << ["Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med])]
+    rows << [ "Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss]) ]
+    rows << [ "Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med]) ]
     if payroll_item.additional_withholding.to_d.nonzero? || ytd[:addl_wh].to_d.nonzero?
-      rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])]
+      rows << [ "Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh]) ]
     end
 
     rows << [
@@ -548,7 +548,7 @@ class CheckGenerator
     non_overlapping_top = deductions_top - deductions_height - 6.0
     minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
 
-    [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
+    [ [ default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top ].min, minimum_top ].max
   end
 
   def details_block_y(sect_bot, other_pay_top, default_top, stub_cfg, other_pay_height)
@@ -567,10 +567,10 @@ class CheckGenerator
 
     pdf.stroke_color "333333"
     pdf.line_width 0.8
-    pdf.stroke_rectangle [x, y], w, box_h
+    pdf.stroke_rectangle [ x, y ], w, box_h
 
     inner_w = w - 6
-    cw = [inner_w * 0.38, inner_w * 0.31, inner_w * 0.31]
+    cw = [ inner_w * 0.38, inner_w * 0.31, inner_w * 0.31 ]
 
     header = [
       { content: "SUMMARY", font_style: :bold },
@@ -579,19 +579,19 @@ class CheckGenerator
     ]
 
     data_rows = [
-      ["Total Pay", fd(payroll_item.gross_pay), fd(pay_ytd_total)],
-      ["Taxes", fd(cur_taxes), fd(ytd[:taxes])],
-      ["Deductions", fd(cur_deds), fd(ytd_visible_deds)]
+      [ "Total Pay", fd(payroll_item.gross_pay), fd(pay_ytd_total) ],
+      [ "Taxes", fd(cur_taxes), fd(ytd[:taxes]) ],
+      [ "Deductions", fd(cur_deds), fd(ytd_visible_deds) ]
     ]
 
-    data = [header] + data_rows
+    data = [ header ] + data_rows
 
-    pdf.bounding_box([x + 3, y - 3], width: inner_w) do
+    pdf.bounding_box([ x + 3, y - 3 ], width: inner_w) do
       pdf.font_size(6.5) do
         pdf.table(data, column_widths: cw, cell_style: {
-          padding: [stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f], borders: [], size: 6.5
+          padding: [ stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f ], borders: [], size: 6.5
         }) do
-          row(0).borders = [:bottom]
+          row(0).borders = [ :bottom ]
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1..2).align = :right
@@ -604,11 +604,11 @@ class CheckGenerator
     net_y = y - box_h - 8
     amount_text = fd(payroll_item.net_pay)
     pdf.font_size(7) do
-      pdf.draw_text "NET PAY:", at: [x + 3, net_y], style: :bold
+      pdf.draw_text "NET PAY:", at: [ x + 3, net_y ], style: :bold
     end
     pdf.font_size(9) do
       amount_w = pdf.width_of(amount_text, style: :bold)
-      pdf.draw_text amount_text, at: [x + w - amount_w - 3, net_y], style: :bold
+      pdf.draw_text amount_text, at: [ x + w - amount_w - 3, net_y ], style: :bold
     end
   end
 
@@ -622,8 +622,8 @@ class CheckGenerator
       pdf.fill_color "FFCCCC"
       pdf.transparent(0.25) do
         pdf.font_size(90) do
-          pdf.rotate(30, origin: [cx, cy]) do
-            pdf.draw_text "VOID", at: [cx - 140, cy - 30], style: :bold
+          pdf.rotate(30, origin: [ cx, cy ]) do
+            pdf.draw_text "VOID", at: [ cx - 140, cy - 30 ], style: :bold
           end
         end
       end
@@ -636,16 +636,16 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   def render_alignment_test
     Prawn::Document.new(
-      page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN
+      page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_perforations(pdf)
       stub_cfg = layout_section(:stub)
-      [[check_y, "CHECK FACE"], [stub1_y, "STUB 1"], [stub2_y, "STUB 2"]].each do |sy, label|
+      [ [ check_y, "CHECK FACE" ], [ stub1_y, "STUB 1" ], [ stub2_y, "STUB 2" ] ].each do |sy, label|
         st = sy + SECTION_HEIGHT
         pdf.stroke_color "0000FF"
         pdf.line_width 0.5
-        pdf.stroke_rectangle [M + ox, st - 4 + oy], PAGE_WIDTH - M * 2, SECTION_HEIGHT - 8
-        pdf.bounding_box([M + 4 + ox, st - 8 + oy], width: PAGE_WIDTH - M * 2 - 8) do
+        pdf.stroke_rectangle [ M + ox, st - 4 + oy ], PAGE_WIDTH - M * 2, SECTION_HEIGHT - 8
+        pdf.bounding_box([ M + 4 + ox, st - 8 + oy ], width: PAGE_WIDTH - M * 2 - 8) do
           pdf.font_size(10) { pdf.text label, style: :bold, color: "0000AA", align: :center }
         end
       end
@@ -658,7 +658,7 @@ class CheckGenerator
           label: "check.#{field}"
         )
       end
-      [stub1_y, stub2_y].each_with_index do |sect_bot, idx|
+      [ stub1_y, stub2_y ].each_with_index do |sect_bot, idx|
         %w[row1_y row2_y row3_y].each_with_index do |row_key, row_idx|
           draw_alignment_marker(
             pdf,
@@ -668,7 +668,7 @@ class CheckGenerator
           )
         end
       end
-      pdf.bounding_box([0, PAGE_HEIGHT - 4], width: PAGE_WIDTH) do
+      pdf.bounding_box([ 0, PAGE_HEIGHT - 4 ], width: PAGE_WIDTH) do
         pdf.font_size(7) do
           pdf.text "ALIGNMENT TEST – Print on plain paper at Actual Size / 100% (never Fit or Shrink).", align: :center, color: "CC0000"
         end
@@ -776,9 +776,9 @@ class CheckGenerator
       pdf.stroke_color "CC0000"
       pdf.fill_color "CC0000"
       pdf.line_width 0.4
-      pdf.stroke_line [x - 6, y], [x + 6, y]
-      pdf.stroke_line [x, y - 6], [x, y + 6]
-      pdf.font_size(6) { pdf.draw_text label, at: [x + 8, y + 2] }
+      pdf.stroke_line [ x - 6, y ], [ x + 6, y ]
+      pdf.stroke_line [ x, y - 6 ], [ x, y + 6 ]
+      pdf.font_size(6) { pdf.draw_text label, at: [ x + 8, y + 2 ] }
     end
     pdf.fill_color "000000"
     pdf.stroke_color "000000"

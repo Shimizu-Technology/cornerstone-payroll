@@ -182,7 +182,7 @@ module Api
 
         def calculate_with_timekeeping!(payroll_item)
           PayrollItem.transaction(requires_new: true) do
-            PayrollTimeAllocationService.call!(payroll_item: payroll_item)
+            PayrollTimeAllocationService.call!(payroll_item: payroll_item) unless payroll_item.timekeeping_source == "correction_reference"
             payroll_item.calculate!
           end
         end
@@ -401,6 +401,12 @@ module Api
           }
 
           if detailed
+            confirmation = item.direct_deposit_payment_confirmation
+            json[:payment_confirmation] = confirmation && {
+              settled_on: confirmation.settled_on.iso8601,
+              bank_reference: confirmation.bank_reference,
+              confirmed_at: confirmation.created_at.iso8601
+            }
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             # Include full YTD breakdown
             json[:ytd] = {
@@ -417,7 +423,7 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
-          payroll_item.wage_rate_hours = wage_rate_hours
+          payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
           payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
           payroll_item.overtime_hours = entries.sum { |entry| entry["overtime_hours"].to_f }

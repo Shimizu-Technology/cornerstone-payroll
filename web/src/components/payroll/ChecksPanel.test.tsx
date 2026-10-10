@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CheckItem, EarningsStatementItem, PayPeriod } from '@/types';
+import type { CheckItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { ChecksPanel } from './ChecksPanel';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 
@@ -253,4 +253,140 @@ describe('ChecksPanel earnings statements', () => {
     expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
   });
 
+});
+
+
+describe('ChecksPanel paper status scope', () => {
+  const noPaperMeta = { ...meta, total: 0, unprinted: 0, prepared: 0, printed: 0, delivered: 0, voided: 0 };
+  const bankConfirmation = { settled_on: '2026-11-22', bank_reference: 'SYNTHETIC-P01-BANK-20261122-4H', confirmed_at: '2026-11-22T07:02:00Z' };
+  const deposit = { id: depositStatement.id, employee_id: depositStatement.employee_id, employee_name: depositStatement.employee_name, net_pay: depositStatement.net_pay };
+  const countLabel = (count: number, label: string) => (_: string, element: Element | null) =>
+    Boolean(element?.tagName === 'SPAN' && element.textContent === `${count} ${label}`);
+
+  beforeEach(() => { apiMocks.list.mockReset(); });
+  afterEach(cleanup);
+
+  it.each([false, true])('omits paper status pills for DD-only payroll, confirmed=%s', async (confirmed) => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [{ ...deposit, payment_confirmation: confirmed ? bankConfirmation : null }], earnings_statement_items: [depositStatement], meta: { ...noPaperMeta, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'not prepared'))).toBeNull();
+    expect(screen.getByText(countLabel(0, 'paper checks'))).toBeTruthy();
+    expect(screen.getByText(countLabel(1, 'direct-deposit stubs'))).toBeTruthy();
+    if (confirmed) {
+      expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
+    } else {
+      expect(screen.getByRole('button', { name: 'Confirm bank payment' })).toBeTruthy();
+    }
+  });
+
+  it('scopes issued counts to the paper item in a mixed confirmed-bank run', async () => {
+    const delivered = { ...check, check_status: 'delivered' as const };
+    apiMocks.list.mockResolvedValue({ checks: [delivered], direct_deposit_items: [{ ...deposit, payment_confirmation: bankConfirmation }], earnings_statement_items: [paperStatement, depositStatement], meta: { ...meta, prepared: 0, delivered: 1, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    expect(within(group).getByText('Paper check status')).toBeTruthy();
+    expect(within(group).getByText(countLabel(1, 'issued'))).toBeTruthy();
+    expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+    expect(within(group).queryByText(/Bank paid/)).toBeNull();
+  });
+
+  it('preserves every supplied paper status count including voided history', async () => {
+    const statuses = ['unprinted', 'prepared', 'printed', 'delivered', 'voided'] as const;
+    const paperChecks = statuses.map((status, index) => ({ ...check, id: 42 + index, employee_name: `Paper Employee ${index}`, check_number: String(8101 + index), check_status: status, voided: status === 'voided' }));
+    apiMocks.list.mockResolvedValue({ checks: paperChecks, direct_deposit_items: [], earnings_statement_items: [], meta: { ...meta, total: 5, unprinted: 1, prepared: 1, printed: 1, delivered: 1, voided: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(5, 'paper checks'));
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    for (const label of ['not prepared', 'prepared', 'printed', 'issued', 'voided']) {
+      expect(within(group).getByText(countLabel(1, label))).toBeTruthy();
+    }
+  });
+
+  it('omits irrelevant paper status pills for an empty run', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [], meta: noPaperMeta });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(0, 'paper checks'));
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+  });
+});
+
+const pendingCancellation = { status: 'pending' as const, pending_count: 2, acknowledged_count: 1,
+  oldest_pending_at: '2026-10-08T01:00:00Z', errors: [], hours_reserved: true };
+
+function renderCancellationStatement(state: PaymentCancellationSync = pendingCancellation, confirmed = false) {
+  const item = { ...depositStatement, payment_cancellation_sync: state };
+  apiMocks.list.mockResolvedValue({ checks: [], earnings_statement_items: [item],
+    direct_deposit_items: [{ ...item, payment_confirmation: confirmed ? { settled_on: '2026-10-08', bank_reference: 'Bank completed 42', confirmed_at: '2026-10-08T04:00:00Z' } : null }],
+    meta: { ...meta, total: 0, prepared: 0, direct_deposit_count: 1 } });
+  return render(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'committed' } as PayPeriod}
+    timeTrackingReviewHref="/companies/7/pay-runs/8/work?return_to=%2Fcompanies%2F7%2Fpay-runs%2F8%2Fchecks#time-tracking-sync" /></FeedbackProvider>);
+}
+
+describe('ChecksPanel cancellation sync evidence', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(cleanup);
+
+  it('shows pending reservation coverage without disabling truthful bank confirmation', async () => {
+    renderCancellationStatement();
+    expect(await screen.findByText('Check cancellation pending time tracking confirmation')).toBeTruthy();
+    expect(screen.getByText(/2 cancellation records awaiting confirmation/)).toBeTruthy();
+    expect(screen.getByText(/payroll hours remain reserved in time tracking/)).toBeTruthy();
+    const link = screen.getByRole('link', { name: 'Review time tracking sync' });
+    expect(link.getAttribute('href')).toBe('/companies/7/pay-runs/8/work?return_to=%2Fcompanies%2F7%2Fpay-runs%2F8%2Fchecks#time-tracking-sync');
+    const confirm = screen.getByRole('button', { name: 'Confirm bank payment' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(await screen.findByRole('dialog', { name: 'Confirm bank payment' })).toBeTruthy();
+    expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
+  });
+
+  it('keeps actual completed bank evidence visible while source cancellation still waits', async () => {
+    renderCancellationStatement(pendingCancellation, true);
+    expect(await screen.findByText(/Bank paid 2026-10-08 · Bank completed 42/)).toBeTruthy();
+    expect(screen.getByText('Check cancellation pending time tracking confirmation')).toBeTruthy();
+    expect(screen.getByText(/separate from any recorded bank payment/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
+  });
+
+  it('distinguishes a failed cancellation from bank evidence and provides review guidance', async () => {
+    renderCancellationStatement({ ...pendingCancellation, status: 'error', errors: ['The connected source could not confirm this cancellation.'] }, true);
+    expect(await screen.findByText('Check cancellation sync needs attention')).toBeTruthy();
+    expect(screen.getByText('The connected source could not confirm this cancellation.')).toBeTruthy();
+    expect(screen.getByText(/Bank paid 2026-10-08/)).toBeTruthy();
+  });
+
+  it('clears waiting guidance only after the API reports acknowledgement', async () => {
+    const view = renderCancellationStatement();
+    await screen.findByText('Check cancellation pending time tracking confirmation');
+    apiMocks.list.mockResolvedValue({ checks: [], earnings_statement_items: [{ ...depositStatement,
+      payment_cancellation_sync: { ...pendingCancellation, status: 'acknowledged', pending_count: 0, oldest_pending_at: null, hours_reserved: false } }],
+      direct_deposit_items: [], meta: { ...meta, total: 0, direct_deposit_count: 1 } });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'committed' } as PayPeriod} refreshToken={1} /></FeedbackProvider>);
+    expect(await screen.findByText('Check cancellation confirmed by time tracking')).toBeTruthy();
+    expect(screen.queryByText(/payroll hours remain reserved/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Review time tracking sync' })).toBeNull();
+  });
+
+  it('does not invent a sync label for an ordinary no-source payment', async () => {
+    renderStatements([depositStatement]);
+    await screen.findByText('Drew Deposit');
+    expect(screen.queryByText(/Check cancellation/)).toBeNull();
+  });
+
+  it('shows the same cancellation status in paper card and table without copying it to another item', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [{ ...check, payment_cancellation_sync: pendingCancellation },
+      { ...check, id: 99, employee_id: 99, employee_name: 'Other Employee', check_number: '8199' }],
+      direct_deposit_items: [], earnings_statement_items: [], meta: { ...meta, total: 2 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    const notices = await screen.findAllByText('Check cancellation pending time tracking confirmation');
+    expect(notices).toHaveLength(2);
+    const otherRow = screen.getAllByRole('row').find(row => within(row).queryByText('Other Employee'))!;
+    expect(within(otherRow).queryByText(/Check cancellation/)).toBeNull();
+  });
 });

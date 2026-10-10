@@ -224,7 +224,7 @@ class PayPeriodLifecycleService
     EmployeeLoan.where(employee_id: employee_ids).order(:employee_id, :id).lock.load
 
     committed_items.each do |item|
-      PayrollCalculator.for(item.employee, item).apply_loan_payments!
+      PayrollCalculator.for(item.employee, item).apply_loan_payments!(actor: actor)
       employee_ytds.fetch(item.employee_id).add_payroll_item!(item)
       company_ytd.add_payroll_item!(item)
     end

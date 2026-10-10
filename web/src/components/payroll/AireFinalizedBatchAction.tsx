@@ -17,6 +17,8 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   const summary = batch.summary || {};
   const employeeCount = Number(summary.employee_count || 0);
   const exclusionCount = Number(summary.exclusion_count || 0);
+  const includesCorrections = Number(summary.correction_count || 0) > 0
+    || Number(batch.issues?.negative_adjustment_count || 0) > 0;
   const committed = payPeriodStatus === 'committed';
   const nextAction = payPeriodStatus === 'calculated'
     ? 'Next: review the calculated payroll, then select Approve when ready.'
@@ -56,12 +58,18 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display text-lg font-bold text-neutral-950">
-                  {aireRecordLinked ? linkedTitle : 'Time tracking hours are ready to add'}
+                  {includesCorrections && attentionLines === 0
+                    ? aireRecordLinked ? 'Time tracking correction batch is linked' : 'Time tracking batch includes corrections'
+                    : aireRecordLinked ? linkedTitle : 'Time tracking hours are ready to add'}
                 </h3>
                 <Badge variant={aireRecordLinked ? linkedBadgeTone : 'info'}>{aireRecordLinked ? linkedBadge : 'Verified batch'}</Badge>
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-700">
-                {aireRecordLinked
+                {includesCorrections && attentionLines === 0
+                  ? aireRecordLinked
+                    ? 'Review the recorded corrections and their exact source confirmations. Any ordinary payroll follows its normal review steps; linking this batch does not mark anyone paid.'
+                    : 'Review corrections to earlier frozen time. Signed totals show changes to time; the review identifies the hours that can be added to ordinary payroll.'
+                  : aireRecordLinked
                   ? attentionLines > 0
                     ? 'Cornerstone retained the exact affected time tracking lines. Review the check or payment history before deciding what to do next.'
                     : committed && allLinesPaid
@@ -78,7 +86,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
 
           {!aireRecordLinked && (
             <Button type="button" onClick={onReview} className="shrink-0">
-              {committed ? 'Review and link time tracking record' : 'Review and add time tracking hours'}
+              {committed ? 'Review and link time tracking record' : includesCorrections ? 'Review time tracking corrections' : 'Review and add time tracking hours'}
               <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
             </Button>
           )}
@@ -86,7 +94,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
 
         <div className="grid divide-y divide-neutral-200 bg-white sm:grid-cols-4 sm:divide-x sm:divide-y-0">
           <div className="px-5 py-4 sm:px-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payable hours</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{includesCorrections ? 'Signed batch hours' : 'Payable hours'}</p>
             <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(summary.total_hours)} hrs</p>
           </div>
           <div className="px-5 py-4 sm:px-6">
@@ -124,7 +132,9 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
         <div className="flex items-start gap-3 border-t border-neutral-200 bg-neutral-50 px-5 py-4 text-xs leading-5 text-neutral-600 sm:px-6">
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
           <p>
-            {aireRecordLinked
+            {includesCorrections && attentionLines === 0
+              ? 'Signed batch totals can combine increases and reductions to earlier frozen time with ordinary hours. Accounting-only corrections record no new payment or recovery; held entries remain excluded.'
+              : aireRecordLinked
               ? committed
                 ? attentionLines > 0
                   ? 'The payment history remains preserved. Failed and voided payments require an explicit follow-up; they are never turned back into new unpaid hours automatically.'

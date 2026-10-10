@@ -142,6 +142,12 @@ type SettlementRoute = {
   reason: string;
 };
 
+const isCorrectionSettlementCase = (settlementCase: AirePayrollSettlementCase) =>
+  ['changed_after_cutoff', 'deleted_after_cutoff'].includes(settlementCase.origin.reason);
+
+const correctionQuantity = (settlementCase: AirePayrollSettlementCase) =>
+  `Correction magnitude: ${Number(settlementCase.time.held_total_hours).toFixed(2)} hours`;
+
 const lifecycleTone = (status?: string) => {
   if (['payment_issued', 'committed', 'imported', 'finalized', 'ready_for_cutoff'].includes(status || '')) return 'success' as const;
   if (['awaiting_approval', 'ready_for_next_batch', 'payment_failed', 'payment_voided'].includes(status || '')) return 'warning' as const;
@@ -649,7 +655,11 @@ export function AirePayrollCockpit({
       });
       if (current !== actionGeneration.current) return;
       setSettlementRoute(null);
-      setCommandSuccess(settlementRoute.destinationKind === 'regular'
+      setCommandSuccess(isCorrectionSettlementCase(settlementRoute.settlementCase)
+        ? settlementRoute.destinationKind === 'regular'
+          ? 'Correction routed to the selected payroll for review. The original payment remains unchanged.'
+          : 'Correction marked not applied with your review reason. The original payment remains unchanged.'
+        : settlementRoute.destinationKind === 'regular'
         ? 'Held time routed to the selected regular payroll in time tracking.'
         : 'Held time marked not payable in time tracking with your review reason.');
     } catch (caught) {
@@ -806,6 +816,16 @@ export function AirePayrollCockpit({
                   />
                 </div>
 
+                {overview.command_access.delegation_configured === true && overview.command_access.can_command === false && (
+                  <div className="flex items-start gap-3 border-b border-neutral-200 bg-neutral-50 px-5 py-4 text-sm text-neutral-700 sm:px-6">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-semibold">Time changes require a Payroll manager or admin</p>
+                      <p className="mt-1 leading-5">Time approvals, corrections and held-time destinations require that role. You can still review time and payroll evidence.</p>
+                    </div>
+                  </div>
+                )}
+
                 {!overview.command_access.delegation_configured && (
                   <div className="flex items-start gap-3 border-b border-warning-200 bg-warning-50 px-5 py-4 text-sm text-warning-900 sm:px-6">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
@@ -931,6 +951,7 @@ export function AirePayrollCockpit({
                           const routeOption = overview.routing_options.find((option) => (
                             option.external_pay_period_id === settlementCase.routing.target_external_pay_period_id
                           ));
+                          const correctionCase = isCorrectionSettlementCase(settlementCase);
                           const canManage = ['open', 'scheduled'].includes(settlementCase.status);
                           const statusLabel = {
                             open: 'Needs destination',
@@ -950,14 +971,20 @@ export function AirePayrollCockpit({
                                     <Badge variant={lifecycleTone(settlementCase.status)}>{statusLabel}</Badge>
                                   </div>
                                   <p className="mt-2 text-sm text-neutral-700">
-                                    <span className="font-semibold text-neutral-950">{Number(settlementCase.time.held_total_hours).toFixed(2)} held hours</span>
+                                    <span className="font-semibold text-neutral-950">{correctionCase ? correctionQuantity(settlementCase) : `${Number(settlementCase.time.held_total_hours).toFixed(2)} held hours`}</span>
                                     {' · '}worked {formatDate(settlementCase.time.original_work_date)}
                                     {settlementCase.time.category?.name ? ` · ${settlementCase.time.category.name}` : ''}
                                   </p>
                                   <p className="mt-1 text-xs leading-5 text-neutral-500">
-                                    Excluded because {settlementCase.origin.reason.replaceAll('_', ' ')} · time tracking batch {settlementCase.origin.payroll_batch_id}
+                                    {correctionCase ? 'Source ' : 'Excluded because '}{settlementCase.origin.reason.replaceAll('_', ' ')} · time tracking batch {settlementCase.origin.payroll_batch_id}
                                   </p>
-                                  {settlementCase.time.current_total_hours != null
+                                  {correctionCase ? (
+                                    <p className="mt-2 rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2 text-xs font-medium leading-5 text-primary-900">
+                                      {settlementCase.time.current_total_hours != null
+                                        ? `Current source time is ${Number(settlementCase.time.current_total_hours).toFixed(2)} hours. Review the signed change against the original batch before applying a payroll adjustment.`
+                                        : 'Current source time is unavailable. Review the original batch and signed correction before applying a payroll adjustment.'}
+                                    </p>
+                                  ) : settlementCase.time.current_total_hours != null
                                     && Math.abs(Number(settlementCase.time.current_total_hours) - Number(settlementCase.time.held_total_hours)) >= 0.005 && (
                                     <p className="mt-2 rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2 text-xs font-medium leading-5 text-primary-900">
                                       Current corrected time is {Number(settlementCase.time.current_total_hours).toFixed(2)} hours. The held amount above remains the original cutoff record.
@@ -974,12 +1001,12 @@ export function AirePayrollCockpit({
                                       <p className="mt-1 text-xs text-neutral-500">Action due {formatDate(settlementCase.routing.action_due_on)}</p>
                                     </div>
                                     <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Latest payment fact</p>
-                                      <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || 'Not imported into payroll'}</p>
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{correctionCase ? 'Correction processing' : 'Latest payment fact'}</p>
+                                      <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || (correctionCase ? 'No processing acknowledgment for this correction yet' : 'Not imported into payroll')}</p>
                                       <p className="mt-1 text-xs text-neutral-500">
                                         {settlementCase.processing?.payment_reference
                                           ? `Reference ${settlementCase.processing.payment_reference}`
-                                          : settlementCase.included_payroll_batch_id ? `Time tracking batch ${settlementCase.included_payroll_batch_id}` : 'No payment has been recorded'}
+                                          : settlementCase.included_payroll_batch_id ? `Time tracking batch ${settlementCase.included_payroll_batch_id}` : correctionCase ? 'Review original payment evidence in the source history.' : 'No payment has been recorded'}
                                       </p>
                                     </div>
                                   </div>
@@ -1231,10 +1258,12 @@ export function AirePayrollCockpit({
         {settlementRoute && overview && (
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
-              <DialogTitle className="font-display font-bold text-neutral-950">Choose where these hours go</DialogTitle>
+              <DialogTitle className="font-display font-bold text-neutral-950">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Choose where to review this correction' : 'Choose where these hours go'}</DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
                 {settlementRoute.settlementCase.employee.name} · {
-                  settlementRoute.settlementCase.time.current_total_hours != null
+                  isCorrectionSettlementCase(settlementRoute.settlementCase)
+                    ? `${correctionQuantity(settlementRoute.settlementCase)}${settlementRoute.settlementCase.time.current_total_hours != null ? ` · current source time: ${Number(settlementRoute.settlementCase.time.current_total_hours).toFixed(2)} hours` : ' · current source time unavailable'}`
+                    : settlementRoute.settlementCase.time.current_total_hours != null
                     && Math.abs(Number(settlementRoute.settlementCase.time.current_total_hours) - Number(settlementRoute.settlementCase.time.held_total_hours)) >= 0.005
                     ? `${Number(settlementRoute.settlementCase.time.current_total_hours).toFixed(2)} current corrected hours (originally held ${Number(settlementRoute.settlementCase.time.held_total_hours).toFixed(2)})`
                     : `${Number(settlementRoute.settlementCase.time.held_total_hours).toFixed(2)} held hours`
@@ -1243,15 +1272,15 @@ export function AirePayrollCockpit({
             </DialogHeader>
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-5 grid gap-3">
-              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Pay in a future regular payroll</span><span className="mt-1 block text-sm leading-5 text-neutral-600">The hours will be included automatically once they are approved and that payroll reaches cutoff.</span></span></span></label>
-              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">Mark not payable</span><span className="mt-1 block text-sm leading-5 text-neutral-600">Use only after confirming these hours should never be paid. The decision and reason remain in the source’s history.</span></span></span></label>
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'regular' ? 'border-primary-500 bg-primary-50/60' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="regular" checked={settlementRoute.destinationKind === 'regular'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'regular', targetExternalPayPeriodId: settlementRoute.targetExternalPayPeriodId || overview.routing_options[0]?.external_pay_period_id || '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Route correction to a future regular payroll' : 'Pay in a future regular payroll'}</span><span className="mt-1 block text-sm leading-5 text-neutral-600">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? "Review the signed change in that payroll's cutoff batch. Routing does not record a payment." : 'The hours will be included automatically once they are approved and that payroll reaches cutoff.'}</span></span></span></label>
+              <label className={`cursor-pointer rounded-xl border p-4 ${settlementRoute.destinationKind === 'not_payable' ? 'border-danger-300 bg-danger-50' : 'border-neutral-200'}`}><span className="flex items-start gap-3"><input type="radio" name="settlement-destination" value="not_payable" checked={settlementRoute.destinationKind === 'not_payable'} onChange={() => setSettlementRoute({ ...settlementRoute, destinationKind: 'not_payable', targetExternalPayPeriodId: '' })} className="mt-1" /><span><span className="block font-semibold text-neutral-950">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Do not apply this correction' : 'Mark not payable'}</span><span className="mt-1 block text-sm leading-5 text-neutral-600">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Use only after reviewing why this correction should not be applied. The original batch and its payment history remain preserved.' : 'Use only after confirming these hours should never be paid. The decision and reason remain in the source’s history.'}</span></span></span></label>
             </div>
             {settlementRoute.destinationKind === 'regular' && (
-              <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">Publish the next regular pay period to time tracking before routing these hours.</span>}</label>
+              <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Publish a future regular pay period to time tracking before routing this correction.' : 'Publish the next regular pay period to time tracking before routing these hours.'}</span>}</label>
             )}
-            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Why should this correction not be applied?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || !canCommand || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : 'Mark not payable'}</Button></DialogFooter>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || !canCommand || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Do not apply correction' : 'Mark not payable'}</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>

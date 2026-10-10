@@ -13,7 +13,7 @@ class CreatePrinterProfiles < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    add_index :printer_profiles, [:company_id, :name], unique: true
+    add_index :printer_profiles, [ :company_id, :name ], unique: true
     add_index :printer_profiles, :company_id, unique: true,
               where: "is_default = TRUE",
               name: "index_printer_profiles_one_default_per_company"

@@ -442,6 +442,26 @@ module TimeTracking
       payload
     end
 
+    def record_accounting_correction_event(**attributes)
+      payload = record_payroll_entry_processing_event(**attributes)
+      identity = ConnectionIdentity.validate!(source: @source, payload: payload)
+      raise Error, "#{@source.name} omitted its verified accounting receipt descriptor" if identity.legacy
+      validate_integration_response!(payload)
+      expected = attributes.except(:batch_id).merge(external_system: "cornerstone_payroll")
+      receipt = payload["entry_processing"]
+      scalar_keys = %i[event_id status external_system external_pay_period_id external_payroll_item_id
+        source_time_entry_id source_user_uuid contract_version source_line_key source_kind]
+      valid = receipt.is_a?(Hash) && scalar_keys.all? { |key| receipt[key.to_s] == expected[key] }
+      valid &&= %i[total_hours regular_hours overtime_hours].all? { |key| exact_decimal?(receipt[key.to_s], expected[key]) }
+      valid &&= receipt["metadata"] == expected[:metadata].deep_stringify_keys
+      valid &&= %w[payment_method payment_reference payment_effective_on].all? { |key| receipt[key].blank? }
+      valid &&= Time.iso8601(receipt["occurred_at"].to_s) == Time.iso8601(expected[:occurred_at])
+      raise Error, "#{@source.name} did not acknowledge the exact accounting correction" unless valid
+      payload
+    rescue ConnectionIdentity::Error, ArgumentError, TypeError
+      raise Error, "#{@source.name} returned an invalid accounting correction receipt"
+    end
+
     class Error < StandardError
       attr_reader :response_status
 

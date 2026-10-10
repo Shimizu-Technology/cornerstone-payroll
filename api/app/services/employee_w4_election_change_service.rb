@@ -3,21 +3,33 @@
 class EmployeeW4ElectionChangeService
   class Error < StandardError; end
 
-  def initialize(employee:, attributes:, actor:, source:, reason:)
+  def initialize(employee:, attributes:, actor:, source:, reason:, election_received: false)
     @employee = employee
     @attributes = attributes.to_h.symbolize_keys.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
     @attributes[:w4_source_reference] = @attributes[:w4_source_reference].to_s.strip.presence if @attributes.key?(:w4_source_reference)
+    @election_received = ActiveModel::Type::Boolean.new.cast(election_received)
     @actor = actor
     @source = source
     @reason = reason.to_s.strip
   end
 
   def call!
-    return if employee.contractor? || attributes.empty?
+    return if employee.contractor?
 
+    validate_received_election!
+    return if attributes.empty?
+
+    # Never manufacture an initial election for an intake exception lacking a dated election.
+    if employee.intake_exception.present? && employee.employee_w4_elections.none? && attributes[:w4_effective_on].blank? && employee.w4_effective_on.blank?
+      return
+    end
     values = complete_values
     prior = employee.employee_w4_elections.recent_first.first
-    return prior unless changed_from?(prior, values)
+    changed = changed_from?(prior, values)
+    replacing_default = prior&.source == "default_withholding" && source != "default_withholding"
+    return prior unless changed || (replacing_default && election_received)
+
+    validate_default_replacement!(prior: prior, values: values) if replacing_default
 
     raise Error, "W-4 effective date is required when withholding elections change" if values[:effective_on].blank?
     if prior.present? && reason.blank?
@@ -34,11 +46,43 @@ class EmployeeW4ElectionChangeService
     )
     sync_employee_cache!
     election
+  rescue Date::Error
+    raise Error, "Provide a valid received election signed date"
+  end
+
+  # An explicit receipt assertion needs its own submitted evidence. Ordinary
+  # initial/legacy elections without that assertion keep their existing contract.
+  def validate_received_election!
+    return unless election_received && !employee.contractor?
+
+    unless attributes[:w4_effective_on].present? && (attributes[:w4_signed_on].present? || attributes[:w4_source_reference].present?)
+      raise Error, "Provide the received election effective date and signed date or source reference"
+    end
+    Date.iso8601(attributes[:w4_effective_on].to_s)
+    Date.iso8601(attributes[:w4_signed_on].to_s) if attributes[:w4_signed_on].present?
+  rescue Date::Error
+    raise Error, "Provide a valid received election effective or signed date"
+  end
+
+  def validate_default_replacement!(prior: employee.employee_w4_elections.recent_first.first, values: complete_values)
+    return unless prior&.source == "default_withholding" && source != "default_withholding"
+    return unless changed_from?(prior, values) || election_received
+
+    raise Error, "Explicitly record receipt of the employee withholding election" unless election_received
+    source_reference = attributes[:w4_source_reference].to_s.strip
+    evidence = attributes[:w4_signed_on].present? ||
+      (source_reference.present? && source_reference != prior.w4_source_reference)
+    Date.iso8601(attributes[:w4_signed_on].to_s) if attributes[:w4_signed_on].present?
+    unless attributes[:w4_effective_on].present? && evidence
+      raise Error, "Provide the received election effective date and signed date or source reference"
+    end
+  rescue Date::Error
+    raise Error, "Provide a valid received election signed date"
   end
 
   private
 
-  attr_reader :employee, :attributes, :actor, :source, :reason
+  attr_reader :employee, :attributes, :actor, :source, :reason, :election_received
 
   def complete_values
     baseline = employee.employee_w4_elections.recent_first.first&.profile_attributes ||
@@ -84,6 +128,7 @@ class EmployeeW4ElectionChangeService
     changes = latest.profile_attributes.each_with_object({}) do |(attribute, value), updates|
       updates[attribute] = value if comparable(employee.public_send(attribute)) != comparable(value)
     end
+    changes[:intake_payroll_confirmed_at] = nil if employee.intake_exception.present? && changes.present?
     employee.update_columns(changes.merge(updated_at: Time.current)) if changes.present?
   end
 end

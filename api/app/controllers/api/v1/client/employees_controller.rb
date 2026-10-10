@@ -12,7 +12,7 @@ module Api
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
           employees = apply_sort(employees)
-          employees = employees.includes(:department, :employee_wage_rates)
+          employees = employees.includes(:department, :employee_wage_rates, :employee_w4_elections)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -125,6 +125,7 @@ module Api
             :w4_signed_on,
             :w4_source_reference,
             :w4_effective_on,
+            :w4_election_received,
             :retirement_rate,
             :roth_retirement_rate,
             :employer_retirement_match_rate,
@@ -166,6 +167,7 @@ module Api
         end
 
         def apply_filters(scope)
+          scope = scope.intake_incomplete if params[:intake_status] == "incomplete"
           scope = scope.where(department_id: params[:department_id]) if params[:department_id].present?
           scope = scope.where(status: params[:status]) if params[:status].present?
           scope = scope.where(employment_type: params[:employment_type]) if params[:employment_type].present?
@@ -227,8 +229,9 @@ module Api
 
         def serialize_employee(employee, include_department: false, include_document_readiness: false)
           data = employee.as_json(
-            except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
+            except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
+          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {

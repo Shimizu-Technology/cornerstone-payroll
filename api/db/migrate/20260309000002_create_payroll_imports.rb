@@ -15,6 +15,6 @@ class CreatePayrollImports < ActiveRecord::Migration[8.1]
       t.timestamps
     end
 
-    add_index :payroll_imports, [:pay_period_id, :status]
+    add_index :payroll_imports, [ :pay_period_id, :status ]
   end
 end

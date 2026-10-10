@@ -23,7 +23,7 @@ module NumberToWords
     [ 1_000_000_000, "billion" ],
     [ 1_000_000,     "million" ],
     [ 1_000,         "thousand" ],
-    [ 100,           "hundred" ],
+    [ 100,           "hundred" ]
   ].freeze
 
   # Public entry point.

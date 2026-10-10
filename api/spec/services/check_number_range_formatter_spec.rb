@@ -12,6 +12,6 @@ RSpec.describe CheckNumberRangeFormatter do
   end
 
   it "keeps non-numeric check numbers as exact values" do
-    expect(described_class.format(["1002", "MANUAL-A", "1001"])).to eq("1001-1002, MANUAL-A")
+    expect(described_class.format([ "1002", "MANUAL-A", "1001" ])).to eq("1001-1002, MANUAL-A")
   end
 end

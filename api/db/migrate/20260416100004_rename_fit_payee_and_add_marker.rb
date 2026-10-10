@@ -37,21 +37,21 @@ class RenameFitPayeeAndAddMarker < ActiveRecord::Migration[8.0]
 
     # Drop old payee-string-based unique index (it would now be empty anyway
     # because the backfill renamed all matching rows).
-    if index_exists?(:non_employee_checks, [:pay_period_id, :company_id], name: OLD_INDEX_NAME)
+    if index_exists?(:non_employee_checks, [ :pay_period_id, :company_id ], name: OLD_INDEX_NAME)
       remove_index :non_employee_checks, name: OLD_INDEX_NAME
     end
 
     # New unique index keyed on the stable marker. Survives any `payable_to`
     # rename the user makes in the edit UI.
     add_index :non_employee_checks,
-              [:pay_period_id, :company_id, :auto_generated_type],
+              [ :pay_period_id, :company_id, :auto_generated_type ],
               unique: true,
               where: "auto_generated_type IS NOT NULL AND voided = false",
               name: NEW_INDEX_NAME
   end
 
   def down
-    if index_exists?(:non_employee_checks, [:pay_period_id, :company_id, :auto_generated_type], name: NEW_INDEX_NAME)
+    if index_exists?(:non_employee_checks, [ :pay_period_id, :company_id, :auto_generated_type ], name: NEW_INDEX_NAME)
       remove_index :non_employee_checks, name: NEW_INDEX_NAME
     end
 
@@ -69,7 +69,7 @@ class RenameFitPayeeAndAddMarker < ActiveRecord::Migration[8.0]
     SQL
 
     add_index :non_employee_checks,
-              [:pay_period_id, :company_id],
+              [ :pay_period_id, :company_id ],
               unique: true,
               where: "check_type = 'tax_deposit' AND payable_to = '#{LEGACY_FIT_PAYEE}' AND voided = false",
               name: OLD_INDEX_NAME
