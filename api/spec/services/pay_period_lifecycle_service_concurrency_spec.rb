@@ -213,7 +213,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     ensure
       release << true
     end
-    [first_thread, second_thread].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    [ first_thread, second_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     outcomes = 2.times.map { results.pop }
     expect(outcomes.count { |status, _| status == :ok }).to eq(1)
     expect(outcomes.count { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to eq(1)
@@ -241,9 +241,9 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       ActiveRecord::Base.connection_pool.with_connection do
         PayrollItem.find(payroll_item.id).mark_delivered!(user: User.find(actor.id),
           delivered_on: PayrollBusinessClock.today, delivery_method: "hand_delivery", attestation: true)
-        results << [:ok, :delivered]
+        results << [ :ok, :delivered ]
       rescue StandardError => e
-        results << [:error, e]
+        results << [ :error, e ]
       end
     end
     reversal = nil
@@ -255,9 +255,9 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     ensure
       release << true
     end
-    [delivery, reversal].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    [ delivery, reversal ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     outcomes = 2.times.map { results.pop }
-    expect(outcomes).to include([:ok, :delivered])
+    expect(outcomes).to include([ :ok, :delivered ])
     expect(outcomes.any? { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to be(true)
     expect(pay_period.reload).not_to be_voided
     expect(payroll_item.reload).not_to be_voided
@@ -314,9 +314,9 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
         method = operation == :reopen ? :reopen_unpaid! : :void!
         PayPeriodCorrectionService.public_send(method, pay_period: PayPeriod.find(pay_period.id),
           actor: User.find(actor.id), reason: "Correct an unissued payroll")
-        results << [:ok, operation]
+        results << [ :ok, operation ]
       rescue StandardError => e
-        results << [:error, e]
+        results << [ :error, e ]
       end
     end
   end
