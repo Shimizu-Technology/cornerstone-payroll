@@ -12,6 +12,7 @@ import { CheckPrintWorkspaceSkeleton } from './CheckPrintWorkspaceSkeleton';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
 import { OperationStatusPanel } from './OperationStatusPanel';
 import { PdfPreviewPlaceholder } from './PdfPreviewPlaceholder';
+import { PdfDocumentView } from '@/components/documents/PdfPreview';
 import { PrinterProfileManagerDialog } from './PrinterProfileManagerDialog';
 import { checkNumberValidationError } from './checkNumberDrafts';
 
@@ -69,6 +70,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   const [profileManagerOpen, setProfileManagerOpen] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [artifactVerified, setArtifactVerified] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
@@ -76,8 +78,6 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [draftNumbers, setDraftNumbers] = useState<Record<string, string>>({});
   const [savingNumbers, setSavingNumbers] = useState(false);
-  const compactPreviewRef = useRef<HTMLIFrameElement>(null);
-  const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
   const previewRequestRef = useRef(0);
   const workspaceRequestRef = useRef(0);
   const queueRef = useRef<CheckPrintQueueResponse | null>(null);
@@ -103,6 +103,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   );
 
   const revokePreview = useCallback(() => {
+    setPreviewBlob(null);
+    setPreviewExpanded(false);
     setPreviewUrl((url) => {
       if (url) URL.revokeObjectURL(url);
       return null;
@@ -152,6 +154,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       const pdf = await checksApi.printRunPdf(printRun.id);
       if (requestToken !== previewRequestRef.current) return;
       setPreviewUrl(URL.createObjectURL(pdf.blob));
+      setPreviewBlob(pdf.blob);
       setArtifactVerified(true);
     } catch (err) {
       if (requestToken !== previewRequestRef.current) return;
@@ -529,9 +532,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
   };
 
   const print = (): void => {
-    if (!run || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)) return;
-    const frame = previewExpanded ? expandedPreviewRef.current : compactPreviewRef.current;
-    frame?.contentWindow?.print();
+    if (!run || !previewUrl || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)) return;
+    // Open the original verified file; the canvas is for inspection, not stock printing.
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -661,9 +664,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                         <div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-slate-950">Package #{run.id}</div><div className="mt-1 text-xs text-slate-500">Generated {new Date(run.generated_at).toLocaleString()} {run.created_by_name ? `by ${run.created_by_name}` : ''}</div></div>{packageBadge(run)}</div>
                         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs"><div><dt className="text-slate-500">Checks</dt><dd className="mt-0.5 font-semibold text-slate-900">{run.selected_count} · {packageRange}</dd></div><div><dt className="text-slate-500">Total</dt><dd className="mt-0.5 font-semibold text-slate-900">{formatCurrency(packageTotal)}</dd></div><div className="col-span-2"><dt className="text-slate-500">Printer snapshot</dt><dd className="mt-0.5 font-semibold text-slate-900">{run.printer_profile_name || 'Legacy calibration'}{run.printer_profile_lock_version !== null ? ` · version ${run.printer_profile_lock_version}` : ''}</dd></div></dl>
                       </div>
-                      {previewUrl ? <div className="relative"><iframe ref={compactPreviewRef} title="Check package preview" src={previewUrl} className="h-72 w-full bg-slate-900" /><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="absolute right-3 top-3 gap-1.5"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-slate-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
-                      <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950"><span className="font-semibold">Printer setup:</span> Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink.</div>
-                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)}>Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
+                      {previewBlob ? <div><div className="flex justify-end border-b border-slate-100 p-2"><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="gap-1.5 max-sm:min-h-[44px]"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div><PdfDocumentView blob={previewBlob} className="h-96 flex-none" /></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-slate-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
+                      <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950"><span className="font-semibold">Printer setup:</span> Open the original saved PDF to print. Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink. Download it if your browser cannot open the PDF.</div>
+                      <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)}>Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
                       {run.confirmation_state === 'outdated' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>This package is outdated.</strong> {run.confirmation_issue} Generate a replacement from current data.</span></div></div>}
                       {run.confirmation_state === 'legacy' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">This older package did not prepare its checks. Generate a new package before recording issuance or payment.</div>}
                       <details className="border-t border-slate-100 px-4 py-3 text-xs text-slate-600"><summary className="cursor-pointer font-semibold text-slate-700">Audit details</summary><div className="mt-2 space-y-1 break-all font-mono"><p>File: {run.filename}</p><p>SHA-256: {run.sha256}</p><p>Bytes: {run.byte_size.toLocaleString()}</p></div></details>
@@ -699,8 +702,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
       <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded} dismissOnEscape={busyAction !== 'download'}>
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
           <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-slate-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
-          {previewUrl && <iframe ref={expandedPreviewRef} title="Expanded check package preview" src={previewUrl} className="min-h-0 w-full flex-1 bg-slate-900" />}
-          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Print saved PDF</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
+          {previewBlob && <PdfDocumentView blob={previewBlob} />}
+          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
