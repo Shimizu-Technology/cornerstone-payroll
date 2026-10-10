@@ -25,10 +25,11 @@ it('supports an explicit zero without pausing the future loan schedule', () => {
   expect(onChange).toHaveBeenCalledWith(2, { mode: 'override', amount: 0 });
 });
 
-it('shows the reason an unavailable loan cannot be selected', () => {
+it('shows why an unavailable loan only permits skipping the repayment', () => {
   render(<NamedLoanInputs options={[{ ...option, eligible: false, unavailable_reason: 'First repayment is after this payday.' }]} drafts={{}} includesRecurring onChange={vi.fn()} />);
   expect(screen.getByText('First repayment is after this payday.')).toBeTruthy();
-  expect((screen.getByLabelText('Employee Loan repayment choice') as HTMLSelectElement).disabled).toBe(true);
+  expect((screen.getByLabelText('Employee Loan repayment choice') as HTMLSelectElement).disabled).toBe(false);
+  expect(screen.getByRole('option', { name: 'Skip repayment for this payroll ($0)' })).toBeTruthy();
 });
 
 it('requires an intentional amount when a per-run repayment input is cleared', () => {
@@ -36,4 +37,19 @@ it('requires an intentional amount when a per-run repayment input is cleared', (
   render(<NamedLoanInputs options={[option]} drafts={{ '2': { mode: 'override', amount: 300 } }} includesRecurring onChange={onChange} />);
   fireEvent.change(screen.getByLabelText('Employee Loan repayment amount'), { target: { value: '' } });
   expect(onChange).toHaveBeenCalledWith(2, { mode: 'override', amount: null });
+});
+
+
+it('allows clearing a saved override after the loan schedule becomes unavailable', () => {
+  const onChange = vi.fn();
+  const stopped = { ...option, eligible: false, mode: 'override' as const, requested_amount: 300, unavailable_reason: 'Loan schedule was stopped.' };
+  render(<NamedLoanInputs options={[stopped]} drafts={{ '2': { mode: 'override', amount: 300 } }} includesRecurring onChange={onChange} />);
+  expect(screen.getByText(/This saved repayment is no longer available/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Employee Loan repayment choice'), { target: { value: 'default' } });
+  expect(onChange).toHaveBeenCalledWith(2, { mode: 'default', amount: 0 });
+  fireEvent.change(screen.getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
+  expect(onChange).toHaveBeenCalledWith(2, { mode: 'override', amount: 0 });
+  onChange.mockClear();
+  fireEvent.change(screen.getByLabelText('Employee Loan repayment amount'), { target: { value: '200' } });
+  expect(onChange).toHaveBeenCalledWith(2, { mode: 'override', amount: 0 });
 });

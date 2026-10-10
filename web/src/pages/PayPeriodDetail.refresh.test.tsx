@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   employeesList: vi.fn(),
   runPayroll: vi.fn(),
   refreshSetup: vi.fn(),
+  comparison: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
@@ -23,6 +24,7 @@ vi.mock('@/services/api', () => ({
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
     refreshSetup: apiMocks.refreshSetup,
+    comparison: apiMocks.comparison,
   },
   employeesApi: { list: apiMocks.employeesList },
   payrollItemsApi: {},
@@ -315,18 +317,19 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
 });
 
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated') {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
   const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15, loan_deduction: 0 };
-  const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item], ...(comparisonResponse ? { cycle: 'regular' } : {}) } as unknown as PayPeriod;
   const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: 0, eligible: true, mode: 'default' }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
   apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'calculated' } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  apiMocks.comparison.mockResolvedValue(comparisonResponse);
   apiMocks.refreshSetup.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   if (status === 'approved') { await screen.findByRole('button', { name: 'Refresh current setup' }); return null; }
@@ -385,4 +388,17 @@ it('retains a linked loan request when that employee needs calculation recovery'
   await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
   const restoredCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
   expect((within(restoredCard).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('400.00');
+});
+
+
+it('clearly describes a special-run comparison as limited to selected employees', async () => {
+  await renderLoanWorksheet('calculated', {
+    comparison_kind: 'selected_employees',
+    previous_pay_period: { id: 11, start_date: '2026-09-01', end_date: '2026-09-15', pay_date: '2026-09-16' },
+    summary: {}, employee_changes: [],
+    review_flags: { status: 'ok', message: 'Selected employees match.', warning_count: 0, review_count: 0 },
+  });
+  expect(await screen.findByRole('heading', { name: 'Selected Employee Comparison' })).toBeTruthy();
+  expect(screen.getByText(/Compared for the selected employees with/)).toBeTruthy();
+  expect(screen.getByText(/Employees outside this special run are excluded/)).toBeTruthy();
 });
