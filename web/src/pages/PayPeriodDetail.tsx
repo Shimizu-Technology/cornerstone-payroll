@@ -381,6 +381,9 @@ export function PayPeriodDetail({
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
   const commitRouteGenerationRef = useRef(0);
+  const refreshInFlightRouteRef = useRef<number | null>(null);
+  const activePageScopeRef = useRef({ companyId, payRunId });
+  activePageScopeRef.current = { companyId, payRunId };
   const { activeCompany } = useCompany();
   const [paymentMethodItem, setPaymentMethodItem] = useState<PayrollItem | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
@@ -564,6 +567,11 @@ export function PayPeriodDetail({
     // new panel loads.
     setPayPeriod(null);
     setCommitPeriodId(null);
+    setRefreshSetupOpen(false);
+    if (refreshInFlightRouteRef.current !== null) {
+      refreshInFlightRouteRef.current = null;
+      setProcessing(false);
+    }
     setCalculationFailures([]);
     setCalculationNotice(null);
     setWorksheetRefreshWarning(null);
@@ -984,15 +992,21 @@ export function PayPeriodDetail({
   };
 
   const handleRefreshSetup = async () => {
-    if (!payPeriod) return;
+    if (!payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    refreshInFlightRouteRef.current = scope.generation;
     setProcessing(true);
     setError(null);
     setCalculationFailures([]);
     setCalculationNotice(null);
     try {
       const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
+      if (!isCurrentRoute()) return;
       setRefreshSetupOpen(false);
-      await loadPayPeriod(payPeriod.id, true);
+      await loadPayPeriod(scope.payRunId, true);
+      if (!isCurrentRoute()) return;
       setCalculationFailures(response.results.errors);
       const failureCount = response.results.errors.length;
       if (failureCount > 0) {
@@ -1000,8 +1014,14 @@ export function PayPeriodDetail({
       } else {
         setCalculationNotice('Current setup applied to the saved employees and inputs. Review the recalculated payroll and obtain approval again.');
       }
-    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to refresh payroll setup.'); }
-    finally { setProcessing(false); }
+    } catch (err) {
+      if (isCurrentRoute()) setError(err instanceof Error ? err.message : 'Unable to refresh payroll setup.');
+    } finally {
+      if (isCurrentRoute()) {
+        refreshInFlightRouteRef.current = null;
+        setProcessing(false);
+      }
+    }
   };
 
   const handleAdoptConfirmedWorkweek = async (): Promise<void> => {
