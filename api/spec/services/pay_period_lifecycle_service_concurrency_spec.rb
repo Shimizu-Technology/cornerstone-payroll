@@ -264,6 +264,47 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(1200)
   end
 
+  it "serializes a payment attachment behind cascade void and rejects the now-voided target" do
+    described_class.new(pay_period: pay_period, actor: actor).commit!
+    payment = create(:non_employee_check, company: company, pay_period: nil,
+      created_by: actor, check_number: "7777", payment_period_type: "none")
+    controller = Api::V1::Admin::NonEmployeeChecksController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+    paused, release, attachment_backend_pid = Queue.new, Queue.new, Queue.new
+    results = Queue.new
+    allow_any_instance_of(PayrollRevisionPaymentPreflight).to receive(:retire!).and_wrap_original do |original, **kwargs|
+      paused << true
+      release.pop
+      original.call(**kwargs)
+    end
+    reversal = financial_revision_thread(results, :void)
+    attachment = nil
+    begin
+      Timeout.timeout(5) { paused.pop }
+      attachment = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          attachment_backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
+          session = ActionDispatch::Integration::Session.new(Rails.application)
+          session.patch "/api/v1/admin/non_employee_checks/#{payment.id}",
+            params: { non_employee_check: { pay_period_id: pay_period.id } }, as: :json
+          results << [ :ok, session.response.status ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        end
+      end
+      wait_for_database_lock!(Timeout.timeout(5) { attachment_backend_pid.pop })
+      expect(attachment.join(0.2)).to be_nil
+    ensure
+      release << true
+    end
+    [ reversal, attachment ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :void ], [ :ok, 422 ])
+    expect(pay_period.reload).to be_voided
+    expect(payment.reload.pay_period_id).to be_nil
+    expect(payment).not_to be_voided
+  end
+
   private
 
   def financial_revision_thread(results, operation, backend_pid: nil)
@@ -393,6 +434,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     payroll_item_ids = PayrollItem.where(pay_period_id: pay_period_ids).pluck(:id)
 
     delete_check_events_for_cleanup(payroll_item_ids)
+    NonEmployeeCheck.where(company_id: company_id).find_each(&:destroy!)
     PayrollLiabilityEntry.where(company_id: company_id).delete_all
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all

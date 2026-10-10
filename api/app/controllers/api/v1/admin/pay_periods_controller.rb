@@ -399,7 +399,7 @@ module Api
                   apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
                 else
                   payroll_item.clear_wage_rate_hours!
-                  sync_pay_rate_from_employee(payroll_item, employee)
+                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
                   payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
                   payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
                   payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
