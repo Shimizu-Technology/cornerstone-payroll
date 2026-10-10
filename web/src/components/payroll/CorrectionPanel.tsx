@@ -28,8 +28,10 @@ import {
   useState,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { useNavigate } from 'react-router';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi, type PayrollCorrectionPreflight } from '@/services/api';
@@ -114,6 +116,7 @@ export function CorrectionPanel({
   onPayPeriodChange,
 }: CorrectionPanelProps): ReactElement {
   const navigate = useNavigate();
+  const correctionPanelRef = useRef<HTMLDivElement | null>(null);
   const processingPath = (payRunId: number): string => correctionRunPath(
     payPeriod.company_id,
     payRunId,
@@ -345,7 +348,7 @@ export function CorrectionPanel({
   const deleteReasonId    = useId();
 
   return (
-    <div className="space-y-4" data-correction-panel tabIndex={-1}>
+    <div ref={correctionPanelRef} className="space-y-4" data-correction-panel tabIndex={-1}>
 
       {/* ---- Voided period status banner ---- */}
       {isVoided && (
@@ -542,6 +545,7 @@ export function CorrectionPanel({
           ================================================================ */}
       {showVoidModal && (
         <CorrectionModal
+          returnFocusFallback={correctionPanelRef}
           title={
             isCorrection
               ? 'Void Correction Run — Irreversible'
@@ -575,6 +579,7 @@ export function CorrectionPanel({
 
       {showReopenModal && (
         <CorrectionModal
+          returnFocusFallback={correctionPanelRef}
           title="Reopen unpaid payroll"
           dangerLevel="high"
           description={
@@ -618,6 +623,7 @@ export function CorrectionPanel({
           ================================================================ */}
       {showCorrectionModal && (
         <CorrectionModal
+          returnFocusFallback={correctionPanelRef}
           title="Create Correction Run"
           dangerLevel="medium"
           description={
@@ -646,6 +652,7 @@ export function CorrectionPanel({
           ================================================================ */}
       {showDeleteDraftModal && (
         <CorrectionModal
+          returnFocusFallback={correctionPanelRef}
           title="Delete Draft Correction Run"
           dangerLevel="medium"
           description={
@@ -1023,12 +1030,13 @@ function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, ret
 }
 
 // ----------------------------------------------------------------
-// CorrectionModal — accessible inline dialog
+// CorrectionModal — accessible viewport dialog
 // ----------------------------------------------------------------
 
 type DangerLevel = 'high' | 'medium';
 
 interface CorrectionModalProps {
+  returnFocusFallback: RefObject<HTMLDivElement | null>;
   title: string;
   dangerLevel: DangerLevel;
   description: ReactNode;
@@ -1042,6 +1050,7 @@ interface CorrectionModalProps {
 }
 
 function CorrectionModal({
+  returnFocusFallback,
   title,
   dangerLevel,
   description,
@@ -1060,20 +1069,28 @@ function CorrectionModal({
 
   // Capture focus when dialog opens; restore when it closes
   useEffect(() => {
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    const fallbackTarget = returnFocusFallback.current;
+    const activeElement = document.activeElement;
+    returnFocusRef.current = activeElement instanceof HTMLElement && fallbackTarget?.contains(activeElement)
+      ? activeElement : fallbackTarget;
     const panelElement = panelRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     // Small delay so the DOM is fully mounted before focusing
-    const t = setTimeout(() => panelElement?.focus(), 10);
+    const t = setTimeout(() => {
+      if (!panelElement?.contains(document.activeElement)) panelElement?.focus();
+    }, 10);
     return () => {
       clearTimeout(t);
+      document.body.style.overflow = previousOverflow;
       const target = returnFocusRef.current;
       if (target && document.body.contains(target)) {
         target.focus();
       } else {
-        panelElement?.closest<HTMLElement>('[data-correction-panel]')?.focus();
+        if (fallbackTarget?.isConnected) fallbackTarget.focus();
       }
     };
-  }, []);
+  }, [returnFocusFallback]);
 
   // Keyboard: Escape closes (unless in-flight), Tab traps focus inside dialog
   useEffect(() => {
@@ -1120,7 +1137,9 @@ function CorrectionModal({
   const titleClass =
     dangerLevel === 'high' ? 'text-red-900' : 'text-amber-900';
 
-  return (
+  // A filtered card creates a containing block for fixed descendants.
+  // Keep the confirmation in the viewport while retaining its React context.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="presentation"
@@ -1183,7 +1202,8 @@ function CorrectionModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
