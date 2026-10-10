@@ -85,6 +85,9 @@ module Api
           created = false
           ActiveRecord::Base.transaction do
             check.company.lock!
+            if check.pay_period_id && PayPeriod.lock.find(check.pay_period_id).voided?
+              raise ArgumentError, "Cannot create a payment for a voided payroll"
+            end
             if check.payment_method == "check"
               check.check_number = check.company.next_check_number! if check.check_number.blank?
             else
