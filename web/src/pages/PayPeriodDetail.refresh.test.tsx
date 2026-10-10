@@ -995,3 +995,80 @@ it('does not apply a pending correction reload after navigating to another run',
   expect(screen.getByText('New run remains current')).toBeTruthy();
   expect(screen.queryByText('Canonical voided instruments and history')).toBeNull();
 });
+
+
+async function renderRefreshNavigation() {
+  vi.clearAllMocks();
+  const original = { ...correctionOriginal, status: 'approved' as const };
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, id: 13, notes: 'New active refresh scope' } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  function Page() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next refresh run</button>
+      <button onClick={() => navigate('/companies/8/pay-runs/12/work')}>Next refresh company</button>
+      <PayPeriodDetail initialPayPeriod={original} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
+  await screen.findByRole('button', { name: 'Refresh current setup' });
+  return original;
+}
+
+function submitRefreshNavigation() {
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
+}
+
+it.each(['run', 'company'])('does not reload the old run or clear a new busy refresh after a deferred POST and %s navigation', async scope => {
+  const original = await renderRefreshNavigation();
+  let finishOld!: (value: unknown) => void;
+  let finishNew!: (value: unknown) => void;
+  apiMocks.refreshSetup.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
+  submitRefreshNavigation();
+  const next = { ...original, id: scope === 'run' ? 13 : 12, company_id: scope === 'company' ? 8 : 7, notes: 'New active refresh scope' };
+  apiMocks.get.mockResolvedValue({ pay_period: next });
+  fireEvent.click(screen.getByRole('button', { name: scope === 'run' ? 'Next refresh run' : 'Next refresh company' }));
+  await screen.findByText('New active refresh scope');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
+  submitRefreshNavigation();
+  const calls = apiMocks.get.mock.calls.length;
+  await act(async () => finishOld({ results: { success: [], skipped: [], errors: [{ employee_id: 30, error: 'Old run failure must stay behind.' }] } }));
+  expect(apiMocks.get.mock.calls.length).toBe(calls);
+  expect(screen.queryByText('Old run failure must stay behind.')).toBeNull();
+  expect(screen.getByText('New active refresh scope')).toBeTruthy();
+  expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => finishNew({ results: { success: [], skipped: [], errors: [] } }));
+  await screen.findByText(/Current setup applied to the saved employees and inputs/);
+});
+
+it('does not add old refresh outcome feedback after its deferred canonical GET and navigation', async () => {
+  const original = await renderRefreshNavigation();
+  let finishGet!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.refreshSetup.mockResolvedValue({ results: { success: [], skipped: [], errors: [{ employee_id: 30, error: 'Prior run reload error.' }] } });
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finishGet = resolve; }));
+  submitRefreshNavigation();
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, id: 13, notes: 'New active refresh scope' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Next refresh run' }));
+  await screen.findByText('New active refresh scope');
+  await act(async () => finishGet({ pay_period: { ...original, notes: 'Old canonical refresh result' } }));
+  expect(screen.getByText('New active refresh scope')).toBeTruthy();
+  expect(screen.queryByText('Prior run reload error.')).toBeNull();
+  expect(screen.queryByText('1 employee needs attention after refreshing setup.')).toBeNull();
+  expect(screen.queryByText('Old canonical refresh result')).toBeNull();
+});
+
+it('keeps a late refresh POST rejection out of the new run', async () => {
+  await renderRefreshNavigation();
+  let reject!: (error: Error) => void;
+  apiMocks.refreshSetup.mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure; }));
+  submitRefreshNavigation();
+  fireEvent.click(screen.getByRole('button', { name: 'Next refresh run' }));
+  await screen.findByText('New active refresh scope');
+  await act(async () => reject(new Error('Old refresh request was rejected.')));
+  expect(screen.queryByText('Old refresh request was rejected.')).toBeNull();
+  expect(screen.getByText('New active refresh scope')).toBeTruthy();
+});
