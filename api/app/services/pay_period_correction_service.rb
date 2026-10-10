@@ -42,17 +42,14 @@ class PayPeriodCorrectionService
     raise ArgumentError, "reason is required" if reason.blank?
 
     PayPeriod.transaction do
+      Company.lock.find(pay_period.company_id)
       # Acquire row lock to prevent concurrent void attempts
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
 
       raise InvalidStateError, "Only committed pay periods can be voided" unless locked.committed?
       raise AlreadyVoidedError, "This pay period has already been voided" if locked.voided?
       raise AlreadySupersededError, "This pay period already has a correction run" if locked.superseded_by_id.present?
-      PayrollLiabilityPaymentGuard.ensure_clear!(
-        pay_period: locked,
-        error_class: InvalidStateError,
-        action: "voiding this payroll"
-      )
+      payments = PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!
 
       was_correction_run = locked.correction_run?
       source_pay_period_id = locked.source_pay_period_id
@@ -72,6 +69,9 @@ class PayPeriodCorrectionService
         reason:         reason,
         financial_snapshot_from: (was_correction_run ? :resulting_pay_period : :pay_period)
       )
+
+      # Retire check identities before reversing accounting, inside this same transaction.
+      payments.retire!(actor: actor, reason: reason)
 
       # Reverse all payroll items; paper-check void state must not affect payroll correction math.
       # Preload YTD records to avoid 2×N queries in the loop.
@@ -113,7 +113,9 @@ class PayPeriodCorrectionService
         voided_at:         void_time,
         voided_by_id:      actor&.id,
         void_reason:       reason,
-        **locked.tax_sync_refresh_attributes(reference_time: void_time)
+        **locked.tax_sync_refresh_attributes(reference_time: void_time).merge(
+          PayrollTaxSyncService.configured? ? { tax_sync_idempotency_key: "cpr-#{locked.id}-void-#{SecureRandom.uuid}" } : {}
+        )
       )
 
       # If a committed correction run is being voided, release source linkage so
@@ -165,6 +167,8 @@ class PayPeriodCorrectionService
       # Build the new correction pay period
       correction_run = PayPeriod.create!(
         company_id:         locked_source.company_id,
+        company_workweek_id: locked_source.company_workweek_id,
+        company_pay_schedule_id: locked_source.company_pay_schedule_id,
         start_date:         new_start_date || locked_source.start_date,
         end_date:           new_end_date   || locked_source.end_date,
         pay_date:           new_pay_date   || locked_source.pay_date,
@@ -198,6 +202,20 @@ class PayPeriodCorrectionService
       )
 
       correction_run
+    end
+  end
+
+  # An unpaid committed run is replaced, never reset to draft in place. Fresh
+  # item IDs prevent previously reversed loan payments from being reapplied.
+  def self.reopen_unpaid!(pay_period:, actor:, reason:, scope_attributes: {})
+    PayPeriod.transaction do
+      Company.lock.find(pay_period.company_id)
+      locked = PayPeriod.lock.find(pay_period.id)
+      PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!(reopen: true)
+      void!(pay_period: locked, actor: actor, reason: reason)
+      correction = create_correction_run!(source_pay_period: locked.reload, actor: actor, reason: reason)
+      correction.update!(scope_attributes.slice(:includes_base_salary, :includes_recurring_items))
+      correction
     end
   end
 
@@ -247,7 +265,7 @@ class PayPeriodCorrectionService
     # inclusion flag, and operators need the employee row present so they can
     # recalculate or zero it out explicitly in the correction run.
     source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
-      target.payroll_items.create!(
+      copied = target.payroll_items.create!(
         company_id:               target.company_id,
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,
@@ -262,6 +280,17 @@ class PayPeriodCorrectionService
         tips_paid_out:            source_item.tips_paid_out,
         tip_pool:                 source_item.tip_pool,
         loan_deduction:           source_item.loan_deduction,
+        named_loan_payments:       source_item.named_loan_payments,
+        salary_override:          source_item.salary_override,
+        non_taxable_pay:          source_item.non_taxable_pay,
+        service_charge_wages:     source_item.service_charge_wages,
+        custom_earnings:          source_item.custom_earnings,
+        custom_deductions:        source_item.custom_deductions,
+        payroll_adjustments:      source_item.payroll_adjustments,
+        wage_rate_hours:          source_item.wage_rate_hours,
+        bonus_source:             source_item.bonus_source,
+        imported_bonus:           source_item.imported_bonus,
+        payment_delivery_method:  source_item.payment_delivery_method,
         additional_withholding:   source_item.additional_withholding,
         additional_withholding_override: source_item.additional_withholding_override,
         withholding_tax_adjustment: source_item.withholding_tax_adjustment,
@@ -273,6 +302,12 @@ class PayPeriodCorrectionService
         # Calculated fields (gross_pay, taxes, etc.) start at zero —
         # operator must run Calculate Payroll to recompute.
       )
+      source_item.payroll_item_field_entries.each do |entry|
+        copied.payroll_item_field_entries.create!(entry.attributes.except("id", "payroll_item_id", "created_at", "updated_at"))
+      end
+    end
+    source.pay_period_excluded_employees.each do |excluded|
+      target.pay_period_excluded_employees.create!(excluded.attributes.except("id", "pay_period_id", "created_at", "updated_at"))
     end
   end
 
