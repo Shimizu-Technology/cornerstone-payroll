@@ -326,6 +326,9 @@ Rails.application.routes.draw do
             get :client_review
             post :record_client_approval
             post :run_payroll
+            post :refresh_setup
+            get :correction_preflight
+            post :reopen_unpaid
             post :adopt_confirmed_workweek
             get :payroll_field_inputs
             get :comparison

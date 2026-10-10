@@ -20,6 +20,13 @@ class PayrollTaxSyncPayloadBuilder
     }
   end
 
+  # Void events carry the earned rows and positive totals that CST reconciles;
+  # correction_status describes the reversal. Check retirement must not erase them.
+  def self.reportable_items(pay_period)
+    rows = pay_period.payroll_items.reportable
+    pay_period.voided? ? rows : rows.not_voided
+  end
+
   private
 
   def pay_period_payload
@@ -93,6 +100,6 @@ class PayrollTaxSyncPayloadBuilder
   end
 
   def reportable_items
-    pay_period.payroll_items.not_voided.reportable
+    self.class.reportable_items(pay_period)
   end
 end

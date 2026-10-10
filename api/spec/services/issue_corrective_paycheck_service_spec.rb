@@ -350,6 +350,22 @@ RSpec.describe IssueCorrectivePaycheckService do
   end
 
   describe ".preview" do
+    it "blocks preview and issue of named loan overrides without creating a false supplemental delta" do
+      original_item.update!(named_loan_payments: { "123" => "250.0" })
+      ytd_before = EmployeeYtdTotal.find_by!(employee_id: employee.id, year: 2024).attributes
+
+      expect {
+        described_class.preview(original_pay_period: original_period, employee: employee,
+          corrected_inputs: { hours_worked: 60 })
+      }.to raise_error(described_class::InvalidStateError, /named loan override/)
+      expect {
+        described_class.issue!(original_pay_period: original_period, employee: employee,
+          corrected_inputs: { hours_worked: 80 }, pay_date: Date.new(2024, 1, 26), reason: "More hours", actor: actor)
+      }.to raise_error(described_class::InvalidStateError, /reviewed paid-payroll and loan-ledger correction/)
+      expect(PayPeriod.count).to eq(1)
+      expect(EmployeeYtdTotal.find_by!(employee_id: employee.id, year: 2024).attributes).to eq(ytd_before)
+    end
+
     it "returns deltas for an additional-hours correction without persisting" do
       expect {
         result = described_class.preview(
