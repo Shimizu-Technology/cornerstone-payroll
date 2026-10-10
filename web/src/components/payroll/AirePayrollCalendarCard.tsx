@@ -110,18 +110,18 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
 
           <div className="flex flex-wrap gap-2 lg:justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => void run('refresh')} disabled={busy !== null}>
+            <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" onClick={() => void run('refresh')} disabled={busy !== null}>
               <RefreshCw className={`mr-2 h-4 w-4 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
             {isManager && calendar.can_retry && (
-              <Button type="button" variant="outline" size="sm" onClick={() => void run('retry')} disabled={busy !== null}>
+              <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" onClick={() => void run('retry')} disabled={busy !== null}>
                 <RefreshCw className="mr-2 h-4 w-4" />
                 {busy === 'retry' ? 'Retrying…' : 'Retry sync'}
               </Button>
             )}
             {isManager && !cutoffPassed && calendar.can_publish && calendar.needs_revision && (
-              <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null}>
+              <Button className="max-sm:min-h-[44px]" type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null}>
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : primaryAction}
               </Button>
@@ -183,7 +183,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
               </p>
             </div>
             {isManager ? (
-              <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null} className="shrink-0">
+              <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null} className="max-sm:min-h-[44px] shrink-0">
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : 'Publish cutoff to time tracking'}
               </Button>

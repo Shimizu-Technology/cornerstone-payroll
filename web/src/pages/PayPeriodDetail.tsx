@@ -2318,7 +2318,7 @@ export function PayPeriodDetail({
                         tipsLoansVisibilityModeRef.current = 'manual';
                         setShowTipsLoans(prev => !prev);
                       }}
-                      className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                      className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
                         showTipsLoans
                           ? 'bg-blue-100 text-blue-700 border-blue-300'
                           : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
@@ -2334,7 +2334,7 @@ export function PayPeriodDetail({
                           event.stopPropagation();
                           setShowPayrollFields((previous) => !previous);
                         }}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           showPayrollFields
                             ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
                             : 'border-gray-200 bg-gray-100 text-gray-500 hover:bg-gray-200'

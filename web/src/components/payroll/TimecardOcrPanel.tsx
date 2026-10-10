@@ -1506,7 +1506,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <Button size="sm" variant="outline" onClick={handleSearch}>Search</Button>
+            <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={handleSearch}>Search</Button>
             <Select
               className="w-36 py-1.5"
               value={statusFilter}

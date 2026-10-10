@@ -77,7 +77,7 @@ function eventLabel(eventType: string): string {
 function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
   if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
-  return <Button size="sm" variant="outline" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
+  return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod }: ChecksPanelProps) {
@@ -685,7 +685,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       </Button>
                     )}
                     {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
-                      <Button size="sm" onClick={() => setDeliveryTarget(item)}>
+                      <Button size="sm" className="max-sm:min-h-[44px]" onClick={() => setDeliveryTarget(item)}>
                         Record Issued
                       </Button>
                     )}

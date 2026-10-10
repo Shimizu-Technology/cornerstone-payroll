@@ -67,9 +67,9 @@ export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordC
           <span>I confirm this check was released using the method and date above. Any linked time tracking hours will be marked as paid.</span>
         </label>
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => void submit()} disabled={saving || !deliveredOn || !attested}>{saving ? 'Recording…' : 'Record Issued'}</Button>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button className="max-sm:min-h-[44px]" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button className="max-sm:min-h-[44px]" onClick={() => void submit()} disabled={saving || !deliveredOn || !attested}>{saving ? 'Recording…' : 'Record Issued'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

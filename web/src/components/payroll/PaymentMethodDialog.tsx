@@ -104,7 +104,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
       <DialogHeader><DialogTitle>Change payment method</DialogTitle><DialogDescription>{item?.employee_name} · Pay date {formatDate(payPeriod.pay_date)}. Wages, taxes, deductions, and YTD stay the same.</DialogDescription></DialogHeader>
       {loading && <p role="status" className="text-sm text-neutral-600">Checking the payment and its check history…</p>}
       {error && <ActionFeedback tone="error" message={error} retryKey={errorAttempt} />}
-      {!loading && !record && <Button variant="outline" onClick={() => setReload(value => value + 1)}>Try again</Button>}
+      {!loading && !record && <Button className="max-sm:min-h-[44px]" variant="outline" onClick={() => setReload(value => value + 1)}>Try again</Button>}
       {record && <fieldset disabled={saving} className="space-y-4">
         <p className="text-sm text-neutral-600">Current method: <strong>{paymentMethodLabel(currentMethod)}</strong></p>
         {blocked ? <p role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">{eligibility?.reason || 'This payment cannot be changed until its eligibility has been verified. Refresh and try again.'}</p> : <>
@@ -124,7 +124,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
           <p className="text-xs leading-5 text-neutral-600">Confirm direct-deposit enrollment with the employer or bank. Selecting Direct deposit or printing an earnings statement does not send money.</p>
         </>}
       </fieldset>}
-      <DialogFooter><Button variant="outline" disabled={saving} onClick={onClose}>Cancel</Button><Button disabled={!ready} onClick={() => void save()}>{saving ? 'Saving…' : retiresCheck ? 'Record cancellation and save' : 'Save payment method'}</Button></DialogFooter>
+      <DialogFooter className="gap-2 sm:gap-0"><Button className="max-sm:min-h-[44px]" variant="outline" disabled={saving} onClick={onClose}>Cancel</Button><Button className="max-sm:min-h-[44px]" disabled={!ready} onClick={() => void save()}>{saving ? 'Saving…' : retiresCheck ? 'Record cancellation and save' : 'Save payment method'}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }
