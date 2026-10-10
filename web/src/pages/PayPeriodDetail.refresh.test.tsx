@@ -374,3 +374,15 @@ it('keeps a setup refresh failure visible without discarding the existing approv
   expect(await within(screen.getByRole('dialog')).findByText('Employee setup is invalid; correct the saved schedule.')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Commit & Finalize' })).toBeTruthy();
 });
+
+
+it('retains a linked loan request when that employee needs calculation recovery', async () => {
+  const card = await renderLoanWorksheet();
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '400' } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', run_purpose: 'correction', includes_recurring_items: false, payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14 }] }, results: { success: [], skipped: [], errors: [{ employee_id: 30, name: 'Ana Cruz', error: 'Loan balance needs review.' }] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
+  const restoredCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect((within(restoredCard).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('400.00');
+});

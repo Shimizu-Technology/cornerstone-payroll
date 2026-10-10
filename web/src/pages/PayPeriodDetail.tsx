@@ -908,6 +908,10 @@ export function PayPeriodDetail({
       await payPeriodsApi.payrollFieldInputs(payPeriod.id)
         .then((updatedPayrollFieldResponse) => {
           syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
+          setNamedLoanDrafts(previous => ({
+            ...previous,
+            ...Object.fromEntries(Object.entries(namedLoanDrafts).filter(([employeeId]) => failedEmployeeIds.has(employeeId))),
+          }));
         })
         .catch((refreshError) => {
           console.warn('Payroll ran successfully, but the payroll field worksheet could not be refreshed.', refreshError);
