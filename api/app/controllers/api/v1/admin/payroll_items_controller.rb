@@ -401,6 +401,12 @@ module Api
           }
 
           if detailed
+            confirmation = item.direct_deposit_payment_confirmation
+            json[:payment_confirmation] = confirmation && {
+              settled_on: confirmation.settled_on.iso8601,
+              bank_reference: confirmation.bank_reference,
+              confirmed_at: confirmation.created_at.iso8601
+            }
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             # Include full YTD breakdown
             json[:ytd] = {

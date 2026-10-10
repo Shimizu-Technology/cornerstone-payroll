@@ -96,6 +96,45 @@ describe('PayrollItemDetail payment labels', () => {
     expect(screen.queryByText('No payment issued')).toBeNull();
   });
 
+  it.each([null, '2026-11-22T09:00:00Z'])('shows persisted bank payment evidence independently of statement printed=%s', async (printedAt) => {
+    const confirmed = { ...baseItem, effective_payment_delivery_method: 'direct_deposit', check_number: null,
+      check_printed_at: printedAt, payment_confirmation: { settled_on: '2026-11-22', bank_reference: 'SIM-P03-BANK-20261122-REPLACEMENT', confirmed_at: '2026-11-22T07:04:00Z' } } as PayrollItem;
+    renderDetail(confirmed);
+    expect(await screen.findByText('Bank paid Nov 22, 2026 · SIM-P03-BANK-20261122-REPLACEMENT')).toBeDefined();
+    expect(screen.getByText('Bank payment confirmed')).toBeDefined();
+    expect(screen.getByText('Available to print; not payment evidence')).toBeDefined();
+    expect(screen.queryByText('Direct-deposit stub; transfer not confirmed')).toBeNull();
+    expect(screen.queryByText('Available to print; bank transfer not confirmed')).toBeNull();
+    expect(screen.queryByText('Earnings statement only')).toBeNull();
+  });
+
+  it('shows the exact mixed-case bank reference without capitalizing or overflowing it', async () => {
+    const reference = `sim-mixed-${'a'.repeat(180)}`;
+    renderDetail({ ...baseItem, effective_payment_delivery_method: 'direct_deposit', check_number: null,
+      payment_confirmation: { settled_on: '2026-11-22', bank_reference: reference, confirmed_at: '2026-11-22T07:04:00Z' } } as PayrollItem);
+    const evidence = await screen.findByText(reference);
+    expect(evidence.style.textTransform).toBe('none');
+    expect(evidence.style.overflowWrap).toBe('anywhere');
+  });
+
+  it('keeps void status distinct from retained bank confirmation history', async () => {
+    renderDetail({ ...baseItem, effective_payment_delivery_method: 'direct_deposit', check_number: null, voided: true,
+      payment_confirmation: { settled_on: '2026-11-22', bank_reference: 'SIM-RETAINED-BANK', confirmed_at: '2026-11-22T07:04:00Z' } } as PayrollItem);
+    expect(await screen.findByText('Voided payroll item')).toBeDefined();
+    expect(screen.getByText('Retained bank settlement')).toBeDefined();
+    expect(screen.getByText('SIM-RETAINED-BANK')).toBeDefined();
+    expect(screen.queryByText('Bank payment confirmed')).toBeNull();
+    expect(screen.queryByText('Direct-deposit stub; transfer not confirmed')).toBeNull();
+  });
+
+  it('does not turn a printed eligible direct-deposit statement into confirmation', async () => {
+    renderDetail({ ...baseItem, effective_payment_delivery_method: 'direct_deposit', check_number: null,
+      check_printed_at: '2026-11-22T07:00:00Z', earnings_statement_eligible: true } as PayrollItem);
+    await screen.findByText('Payment context');
+    expect(screen.getByText('Direct-deposit stub; transfer not confirmed')).toBeDefined();
+    expect(screen.queryByText('Bank payment confirmed')).toBeNull();
+  });
+
   it('keeps saved positive direct-deposit behavior despite the employee default', async () => {
     renderDetail({ ...baseItem, effective_payment_delivery_method: 'direct_deposit', check_number: null });
     await screen.findByText('Payment context');

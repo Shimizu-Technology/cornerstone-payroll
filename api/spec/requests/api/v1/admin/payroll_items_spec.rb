@@ -44,6 +44,48 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response.parsed_body.dig("payroll_item", "payment_delivery_method")).to eq("direct_deposit")
     end
 
+    it "returns persisted bank confirmation evidence on the exact scoped detail without mutating payment history" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65)
+      confirmation = DirectDepositPaymentConfirmation.create!(payroll_item: payroll_item, user: admin_user,
+        settled_on: PayrollBusinessClock.today - 1.day, bank_reference: "SYNTHETIC-DETAIL-BANK")
+      before = [ payroll_item.reload.attributes, confirmation.reload.attributes, CheckEvent.count,
+        DirectDepositPaymentConfirmation.count, EmployeeYtdTotal.count, AirePayrollEntryAcknowledgement.count ]
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("payroll_item").fetch("payment_confirmation")).to eq(
+        "settled_on" => confirmation.settled_on.iso8601,
+        "bank_reference" => confirmation.bank_reference,
+        "confirmed_at" => confirmation.created_at.iso8601
+      )
+      expect([ payroll_item.reload.attributes, confirmation.reload.attributes, CheckEvent.count,
+        DirectDepositPaymentConfirmation.count, EmployeeYtdTotal.count, AirePayrollEntryAcknowledgement.count ]).to eq(before)
+    end
+
+    it "returns no confirmation for an eligible direct-deposit item without a persisted confirmation" do
+      pay_period.update!(status: "committed")
+      payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65)
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("payroll_item").fetch("payment_confirmation")).to be_nil
+      expect(DirectDepositPaymentConfirmation.count).to eq(0)
+    end
+
+    it "does not return another item bank confirmation through the requested item" do
+      pay_period.update!(status: "committed")
+      other_employee = create(:employee, company: company)
+      other = create(:payroll_item, company: company, pay_period: pay_period, employee: other_employee,
+        payment_delivery_method: "direct_deposit", gross_pay: 100, net_pay: 92.35)
+      DirectDepositPaymentConfirmation.create!(payroll_item: other, user: admin_user,
+        settled_on: PayrollBusinessClock.today - 1.day, bank_reference: "SYNTHETIC-OTHER-ITEM")
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("payroll_item").fetch("payment_confirmation")).to be_nil
+      expect(response.body).not_to include("SYNTHETIC-OTHER-ITEM")
+    end
+
     it "returns immutable source evidence for imported period pay and typed one-time items" do
       payroll_item.update!(
         salary_override: 9_000,
