@@ -1570,6 +1570,7 @@ export interface PayrollItem {
   effective_payment_delivery_method?: PaymentDeliveryMethod;
   payment_method_change?: PaymentMethodChangeEligibility;
   earnings_statement_eligible?: boolean;
+  payment_confirmation?: DirectDepositItem['payment_confirmation'];
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;

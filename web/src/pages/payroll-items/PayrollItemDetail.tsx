@@ -143,6 +143,10 @@ export function PayrollItemDetail(): ReactElement {
     : (payrollItem.import_source || payrollItem.timekeeping_source || 'manual').replaceAll('_', ' ');
   const importedComponents = (payrollItem.payroll_field_entries || []).filter((entry) => entry.source === 'import' && entry.active !== false);
   const isDirectDeposit = payrollItem.effective_payment_delivery_method === 'direct_deposit';
+  const bankConfirmation = payrollItem.payment_confirmation;
+  const bankPaymentDescription = payrollItem.voided ? 'Voided payroll item' : bankConfirmation
+    ? `Bank paid ${formatDate(bankConfirmation.settled_on)} · ${bankConfirmation.bank_reference}`
+    : 'Direct-deposit stub; transfer not confirmed';
   const paymentDisplay = payRunPaymentDisplay(payrollItem, { committed: payRun.status === 'committed', rehearsal: false, canPreview: false });
   const hasSavedCheckEvidence = Boolean(payrollItem.check_number || payrollItem.check_prepared_at || payrollItem.check_printed_at
     || ['prepared', 'printed', 'delivered', 'voided'].includes(payrollItem.check_status || ''));
@@ -177,7 +181,7 @@ export function PayrollItemDetail(): ReactElement {
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
           <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
           <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
-          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? 'Direct-deposit stub; transfer not confirmed' : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
+          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? bankPaymentDescription : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -198,11 +202,19 @@ export function PayrollItemDetail(): ReactElement {
           <Card>
             <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">{statementOnly ? 'An earnings statement records this payroll activity; no payment is issued.' : 'Payment method for this run; finalized when payroll is committed.'}</p></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <ContextRow icon={Banknote} label="Method" value={statementOnly ? paymentDisplay.method : isDirectDeposit ? 'Direct deposit (stub only)' : 'Paper check'} />
+              <ContextRow icon={Banknote} label="Method" value={statementOnly ? paymentDisplay.method : isDirectDeposit ? bankConfirmation ? 'Direct deposit' : 'Direct deposit (stub only)' : 'Paper check'} />
               {statementOnly ? (
                 <ContextRow icon={ReceiptText} label="Payment status" value={paymentDisplay.status} />
               ) : isDirectDeposit ? (
-                <ContextRow icon={ReceiptText} label="Stub status" value="Available to print; bank transfer not confirmed" />
+                <>
+                  <ContextRow icon={ReceiptText} label="Stub status" value={payrollItem.voided ? 'Retained document; payroll item is voided' : bankConfirmation ? 'Available to print; not payment evidence' : 'Available to print; bank transfer not confirmed'} />
+                  {bankConfirmation && <>
+                    <ContextRow icon={CheckCircle2} label="Payment status" value={payrollItem.voided ? 'Voided' : 'Bank payment confirmed'} />
+                    <ContextRow icon={CalendarDays} label={payrollItem.voided ? 'Retained bank settlement' : 'Bank settled on'} value={formatDate(bankConfirmation.settled_on)} />
+                    <ContextRow icon={ReceiptText} label="Bank reference" value={bankConfirmation.bank_reference} verbatim />
+                    <ContextRow icon={Clock3} label="Confirmation recorded" value={formatGuamDateTime(bankConfirmation.confirmed_at)} />
+                  </>}
+                </>
               ) : (
                 <>
                   <ContextRow icon={Printer} label="Check number" value={payrollItem.check_number || 'Not assigned'} />
@@ -269,15 +281,16 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500" style={{ overflowWrap: 'anywhere' }}>{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
   icon: typeof Banknote;
   label: string;
   value: string;
+  verbatim?: boolean;
 }
 
-function ContextRow({ icon: Icon, label, value }: ContextRowProps): ReactElement {
-  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div></div>;
+function ContextRow({ icon: Icon, label, value, verbatim = false }: ContextRowProps): ReactElement {
+  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800" style={verbatim ? { textTransform: 'none', overflowWrap: 'anywhere' } : undefined}>{value}</p></div></div>;
 }
