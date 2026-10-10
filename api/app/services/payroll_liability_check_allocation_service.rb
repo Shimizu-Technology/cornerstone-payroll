@@ -19,6 +19,7 @@ class PayrollLiabilityCheckAllocationService
 
   def allocate!
     NonEmployeeCheck.transaction do
+      Company.lock.find(non_employee_check.company_id)
       payment = NonEmployeeCheck.lock.find(non_employee_check.id)
       raise Error, "A voided payment cannot reserve liabilities" if payment.voided?
       raise Error, "A paid payment cannot change its liability allocation" if payment.paid_at.present?

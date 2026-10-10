@@ -1455,8 +1455,14 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; named_loan_payments?: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
+  refreshSetup: (id: number, data: { includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
+    api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/refresh_setup`, data),
+  correctionPreflight: (id: number) =>
+    api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight }>(`/admin/pay_periods/${id}/correction_preflight`),
+  reopenUnpaid: (id: number, data: { reason: string; unpaid_acknowledgement: boolean; includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
+    api.post<CorrectionRunResponse>(`/admin/pay_periods/${id}/reopen_unpaid`, data),
   adoptConfirmedWorkweek: (id: number): Promise<PayPeriodResponse> =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/adopt_confirmed_workweek`),
   approve: (id: number) =>
@@ -1520,7 +1526,7 @@ export const payPeriodsApi = {
     api.getBlob(`/admin/pay_periods/${id}/supplemental_template`),
 
   // CPR-71: Payroll correction workflow
-  void: (id: number, data: { reason: string }) =>
+  void: (id: number, data: { reason: string; unpaid_acknowledgement?: boolean }) =>
     api.post<VoidPayPeriodResponse>(`/admin/pay_periods/${id}/void`, data),
   createCorrectionRun: (
     id: number,
@@ -6181,3 +6187,14 @@ export const authApi = {
     companiesApi.clearActiveCompanyId();
   },
 };
+
+export interface PayrollCorrectionPreflight {
+  eligible: boolean;
+  blockers: string[];
+  employee_checks: PayrollCorrectionPayment[];
+  other_payments: PayrollCorrectionPayment[];
+  requires_unpaid_acknowledgement: boolean;
+}
+export interface PayrollCorrectionPayment {
+  id: number; check_number: string | null; payee: string; amount: number; status: string; already_voided: boolean;
+}

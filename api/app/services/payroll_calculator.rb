@@ -41,9 +41,9 @@ class PayrollCalculator
     raise NotImplementedError, "Subclasses must implement #calculate"
   end
 
-  def apply_loan_payments!
+  def apply_loan_payments!(actor: nil)
     PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item)
-    ApplicationRecord.transaction { process_loan_payments }
+    ApplicationRecord.transaction { process_loan_payments(actor: actor) }
   end
 
   protected
@@ -246,6 +246,7 @@ class PayrollCalculator
 
       amount = retirement_adjusted_deduction_amount(ed)
       loan = historical_calculation? ? nil : loan_for_deduction_type(dt.id)
+      next if loan && payroll_item.named_loan_payments.key?(loan.id.to_s)
       amount = loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: loan.payment_amount || amount) if loan
       next if amount.zero?
 
@@ -286,6 +287,8 @@ class PayrollCalculator
     end
 
     record_payroll_field_employee_deductions
+    apply_named_loan_repayments! unless historical_calculation?
+    PayrollLoanConfigurationGuard.validate!(employee: employee, payroll_item: payroll_item) unless historical_calculation?
     record_payroll_field_employer_contributions
 
     # Update aggregate fields for backward compatibility with existing code
@@ -294,7 +297,7 @@ class PayrollCalculator
   end
 
   # Process loan balance tracking for any loan-type deductions
-  def process_loan_payments
+  def process_loan_payments(actor: nil)
     recorded_loan_ids = Set.new
     payroll_item.payroll_item_deductions.select { |pid| pid.deduction_type&.loan? }.each do |pid|
       loan = pid.employee_loan || find_active_loan_for_deduction(pid)
@@ -306,7 +309,8 @@ class PayrollCalculator
         pay_period: pay_period,
         payroll_item: payroll_item,
         date: pay_period.pay_date,
-        schedule_snapshot: pid.loan_schedule_snapshot
+        schedule_snapshot: pid.loan_schedule_snapshot,
+        recorded_by: actor
       )
     end
   end
@@ -343,6 +347,7 @@ class PayrollCalculator
   def record_payroll_field_employee_deductions
     payroll_item.payroll_item_field_entries.each do |entry|
       next unless entry.active? && entry.kind == "deduction" && entry.amount.to_f.positive?
+      next if payroll_item.named_loan_payments.key?(entry.metadata.to_h["employee_loan_id"].to_s)
       next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
 
       category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
@@ -356,6 +361,23 @@ class PayrollCalculator
         employee_loan_id: historical_calculation? ? nil : entry.metadata&.fetch("employee_loan_id", nil),
         loan_schedule_snapshot: historical_calculation? ? {} : (entry.metadata || {}).fetch("loan_schedule_snapshot", {})
       )
+    end
+  end
+
+  def apply_named_loan_repayments!
+    NamedPayrollLoanInput.validate!(payroll_item)
+    payroll_item.named_loan_payments.each do |id, requested|
+      loan = employee.employee_loans.find(id)
+      amount = loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: requested)
+      next unless amount.positive?
+      type = loan.deduction_type || find_or_create_payroll_field_deduction_type(loan.name,
+        category: "post_tax", sub_category: "loan", reporting_group: nil)
+      unless type.active? && type.post_tax? && type.loan?
+        raise ArgumentError, "#{loan.name}: linked loan deduction must be active and post-tax"
+      end
+      payroll_item.payroll_item_deductions.build(deduction_type: type, employee_loan: loan,
+        amount: amount, category: "post_tax", label: loan.name,
+        loan_schedule_snapshot: loan_schedule_snapshot(loan, default: false))
     end
   end
 
@@ -640,9 +662,11 @@ class PayrollCalculator
       next unless entry
 
       requested = entry.source == "employee_default" ? (loan.payment_amount || entry.amount) : (entry.metadata || {}).fetch("loan_requested_amount", entry.amount)
+      entry.metadata = entry.metadata.to_h.merge("loan_requested_amount" => requested.to_s)
+      requested = payroll_item.named_loan_payments.fetch(loan.id.to_s, requested)
       eligible = assignment.active? && (assignment.start_date.blank? || assignment.start_date <= pay_period.pay_date) && (assignment.end_date.blank? || assignment.end_date >= pay_period.pay_date)
       entry.amount = eligible ? loan.scheduled_payment_for(pay_date: pay_period.pay_date, requested_amount: requested) : 0.to_d
-      entry.metadata = (entry.metadata || {}).merge("employee_loan_id" => loan.id, "loan_requested_amount" => requested.to_s, "loan_schedule_snapshot" => loan_schedule_snapshot(loan, default: entry.source == "employee_default"))
+      entry.metadata = (entry.metadata || {}).merge("employee_loan_id" => loan.id, "loan_schedule_snapshot" => loan_schedule_snapshot(loan, default: entry.source == "employee_default"))
     end
   end
 
@@ -767,7 +791,9 @@ class PayrollCalculator
       payroll_item.payroll_item_deductions.each do |deduction|
         deduction_category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
         next unless deduction.category == deduction_category
-        next unless deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+        loan_id = entry.metadata.to_h["employee_loan_id"]
+        same_loan = loan_id.present? && deduction.employee_loan_id == loan_id.to_i
+        next unless same_loan || deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
 
         deduction.amount = next_amount
       end

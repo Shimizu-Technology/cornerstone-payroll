@@ -12,16 +12,16 @@ module Api
         # Read-only previews (`:corrective_paycheck_preview`,
         # `:supplemental_pay_periods`) are deliberately omitted.
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :record_client_approval,
-                      :create_correction_run, :generate_fit_check,
+                      :create_correction_run, :reopen_unpaid, :refresh_setup, :generate_fit_check,
                       :corrective_paychecks, :adopt_confirmed_workweek
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
           :promoted_payment_preview, :prepare_promoted_payment,
-          :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
+          :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs, :client_review, :record_client_approval
         ]
-        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll ]
+        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -78,8 +78,48 @@ module Api
             payroll_field_inputs: PayrollFieldInputBuilder.new(
               pay_period: @pay_period,
               company_id: current_company_id
-            ).call
+            ).call.merge(named_loan_options: NamedPayrollLoanInput.options(@pay_period))
           }
+        end
+
+        def correction_preflight
+          preview = PayrollRevisionPaymentPreflight.new(pay_period: @pay_period)
+          render json: { correction_preflight: preview.call(reopen: true), void_preflight: preview.call }
+        end
+
+        def reopen_unpaid
+          require_unpaid_acknowledgement!
+          correction = PayPeriodCorrectionService.reopen_unpaid!(
+            pay_period: @pay_period, actor: current_user, reason: params[:reason].to_s.strip,
+            scope_attributes: refresh_scope_attributes
+          )
+          render json: { source_pay_period: pay_period_json(@pay_period.reload),
+            correction_run: pay_period_json(correction, include_items: true) }, status: :created
+        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # Refresh setup under the shared company/period lock without expanding
+        # the roster or overwriting entered wages. Reapproval is required.
+        def refresh_setup
+          unless @pay_period.can_edit? && %w[draft calculated approved].include?(@pay_period.status)
+            raise ArgumentError, "Only draft, calculated, or approved payroll can refresh setup"
+          end
+          scope_attributes = refresh_scope_attributes
+          @pay_period.invalidate_calculation!(reason: "Employee/client setup refreshed; previous approval is no longer valid")
+          @pay_period.update!(scope_attributes)
+          ids = @pay_period.payroll_items.pluck(:employee_id)
+          if ids.empty?
+            render json: { pay_period: pay_period_json(@pay_period, include_items: true), results: { success: [], skipped: [], errors: [] } }
+          else
+            @preserve_entered_pay_rates = true
+            %i[hours salary_overrides bonuses tips tips_paid_out service_charge_wages loan_deductions
+              named_loan_payments custom_earnings custom_deductions payroll_adjustments payroll_field_inputs].each { |key| params.delete(key) }
+            params[:employee_ids] = ids
+            run_payroll
+          end
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods
@@ -275,6 +315,9 @@ module Api
           unless @pay_period.draft? || @pay_period.calculated?
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end
+          if params.key?(:named_loan_payments) && !params[:named_loan_payments].respond_to?(:to_unsafe_h)
+            return render json: { error: "Named loan inputs must be an object keyed by employee" }, status: :unprocessable_entity
+          end
 
           PayrollGoLiveGate.new(company: @pay_period.company, pay_date: @pay_period.pay_date)
             .require_live_payroll!(parallel_run: @pay_period.parallel_run?)
@@ -286,8 +329,13 @@ module Api
           # 3. Otherwise, include all active employees for normal payroll runs/recalculations
           submitted_employee_ids = submitted_payroll_employee_ids
           excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id)
-          employee_ids = if params[:employee_ids].present?
-            Array(params[:employee_ids]) | submitted_employee_ids
+          if params.key?(:employee_ids) && Array(params[:employee_ids]).empty?
+            return render json: { error: "Select at least one employee before calculating payroll" }, status: :unprocessable_entity
+          end
+          employee_ids = if params.key?(:employee_ids)
+            Array(params[:employee_ids])
+          elsif @pay_period.correction_run?
+            @pay_period.payroll_items.pluck(:employee_id)
           elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
             imported_ids = @pay_period.payroll_items.pluck(:employee_id)
             eligible = Employee.where(company_id: current_company_id).eligible_for_period(@pay_period.start_date, @pay_period.end_date)
@@ -338,7 +386,7 @@ module Api
               end
               payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
 
-              sync_pay_rate_from_employee(payroll_item, employee)
+              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
               payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
 
@@ -351,7 +399,7 @@ module Api
                   apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
                 else
                   payroll_item.clear_wage_rate_hours!
-                  sync_pay_rate_from_employee(payroll_item, employee)
+                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
                   payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
                   payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
                   payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
@@ -391,6 +439,10 @@ module Api
               if params[:service_charge_wages] && params[:service_charge_wages][employee_id.to_s]
                 service_charge_val = params[:service_charge_wages][employee_id.to_s].to_f
                 payroll_item.service_charge_wages = service_charge_val > 0 ? service_charge_val : 0
+              end
+
+              if params[:named_loan_payments]&.key?(employee_id.to_s)
+                NamedPayrollLoanInput.apply!(payroll_item: payroll_item, inputs: params[:named_loan_payments][employee_id.to_s])
               end
 
               # Apply loan deductions from the Adjust Hours table
@@ -440,7 +492,9 @@ module Api
 
               # Calculate payroll
               PayrollItem.transaction(requires_new: true) do
-                PayrollTimeAllocationService.call!(payroll_item: payroll_item)
+                unless @preserve_entered_pay_rates || payroll_item.timekeeping_source == "correction_reference"
+                  PayrollTimeAllocationService.call!(payroll_item: payroll_item)
+                end
                 payroll_item.calculate!
                 case PayrollItemActivity.classify(payroll_item)
                 when :verified_empty
@@ -676,6 +730,7 @@ module Api
           end
 
           begin
+            require_unpaid_acknowledgement!
             event = PayPeriodCorrectionService.void!(
               pay_period: @pay_period,
               actor:      current_user,
@@ -1165,6 +1220,21 @@ module Api
           )
         end
 
+        def refresh_scope_attributes
+          %i[includes_base_salary includes_recurring_items].each_with_object({}) do |key, attrs|
+            next unless params.key?(key)
+            value = params[key]
+            raise ArgumentError, "#{key} must be true or false" unless [ true, false, "true", "false" ].include?(value)
+            attrs[key] = ActiveModel::Type::Boolean.new.cast(value)
+          end
+        end
+
+        def require_unpaid_acknowledgement!
+          unless [ true, "true" ].include?(params[:unpaid_acknowledgement])
+            raise ArgumentError, "Confirm that all employee and tax payments remain unissued and unpaid, and prepared paper checks will be destroyed"
+          end
+        end
+
         def purpose_fields_submitted?
           submitted = params.fetch(:pay_period, {})
           submitted.key?(:run_purpose) || submitted.key?("run_purpose") ||
@@ -1389,6 +1459,7 @@ module Api
             check_print_count: item.check_print_count,
             check_status: item.check_status,
             loan_deduction: item.loan_deduction,
+            named_loan_payments: item.named_loan_payments.transform_values { |amount| amount.to_d.to_f },
             tip_pool: item.tip_pool,
             import_source: item.import_source,
             time_tracking_provenance: time_tracking_provenance_json(item),
@@ -1469,7 +1540,14 @@ module Api
             []
           end
 
-          (keyed_ids + hours_ids).map(&:to_i).select(&:positive?).uniq
+          named_ids = if params[:named_loan_payments].respond_to?(:to_unsafe_h)
+            params[:named_loan_payments].to_unsafe_h.filter_map do |employee_id, inputs|
+              employee_id if inputs.is_a?(Hash) && inputs.values.any? { |input| input.is_a?(Hash) && input["mode"] == "override" && input["amount"].to_f.positive? }
+            end
+          else
+            []
+          end
+          (keyed_ids + hours_ids + named_ids).map(&:to_i).select(&:positive?).uniq
         end
 
         def normalize_custom_earnings(entries)
@@ -1486,7 +1564,7 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
-          payroll_item.wage_rate_hours = wage_rate_hours
+          payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
 
           payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }

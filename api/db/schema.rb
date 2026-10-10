@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_09_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2856,6 +2856,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_070000) do
     t.decimal "loan_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "medicare_tax", precision: 10, scale: 2, default: "0.0"
     t.decimal "medicare_taxable_wages", precision: 14, scale: 2
+    t.jsonb "named_loan_payments", default: {}, null: false
     t.decimal "net_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "non_taxable_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
@@ -2918,6 +2919,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_070000) do
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "payroll_items_payment_delivery_method_check"
     t.check_constraint "payment_delivery_method::text IS DISTINCT FROM 'direct_deposit'::text OR check_number IS NULL", name: "payroll_items_direct_deposit_no_check_number"
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
+    t.check_constraint "jsonb_typeof(named_loan_payments) = 'object'::text", name: "payroll_items_named_loan_payments_object"
   end
 
   create_table "payroll_liability_check_allocations", force: :cascade do |t|

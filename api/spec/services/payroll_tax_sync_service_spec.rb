@@ -109,6 +109,55 @@ RSpec.describe PayrollTaxSyncService, type: :service do
       end
     end
 
+    context "when CST records a batch but reports failed reconciliation" do
+      before do
+        stub_request(:post, "https://cst.example.com/api/v1/ingest")
+          .to_return(status: 201, body: '{"payroll_import_batch":{"status":"failed","error_message":"Reconciliation mismatch"}}')
+      end
+
+      it "records sync failure instead of false success" do
+        expect { service.sync! }.to raise_error(PayrollTaxSyncService::SyncError, /reconciliation failed/)
+        expect(pay_period.reload.tax_sync_status).to eq("failed")
+      end
+    end
+
+    context "when a void revision is queued while the original request is in flight" do
+      def queue_void_revision
+        PayPeriod.find(pay_period.id).update!(
+          tax_sync_idempotency_key: "cpr-test-123-void",
+          tax_sync_status: "pending",
+          tax_synced_at: nil,
+          tax_sync_last_error: nil
+        )
+      end
+
+      it "leaves the newer revision pending when the original request succeeds" do
+        stub_request(:post, "https://cst.example.com/api/v1/ingest").to_return do
+          queue_void_revision
+          { status: 200, body: '{"status":"accepted"}' }
+        end
+
+        service.sync!
+
+        expect(pay_period.reload.tax_sync_status).to eq("pending")
+        expect(pay_period.tax_synced_at).to be_nil
+        expect(pay_period.tax_sync_idempotency_key).to eq("cpr-test-123-void")
+        expect(WebMock).to have_requested(:post, "https://cst.example.com/api/v1/ingest")
+          .with(headers: { "Idempotency-Key" => "cpr-test-123" })
+      end
+
+      it "does not mark the newer revision failed when the original request fails" do
+        stub_request(:post, "https://cst.example.com/api/v1/ingest").to_return do
+          queue_void_revision
+          { status: 500, body: "Internal Server Error" }
+        end
+
+        expect { service.sync! }.to raise_error(PayrollTaxSyncService::SyncError, /500/)
+        expect(pay_period.reload.tax_sync_status).to eq("pending")
+        expect(pay_period.tax_sync_last_error).to be_nil
+      end
+    end
+
     context "when CST returns 409 (duplicate/idempotent)" do
       before do
         stub_request(:post, "https://cst.example.com/api/v1/ingest")

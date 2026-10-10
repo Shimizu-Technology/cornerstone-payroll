@@ -252,6 +252,7 @@ class IssueCorrectivePaycheckService
   # ---------------------------------------------------------------------
   def validate_for_preview!
     raise OriginalNotFoundError, "Original payroll item not found for employee in this pay period" if original_item.nil?
+    validate_named_loan_replay!
 
     if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
@@ -315,6 +316,7 @@ class IssueCorrectivePaycheckService
   end
 
   def assert_correctable!(period)
+    validate_named_loan_replay!
     unless period.can_issue_corrective_paycheck?
       raise InvalidStateError,
             "Pay period must be a regular committed (non-voided) period to issue a corrective paycheck"
@@ -323,6 +325,13 @@ class IssueCorrectivePaycheckService
       raise InvalidStateError,
             "Cannot issue a corrective paycheck for an item whose original check is voided"
     end
+  end
+
+  def validate_named_loan_replay!
+    return if original_item.named_loan_payments.blank?
+
+    raise InvalidStateError,
+          "This paycheck has a named loan override that cannot be safely replayed for a supplemental correction. Use unpaid payroll reopening if all payments are unissued and unpaid; otherwise arrange a reviewed paid-payroll and loan-ledger correction"
   end
 
   # ---------------------------------------------------------------------

@@ -1971,7 +1971,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     if (payPeriod.correction_status !== 'voided') {
       const voidResponse = await adminApi.post(
         `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
-        { data: { reason: 'Verify filtered correction navigation' } },
+        { data: { reason: 'Verify filtered correction navigation', unpaid_acknowledgement: true } },
       );
       expect(voidResponse.ok()).toBeTruthy();
     }
