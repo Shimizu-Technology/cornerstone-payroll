@@ -1239,6 +1239,13 @@ export function PayPeriodDetail({
     });
   };
 
+  useEffect(() => {
+    if (loading || !payPeriod?.id || location.hash !== '#time-tracking-sync') return;
+    const target = document.getElementById('time-tracking-sync');
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [loading, payPeriod?.id, location.hash]);
+
   const correctionRouteGeneration = commitRouteGenerationRef.current;
 
   if (loading) {
@@ -1995,6 +2002,7 @@ export function PayPeriodDetail({
           </div>
         ))}
 
+        <div id="time-tracking-sync" tabIndex={-1} className="scroll-mt-24">
         {payPeriod.time_tracking?.aire_calendar && (
           <AirePayrollCockpit
             key={payPeriod.id}
@@ -2028,6 +2036,8 @@ export function PayPeriodDetail({
               onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
           </div>
         )}
+
+        </div>
 
         {payPeriod.notes && (
           <Card className="border-blue-100 bg-blue-50/60">
@@ -3789,7 +3799,7 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
+              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
             </div>
           </Card>
         )}

@@ -563,7 +563,7 @@ function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo, o
       </Card>
       {!isRehearsal && payRun.status === 'committed' && (
         <>
-          <ChecksPanel payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
+          <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })}#time-tracking-sync`} payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
           <UnifiedCheckPrintDialog
             open={checkPrintOpen}
             payPeriodId={payRun.id}

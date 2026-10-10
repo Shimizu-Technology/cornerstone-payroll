@@ -7,7 +7,7 @@ import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import type { CheckItem, CheckListMeta, DirectDepositItem, EarningsStatementItem, PayPeriod } from '@/types';
+import type { CheckItem, CheckListMeta, DirectDepositItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,7 @@ interface ChecksPanelProps {
   refreshToken?: number;
   onChecksChanged?: () => Promise<void>;
   onChangePaymentMethod?: (payrollItemId: number) => void;
+  timeTrackingReviewHref?: string;
 }
 
 type CheckAction = 'preview' | 'stub';
@@ -74,13 +75,28 @@ function eventLabel(eventType: string): string {
   }
 }
 
+function CancellationSyncNotice({ state, reviewHref }: { state?: PaymentCancellationSync | null; reviewHref?: string }): ReactElement | null {
+  if (!state) return null;
+  const waiting = state.status !== 'acknowledged';
+  return <div className="mt-2 space-y-2 text-sm" role={state.status === 'error' ? 'alert' : 'status'}>
+    <Badge variant={state.status === 'error' ? 'danger' : waiting ? 'warning' : 'success'}>
+      {state.status === 'error' ? 'Check cancellation sync needs attention' : waiting ? 'Check cancellation pending time tracking confirmation' : 'Check cancellation confirmed by time tracking'}
+    </Badge>
+    {waiting && <p className="text-neutral-700">{state.pending_count} cancellation record{state.pending_count === 1 ? '' : 's'} awaiting confirmation.
+      {state.hours_reserved ? ' The payroll hours remain reserved in time tracking.' : ''} This sync status is separate from any recorded bank payment.</p>}
+    {waiting && state.oldest_pending_at && <p className="text-xs text-neutral-600">Waiting since {formatEventTime(state.oldest_pending_at)}</p>}
+    {state.errors.map(message => <p key={message} className="break-words text-danger-800">{message}</p>)}
+    {waiting && reviewHref && <a className="inline-flex min-h-11 items-center font-medium text-primary-700 underline" href={reviewHref}>Review time tracking sync</a>}
+  </div>;
+}
+
 function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
   if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
   return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod, timeTrackingReviewHref }: ChecksPanelProps) {
   const { notify } = useFeedback();
   const loadRequest = useRef(0);
   const runScope = `${payPeriod.company_id || 0}:${payPeriod.id}`;
@@ -579,6 +595,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                             <input type="checkbox" className="h-4 w-4 shrink-0" checked={selectedStubIdSet.has(item.id)} onChange={() => toggleStubSelection(item)} aria-label={`Select earnings statement for ${item.employee_name}`} />
                             <span className="min-w-0 break-words font-semibold text-neutral-950">{item.employee_name}</span>
                           </label>
+                          <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
                           <p className="ml-8 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end [&>button]:min-h-11">
@@ -658,6 +675,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       {shouldShowReason && <p className="mt-1 text-orange-700">Reason: {latestEvent.reason}</p>}
                     </div>
                   )}
+
+                  <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
 
                   {!item.voided && item.check_number && (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -753,6 +772,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                     </div>
                   </td>
                   <td className="px-3 py-2 text-gray-900">
+                    <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
                     <div className="space-y-0.5">
                       <div>{item.employee_name}</div>
                       {item.department_name && (
