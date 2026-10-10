@@ -5,7 +5,7 @@ class TestWorkspaceSafetyPolicy
     # These records are shared across live companies, rather than copied into a workspace.
     "api/v1/admin/annual_retirement_limits" => %w[create update],
     "api/v1/admin/pay_periods" => %w[
-      commit void create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
+      commit void reopen_unpaid create_correction_run correct_pay_date generate_fit_check retry_tax_sync corrective_paychecks
     ],
     "api/v1/admin/check_numbers" => %w[update],
     "api/v1/admin/checks" => %w[batch_pdf mark_all_printed mark_printed mark_delivered void reprint update_check_number replace_check],

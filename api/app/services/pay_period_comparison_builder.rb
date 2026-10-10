@@ -44,10 +44,14 @@ class PayPeriodComparisonBuilder
   def call
     current_items = comparison_items(@pay_period)
     previous_items = @previous_period ? comparison_items(@previous_period) : []
+    if scoped_comparison?
+      participating_ids = current_items.map(&:employee_id)
+      previous_items = previous_items.select { |item| participating_ids.include?(item.employee_id) }
+    end
     employee_changes = @previous_period ? employee_changes_payload(current_items, previous_items) : []
 
     {
-      comparison_kind: training_benchmark? ? "training_benchmark" : "previous_period",
+      comparison_kind: training_benchmark? ? "training_benchmark" : scoped_comparison? ? "selected_employees" : "previous_period",
       current_pay_period: period_payload(@pay_period),
       previous_pay_period: @previous_period ? period_payload(@previous_period) : nil,
       summary: summary_payload(current_items, previous_items),
@@ -64,14 +68,30 @@ class PayPeriodComparisonBuilder
       return @pay_period.training_replay_benchmark || @pay_period.test_workspace_source_pay_period
     end
 
-    PayPeriod
+    return @pay_period.source_pay_period if @pay_period.correction_run? && @pay_period.source_pay_period.present?
+
+    candidates = PayPeriod
       .reportable_committed
       .regular_cycle
       .where(company_id: @pay_period.company_id)
       .where.not(id: @pay_period.id)
       .where("pay_date < ? OR (pay_date = ? AND id < ?)", @pay_period.pay_date, @pay_period.pay_date, @pay_period.id)
       .order(pay_date: :desc, id: :desc)
-      .first
+    ordered = candidates.includes(:source_pay_period).to_a
+    ordered.find { |candidate| effective_purpose(candidate) == effective_purpose(@pay_period) } ||
+      ordered.find { |candidate| effective_purpose(candidate) == "regular" }
+  end
+
+  def effective_purpose(period)
+    visited = Set.new
+    while period.correction_run? && period.source_pay_period && visited.add?(period.id)
+      period = period.source_pay_period
+    end
+    period.run_purpose
+  end
+
+  def scoped_comparison?
+    !training_benchmark? && @pay_period.run_purpose != "regular"
   end
 
   def period_payload(period)
@@ -120,10 +140,9 @@ class PayPeriodComparisonBuilder
       end
     end
 
-    period.payroll_items
-      .not_voided.reportable
-      .includes(employee: :department)
-      .to_a
+    items = period.payroll_items.reportable
+    items = items.not_voided unless period.voided? && @pay_period.source_pay_period_id == period.id
+    items.includes(employee: :department).to_a
   end
 
   def summary_payload(current_items, previous_items)

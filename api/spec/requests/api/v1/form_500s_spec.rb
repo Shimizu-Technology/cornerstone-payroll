@@ -171,6 +171,20 @@ RSpec.describe "Api::V1::Form500s", type: :request do
     expect(filing.notes).to eq("")
   end
 
+  it "rejects paid or filed tracking for a payroll that was already voided" do
+    pay_period.update!(correction_status: "voided", voided_at: Time.current, void_reason: "Unpaid correction")
+    %w[paid filed].each do |status|
+      post "/api/v1/form_500s/save", params: {
+        form_500: Form500Generator.default_fields(company: company, pay_period: pay_period)
+          .merge(pay_period_id: pay_period.id, status: status)
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("voided payroll")
+      expect(pay_period.reload.form500_filing).to be_nil
+    end
+  end
+
   it "does not overwrite the saved filing when previewing unsaved edits" do
     pay_period.create_form500_filing!(
       company: company,

@@ -106,7 +106,7 @@ RSpec.describe PayPeriodCorrectionService do
         expect(committed_period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
       end
 
-      it "requires linked liability payments to be voided before payroll is voided" do
+      it "retires linked unpaid liability payments with the payroll" do
         posting = PayrollLiabilityPostingService.post!(pay_period: committed_period, actor: actor)
         entries = posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT)
         payment = create(:non_employee_check, company: company, pay_period: committed_period,
@@ -120,10 +120,11 @@ RSpec.describe PayPeriodCorrectionService do
             actor: actor,
             reason: "Correct payroll"
           )
-        }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /linked liability payment/)
+        }.not_to raise_error
 
-        expect(committed_period.reload).not_to be_voided
-        expect(posting.reload.reversal_posting).to be_nil
+        expect(committed_period.reload).to be_voided
+        expect(payment.reload).to be_voided
+        expect(posting.reload.reversal_posting).to be_present
       end
 
       it "does not enqueue tax sync when the CST ingest integration is not configured" do

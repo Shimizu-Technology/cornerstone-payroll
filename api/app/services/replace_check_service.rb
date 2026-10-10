@@ -228,6 +228,9 @@ class ReplaceCheckService
     # called directly (specs, jobs, console), so order matters.
     raise InvalidStateError, "Original payroll item is missing" if @payroll_item.nil?
     raise UnsupportedEmployeeError, "Replace flow doesn't support contractor checks" if @payroll_item.contractor?
+    if @payroll_item.named_loan_payments.present?
+      raise InvalidStateError, "This check has a named loan override. Reopen the unpaid payroll so the loan ledger is reversed and recalculated together."
+    end
     if @payroll_item.correction_entry?
       raise InvalidStateError,
             "Cannot replace a corrective entry directly — replace the original payroll item instead"
