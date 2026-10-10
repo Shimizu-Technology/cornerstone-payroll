@@ -21,6 +21,7 @@ const apiMocks = vi.hoisted(() => ({
 const componentMocks = vi.hoisted(() => ({
   timeTrackingImport: vi.fn(),
   calendarRefreshCompleted: vi.fn(),
+  correctionCallback: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
@@ -39,8 +40,9 @@ vi.mock('@/services/api', () => ({
 }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
-  ChecksPanel: ({ refreshToken }: { refreshToken?: number }) => (
-    <div data-testid="processing-check-list-refresh-token">{refreshToken}</div>
+  ChecksPanel: ({ refreshToken, payPeriod }: { refreshToken?: number; payPeriod: PayPeriod }) => (
+    <><div data-testid="processing-check-list-refresh-token">{refreshToken}</div>
+      <div data-testid="saved-instrument-state">{payPeriod.payroll_items?.[0]?.voided ? 'Voided' : 'Assigned'}</div></>
   ),
 }));
 vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => null }));
@@ -78,7 +80,16 @@ vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
     </div>
   ),
 }));
-vi.mock('@/components/payroll/PayrollLiabilityPanel', () => ({ PayrollLiabilityPanel: () => null }));
+vi.mock('@/components/payroll/PayrollLiabilityPanel', () => ({
+  PayrollLiabilityPanel: ({ reconciliation }: { reconciliation?: { status: string; postings: unknown[] } | null }) =>
+    <div data-testid="saved-liability-state">{reconciliation?.status}:{reconciliation?.postings.length}</div>,
+}));
+vi.mock('@/components/payroll/CorrectionPanel', () => ({
+  CorrectionPanel: ({ payPeriod, onPayPeriodChange }: { payPeriod: PayPeriod; onPayPeriodChange: (updated: PayPeriod) => void }) => {
+    componentMocks.correctionCallback(onPayPeriodChange);
+    return <button onClick={() => onPayPeriodChange({ ...payPeriod, correction_status: 'voided', payroll_items: undefined })}>Finish correction</button>;
+  },
+}));
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({ UnifiedCheckPrintDialog: () => null }));
 
 const initialPayPeriod = {
@@ -913,4 +924,74 @@ it.each([
   expect(within(entry).queryByText(other)).toBeNull();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
+});
+
+
+const correctionOriginal = { ...initialPayPeriod, payroll_items: [{ id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25, hours_worked: 4, overtime_hours: 0, gross_pay: 100, net_pay: 77.35, voided: false }],
+  time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as unknown as PayPeriod;
+const correctionCanonical = { ...correctionOriginal, notes: 'Canonical voided instruments and history', correction_status: 'voided',
+  payroll_items: correctionOriginal.payroll_items!.map(item => ({ ...item, voided: true })) } as PayPeriod;
+
+async function renderCorrectionRefresh() {
+  vi.clearAllMocks();
+  apiMocks.get.mockResolvedValue({ pay_period: correctionCanonical });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: { status: 'posted', postings: [{}] } });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  function Page() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Other run</button>
+      <button onClick={() => navigate('/companies/8/pay-runs/12/work')}>Other company</button>
+      <PayPeriodDetail initialPayPeriod={correctionOriginal} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
+  await screen.findByRole('button', { name: 'Finish correction' });
+}
+
+it('reloads saved instruments, journal liabilities and source history after a partial correction response', async () => {
+  await renderCorrectionRefresh();
+  expect(screen.getByTestId('saved-instrument-state').textContent).toBe('Assigned');
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: { status: 'reversed', postings: [{}, {}] } });
+  let resolve!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(success => { resolve = success; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12));
+  expect(screen.getByText('Voided', { selector: 'span' })).toBeTruthy();
+  await act(async () => resolve({ pay_period: correctionCanonical }));
+  expect(await screen.findByText('Canonical voided instruments and history')).toBeTruthy();
+  expect(screen.getByTestId('saved-instrument-state').textContent).toBe('Voided');
+  expect(screen.getByTestId('saved-liability-state').textContent).toBe('reversed:2');
+  expect(screen.getByTestId('processing-check-list-refresh-token').textContent).toBe('1');
+  for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
+    expect(screen.getByTestId(id).getAttribute('data-revision')).toBe('1');
+  }
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+
+it.each(['Other run', 'Other company'])('ignores a late correction response after switching to %s', async label => {
+  await renderCorrectionRefresh();
+  const oldCallback = componentMocks.correctionCallback.mock.calls.at(-1)![0] as (updated: PayPeriod) => void;
+  const other = { ...correctionOriginal, id: label === 'Other run' ? 13 : 12, company_id: label === 'Other company' ? 8 : 7, notes: 'Different active scope' };
+  apiMocks.get.mockResolvedValue({ pay_period: other });
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  await screen.findByText('Different active scope');
+  const calls = apiMocks.get.mock.calls.length;
+  act(() => oldCallback(correctionCanonical));
+  expect(apiMocks.get.mock.calls.length).toBe(calls);
+  expect(screen.getByText('Different active scope')).toBeTruthy();
+  expect(screen.queryByText('Canonical voided instruments and history')).toBeNull();
+});
+
+it('does not apply a pending correction reload after navigating to another run', async () => {
+  await renderCorrectionRefresh();
+  let resolve!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(success => { resolve = success; }));
+  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...correctionOriginal, id: 13, notes: 'New run remains current' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  await screen.findByText('New run remains current');
+  await act(async () => resolve({ pay_period: correctionCanonical }));
+  expect(screen.getByText('New run remains current')).toBeTruthy();
+  expect(screen.queryByText('Canonical voided instruments and history')).toBeNull();
 });
