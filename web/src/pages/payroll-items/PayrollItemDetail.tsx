@@ -32,6 +32,7 @@ import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
+import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
 export function PayrollItemDetail(): ReactElement {
@@ -142,6 +143,12 @@ export function PayrollItemDetail(): ReactElement {
     : (payrollItem.import_source || payrollItem.timekeeping_source || 'manual').replaceAll('_', ' ');
   const importedComponents = (payrollItem.payroll_field_entries || []).filter((entry) => entry.source === 'import' && entry.active !== false);
   const isDirectDeposit = payrollItem.effective_payment_delivery_method === 'direct_deposit';
+  const paymentDisplay = payRunPaymentDisplay(payrollItem, { committed: payRun.status === 'committed', rehearsal: false, canPreview: false });
+  const hasSavedCheckEvidence = Boolean(payrollItem.check_number || payrollItem.check_prepared_at || payrollItem.check_printed_at
+    || ['prepared', 'printed', 'delivered', 'voided'].includes(payrollItem.check_status || ''));
+  const statementOnly = ['calculated', 'approved', 'committed'].includes(payRun.status)
+    && payrollItem.earnings_statement_eligible === true && !payrollItem.voided
+    && !hasSavedCheckEvidence && Number(payrollItem.net_pay || 0) <= 0;
 
   return (
     <div>
@@ -156,7 +163,7 @@ export function PayrollItemDetail(): ReactElement {
           <Badge variant={payrollItem.voided ? 'danger' : payRun.status === 'committed' ? 'success' : 'default'}>{payrollItem.voided ? 'Voided' : payRun.status === 'committed' ? 'Finalized' : 'In progress'}</Badge>
           <Badge variant="default">{payrollItem.employment_type}</Badge>
           {payrollItem.check_number && <Badge variant={payrollItem.check_prepared_at || payrollItem.check_printed_at ? 'success' : 'info'}>Check #{payrollItem.check_number}</Badge>}
-          {isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
+          {statementOnly ? <Badge variant="default">Earnings statement only</Badge> : isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
         </div>
       </section>
 
@@ -170,7 +177,7 @@ export function PayrollItemDetail(): ReactElement {
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
           <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
           <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
-          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={isDirectDeposit ? 'Direct-deposit stub; transfer not confirmed' : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
+          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? 'Direct-deposit stub; transfer not confirmed' : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -189,10 +196,12 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">Payment method for this run; finalized when payroll is committed.</p></CardHeader>
+            <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">{statementOnly ? 'An earnings statement records this payroll activity; no payment is issued.' : 'Payment method for this run; finalized when payroll is committed.'}</p></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <ContextRow icon={Banknote} label="Method" value={isDirectDeposit ? 'Direct deposit (stub only)' : 'Paper check'} />
-              {isDirectDeposit ? (
+              <ContextRow icon={Banknote} label="Method" value={statementOnly ? paymentDisplay.method : isDirectDeposit ? 'Direct deposit (stub only)' : 'Paper check'} />
+              {statementOnly ? (
+                <ContextRow icon={ReceiptText} label="Payment status" value={paymentDisplay.status} />
+              ) : isDirectDeposit ? (
                 <ContextRow icon={ReceiptText} label="Stub status" value="Available to print; bank transfer not confirmed" />
               ) : (
                 <>
