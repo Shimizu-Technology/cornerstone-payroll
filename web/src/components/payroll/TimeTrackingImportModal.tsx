@@ -374,6 +374,7 @@ export function TimeTrackingImportModal({
     : mappedIncludedRows.length > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
 
   const handlePreview = async () => {
+    if (loading || correctionBusy) return;
     if (!selectedSource) {
       setError('Configure an active time tracking source for this client first.');
       return;
@@ -424,7 +425,7 @@ export function TimeTrackingImportModal({
   }, [autoPreview, initialSourceId, open, selectedSource, sourceDiscoveryScope, sourcesLoading, step]);
 
   const reviewCorrection = async (line: ExactTimeCorrectionLine) => {
-    if (!preview) return;
+    if (loading || correctionBusy || !preview) return;
     const isCurrentRequest = beginScopedRequest();
     setCorrectionBusy(true);
     setError(null);
@@ -444,7 +445,7 @@ export function TimeTrackingImportModal({
   };
 
   const confirmCorrection = async () => {
-    if (!preview || !correction) return;
+    if (loading || correctionBusy || !preview || !correction) return;
     const isCurrentRequest = beginScopedRequest();
     setCorrectionBusy(true);
     setError(null);
@@ -468,7 +469,7 @@ export function TimeTrackingImportModal({
   };
 
   const refreshCorrectionDelivery = async (disposition: ExactTimeCorrectionDisposition, retry = false) => {
-    if (!preview) return;
+    if (loading || correctionBusy || !preview) return;
     const isCurrentRequest = beginScopedRequest();
     setCorrectionBusy(true);
     setError(null);
@@ -487,7 +488,7 @@ export function TimeTrackingImportModal({
   };
 
   const handleApply = async () => {
-    if (!preview) return;
+    if (loading || correctionBusy || !preview) return;
     const isCurrentRequest = beginScopedRequest();
     setLoading(true);
     setError(null);
@@ -1109,12 +1110,12 @@ export function TimeTrackingImportModal({
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={closeModal}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={loading || correctionBusy || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
             </>
           )}
           {step === 'review' && (
             <>
-              <Button variant="outline" onClick={() => setStep('select')}>Back</Button>
+              <Button variant="outline" disabled={correctionBusy} onClick={() => { if (!correctionBusy) setStep('select'); }}>Back</Button>
               <Button onClick={handleApply} disabled={loading || correctionBusy || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}
