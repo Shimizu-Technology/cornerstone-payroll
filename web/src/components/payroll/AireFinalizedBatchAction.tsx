@@ -68,7 +68,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                 {includesCorrections && attentionLines === 0
                   ? aireRecordLinked
                     ? 'Review the recorded corrections and their exact source confirmations. Any ordinary payroll follows its normal review steps; linking this batch does not mark anyone paid.'
-                    : 'Review corrections to earlier frozen time before adding any remaining ordinary hours. Follow any required accounting review; signed batch totals are not new payable hours.'
+                    : 'Review corrections to earlier frozen time. Signed totals show changes to time; the review identifies the hours that can be added to ordinary payroll.'
                   : aireRecordLinked
                   ? attentionLines > 0
                     ? 'Cornerstone retained the exact affected time tracking lines. Review the check or payment history before deciding what to do next.'
@@ -133,7 +133,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
           <p>
             {includesCorrections && attentionLines === 0
-              ? 'Signed batch totals can combine increases and reductions to earlier frozen time with ordinary hours. Accounting corrections record no new payment or recovery; held entries remain excluded.'
+              ? 'Signed batch totals can combine increases and reductions to earlier frozen time with ordinary hours. Accounting-only corrections record no new payment or recovery; held entries remain excluded.'
               : aireRecordLinked
               ? committed
                 ? attentionLines > 0
