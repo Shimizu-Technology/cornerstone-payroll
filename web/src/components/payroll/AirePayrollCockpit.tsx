@@ -816,6 +816,16 @@ export function AirePayrollCockpit({
                   />
                 </div>
 
+                {overview.command_access.delegation_configured === true && overview.command_access.can_command === false && (
+                  <div className="flex items-start gap-3 border-b border-neutral-200 bg-neutral-50 px-5 py-4 text-sm text-neutral-700 sm:px-6">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-semibold">Time changes require a Payroll manager or admin</p>
+                      <p className="mt-1 leading-5">Time approvals, corrections and held-time destinations require that role. You can still review time and payroll evidence.</p>
+                    </div>
+                  </div>
+                )}
+
                 {!overview.command_access.delegation_configured && (
                   <div className="flex items-start gap-3 border-b border-warning-200 bg-warning-50 px-5 py-4 text-sm text-warning-900 sm:px-6">
                     <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />

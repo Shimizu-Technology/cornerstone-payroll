@@ -722,11 +722,52 @@ describe('AirePayrollCockpit', () => {
       </MemoryRouter>
     );
     await screen.findByText(/actions need your time tracking access/i);
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock time tracking cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('link', { name: /connect my time tracking account/i }).getAttribute('href'))
       .toBe('/app/aire-account-connection?source_id=1&return_to=%2Fcompanies%2F1%2Fpay-periods%2F17');
+  });
+
+  it('explains role-disabled commands when time tracking access is already configured', async () => {
+    mockLoads(false);
+    const data = fixtures(false);
+    data.overview.command_access.delegation_configured = true;
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    const user = userEvent.setup();
+    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
+
+    await screen.findByText('Time changes require a Payroll manager or admin');
+    expect(screen.getByText('Time approvals, corrections and held-time destinations require that role. You can still review time and payroll evidence.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /connect my time tracking account/i })).toBeNull();
+    expect(screen.getByText('Malia Cruz')).toBeTruthy();
+    const approve = screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    const correct = screen.getByRole('button', { name: 'Correct' }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(correct.disabled).toBe(true);
+    await user.click(approve);
+    await user.click(correct);
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+    expect((screen.getByRole('button', { name: 'Choose destination' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMocks.routeSettlement).not.toHaveBeenCalled();
+  });
+
+  it('does not describe a role restriction for authorized commands temporarily disabled during refresh', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    let finish!: (value: { aire_payroll_cockpit: AirePayrollCockpitOverview }) => void;
+    apiMocks.overview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+    expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    await act(async () => finish({ aire_payroll_cockpit: fixtures().overview }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
   });
 
   it('does not let an older refresh overwrite a newer payroll view', async () => {
