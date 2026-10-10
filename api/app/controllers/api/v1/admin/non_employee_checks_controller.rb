@@ -85,6 +85,9 @@ module Api
           created = false
           ActiveRecord::Base.transaction do
             check.company.lock!
+            if check.pay_period_id && PayPeriod.lock.find(check.pay_period_id).voided?
+              raise ArgumentError, "Cannot create a payment for a voided payroll"
+            end
             if check.payment_method == "check"
               check.check_number = check.company.next_check_number! if check.check_number.blank?
             else
@@ -117,21 +120,7 @@ module Api
 
         # PATCH /api/v1/admin/non_employee_checks/:id
         def update
-          if @check.voided?
-            return render json: { error: "Cannot update a voided check" }, status: :unprocessable_entity
-          end
-
           attrs = check_params.to_h
-          if @check.paid_at.present? && locked_field_change?(attrs, PAID_LOCKED_FIELDS)
-            return render json: {
-              error: "Void and recreate a paid payment to change its financial or payment details"
-            }, status: :unprocessable_entity
-          end
-          if @check.payroll_liability_check_allocations.exists? && locked_field_change?(attrs, LIABILITY_LOCKED_FIELDS)
-            return render json: {
-              error: "Void and recreate a liability payment to change its recipient, amount, method, or reporting period"
-            }, status: :unprocessable_entity
-          end
           if attrs.key?("pay_period_id") || attrs.key?(:pay_period_id)
             pay_period_id = attrs["pay_period_id"] || attrs[:pay_period_id]
             pay_period = resolve_pay_period(pay_period_id) if pay_period_id.present?
@@ -147,7 +136,6 @@ module Api
 
           # Snapshot the audited fields before we touch the record so the audit
           # log can capture an accurate before/after diff.
-          before_snapshot = audit_snapshot(@check)
           reason = params[:reason].presence
 
           # Track success inside the transaction rather than `return`-ing out of
@@ -158,9 +146,21 @@ module Api
           updated = false
           changed = []
           ActiveRecord::Base.transaction do
+            @check.company.lock!
+            @check.lock!
+            raise ArgumentError, "Cannot update a voided check" if @check.voided?
+            if @check.paid_at.present? && locked_field_change?(attrs, PAID_LOCKED_FIELDS)
+              raise ArgumentError, "Void and recreate a paid payment to change its financial or payment details"
+            end
+            if @check.payroll_liability_check_allocations.exists? && locked_field_change?(attrs, LIABILITY_LOCKED_FIELDS)
+              raise ArgumentError, "Void and recreate a liability payment to change its recipient, amount, method, or reporting period"
+            end
+            target_period_id = attrs.key?("pay_period_id") ? attrs["pay_period_id"] : @check.pay_period_id
+            if target_period_id && PayPeriod.lock.find(target_period_id).voided?
+              raise ArgumentError, "Cannot attach or update a payment for a voided payroll"
+            end
+            before_snapshot = audit_snapshot(@check)
             if attrs.key?("check_number")
-              @check.company.lock!
-              @check.lock!
               validate_check_number_assignment!(
                 check_number_value(attrs),
                 excluding_non_employee_check_id: @check.id

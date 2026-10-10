@@ -36,6 +36,14 @@ RSpec.describe TransmittalLogPdfGenerator do
       memo: "FIT Withholding - PPE 04/14/2026 - Form 500")
   end
 
+  it "includes additional withholding exactly once in the FIT tax obligations" do
+    pay_period.payroll_items.sole.update!(additional_withholding: 66)
+    pdf = described_class.new(pay_period).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join(" ").gsub(/\s+/, " ")
+    expect(text).to match(/Employee FIT Withheld\s+\$116\.52/)
+    expect(text).to match(/FIT Subtotal\s+\$116\.52/)
+  end
+
   it "uses the transmittal date for Date while preserving pay date for Pay Day" do
     pdf = described_class.new(pay_period, transmittal_date: Date.new(2026, 4, 20)).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")

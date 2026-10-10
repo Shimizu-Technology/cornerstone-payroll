@@ -390,6 +390,18 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(check.reload.pay_period_id).to eq(pay_period.id)
     end
 
+    it "rejects attaching a payment to a voided payroll even without a check-number edit" do
+      voided_period = create(:pay_period, :committed, company: company,
+        correction_status: "voided", voided_at: Time.current, void_reason: "Unpaid correction")
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: { non_employee_check: { pay_period_id: voided_period.id } }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("voided payroll")
+      expect(check.reload.pay_period_id).to eq(pay_period.id)
+    end
+
     it "can detach from a pay period and reclassify as a monthly standalone check in one update" do
       patch "/api/v1/admin/non_employee_checks/#{check.id}",
         params: {
@@ -628,7 +640,6 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("No printable")
     end
-
   end
 
   describe "POST /api/v1/admin/non_employee_checks/mark_all_printed" do
@@ -673,7 +684,6 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(own_check.reload.printed_at).to be_present
       expect(foreign_check.reload.printed_at).to be_nil
     end
-
   end
 
   describe "DELETE /api/v1/admin/non_employee_checks/:id" do

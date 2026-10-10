@@ -191,7 +191,135 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     expect(requirement.reload.status).to eq("received")
   end
 
+  it "creates only one fresh revision when two unpaid reopen requests compete" do
+    described_class.new(pay_period: pay_period, actor: actor).commit!
+    paused, release = Queue.new, Queue.new
+    results = Queue.new
+    count = 0
+    mutex = Mutex.new
+    allow_any_instance_of(PayrollRevisionPaymentPreflight).to receive(:retire!).and_wrap_original do |original, **kwargs|
+      first_call = mutex.synchronize { count += 1; count == 1 }
+      if first_call
+        paused << true
+        release.pop
+      end
+      original.call(**kwargs)
+    end
+    first_thread = financial_revision_thread(results, :reopen)
+    second_thread = nil
+    begin
+      Timeout.timeout(5) { paused.pop }
+      second_thread = financial_revision_thread(results, :reopen)
+    ensure
+      release << true
+    end
+    [ first_thread, second_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    outcomes = 2.times.map { results.pop }
+    expect(outcomes.count { |status, _| status == :ok }).to eq(1)
+    expect(outcomes.count { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to eq(1)
+    expect(pay_period.reload).to be_voided
+    expect(PayPeriod.where(source_pay_period_id: pay_period.id).count).to eq(1)
+    expect(payroll_item.check_events.where(event_type: "voided").count).to eq(1)
+    expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(0)
+  end
+
+  it "waits for a concurrent check delivery and then refuses to reverse its payroll" do
+    described_class.new(pay_period: pay_period, actor: actor).commit!
+    payroll_item.reload.update!(check_printed_at: Time.current)
+    paused, release, void_backend_pid = Queue.new, Queue.new, Queue.new
+    results = Queue.new
+    allow_any_instance_of(PayrollItem).to receive(:lock!).and_wrap_original do |original, *args|
+      value = original.call(*args)
+      if Thread.current[:delivery_race]
+        paused << true
+        release.pop
+      end
+      value
+    end
+    delivery = Thread.new do
+      Thread.current[:delivery_race] = true
+      ActiveRecord::Base.connection_pool.with_connection do
+        PayrollItem.find(payroll_item.id).mark_delivered!(user: User.find(actor.id),
+          delivered_on: PayrollBusinessClock.today, delivery_method: "hand_delivery", attestation: true)
+        results << [ :ok, :delivered ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+    reversal = nil
+    begin
+      Timeout.timeout(5) { paused.pop }
+      reversal = financial_revision_thread(results, :void, backend_pid: void_backend_pid)
+      wait_for_database_lock!(Timeout.timeout(5) { void_backend_pid.pop })
+      expect(reversal.join(0.2)).to be_nil
+    ensure
+      release << true
+    end
+    [ delivery, reversal ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    outcomes = 2.times.map { results.pop }
+    expect(outcomes).to include([ :ok, :delivered ])
+    expect(outcomes.any? { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to be(true)
+    expect(pay_period.reload).not_to be_voided
+    expect(payroll_item.reload).not_to be_voided
+    expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(1200)
+  end
+
+  it "serializes a payment attachment behind cascade void and rejects the now-voided target" do
+    described_class.new(pay_period: pay_period, actor: actor).commit!
+    payment = create(:non_employee_check, company: company, pay_period: nil,
+      created_by: actor, check_number: "7777", payment_period_type: "none")
+    controller = Api::V1::Admin::NonEmployeeChecksController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+    paused, release, attachment_backend_pid = Queue.new, Queue.new, Queue.new
+    results = Queue.new
+    allow_any_instance_of(PayrollRevisionPaymentPreflight).to receive(:retire!).and_wrap_original do |original, **kwargs|
+      paused << true
+      release.pop
+      original.call(**kwargs)
+    end
+    reversal = financial_revision_thread(results, :void)
+    attachment = nil
+    begin
+      Timeout.timeout(5) { paused.pop }
+      attachment = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          attachment_backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
+          session = ActionDispatch::Integration::Session.new(Rails.application)
+          session.patch "/api/v1/admin/non_employee_checks/#{payment.id}",
+            params: { non_employee_check: { pay_period_id: pay_period.id } }, as: :json
+          results << [ :ok, session.response.status ]
+        rescue StandardError => e
+          results << [ :error, e ]
+        end
+      end
+      wait_for_database_lock!(Timeout.timeout(5) { attachment_backend_pid.pop })
+      expect(attachment.join(0.2)).to be_nil
+    ensure
+      release << true
+    end
+    [ reversal, attachment ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :void ], [ :ok, 422 ])
+    expect(pay_period.reload).to be_voided
+    expect(payment.reload.pay_period_id).to be_nil
+    expect(payment).not_to be_voided
+  end
+
   private
+
+  def financial_revision_thread(results, operation, backend_pid: nil)
+    Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do
+        backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()") if backend_pid
+        method = operation == :reopen ? :reopen_unpaid! : :void!
+        PayPeriodCorrectionService.public_send(method, pay_period: PayPeriod.find(pay_period.id),
+          actor: User.find(actor.id), reason: "Correct an unissued payroll")
+        results << [ :ok, operation ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+  end
 
   def wait_for_database_lock!(backend_pid)
     pid = Integer(backend_pid)
@@ -306,6 +434,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     payroll_item_ids = PayrollItem.where(pay_period_id: pay_period_ids).pluck(:id)
 
     delete_check_events_for_cleanup(payroll_item_ids)
+    NonEmployeeCheck.where(company_id: company_id).find_each(&:destroy!)
     PayrollLiabilityEntry.where(company_id: company_id).delete_all
     PayrollLiabilityPosting.where(company_id: company_id).delete_all
     PayrollItemDeduction.where(payroll_item_id: payroll_item_ids).delete_all
@@ -315,6 +444,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     ClientDocument.where(company_id: company_id).delete_all
     EmployeeYtdTotal.where(employee_id: employee_id).delete_all
     CompanyYtdTotal.where(company_id: company_id).delete_all
+    PayPeriodCorrectionEvent.where(company_id: company_id).delete_all
+    PayPeriod.where(id: pay_period_ids).update_all(source_pay_period_id: nil, superseded_by_id: nil)
     PayPeriod.where(id: pay_period_ids).delete_all
     Employee.where(id: employee_id).delete_all
     Department.where(id: department.id).delete_all

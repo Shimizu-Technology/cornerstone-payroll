@@ -12,6 +12,8 @@ const apiMocks = vi.hoisted(() => ({
   payrollFieldInputs: vi.fn(),
   employeesList: vi.fn(),
   runPayroll: vi.fn(),
+  refreshSetup: vi.fn(),
+  comparison: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
@@ -21,6 +23,8 @@ vi.mock('@/services/api', () => ({
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
+    refreshSetup: apiMocks.refreshSetup,
+    comparison: apiMocks.comparison,
   },
   employeesApi: { list: apiMocks.employeesList },
   payrollItemsApi: {},
@@ -310,4 +314,150 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
   const card = screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' });
   expect((within(card).getByLabelText('Regular hours') as HTMLInputElement).value).toBe('8');
   expect(screen.getByRole('button', { name: 'Review affected employees' })).toBeTruthy();
+});
+
+
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0) {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: 0, loan_payment: loanPayment };
+  const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item], ...(comparisonResponse ? { cycle: 'regular' } : {}) } as unknown as PayPeriod;
+  const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: 0, eligible: true, mode: 'default' }];
+  apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
+  apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'calculated' } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  apiMocks.comparison.mockResolvedValue(comparisonResponse);
+  apiMocks.refreshSetup.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  if (status === 'approved') { await screen.findByRole('button', { name: 'Refresh current setup' }); return null; }
+  return await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+}
+
+it('recalculates exactly the selected correction employee with a named loan repayment', async () => {
+  const card = await renderLoanWorksheet();
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  const payload = apiMocks.runPayroll.mock.calls[0][1];
+  expect(payload.employee_ids).toEqual([30]);
+  expect(Object.keys(payload.hours)).toEqual(['30']);
+  expect(payload.named_loan_payments).toEqual({ '30': { '2': { mode: 'override', amount: 300 } } });
+  expect(payload.hours['30']).toEqual({ regular: 80.3, overtime: 14 });
+});
+
+it('withdraws approval and refreshes saved setup without asking the user to recreate payroll', async () => {
+  await renderLoanWorksheet('approved');
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  const dialog = screen.getByRole('dialog');
+  expect(within(dialog).getByText(/Existing approval and client review will be withdrawn/)).toBeTruthy();
+  fireEvent.click(within(dialog).getByLabelText('Include recurring employee setup'));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh and recalculate' }));
+  await waitFor(() => expect(apiMocks.refreshSetup).toHaveBeenCalledWith(12, { includes_recurring_items: true, includes_base_salary: false }));
+  expect(await screen.findByRole('button', { name: 'Recalculate' })).toBeTruthy();
+});
+
+it('protects unsaved hours in a saved draft from being overwritten by setup refresh', async () => {
+  const card = await renderLoanWorksheet('draft');
+  fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
+  const refresh = screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement;
+  expect(refresh.disabled).toBe(true);
+  expect(refresh.title).toMatch(/Calculate your worksheet edits first/);
+  expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
+});
+
+it('keeps a setup refresh failure visible without discarding the existing approved payroll', async () => {
+  await renderLoanWorksheet('approved');
+  apiMocks.refreshSetup.mockRejectedValue(new Error('Employee setup is invalid; correct the saved schedule.'));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
+  expect(await within(screen.getByRole('dialog')).findByText('Employee setup is invalid; correct the saved schedule.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Commit & Finalize' })).toBeTruthy();
+});
+
+
+it('retains a linked loan request when that employee needs calculation recovery', async () => {
+  const card = await renderLoanWorksheet();
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '400' } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', run_purpose: 'correction', includes_recurring_items: false, payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14 }] }, results: { success: [], skipped: [], errors: [{ employee_id: 30, name: 'Ana Cruz', error: 'Loan balance needs review.' }] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
+  const restoredCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect((within(restoredCard).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('400.00');
+});
+
+
+it('clearly describes a special-run comparison as limited to selected employees', async () => {
+  await renderLoanWorksheet('calculated', {
+    comparison_kind: 'selected_employees',
+    previous_pay_period: { id: 11, start_date: '2026-09-01', end_date: '2026-09-15', pay_date: '2026-09-16' },
+    summary: {}, employee_changes: [],
+    review_flags: { status: 'ok', message: 'Selected employees match.', warning_count: 0, review_count: 0 },
+  });
+  expect(await screen.findByRole('heading', { name: 'Selected Employee Comparison' })).toBeTruthy();
+  expect(screen.getByText(/Compared for the selected employees with/)).toBeTruthy();
+  expect(screen.getByText(/Employees outside this special run are excluded/)).toBeTruthy();
+});
+
+
+async function renderSavedRateCorrection(singleRate = false) {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 25, pay_frequency: 'semimonthly', status: 'active', wage_rates: [
+    { id: 1, label: 'Old department renamed', rate: 25, is_primary: true, active: false },
+    { id: 4, label: 'New department', rate: 40, is_primary: false, active: true },
+  ] } as Employee;
+  const savedRates = [
+    { employee_wage_rate_id: 1, label: 'Original department', rate: 16, regular_hours: 8, overtime_hours: 2, holiday_hours: 1, pto_hours: 3, is_primary: true, active: true },
+    ...(!singleRate ? [{ employee_wage_rate_id: 3, label: 'Removed department', rate: 20, regular_hours: 4, overtime_hours: 1, holiday_hours: 2, pto_hours: 1, is_primary: false, active: true }] : []),
+  ];
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: singleRate ? 8 : 12, overtime_hours: singleRate ? 2 : 3, holiday_hours: singleRate ? 1 : 3, pto_hours: singleRate ? 3 : 4, timekeeping_source: 'correction_reference', wage_rate_hours: savedRates };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  return { card, savedRates };
+}
+
+it('preserves correction wage buckets after current rates change or source IDs are deactivated and removed', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection();
+  expect(within(card).getByText('Original department · $16.00/hr')).toBeTruthy();
+  expect(within(card).getByText('Removed department · $20.00/hr')).toBeTruthy();
+  expect(within(card).queryByText(/New department/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual(savedRates);
+});
+
+it('keeps captured rates and other hour types when the operator deliberately edits one correction bucket', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection();
+  const bucket = within(card).getByText('Original department · $16.00/hr').parentElement!;
+  fireEvent.change(within(bucket).getByLabelText('Regular hours'), { target: { value: '9' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 9 }, savedRates[1]]);
+});
+
+it('submits a single captured wage bucket with updated hours instead of clearing its historical rate', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection(true);
+  fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 10 }]);
+});
+
+
+it('labels the saved loan total as loan deductions while keeping standalone entry distinct', async () => {
+  await renderLoanWorksheet('calculated', undefined, 300);
+  const header = screen.getByRole('columnheader', { name: 'Loan deductions' });
+  expect(header.title).toBe('Calculated total of linked loan repayments and any standalone loan deduction.');
+  expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '+ Tips & Deductions' }));
+  expect(await screen.findByRole('columnheader', { name: 'Standalone deduction' })).toBeTruthy();
 });

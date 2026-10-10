@@ -164,7 +164,22 @@ export interface PayPeriodPayrollFieldAssignment {
   skipped_reason?: string | null;
 }
 
+export interface NamedLoanOption {
+  employee_id: number;
+  loan_id: number;
+  name: string;
+  tracking_mode: LoanTrackingMode;
+  current_balance: number | null;
+  scheduled_amount: number;
+  eligible: boolean;
+  unavailable_reason?: string | null;
+  current_amount: number;
+  mode: 'default' | 'override';
+  requested_amount?: number | null;
+}
+
 export interface PayPeriodPayrollFieldInputs {
+  named_loan_options?: NamedLoanOption[];
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
   retained_manual_entries?: Array<{ employee_id: number; field_id: number | null; label: string; requested_amount: number; applied_amount: number; source: 'manual' | 'import' }>;
@@ -1283,7 +1298,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
-  comparison_kind: 'previous_period' | 'training_benchmark';
+  comparison_kind: 'previous_period' | 'training_benchmark' | 'selected_employees';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;
@@ -1308,6 +1323,7 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  named_loan_payments?: Record<string, number>;
   id: number;
   pay_period_id?: number;
   employee_id: number;

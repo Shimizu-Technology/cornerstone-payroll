@@ -197,7 +197,7 @@ class TransmittalLogPdfGenerator
 
   def render_tax_obligations(pdf)
     items = pay_period.payroll_items.not_voided.reportable
-    total_fit  = items.sum(:withholding_tax)
+    total_fit  = items.sum { |item| item.total_income_tax_withheld }
     emp_ss     = items.sum(:social_security_tax)
     er_ss      = items.sum(:employer_social_security_tax)
     emp_med    = items.sum(:medicare_tax)
