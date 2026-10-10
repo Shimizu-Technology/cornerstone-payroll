@@ -136,6 +136,18 @@ function formatSignedNumber(value: number) {
 
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
+  if (payrollItem?.timekeeping_source === 'correction_reference' && existing?.length) {
+    return existing.map(entry => ({
+      ...entry,
+      rate: toNumber(entry.rate),
+      regular_hours: toNumber(entry.regular_hours),
+      overtime_hours: toNumber(entry.overtime_hours),
+      holiday_hours: toNumber(entry.holiday_hours),
+      pto_hours: toNumber(entry.pto_hours),
+      is_primary: entry.is_primary ?? false,
+      active: entry.active ?? true,
+    }));
+  }
   const configuredRates = employee.wage_rates || [];
   if (configuredRates.length > 0) {
     const existingById = new Map(
@@ -624,6 +636,12 @@ export function PayPeriodDetail({
       [String(employeeId)]: {
         ...prev[String(employeeId)],
         [field]: clampedValue,
+        ...(prev[String(employeeId)]?.wage_rates?.length === 1 ? {
+          wage_rates: prev[String(employeeId)].wage_rates!.map(rate => ({
+            ...rate,
+            [field === 'regular' ? 'regular_hours' : 'overtime_hours']: clampedValue,
+          })),
+        } : {}),
       },
     }));
   };
@@ -800,7 +818,10 @@ export function PayPeriodDetail({
       const hours: Record<string, { regular?: number; overtime?: number; wage_rates?: PayrollItemWageRateHours[] }> = {};
       Object.entries(hoursMap).forEach(([empId, entry]) => {
         if (!selectedEmployeeIds.has(Number(empId))) return;
-        hours[empId] = entry.wage_rates && entry.wage_rates.length > 1
+        const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
+          && item.timekeeping_source === 'correction_reference');
+        hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
+          && (entry.wage_rates.length > 1 || preservesSourceRates)
           ? {
               regular: entry.regular,
               overtime: entry.overtime,
@@ -1684,7 +1705,7 @@ export function PayPeriodDetail({
                 if (isCalculated && calculatedItem) return toNumber(calculatedItem.gross_pay);
 
                 const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
-                const rate = toNumber(employee.pay_rate);
+                const rate = toNumber(calculatedItem?.timekeeping_source === 'correction_reference' ? calculatedItem.pay_rate : employee.pay_rate);
                 const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
                 const isFlatContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type !== 'hourly';
                 const activeRates = (entry.wage_rates || []).filter((row) => row.active !== false);
@@ -2458,10 +2479,12 @@ export function PayPeriodDetail({
                 const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
+                const savedItem = payrollItemByEmployeeId.get(emp.id);
+                const payRate = toNumber(savedItem?.timekeeping_source === 'correction_reference' ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                 const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
-                  ? `${formatCurrency(toNumber(emp.pay_rate) / periodsPerYear)}/period`
-                  : `${formatCurrency(toNumber(emp.pay_rate))}${hasHours ? '/hr' : '/period'}`;
+                  ? `${formatCurrency(payRate / periodsPerYear)}/period`
+                  : `${formatCurrency(payRate)}${hasHours ? '/hr' : '/period'}`;
                 return <section key={emp.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll entry for ${name}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
@@ -2531,7 +2554,8 @@ export function PayPeriodDetail({
                       const showDivider = currentGroup !== prevGroup;
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
-                      const payRate = toNumber(emp.pay_rate);
+                      const savedItem = payrollItemByEmployeeId.get(emp.id);
+                      const payRate = toNumber(savedItem?.timekeeping_source === 'correction_reference' ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                       const activeWageRates = (hours.wage_rates || []).map((rate, index) => ({ rate, index })).filter(({ rate }) => rate.active !== false);

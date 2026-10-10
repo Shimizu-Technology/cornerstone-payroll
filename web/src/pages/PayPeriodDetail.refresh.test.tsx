@@ -402,3 +402,52 @@ it('clearly describes a special-run comparison as limited to selected employees'
   expect(screen.getByText(/Compared for the selected employees with/)).toBeTruthy();
   expect(screen.getByText(/Employees outside this special run are excluded/)).toBeTruthy();
 });
+
+
+async function renderSavedRateCorrection(singleRate = false) {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 25, pay_frequency: 'semimonthly', status: 'active', wage_rates: [
+    { id: 1, label: 'Old department renamed', rate: 25, is_primary: true, active: false },
+    { id: 4, label: 'New department', rate: 40, is_primary: false, active: true },
+  ] } as Employee;
+  const savedRates = [
+    { employee_wage_rate_id: 1, label: 'Original department', rate: 16, regular_hours: 8, overtime_hours: 2, holiday_hours: 1, pto_hours: 3, is_primary: true, active: true },
+    ...(!singleRate ? [{ employee_wage_rate_id: 3, label: 'Removed department', rate: 20, regular_hours: 4, overtime_hours: 1, holiday_hours: 2, pto_hours: 1, is_primary: false, active: true }] : []),
+  ];
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: singleRate ? 8 : 12, overtime_hours: singleRate ? 2 : 3, holiday_hours: singleRate ? 1 : 3, pto_hours: singleRate ? 3 : 4, timekeeping_source: 'correction_reference', wage_rate_hours: savedRates };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  return { card, savedRates };
+}
+
+it('preserves correction wage buckets after current rates change or source IDs are deactivated and removed', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection();
+  expect(within(card).getByText('Original department · $16.00/hr')).toBeTruthy();
+  expect(within(card).getByText('Removed department · $20.00/hr')).toBeTruthy();
+  expect(within(card).queryByText(/New department/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual(savedRates);
+});
+
+it('keeps captured rates and other hour types when the operator deliberately edits one correction bucket', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection();
+  const bucket = within(card).getByText('Original department · $16.00/hr').parentElement!;
+  fireEvent.change(within(bucket).getByLabelText('Regular hours'), { target: { value: '9' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 9 }, savedRates[1]]);
+});
+
+it('submits a single captured wage bucket with updated hours instead of clearing its historical rate', async () => {
+  const { card, savedRates } = await renderSavedRateCorrection(true);
+  fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 10 }]);
+});
