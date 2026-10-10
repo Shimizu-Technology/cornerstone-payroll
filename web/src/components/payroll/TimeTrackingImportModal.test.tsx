@@ -378,6 +378,47 @@ describe('correction request scopes', () => {
     await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
   };
 
+  const attemptBackAndRefetch = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    const fetch = screen.queryByRole('button', { name: /Retrieve Finalized Batch|Fetch Hours/ });
+    if (fetch) await user.click(fetch);
+  };
+
+  it('keeps the original successful confirmation and callback when Back/refetch is attempted while pending', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<ReturnType<typeof committed>>();
+    const onCorrectionRecorded = vi.fn();
+    apiMocks.preview.mockResolvedValue({ import: importFor(99) });
+    apiMocks.correctionPreview.mockResolvedValue({ correction: detail('Original person') });
+    apiMocks.correctionConfirm.mockReturnValueOnce(pending.promise);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await acknowledge(user);
+    await user.click(screen.getByRole('button', { name: 'Confirm accounting correction' }));
+    await attemptBackAndRefetch(user);
+    await act(async () => pending.resolve(committed(100)));
+    expect(onCorrectionRecorded).toHaveBeenCalledOnce();
+    expect(apiMocks.correctionConfirm).toHaveBeenCalledOnce();
+    expect(apiMocks.preview).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/Recorded in Payroll supplemental #100/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Refresh source confirmation' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps correction preview current and clears busy after blocked Back/refetch', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<{ correction: ReturnType<typeof detail> }>();
+    apiMocks.preview.mockResolvedValue({ import: importFor(99) });
+    apiMocks.correctionPreview.mockReturnValueOnce(pending.promise);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} autoPreview />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await attemptBackAndRefetch(user);
+    await act(async () => pending.resolve({ correction: detail('Original person') }));
+    expect(apiMocks.preview).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/Original person/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it.each(['period', 'company', 'source', 'close'])('ignores a late correction preview after %s changes without replacing the current person or clearing current busy state', async (change) => {
     const user = userEvent.setup();
     const old = deferred<{ correction: ReturnType<typeof detail> }>();
@@ -529,6 +570,25 @@ describe('accounting posting and source delivery are separate', () => {
     expect(apiMocks.apply).not.toHaveBeenCalled();
     expect(onImportComplete).not.toHaveBeenCalled();
     expect(onCorrectionRecorded).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps delivery refresh and its callback current when Back/refetch is attempted while pending', async () => {
+    const user = userEvent.setup();
+    let finish!: (value: { disposition: ReturnType<typeof disposition> }) => void;
+    const pending = new Promise<{ disposition: ReturnType<typeof disposition> }>(resolve => { finish = resolve; });
+    const onCorrectionRecorded = vi.fn();
+    apiMocks.preview.mockResolvedValue({ import: importData('pending') });
+    apiMocks.correctionDelivery.mockReturnValueOnce(pending);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
+    await user.click(await screen.findByRole('button', { name: 'Refresh source confirmation' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    const fetch = screen.queryByRole('button', { name: /Retrieve Finalized Batch|Fetch Hours/ });
+    if (fetch) await user.click(fetch);
+    await act(async () => finish({ disposition: disposition('confirmed') }));
+    expect(onCorrectionRecorded).toHaveBeenCalledOnce();
+    expect(apiMocks.preview).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/Source confirmation verified/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Refresh source confirmation' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('preserves ordinary employee mappings when only source delivery metadata refreshes', async () => {
