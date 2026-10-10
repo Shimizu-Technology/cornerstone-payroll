@@ -26,6 +26,8 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
   const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [paintedPage, setPaintedPage] = useState<{ document: PDFDocumentProxy; pageNumber: number } | null>(null);
+  const pagePainted = paintedPage?.document === pdfDocument && paintedPage?.pageNumber === pageNumber;
   const [zoomed, setZoomed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -65,6 +67,7 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
     let cancelled = false;
     let task: RenderTask | null = null;
     setRendering(true);
+    setPaintedPage(null);
     setError(null);
     void pdfDocument.getPage(pageNumber).then((page) => {
       if (cancelled || !canvasRef.current) return;
@@ -75,7 +78,10 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
       task = page.render({ canvas, viewport });
       return task.promise;
     }).then(() => {
-      if (!cancelled) setRendering(false);
+      if (!cancelled) {
+        setPaintedPage({ document: pdfDocument, pageNumber });
+        setRendering(false);
+      }
     }).catch(() => {
       if (!cancelled) {
         setRendering(false);
@@ -102,7 +108,7 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
       <div className="min-h-0 flex-1 overflow-auto p-4 text-center sm:p-6">
         {rendering && <p role="status" className="text-sm text-slate-600">Rendering page…</p>}
         {loading && <p className="py-12 text-sm text-slate-600">Rendering PDF preview…</p>}
-        {pdfDocument && <canvas ref={canvasRef} aria-label={`Page ${pageNumber} preview`} className={`mx-auto h-auto bg-white shadow-lg ${zoomed ? 'max-w-none' : 'max-w-full'} ${rendering ? 'opacity-50' : ''}`} />}
+        {pdfDocument && <canvas ref={canvasRef} aria-label={`Page ${pageNumber} preview`} aria-hidden={!pagePainted || rendering || Boolean(error)} style={{ visibility: pagePainted && !rendering && !error ? 'visible' : 'hidden' }} className={`mx-auto h-auto bg-white shadow-lg ${zoomed ? 'max-w-none' : 'max-w-full'}`} />}
       </div>
     </div>
   );
