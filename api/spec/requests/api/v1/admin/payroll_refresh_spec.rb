@@ -20,7 +20,10 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   it "recalculates approved payroll using current setup, preserves entered rates and manual deductions, and keeps the existing scope" do
     expect(PayrollTimeAllocationService).not_to receive(:call!)
     employee.update!(default_custom_earnings: [ { "label" => "Current bonus", "amount" => 50 } ])
-    post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: { includes_recurring_items: true, includes_base_salary: false }, as: :json
+    post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: {
+      includes_recurring_items: true, includes_base_salary: false,
+      hours: { employee.id.to_s => { regular: 80, overtime: 0, holiday: 0, pto: 0 } }
+    }, as: :json
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("results", "errors")).to eq([])
     expect(period.reload).to have_attributes(status: "calculated", approved_at: nil, approved_by_id: nil)
@@ -28,6 +31,26 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     expect(item.custom_deductions).to eq([ { "label" => "Manual", "amount" => 10 } ])
     expect(period.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
     expect(period.payroll_review_packages.current.sole.status).to eq("pending")
+  end
+
+  it "preserves the reopened payroll rate when its saved hours are explicitly resubmitted" do
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    expect(response).to have_http_status(:created)
+    correction_id = response.parsed_body.dig("correction_run", "id")
+
+    post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
+      employee_ids: [ employee.id ],
+      hours: { employee.id.to_s => { regular: 80, overtime: 0, holiday: 0, pto: 0 } }
+    }, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    copied = PayPeriod.find(correction_id).payroll_items.sole
+    expect(copied.pay_rate).to eq(12.to_d)
+    expect(copied.gross_pay).to eq(960.to_d)
+    expect(employee.reload.pay_rate).to eq(16.to_d)
   end
 
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
