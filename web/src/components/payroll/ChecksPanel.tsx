@@ -467,17 +467,24 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     <div className="space-y-4">
       {/* Header + batch actions */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+        <div className="space-y-1 text-sm text-gray-600">
           {meta && (
             <>
-              <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
-              {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
-              <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> not prepared</span>
-              <span><span className="font-medium text-blue-700">{meta.prepared}</span> prepared</span>
-              <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
-              <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
-              {meta.voided > 0 && (
-                <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
+                {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
+              </div>
+              {meta.total > 0 && (
+                <div role="group" aria-label="Paper check status" className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="font-medium text-gray-900">Paper check status</span>
+                  <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> not prepared</span>
+                  <span><span className="font-medium text-blue-700">{meta.prepared}</span> prepared</span>
+                  <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
+                  <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
+                  {meta.voided > 0 && (
+                    <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
+                  )}
+                </div>
               )}
             </>
           )}

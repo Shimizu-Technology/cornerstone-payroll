@@ -254,3 +254,64 @@ describe('ChecksPanel earnings statements', () => {
   });
 
 });
+
+
+describe('ChecksPanel paper status scope', () => {
+  const noPaperMeta = { ...meta, total: 0, unprinted: 0, prepared: 0, printed: 0, delivered: 0, voided: 0 };
+  const bankConfirmation = { settled_on: '2026-11-22', bank_reference: 'SYNTHETIC-P01-BANK-20261122-4H', confirmed_at: '2026-11-22T07:02:00Z' };
+  const deposit = { id: depositStatement.id, employee_id: depositStatement.employee_id, employee_name: depositStatement.employee_name, net_pay: depositStatement.net_pay };
+  const countLabel = (count: number, label: string) => (_: string, element: Element | null) =>
+    Boolean(element?.tagName === 'SPAN' && element.textContent === `${count} ${label}`);
+
+  beforeEach(() => { apiMocks.list.mockReset(); });
+  afterEach(cleanup);
+
+  it.each([false, true])('omits paper status pills for DD-only payroll, confirmed=%s', async (confirmed) => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [{ ...deposit, payment_confirmation: confirmed ? bankConfirmation : null }], earnings_statement_items: [depositStatement], meta: { ...noPaperMeta, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'not prepared'))).toBeNull();
+    expect(screen.getByText(countLabel(0, 'paper checks'))).toBeTruthy();
+    expect(screen.getByText(countLabel(1, 'direct-deposit stubs'))).toBeTruthy();
+    if (confirmed) {
+      expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
+    } else {
+      expect(screen.getByRole('button', { name: 'Confirm bank payment' })).toBeTruthy();
+    }
+  });
+
+  it('scopes issued counts to the paper item in a mixed confirmed-bank run', async () => {
+    const delivered = { ...check, check_status: 'delivered' as const };
+    apiMocks.list.mockResolvedValue({ checks: [delivered], direct_deposit_items: [{ ...deposit, payment_confirmation: bankConfirmation }], earnings_statement_items: [paperStatement, depositStatement], meta: { ...meta, prepared: 0, delivered: 1, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    expect(within(group).getByText('Paper check status')).toBeTruthy();
+    expect(within(group).getByText(countLabel(1, 'issued'))).toBeTruthy();
+    expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+    expect(within(group).queryByText(/Bank paid/)).toBeNull();
+  });
+
+  it('preserves every supplied paper status count including voided history', async () => {
+    const statuses = ['unprinted', 'prepared', 'printed', 'delivered', 'voided'] as const;
+    const paperChecks = statuses.map((status, index) => ({ ...check, id: 42 + index, employee_name: `Paper Employee ${index}`, check_number: String(8101 + index), check_status: status, voided: status === 'voided' }));
+    apiMocks.list.mockResolvedValue({ checks: paperChecks, direct_deposit_items: [], earnings_statement_items: [], meta: { ...meta, total: 5, unprinted: 1, prepared: 1, printed: 1, delivered: 1, voided: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(5, 'paper checks'));
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    for (const label of ['not prepared', 'prepared', 'printed', 'issued', 'voided']) {
+      expect(within(group).getByText(countLabel(1, label))).toBeTruthy();
+    }
+  });
+
+  it('omits irrelevant paper status pills for an empty run', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [], meta: noPaperMeta });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(0, 'paper checks'));
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+  });
+});
