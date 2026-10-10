@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render as renderOriginal, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import type { TimeTrackingImportData, TimeTrackingPreviewRow } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 import { TimeTrackingImportModal } from './TimeTrackingImportModal';
+import { MemoryRouter } from 'react-router';
+import type { ReactNode } from 'react';
+
+function render(ui: ReactNode) { return renderOriginal(ui, { wrapper: MemoryRouter }); }
 
 const apiMocks = vi.hoisted(() => ({
   listSources: vi.fn(),
@@ -344,6 +348,10 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   await user.click(confirm);
   await waitFor(() => expect(apiMocks.correctionConfirm).toHaveBeenCalledWith(17, { import_id: 99, ...{ source_user_id: line.source_user_id, source_time_entry_id: line.source_time_entry_id, line_key: line.line_key }, preview_token: 'signed-proof', reason: 'Approved source correction', acknowledge_accounting_only: true }));
   expect(await screen.findByText(/Recorded in Payroll supplemental #100/)).toBeTruthy();
+  const correctionLink = screen.getByRole('link', { name: 'View correction' });
+  const href = new URL(correctionLink.getAttribute('href')!, 'http://payroll.test');
+  expect(href.pathname).toBe('/companies/3/pay-runs/100/payroll-items/101');
+  expect(href.searchParams.get('return_to')).toBe('/companies/3/pay-runs/17/work');
 });
 
 
@@ -562,4 +570,16 @@ describe('accounting posting and source delivery are separate', () => {
     expect(onCorrectionRecorded).not.toHaveBeenCalled();
     expect(apiMocks.correctionConfirm).not.toHaveBeenCalled();
   });
+});
+
+
+it.each(['different active company', 'invalid period id', 'invalid item id'] as const)('does not offer an unscoped correction link for %s', async scenario => {
+  if (scenario === 'different active company') apiMocks.company.activeCompany = { id: 8, name: 'Other company' };
+  apiMocks.preview.mockResolvedValue({ import: { id: 99, status: 'previewed',
+    correction_dispositions: [{ id: 1, corrective_pay_period_id: scenario === 'invalid period id' ? -1 : 100,
+      corrective_payroll_item_id: scenario === 'invalid item id' ? 0 : 101, total_hours: -1 }],
+    processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
+  render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} initialSourceId={source.id} autoPreview />);
+  await screen.findByRole('region', { name: 'Accounting correction delivery' });
+  expect(screen.queryByRole('link', { name: 'View correction' })).toBeNull();
 });

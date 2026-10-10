@@ -4,7 +4,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
+import { payrollItemPath, payRunPath, safeInternalReturnPath } from '@/lib/routes';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
@@ -106,6 +107,10 @@ export function TimeTrackingImportModal({
     : companies.find((company) => company.id === payPeriod.company_id);
   const clientLabel = payrollCompany?.name || (payPeriod.company_id ? `Client #${payPeriod.company_id}` : 'This payroll’s client');
   const navigate = useNavigate();
+  const correctionCompanyId = typeof payPeriod.company_id === 'number' && activeCompany?.id === payPeriod.company_id
+    && Number.isSafeInteger(payPeriod.company_id) && payPeriod.company_id > 0
+    && Number.isSafeInteger(payPeriod.id) && payPeriod.id > 0
+    ? payPeriod.company_id : null;
   const [correction, setCorrection] = useState<ExactTimeCorrectionPreview | null>(null);
   const [correctionReason, setCorrectionReason] = useState('');
   const [correctionAcknowledged, setCorrectionAcknowledged] = useState(false);
@@ -721,6 +726,13 @@ export function TimeTrackingImportModal({
                     </div>
                   ) : <p className="text-neutral-700">Source confirmation pending.{done.source_receipt?.queued_at ? ` Queued ${formatTimestamp(done.source_receipt.queued_at)}.` : ''}</p>}
                   <div className="flex flex-wrap gap-2">
+                    {correctionCompanyId && Number.isSafeInteger(done.corrective_pay_period_id) && done.corrective_pay_period_id > 0
+                      && Number.isSafeInteger(done.corrective_payroll_item_id) && done.corrective_payroll_item_id > 0 && (
+                        <Link className="inline-flex min-h-11 items-center rounded-xl border border-primary-200 px-3 font-semibold text-primary-800 hover:bg-primary-50"
+                          to={payrollItemPath(correctionCompanyId, done.corrective_pay_period_id, done.corrective_payroll_item_id, {
+                            returnTo: safeInternalReturnPath(payRunPath(correctionCompanyId, payPeriod.id, 'work'), '/app'),
+                          })}>View correction</Link>
+                      )}
                     <Button variant="outline" size="sm" disabled={loading || correctionBusy} onClick={() => void refreshCorrectionDelivery(done)}>Refresh source confirmation</Button>
                     {done.source_receipt?.can_retry && <Button variant="outline" size="sm" disabled={loading || correctionBusy} onClick={() => void refreshCorrectionDelivery(done, true)}>Retry source confirmation</Button>}
                   </div>
