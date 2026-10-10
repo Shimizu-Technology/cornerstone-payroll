@@ -103,7 +103,8 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     correction_id = response.parsed_body.dig("correction_run", "id")
     foreign = other.employee_wage_rates.create!(label: "Foreign", rate: 100)
     inactive = employee.employee_wage_rates.create!(label: "Never used", rate: 100, active: false)
-    [ foreign, inactive ].each do |rate|
+    nonexistent = Struct.new(:id, :label).new(EmployeeWageRate.maximum(:id) + 1_000, "Invented")
+    [ foreign, inactive, nonexistent ].each do |rate|
       post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
         employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [
           { employee_wage_rate_id: rate.id, label: rate.label, rate: 100, regular_hours: 80 }
@@ -112,6 +113,41 @@ RSpec.describe "Payroll setup refresh API", type: :request do
       expect(response.parsed_body.dig("results", "errors").size).to eq(1)
       expect(PayPeriod.find(correction_id).payroll_items.sole.wage_rate_hours.first["employee_wage_rate_id"]).to eq(saved.id)
     end
+  end
+
+  it "replays original rates physically deleted before and after reopening in both calculation and item editing" do
+    primary = employee.employee_wage_rates.create!(label: "Deleted primary", rate: 12, is_primary: true)
+    secondary = employee.employee_wage_rates.create!(label: "Deleted secondary", rate: 20)
+    buckets = [
+      { "employee_wage_rate_id" => primary.id, "label" => primary.label, "rate" => 12, "regular_hours" => 40, "is_primary" => true },
+      { "employee_wage_rate_id" => secondary.id, "label" => secondary.label, "rate" => 20, "regular_hours" => 40 }
+    ]
+    item.update!(wage_rate_hours: buckets)
+    period.update!(status: "committed", committed_at: Time.current)
+    primary.destroy_with_employee_lock!
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    expect(response).to have_http_status(:created)
+    correction_id = response.parsed_body.dig("correction_run", "id")
+    secondary.destroy_with_employee_lock!
+    expect(EmployeeWageRate.where(id: buckets.map { |entry| entry["employee_wage_rate_id"] })).to be_empty
+
+    post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: buckets } }
+    }, as: :json
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    copied = PayPeriod.find(correction_id).payroll_items.sole
+    expect(copied.gross_pay).to eq(1280.to_d)
+    expect(copied.pay_rate).to eq(12.to_d)
+
+    controller = Api::V1::Admin::PayrollItemsController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+    patch "/api/v1/admin/pay_periods/#{correction_id}/payroll_items/#{copied.id}",
+      params: { payroll_item: { wage_rate_hours: buckets }, auto_calculate: true }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(copied.reload.gross_pay).to eq(1280.to_d)
+    expect(copied.wage_rate_hours.map { |entry| entry["rate"] }).to eq([ 12.0, 20.0 ])
   end
 
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
