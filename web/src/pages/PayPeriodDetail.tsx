@@ -784,6 +784,10 @@ export function PayPeriodDetail({
         if (!selectedEmployeeIds.has(Number(employeeId))) return;
         named_loan_payments[employeeId] = {};
         Object.entries(drafts).forEach(([loanId, draft]) => {
+          const option = namedLoanOptions.find(candidate => String(candidate.employee_id) === employeeId && String(candidate.loan_id) === loanId);
+          if (draft.mode === 'override' && !option?.eligible && toNumber(draft.amount) > 0) {
+            throw new Error(`The saved repayment for ${option?.name || 'this loan'} is no longer available. Choose no repayment or enter zero, then recalculate.`);
+          }
           if (draft.mode === 'override' && draft.amount == null) throw new Error('Enter the linked loan repayment amount, or choose the scheduled default.');
           named_loan_payments[employeeId][loanId] = draft.mode === 'override' ? { mode: 'override', amount: draft.amount ?? 0 } : { mode: 'default' };
         });
@@ -2149,13 +2153,13 @@ export function PayPeriodDetail({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">
-                    {comparison?.comparison_kind === 'training_benchmark' ? 'Training Benchmark Comparison' : 'Previous Pay Period Comparison'}
+                    {comparison?.comparison_kind === 'training_benchmark' ? 'Training Benchmark Comparison' : comparison?.comparison_kind === 'selected_employees' ? 'Selected Employee Comparison' : 'Previous Pay Period Comparison'}
                   </h3>
                   <p className={`mt-1 text-sm ${comparisonError ? 'text-red-700' : 'text-gray-600'}`}>
                     {comparisonError
                       ? 'Comparison failed to load. Retry before approving this payroll.'
                       : comparison?.previous_pay_period
-                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
+                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : comparison.comparison_kind === 'selected_employees' ? 'Compared for the selected employees with' : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
                         : comparisonLoading ? 'Loading comparison…' : 'No comparison target found for this payroll.'}
                   </p>
                 </div>
@@ -2252,7 +2256,9 @@ export function PayPeriodDetail({
                     <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                       {comparison.comparison_kind === 'training_benchmark'
                         ? 'No material employee-level differences from the training benchmark.'
-                        : 'No material employee-level changes detected against the previous committed period.'}
+                        : comparison.comparison_kind === 'selected_employees'
+                          ? 'No material differences for the selected employees. Employees outside this special run are excluded from the comparison.'
+                          : 'No material employee-level changes detected against the previous committed period.'}
                     </div>
                   )}
                 </>

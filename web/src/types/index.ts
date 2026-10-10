@@ -1298,7 +1298,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
-  comparison_kind: 'previous_period' | 'training_benchmark';
+  comparison_kind: 'previous_period' | 'training_benchmark' | 'selected_employees';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;

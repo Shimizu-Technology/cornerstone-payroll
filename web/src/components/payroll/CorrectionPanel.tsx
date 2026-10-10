@@ -127,11 +127,11 @@ export function CorrectionPanel({
   const [reopenReason, setReopenReason] = useState('');
   const [reopenLoading, setReopenLoading] = useState(false);
   const [reopenError, setReopenError] = useState<string | null>(null);
-  const loadPreflight = async () => {
+  const loadPreflight = async (action: 'reopen' | 'void') => {
     setPreflight(null);
     setPreflightLoading(true);
     setUnpaidAcknowledgement(false);
-    try { const response = await payPeriodsApi.correctionPreflight(payPeriod.id); setPreflight(response.correction_preflight); }
+    try { const response = await payPeriodsApi.correctionPreflight(payPeriod.id); setPreflight(action === 'void' ? response.void_preflight : response.correction_preflight); }
     catch (err) { setPreflight({ eligible: false, blockers: [err instanceof Error ? err.message : 'Unable to check payment eligibility. Close and try again.'], employee_checks: [], other_payments: [], requires_unpaid_acknowledgement: true }); }
     finally { setPreflightLoading(false); }
   };
@@ -422,7 +422,7 @@ export function CorrectionPanel({
 
       {/* ---- Action buttons ---- */}
       <div className="flex flex-wrap gap-2" role="group" aria-label="Correction actions">
-        {canVoid && <Button variant="outline" disabled={anyActionInFlight} onClick={() => { setShowReopenModal(true); setReopenReason(''); setReopenError(null); void loadPreflight(); }}>Reopen unpaid payroll</Button>}
+        {canVoid && <Button variant="outline" disabled={anyActionInFlight} onClick={() => { setShowReopenModal(true); setReopenReason(''); setReopenError(null); void loadPreflight('reopen'); }}>Reopen unpaid payroll</Button>}
         {canVoid && (
           <Button
             variant="outline"
@@ -433,7 +433,7 @@ export function CorrectionPanel({
               setVoidError(null);
               setVoidReason('');
               setVoidConfirmText('');
-              void loadPreflight();
+              void loadPreflight('void');
             }}
           >
             {isCorrection

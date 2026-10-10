@@ -21,16 +21,17 @@ export function NamedLoanInputs({ options, drafts, includesRecurring, onChange }
         <p className="text-xs text-slate-600">{option.current_balance == null ? 'Balance not tracked' : `Balance ${formatCurrency(option.current_balance)}`} · Scheduled {formatCurrency(option.scheduled_amount)}</p>
         {!option.eligible && <p role="status" className="text-xs text-amber-800">{option.unavailable_reason || 'This loan is unavailable for this payday.'}</p>}
         <label className="block text-xs font-medium text-slate-700">{option.name} repayment choice
-          <select className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-2" disabled={!option.eligible} value={draft.mode}
-            onChange={event => onChange(option.loan_id, { mode: event.target.value as NamedLoanDraft['mode'], amount: draft.amount ?? option.scheduled_amount })}>
-            <option value="default">{includesRecurring ? `Scheduled repayment (${formatCurrency(option.scheduled_amount)})` : 'No repayment — recurring setup excluded'}</option>
-            <option value="override">Set repayment for this payroll</option>
+          <select className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-2" value={draft.mode}
+            onChange={event => onChange(option.loan_id, { mode: event.target.value as NamedLoanDraft['mode'], amount: option.eligible ? (draft.amount ?? option.scheduled_amount) : 0 })}>
+            <option value="default">{!option.eligible ? 'No repayment — loan unavailable' : includesRecurring ? `Scheduled repayment (${formatCurrency(option.scheduled_amount)})` : 'No repayment — recurring setup excluded'}</option>
+            <option value="override">{option.eligible ? 'Set repayment for this payroll' : 'Skip repayment for this payroll ($0)'}</option>
           </select>
         </label>
         {draft.mode === 'override' && <label className="block text-xs font-medium text-slate-700">{option.name} repayment amount
-          <NumericInput className="mt-1 min-h-11 w-full" value={draft.amount} onValueChange={amount => onChange(option.loan_id, { mode: 'override', amount })} min={0} emptyValue={null} notifyEmptyOnChange fixedDecimalsOnBlur={2} disabled={!option.eligible} />
+          <NumericInput className="mt-1 min-h-11 w-full" value={draft.amount} onValueChange={amount => onChange(option.loan_id, { mode: 'override', amount })} min={0} emptyValue={null} notifyEmptyOnChange fixedDecimalsOnBlur={2} max={option.eligible ? undefined : 0} />
         </label>}
-        {draft.mode === 'override' && draft.amount === 0 && <p className="text-xs text-slate-600">No repayment from this paycheck. The loan schedule stays active.</p>}
+        {!option.eligible && draft.mode === 'override' && Number(draft.amount) > 0 && <p role="alert" className="text-xs text-red-800">This saved repayment is no longer available. Choose no repayment or enter zero, then recalculate.</p>}
+        {draft.mode === 'override' && draft.amount === 0 && <p className="text-xs text-slate-600">No repayment from this paycheck. Saved loan setup is unchanged.</p>}
       </div>;
     })}
   </fieldset>;
