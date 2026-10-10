@@ -53,6 +53,67 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     expect(employee.reload.pay_rate).to eq(16.to_d)
   end
 
+  it "recalculates copied multi-rate hours at saved rates after profile rates change or deactivate" do
+    primary = employee.employee_wage_rates.create!(label: "Primary", rate: 12, is_primary: true)
+    secondary = employee.employee_wage_rates.create!(label: "Secondary", rate: 20)
+    buckets = [
+      { "employee_wage_rate_id" => primary.id, "label" => "Primary", "rate" => 12, "regular_hours" => 40, "is_primary" => true },
+      { "employee_wage_rate_id" => secondary.id, "label" => "Secondary", "rate" => 20, "regular_hours" => 40 }
+    ]
+    item.update!(wage_rate_hours: buckets)
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction_id = response.parsed_body.dig("correction_run", "id")
+    primary.update!(rate: 16)
+    secondary.update!(rate: 30, active: false)
+
+    submitted = buckets
+    post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: submitted } }
+    }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    copied = PayPeriod.find(correction_id).payroll_items.sole
+    expect(copied.wage_rate_hours.map { |bucket| bucket["rate"] }).to eq([ 12.0, 20.0 ])
+    expect(copied.gross_pay).to eq(1280.to_d)
+    expect(copied.pay_rate).to eq(12.to_d)
+
+    controller = Api::V1::Admin::PayrollItemsController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+    expect(PayrollTimeAllocationService).not_to receive(:call!)
+    patch "/api/v1/admin/pay_periods/#{correction_id}/payroll_items/#{copied.id}",
+      params: { payroll_item: { wage_rate_hours: submitted }, auto_calculate: true }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(copied.reload.gross_pay).to eq(1280.to_d)
+    patch "/api/v1/admin/pay_periods/#{correction_id}/payroll_items/#{copied.id}",
+      params: { payroll_item: { wage_rate_hours: buckets.map { |bucket| bucket.merge("rate" => 99) } } }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["errors"].join).to include("reviewed wage-rate correction")
+    expect(copied.reload.wage_rate_hours.map { |bucket| bucket["rate"] }).to eq([ 12.0, 20.0 ])
+  end
+
+  it "rejects foreign and invented inactive wage-rate IDs in correction drafts" do
+    saved = employee.employee_wage_rates.create!(label: "Saved", rate: 12)
+    item.update!(wage_rate_hours: [ { "employee_wage_rate_id" => saved.id, "label" => "Saved", "rate" => 12, "regular_hours" => 80 } ])
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction_id = response.parsed_body.dig("correction_run", "id")
+    foreign = other.employee_wage_rates.create!(label: "Foreign", rate: 100)
+    inactive = employee.employee_wage_rates.create!(label: "Never used", rate: 100, active: false)
+    [ foreign, inactive ].each do |rate|
+      post "/api/v1/admin/pay_periods/#{correction_id}/run_payroll", params: {
+        employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [
+          { employee_wage_rate_id: rate.id, label: rate.label, rate: 100, regular_hours: 80 }
+        ] } }
+      }, as: :json
+      expect(response.parsed_body.dig("results", "errors").size).to eq(1)
+      expect(PayPeriod.find(correction_id).payroll_items.sole.wage_rate_hours.first["employee_wage_rate_id"]).to eq(saved.id)
+    end
+  end
+
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
     period.update!(status: "calculated")
     package = PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!

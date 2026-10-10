@@ -1559,7 +1559,7 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
-          payroll_item.wage_rate_hours = wage_rate_hours
+          payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
 
           payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
