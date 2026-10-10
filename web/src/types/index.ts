@@ -1866,7 +1866,17 @@ export interface CheckEvent {
   created_at: string;
 }
 
+export interface PaymentCancellationSync {
+  status: 'pending' | 'error' | 'acknowledged';
+  pending_count: number;
+  acknowledged_count: number;
+  oldest_pending_at: string | null;
+  errors: string[];
+  hours_reserved: boolean;
+}
+
 export interface CheckItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   pay_period_id: number;
   employee_id: number;
@@ -1900,6 +1910,7 @@ export interface PaymentMethodChangeEligibility {
 }
 
 export interface EarningsStatementItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   employee_id: number;
   employee_name: string;
@@ -1924,6 +1935,7 @@ export interface CheckListMeta {
 }
 
 export interface DirectDepositItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number; employee_id: number; employee_name: string; net_pay: number;
   payment_confirmation?: { settled_on: string; bank_reference: string; confirmed_at: string } | null;
 }
