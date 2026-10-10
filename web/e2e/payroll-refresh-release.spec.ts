@@ -69,11 +69,13 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   async function finalize(page: Page, id: number, loanId: number): Promise<void> {
     await page.getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('approved');
-    page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('Commit this payroll?');
-      await dialog.accept();
-    });
     await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).filter({ visible: true }).click();
+    const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?', exact: true });
+    await expect(commitDialog).toBeVisible();
+    await expect(commitDialog.getByText('Synthetic Payroll Refresh QA', { exact: true })).toBeVisible();
+    await expect(commitDialog.getByText(`#${id}`, { exact: true })).toBeVisible();
+    await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
+    await expect(commitDialog).not.toBeVisible();
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('committed');
     const savedLoan = await loan(loanId);
     expect(Number(savedLoan.current_balance)).toBe(2959.97);
@@ -138,7 +140,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await chooseLoan(page, 'QA Reopen Loan');
     await calculate(page, id);
     await finalize(page, id, fixture.reopen.loan_id!);
-    expect((await period(fixture.reopen.period_id)).correction_status, { timeout: 30_000 }).toBe('voided');
+    expect((await period(fixture.reopen.period_id)).correction_status).toBe('voided');
   });
 
   test('refreshing current setup withdraws approval and applies the new scheduled loan once', async ({ page }) => {
@@ -171,7 +173,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(id);
     expect(saved.payroll_items).toHaveLength(1);
-    expect(Number(saved.payroll_items[0].gross_pay), { timeout: 30_000 }).toBe(1280);
+    expect(Number(saved.payroll_items[0].gross_pay)).toBe(1280);
     expect(Number(saved.payroll_items[0].loan_payment)).toBe(300);
     expect(Number(saved.payroll_items[0].hours_worked)).toBe(80);
     expect(Number(saved.payroll_items[0].overtime_hours)).toBe(0);
@@ -207,7 +209,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await expect(dialog.getByRole('button', { name: 'Reopen and create draft', exact: true })).toBeDisabled();
     const bounds = await dialog.boundingBox();
     expect(bounds?.width).toBeLessThanOrEqual(390);
-    expect((await period(fixture.delivered.period_id)).status, { timeout: 30_000 }).toBe('committed');
-    expect((await period(fixture.delivered.period_id)).correction_status, { timeout: 30_000 }).toBeNull();
+    expect((await period(fixture.delivered.period_id)).status).toBe('committed');
+    expect((await period(fixture.delivered.period_id)).correction_status).toBeNull();
   });
 });
