@@ -107,11 +107,12 @@ RSpec.describe "Tracked payroll loan repayment" do
   end
 
   it "reverses the loan payment through the real payroll void service" do
+    actor = create(:user, company: company)
     calculate
     period.update!(status: "approved")
-    PayPeriodLifecycleService.new(pay_period: period, actor: nil).commit!
+    PayPeriodLifecycleService.new(pay_period: period, actor: actor).commit!
     expect(loan.reload.current_balance).to eq(0)
-    PayPeriodCorrectionService.void!(pay_period: period.reload, actor: nil, reason: "Payroll correction required")
+    PayPeriodCorrectionService.void!(pay_period: period.reload, actor: actor, reason: "Payroll correction required")
     expect(loan.reload.current_balance).to eq(75)
     expect(loan.loan_transactions.payments.count).to eq(1)
     expect(loan.loan_transactions.where(transaction_type: "adjustment").count).to eq(1)

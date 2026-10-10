@@ -640,7 +640,6 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("No printable")
     end
-
   end
 
   describe "POST /api/v1/admin/non_employee_checks/mark_all_printed" do
@@ -685,7 +684,6 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(own_check.reload.printed_at).to be_present
       expect(foreign_check.reload.printed_at).to be_nil
     end
-
   end
 
   describe "DELETE /api/v1/admin/non_employee_checks/:id" do
