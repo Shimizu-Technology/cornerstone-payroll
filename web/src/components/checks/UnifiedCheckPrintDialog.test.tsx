@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +36,9 @@ vi.mock('@/services/api', () => ({
     create: apiMocks.createPrinterProfile,
   },
 }));
+
+const pdfMocks = vi.hoisted(() => ({ getDocument: vi.fn(), getPage: vi.fn(), destroy: vi.fn(), cancel: vi.fn() }));
+vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: pdfMocks.getDocument }));
 
 const printerProfile = {
   id: 8,
@@ -150,11 +153,16 @@ function renderDialog(props?: Partial<React.ComponentProps<typeof UnifiedCheckPr
 
 describe('UnifiedCheckPrintDialog', () => {
   beforeEach(() => {
+    pdfMocks.getPage.mockReset().mockResolvedValue({ getViewport: () => ({ width: 612, height: 792 }), render: () => ({ promise: Promise.resolve(), cancel: pdfMocks.cancel }) });
+    pdfMocks.destroy.mockReset();
+    pdfMocks.getDocument.mockReset().mockImplementation(() => ({ promise: Promise.resolve({ numPages: 2, getPage: pdfMocks.getPage }), destroy: pdfMocks.destroy }));
     apiMocks.printQueue.mockReset().mockResolvedValue(queue);
     apiMocks.printRuns.mockReset().mockResolvedValue({ check_print_runs: [] });
     apiMocks.activePrintGeneration.mockReset().mockResolvedValue({ check_print_generation: null });
     apiMocks.printGeneration.mockReset();
-    apiMocks.printRunPdf.mockReset().mockResolvedValue({ blob: new Blob(['%PDF-1.4']), filename: 'checks.pdf' });
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    Object.defineProperty(blob, 'arrayBuffer', { value: async () => new Uint8Array([37, 80, 68, 70]).buffer });
+    apiMocks.printRunPdf.mockReset().mockResolvedValue({ blob, filename: 'checks.pdf' });
     apiMocks.createPrintGeneration.mockReset().mockResolvedValue({ check_print_generation: queuedGeneration });
     apiMocks.updateCheckNumbers.mockReset();
     apiMocks.listPrinterProfiles.mockReset().mockResolvedValue({ printer_profiles: [printerProfile], selections: [], active_printer_profile_id: 8 });
@@ -167,6 +175,78 @@ describe('UnifiedCheckPrintDialog', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it('renders both saved pages compact and enlarged without another preparation', async () => {
+    const user = userEvent.setup();
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [generatedRun] });
+    const onPackageGenerated = vi.fn();
+    renderDialog({ onPackageGenerated });
+    await screen.findByText('Page 1 of 2');
+    expect(screen.getByLabelText('Page 1 preview').tagName).toBe('CANVAS');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Page 2 of 2');
+    await user.click(screen.getByRole('button', { name: 'Enlarge' }));
+    const expanded = await screen.findByRole('dialog', { name: `Inspect package #${generatedRun.id}` });
+    await within(expanded).findByText('Page 1 of 2');
+    await user.click(within(expanded).getByRole('button', { name: 'Next' }));
+    await within(expanded).findByText('Page 2 of 2');
+    expect(within(expanded).getByLabelText('Page 2 preview').tagName).toBe('CANVAS');
+    expect(screen.queryByTitle('Expanded check package preview')).toBeNull();
+    expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+    expect(apiMocks.updateCheckNumbers).not.toHaveBeenCalled();
+    expect(onPackageGenerated).not.toHaveBeenCalled();
+  });
+
+  it('shows rendering failure while retaining the verified original download', async () => {
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [generatedRun] });
+    pdfMocks.getDocument.mockImplementation(() => ({ promise: Promise.reject(new Error('Unsupported PDF rendering')), destroy: pdfMocks.destroy }));
+    renderDialog();
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('PDF could not be displayed'));
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+    expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+    expect(apiMocks.printRunPdf).toHaveBeenCalledExactlyOnceWith(generatedRun.id);
+  });
+
+  it('prints the original verified file rather than the scaled preview canvas', async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [generatedRun] });
+    renderDialog();
+    await screen.findByText('Page 1 of 2');
+    await user.click(screen.getByRole('button', { name: 'Open saved PDF to print' }));
+    expect(open).toHaveBeenCalledExactlyOnceWith('blob:checks', '_blank', 'noopener,noreferrer');
+    expect(apiMocks.createPrintGeneration).not.toHaveBeenCalled();
+    expect(apiMocks.updateCheckNumbers).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it('destroys the renderer and ignores late page responses after closing the workspace', async () => {
+    let resolvePage!: (page: { getViewport: () => { width: number; height: number }; render: () => { promise: Promise<void>; cancel: () => void } }) => void;
+    pdfMocks.getPage.mockReturnValue(new Promise((resolve) => { resolvePage = resolve; }));
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [generatedRun] });
+    const view = renderDialog();
+    await screen.findByText('Page 1 of 2');
+    await waitFor(() => expect(pdfMocks.getPage).toHaveBeenCalled());
+    view.rerender(<MemoryRouter><UnifiedCheckPrintDialog open={false} payPeriodId={9} onOpenChange={vi.fn()} onPackageGenerated={vi.fn()} /></MemoryRouter>);
+    const paint = vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() }));
+    await act(async () => { resolvePage({ getViewport: () => ({ width: 612, height: 792 }), render: paint }); });
+    expect(paint).not.toHaveBeenCalled();
+    expect(pdfMocks.destroy).toHaveBeenCalled();
+    expect(screen.queryByLabelText('Page 1 preview')).toBeNull();
+  });
+
+  it('keeps legacy packages inspectable but disables all original-file printing', async () => {
+    const user = userEvent.setup();
+    const legacy = { ...savedRun, status: 'generated' as const, confirmed_at: null, confirmation_state: 'legacy' as const };
+    apiMocks.printRuns.mockResolvedValue({ check_print_runs: [legacy] });
+    renderDialog();
+    await screen.findByText('Page 1 of 2');
+    expect((screen.getByRole('button', { name: 'Open saved PDF to print' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Enlarge' }));
+    const expanded = await screen.findByRole('dialog', { name: 'Inspect package #42' });
+    expect((within(expanded).getByRole('button', { name: 'Open saved PDF to print' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(expanded).queryByRole('button', { name: 'Open to print' })).toBeNull();
   });
 
   it('reopens the latest immutable package without generating another PDF', async () => {
@@ -603,7 +683,7 @@ describe('UnifiedCheckPrintDialog', () => {
     renderDialog();
 
     expect(await screen.findByText('This package is outdated.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Print saved PDF' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Open saved PDF to print' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: 'Confirm printed correctly' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Generate replacement package' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Generate replacement package' }));
