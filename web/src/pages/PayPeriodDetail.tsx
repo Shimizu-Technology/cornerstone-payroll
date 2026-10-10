@@ -987,12 +987,19 @@ export function PayPeriodDetail({
     if (!payPeriod) return;
     setProcessing(true);
     setError(null);
+    setCalculationFailures([]);
+    setCalculationNotice(null);
     try {
       const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
       setRefreshSetupOpen(false);
       await loadPayPeriod(payPeriod.id, true);
       setCalculationFailures(response.results.errors);
-      setCalculationNotice('Current setup applied to the saved employees and inputs. Review the recalculated payroll and obtain approval again.');
+      const failureCount = response.results.errors.length;
+      if (failureCount > 0) {
+        setError(`${failureCount} ${failureCount === 1 ? 'employee needs' : 'employees need'} attention after refreshing setup.`);
+      } else {
+        setCalculationNotice('Current setup applied to the saved employees and inputs. Review the recalculated payroll and obtain approval again.');
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'Unable to refresh payroll setup.'); }
     finally { setProcessing(false); }
   };
@@ -2551,7 +2558,7 @@ export function PayPeriodDetail({
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
                 const savedItem = payrollItemByEmployeeId.get(emp.id);
-                const payRate = toNumber(savedItem?.timekeeping_source === 'correction_reference' ? savedItem.pay_rate : emp.pay_rate);
+                const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                 const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
                   ? `${formatCurrency(payRate / periodsPerYear)}/period`
@@ -2626,7 +2633,7 @@ export function PayPeriodDetail({
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                       const savedItem = payrollItemByEmployeeId.get(emp.id);
-                      const payRate = toNumber(savedItem?.timekeeping_source === 'correction_reference' ? savedItem.pay_rate : emp.pay_rate);
+                      const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                       const activeWageRates = (hours.wage_rates || []).map((rate, index) => ({ rate, index })).filter(({ rate }) => rate.active !== false);
