@@ -54,7 +54,9 @@ class PayPeriodCorrectionService
       end
       linked_items = locked.payroll_items.select(:id)
       linked_originals = TimeTrackingEntryAllocation.where(payroll_item_id: linked_items).select(:id)
+      linked_accounting_items = PayrollItem.where(correction_for_payroll_item_id: linked_items).select(:id)
       if TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: linked_items).exists? ||
+        TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: linked_accounting_items).exists? ||
         TimeTrackingCorrectionDisposition.where(original_allocation_id: linked_originals).exists?
         raise InvalidStateError, "This payroll has an exact source accounting correction. Voiding is held until the correction disposition and source receipt can be reversed together; review the linked correction with payroll support."
       end

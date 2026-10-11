@@ -38,7 +38,17 @@ class TimeTrackingCorrectionDisposition < ApplicationRecord
     line = Array(employee&.dig("adjustments")).find { |row| row["source_time_entry_id"].to_s == source_time_entry_id && row["line_key"].to_s == line_key }
     TimeTracking::OriginalAllocationProof.new(payroll_item: original.payroll_item, source: time_tracking_source,
       source_user_id: source_user_id, source_user_uuid: source_user_uuid).call
-    TimeTracking::OriginalPaymentProof.call(original.payroll_item)
+    target = item.correction_for_payroll_item
+    stored = item.calculation_context_snapshot.dig("corrective_paycheck", "source_accounting_target")
+    if stored
+      resolver = TimeTracking::PaidCorrectionTarget.new(allocation: original, source: time_tracking_source, line: line_snapshot)
+      unless stored.is_a?(Hash) && stored["target_payroll_item_id"] == target&.id && resolver.matches_saved_evidence?(stored)
+        raise ArgumentError, "Accounting correction financial succession or current payment proof changed"
+      end
+    else
+      raise ArgumentError, "Accounting correction has no verified target proof" unless target&.id == original.payroll_item_id
+      TimeTracking::OriginalPaymentProof.call(target)
+    end
     identity = TimeTracking::ConnectionIdentity.validate!(source: time_tracking_source, payload: import.raw_payload)
     unless company_id == time_tracking_source.company_id && company_id == import.pay_period.company_id &&
       original.company_id == company_id && original.time_tracking_source_id == time_tracking_source_id &&
@@ -48,9 +58,9 @@ class TimeTrackingCorrectionDisposition < ApplicationRecord
       original.verified_source_user_uuid == source_user_uuid && original.source_user_id == source_user_id &&
       original.source_time_entry_id == source_time_entry_id && original.line_key == line_key &&
       item.company_id == company_id && item.employee_id == original.employee_id &&
-      item.correction_for_payroll_item_id == original.payroll_item_id && item.pay_period.committed? && !item.pay_period.voided? &&
-      !original.pay_period.voided? && !original.payroll_item.voided? &&
-      item.pay_period.corrects_pay_period_id == original.pay_period_id && !item.voided? &&
+      target && item.correction_for_payroll_item_id == target.id && item.pay_period.committed? && !item.pay_period.voided? &&
+      !target.pay_period.voided? && !target.voided? &&
+      item.pay_period.corrects_pay_period_id == target.pay_period_id && !item.voided? &&
       item.net_pay.to_d.negative? && item.check_number.blank? &&
       total_hours == regular_hours + overtime_hours && total_hours.negative? && regular_hours <= 0 && overtime_hours <= 0 &&
       %w[total_hours regular_hours overtime_hours].all? { |key| public_send(key) == line_snapshot[key].to_d } &&

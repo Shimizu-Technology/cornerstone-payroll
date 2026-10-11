@@ -37,6 +37,13 @@ class CheckEvent < ApplicationRecord
   after_create_commit :dispatch_aire_entry_lifecycle
   after_create_commit :dispatch_aire_manual_allocations
 
+  # Existing delivery proof does not authorize another instrument operation.
+  def historical_delivery_evidence_valid?
+    persisted? && event_type == "delivered" && check_number.present? && effective_on.present? && effective_on <= PayrollBusinessClock.today &&
+      (evidence_type.nil? || DELIVERY_EVIDENCE_TYPES.include?(evidence_type)) && payroll_item &&
+      (user.nil? || user.organization_id == payroll_item.company.organization_id)
+  end
+
   private
 
   def financial_source_payment_ready

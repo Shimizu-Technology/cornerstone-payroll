@@ -18,6 +18,15 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
   after_create_commit :dispatch_aire_entry_lifecycle
   after_create_commit :dispatch_aire_manual_allocations
 
+  # Read-only proof of a recorded transfer, separate from eligibility to issue
+  # another payment. The financial succession resolver verifies Source links.
+  def historical_evidence_valid?
+    persisted? && settled_on.present? && settled_on <= PayrollBusinessClock.today && bank_reference.present? && bank_reference.length <= 200 &&
+      payroll_item && user && user.organization_id == payroll_item.company.organization_id &&
+      payroll_item.pay_period.committed? && !payroll_item.pay_period.voided? && !payroll_item.voided? &&
+      payroll_item.effective_payment_delivery_method == "direct_deposit" && payroll_item.net_pay.to_d.positive?
+  end
+
   private
 
   def valid_payroll_item
