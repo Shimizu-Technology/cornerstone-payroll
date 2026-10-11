@@ -667,15 +667,15 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
       <CardHeader className="gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Every linked QuickBooks record and committed Cornerstone paycheck appears here. Imported records are locked and cannot be edited or recalculated.</p></div>
         {report && report.history.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs font-semibold text-neutral-600">Year
-              <select value={yearFilter} onChange={(event) => setHistoryFilter('history_year', event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="min-w-0 text-xs font-semibold text-neutral-600">Year
+              <select value={yearFilter} onChange={(event) => setHistoryFilter('history_year', event.target.value)} className="mt-1 block h-11 w-full min-w-0 max-w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900 sm:h-10">
                 <option value="all">All years</option>
                 {years.map((year) => <option key={year} value={year}>{year}</option>)}
               </select>
             </label>
-            <label className="text-xs font-semibold text-neutral-600">Source
-              <select value={sourceFilter} onChange={(event) => setHistoryFilter('history_source', event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+            <label className="min-w-0 text-xs font-semibold text-neutral-600">Source
+              <select value={sourceFilter} onChange={(event) => setHistoryFilter('history_source', event.target.value)} className="mt-1 block h-11 w-full min-w-0 max-w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900 sm:h-10">
                 <option value="all">All sources</option>
                 <option value="cornerstone">Cornerstone</option>
                 <option value="quickbooks">QuickBooks / adjustments</option>

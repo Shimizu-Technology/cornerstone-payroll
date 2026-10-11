@@ -89,6 +89,32 @@ describe('AireManualPaymentReconciliation', () => {
     expect(mocks.money).not.toHaveBeenCalled();
   });
 
+  it('labels a successful issued sync as Refresh status while using the same saved allocation action', async () => {
+    const issued = { ...allocation, status: 'issued' as const,
+      payment_evidence: { reference: '0012', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' as const } };
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [issued] });
+    mocks.retry.mockResolvedValue({ manual_allocation: issued });
+    render(<AireManualPaymentReconciliation {...props} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Refresh status for entry 40' }));
+    await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
+    expect(mocks.retry).toHaveBeenCalledExactlyOnceWith(67, 9);
+    expect(screen.getByRole('button', { name: 'Refresh status for entry 40' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry sync for entry 40' })).toBeNull();
+    expect(screen.getByText(/Time tracking issued receipt · reference 0012/)).toBeTruthy();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it('keeps Retry sync for an issued allocation with a sync error', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [
+      { ...allocation, status: 'issued', last_sync_error: 'Source confirmation needs review' },
+    ] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByRole('button', { name: 'Retry sync for entry 40' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh status for entry 40' })).toBeNull();
+    expect(screen.getByRole('alert')).toHaveProperty('textContent', 'Source confirmation needs review');
+  });
+
   it.each([
     { name: 'pending sync', current: { ...allocation, status: 'pending_commit' as const, last_sync_error: 'time tracking unavailable' },
       label: 'Saved locally; time tracking confirmation pending' },

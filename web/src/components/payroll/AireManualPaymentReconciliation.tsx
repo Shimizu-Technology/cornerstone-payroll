@@ -192,7 +192,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
           {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">Time tracking status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" disabled={busy || loading}
-          onClick={() => void retry(allocation)}>Retry sync for entry {allocation.source_time_entry_id}</Button>}</div>
+          onClick={() => void retry(allocation)}>{allocation.status === 'issued' && !allocation.payment_cancellation_pending && !allocation.last_sync_error ? 'Refresh status' : 'Retry sync'} for entry {allocation.source_time_entry_id}</Button>}</div>
       </li>)}
     </ul>}
     {review && <>
