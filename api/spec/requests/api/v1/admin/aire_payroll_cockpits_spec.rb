@@ -78,9 +78,10 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
         other_period = create(:pay_period, :committed, company: create(:company))
 
         expect(client).not_to receive(:payroll_cockpit_manual_review)
-        get "/api/v1/admin/pay_periods/#{other_period.id}/aire_payroll_cockpit/manual_review"
+        get "/api/v1/admin/pay_periods/#{other_period.id}/aire_payroll_cockpit/manual_review", as: :json
 
         expect(response).to have_http_status(:not_found)
+        expect(response.parsed_body).not_to have_key("cornerstone_manual_allocations")
         expect(response.body).not_to include(employee.full_name, "PRIVATE-ISSUE-INTENT", "PRIVATE-SOURCE-CONTRACT")
       end
 
