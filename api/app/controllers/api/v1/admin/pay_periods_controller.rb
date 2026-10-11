@@ -13,13 +13,13 @@ module Api
         # `:supplemental_pay_periods`) are deliberately omitted.
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :record_client_approval,
                       :create_correction_run, :reopen_unpaid, :refresh_setup, :generate_fit_check,
-                      :corrective_paychecks, :adopt_confirmed_workweek
+                      :corrective_paychecks, :adopt_confirmed_workweek, :connect_corrected_hours
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
           :promoted_payment_preview, :prepare_promoted_payment,
           :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
-          :comparison, :payroll_field_inputs, :client_review, :record_client_approval
+          :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :corrected_hours, :connect_corrected_hours
         ]
         around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup ]
 
@@ -54,6 +54,20 @@ module Api
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true)
           }
+        end
+
+        def corrected_hours
+          service = TimeTracking::FinancialCorrectionService.new(pay_period: @pay_period, actor: current_user)
+          render json: { corrected_hours: service.preview }
+        rescue TimeTracking::FinancialCorrectionService::Error => e
+          render json: { corrected_hours: { required: true, status: "needs_review", error: e.message, items: [] } }
+        end
+
+        def connect_corrected_hours
+          service = TimeTracking::FinancialCorrectionService.new(pay_period: @pay_period, actor: current_user)
+          render json: { corrected_hours: service.confirm!(expected_digest: params.require(:expected_digest)) }
+        rescue TimeTracking::FinancialCorrectionService::Error, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/adopt_confirmed_workweek
@@ -1263,6 +1277,7 @@ module Api
 
           json = {
             id: pay_period.id,
+            source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,
             start_date: pay_period.start_date,
             end_date: pay_period.end_date,

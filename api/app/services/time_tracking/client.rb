@@ -442,6 +442,48 @@ module TimeTracking
       payload
     end
 
+    def record_financial_correction_event(batch_id:, payload:, link_request:, binding_id: nil)
+      require_capability!(:payroll_obligation_correction_v1)
+      raise Error, "Verify the connected Source identity before connecting corrected hours" unless @source.active? && @source.remote_identity_pinned?
+      response = request_json(payroll_batch_obligation_events_uri(batch_id), validate_source: false, method: :post, body: payload)
+      validate_financial_correction_receipt!(response, expected: payload, link_request: link_request, binding_id: binding_id)
+      response
+    end
+
+    def validate_financial_correction_receipt!(response, expected:, link_request: expected, binding_id: nil, historical: false)
+      require_capability!(:payroll_obligation_correction_v1)
+      raise Error, "Verify the active Source identity before using corrected payroll ownership" unless @source.active? && @source.remote_identity_pinned?
+      identity = ConnectionIdentity.validate!(source: @source, payload: response)
+      raise Error, "Source omitted its verified correction descriptor" if identity.legacy || !identity.capabilities.include?("payroll_obligation_correction_v1")
+      validate_integration_response!(response) unless historical
+      event = response["entry_processing"]
+      valid = event.is_a?(Hash)
+      scalar = %w[event_id status external_system external_pay_period_id external_payroll_item_id contract_version
+        source_time_entry_id source_user_uuid source_line_key source_kind]
+      valid &&= scalar.all? { |key| event[key] == expected[key] }
+      valid &&= %w[total_hours regular_hours overtime_hours].all? { |key| exact_decimal?(event[key], expected[key]) }
+      valid &&= Time.iso8601(event["occurred_at"].to_s) == Time.iso8601(expected.fetch("occurred_at"))
+      metadata = expected.fetch("metadata", {})
+      raise Error, "Source correction metadata must be an object" unless metadata.is_a?(Hash)
+      metadata = metadata.deep_dup
+      metadata["payment_effective_on"] = expected["payment_effective_on"] if expected.key?("payment_effective_on")
+      if expected["status"] == "payment_cancelled"
+        metadata["original_payment_effective_on_known"] = expected["payment_effective_on"].present?
+        metadata["original_payment_effective_on"] = expected["payment_effective_on"].presence
+      end
+      valid &&= event["metadata"].is_a?(Hash) && event["metadata"] == metadata
+      valid &&= %w[payment_method payment_reference payment_effective_on].all? { |key| event[key].presence == expected[key].presence }
+      binding = response["obligation_correction"]
+      valid &&= binding.is_a?(Hash) && binding["binding_id"].to_s.match?(/\A[1-9]\d*\z/) &&
+        binding["request_digest"] == CanonicalPayload.checksum(link_request) &&
+        binding["command"] == link_request.fetch("obligation_correction")
+      valid &&= binding["binding_id"].to_s == binding_id.to_s if binding_id
+      raise Error, "Source did not acknowledge the exact corrected payroll ownership" unless valid
+      true
+    rescue ConnectionIdentity::Error, ArgumentError, TypeError, KeyError => e
+      raise Error, "Source correction receipt needs review: #{e.message}"
+    end
+
     def record_accounting_correction_event(**attributes)
       payload = record_payroll_entry_processing_event(**attributes)
       identity = ConnectionIdentity.validate!(source: @source, payload: payload)
@@ -548,6 +590,12 @@ module TimeTracking
     def payroll_batch_processing_events_uri(batch_id)
       uri = payroll_batch_uri(batch_id)
       uri.path = "#{uri.path}/processing_events"
+      uri
+    end
+
+    def payroll_batch_obligation_events_uri(batch_id)
+      uri = payroll_batch_uri(batch_id)
+      uri.path = "#{uri.path}/obligation_events"
       uri
     end
 

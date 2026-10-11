@@ -8,6 +8,7 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
   belongs_to :time_tracking_import
   belongs_to :payroll_item
   belongs_to :check_event, optional: true
+  belongs_to :financial_correction_link, class_name: "TimeTrackingFinancialCorrectionLink", optional: true
 
   validates :source_event_key, :event_id, :source_time_entry_id, :source_user_id, :status, :occurred_at, presence: true
   validates :source_event_key, :event_id, uniqueness: true
@@ -44,9 +45,52 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
     end
   end
 
+  def self.record_for_financial_link!(link:, payload:, dependencies: [], check_event: nil)
+    row = link.original_allocation
+    create_or_find_by!(source_event_key: "financial_link:#{link.id}:#{payload.fetch('event_id')}") do |ack|
+      ack.time_tracking_import = row.time_tracking_import
+      ack.payroll_item = link.payroll_item
+      ack.check_event = check_event
+      ack.financial_correction_link = link
+      ack.wire_payload = payload
+      ack.event_id = payload.fetch("event_id")
+      ack.status = payload.fetch("status")
+      ack.occurred_at = Time.iso8601(payload.fetch("occurred_at"))
+      ack.source_time_entry_id = row.source_time_entry_id
+      ack.source_user_id = row.source_user_id
+      ack.source_user_uuid = row.verified_source_user_uuid
+      ack.contract_version = LINE_CONTRACT_VERSION
+      ack.source_line_key = row.line_key
+      ack.source_kind = row.source_kind
+      ack.total_hours = row.total_hours
+      ack.regular_hours = row.regular_hours
+      ack.overtime_hours = row.overtime_hours
+      ack.payment_method = payload["payment_method"]
+      ack.payment_reference = payload["payment_reference"]
+      ack.payment_effective_on = payload["payment_effective_on"]
+      ack.delivery_dependencies = dependencies
+      ack.cancellation_metadata = payload.fetch("metadata", {}) if ack.status == "payment_cancelled"
+    end
+  end
+
+  def self.record_financial_payment!(link:, key:, status:, occurred_at:, payment_method:, payment_reference:, payment_effective_on:, check_event: nil)
+    previous = where(financial_correction_link: link).order(:id).last
+    event_id = "cornerstone:financial:#{key}:#{link.id}"
+    payload = link.payment_payload(event_id: event_id, status: status, occurred_at: occurred_at,
+      payment_method: payment_method, payment_reference: payment_reference, payment_effective_on: payment_effective_on)
+    if status == "payment_cancelled"
+      original = TimeTracking::PaymentCancellationBridge.original_receipt(link.payroll_item, link, payment_reference)
+      raise PayrollPaymentMethodService::Error, "The original corrected check Source receipt is missing" unless original
+      payload["payment_effective_on"] = original.payment_effective_on&.iso8601
+      payload["metadata"] = { "cancelled_payment_event_id" => original.event_id,
+        "cancellation_evidence_reference" => check_event.evidence_reference, "payroll_obligation_retained" => true }
+    end
+    record_for_financial_link!(link: link, payload: payload, dependencies: [ previous&.id, original&.id ].compact.uniq, check_event: check_event)
+  end
+
   def self.record_for_check_event!(check_event:, status:)
     item = check_event.payroll_item
-    item.time_tracking_entry_allocations.includes(:time_tracking_import).map do |row|
+    ordinary = item.time_tracking_entry_allocations.includes(:time_tracking_import).map do |row|
       original = TimeTracking::PaymentCancellationBridge.original_receipt(item, row, check_event.check_number) if status == "payment_cancelled"
       if status == "payment_cancelled" && original.nil?
         raise PayrollPaymentMethodService::Error, "The original check source receipt is missing; cancellation is held"
@@ -65,6 +109,11 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
           "cancellation_evidence_reference" => check_event.evidence_reference,
           "payroll_obligation_retained" => true } : {}
       )
+    end
+    ordinary + TimeTracking::FinancialCorrectionService.links_for(item).map do |link|
+      record_financial_payment!(link: link, key: "check_event:#{check_event.id}", status: status,
+        occurred_at: check_event.created_at, payment_method: "paper_check", payment_reference: check_event.check_number,
+        payment_effective_on: check_event.effective_on, check_event: check_event)
     end
   end
 
@@ -120,6 +169,18 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
     true
   rescue StandardError => e
     update_columns(last_error: e.message, updated_at: Time.current) if persisted?
+    false
+  end
+
+  def retry_financial!
+    with_lock do
+      return false unless financial_correction_link_id && last_error.present? && delivered_at.nil?
+      AirePayrollEntryStatusSyncJob.perform_later(id)
+      update!(enqueued_at: Time.current, last_error: nil)
+    end
+    true
+  rescue StandardError => e
+    record_delivery_failure!(e.message) if persisted?
     false
   end
 

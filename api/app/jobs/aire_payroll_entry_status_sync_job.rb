@@ -17,6 +17,17 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
     end
 
     import = acknowledgement.time_tracking_import
+    if acknowledgement.financial_correction_link
+      link = acknowledgement.financial_correction_link
+      client = TimeTracking::Client.new(import.time_tracking_source)
+      receipt = client.record_financial_correction_event(batch_id: import.external_batch_id,
+        payload: acknowledgement.wire_payload, link_request: link.payload, binding_id: link.accepted_receipt.dig("obligation_correction", "binding_id"))
+      ApplicationRecord.transaction do
+        link.accept!(receipt) if acknowledgement.status == "committed"
+        acknowledgement.mark_delivered!(at: Time.current)
+      end
+      return
+    end
     return unless import.finalized_batch?
 
     payable_line = if acknowledgement.contract_version.present?

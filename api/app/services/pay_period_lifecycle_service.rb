@@ -86,6 +86,7 @@ class PayPeriodLifecycleService
         item.update!(payment_delivery_method: item.effective_payment_delivery_method)
       end
 
+      validate_financial_source_correction!
       pay_period.update!(
         status: "committed",
         committed_at: Time.current,
@@ -183,8 +184,20 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, e.message
   end
 
+  def validate_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).validate_before_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
+  def record_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).record_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
   def record_aire_processing_acknowledgements
-    result = { batch: [], entries: [] }
+    result = { batch: [], entries: record_financial_source_correction!.map(&:id) }
     pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
       next unless import.finalized_batch?
 

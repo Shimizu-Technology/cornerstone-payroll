@@ -16,6 +16,7 @@ class CheckEvent < ApplicationRecord
   validates :check_number, presence: true
   validates :effective_on, presence: true
   validates :evidence_type, inclusion: { in: DELIVERY_EVIDENCE_TYPES }, allow_nil: true
+  validate :financial_source_payment_ready
   validate :effective_date_is_not_in_the_future
   validate :user_belongs_to_payroll_organization
 
@@ -37,6 +38,13 @@ class CheckEvent < ApplicationRecord
   after_create_commit :dispatch_aire_manual_allocations
 
   private
+
+  def financial_source_payment_ready
+    return unless event_type.in?(%w[prepared printed delivered reprinted batch_downloaded]) && payroll_item
+    payroll_item.ensure_financial_source_payment_ready!
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
 
   def default_effective_on
     self.effective_on ||= PayrollBusinessClock.today

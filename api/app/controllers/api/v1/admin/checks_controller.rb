@@ -66,6 +66,7 @@ module Api
             checks: loaded_items.map { |item| check_item_json(item) },
             direct_deposit_items: deposit_items.map do |item|
               { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f,
+                source_payment_blocker: TimeTracking::FinancialCorrectionService.payment_blocker(item),
                 payment_cancellation_sync: PaymentCancellationSyncState.for(item),
                 payment_confirmation: item.direct_deposit_payment_confirmation && {
                   settled_on: item.direct_deposit_payment_confirmation.settled_on.iso8601,
@@ -155,6 +156,7 @@ module Api
             return render json: { error: "No checks to print for this pay period (all items have $0 net pay)" }, status: :unprocessable_entity
           end
 
+          printable_items.reject(&:voided?).each(&:ensure_financial_source_payment_ready!)
           render_company = render_company_for(@pay_period.company)
           combined_pdf =
             if render_company.first_hawaiian_4up_checks?
@@ -242,6 +244,7 @@ module Api
         # Download a single check PDF.
         # -----------------------------------------------------------------------
         def show
+          @payroll_item.ensure_financial_source_payment_ready! unless @payroll_item.voided?
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
           end
@@ -866,6 +869,7 @@ module Api
             net_pay: item.net_pay,
             gross_pay: item.gross_pay,
             check_status: item.check_status,
+            source_payment_blocker: TimeTracking::FinancialCorrectionService.payment_blocker(item),
             reconciliation_status: CheckReconciliationStatus.for(item),
             payment_cancellation_sync: PaymentCancellationSyncState.for(item),
             aire_linked: item.time_tracking_entry_allocations.any?,

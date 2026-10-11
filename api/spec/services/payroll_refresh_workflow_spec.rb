@@ -15,7 +15,8 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
   let(:type) { DeductionType.create!(company: company, name: "Employee Loan", category: "post_tax", sub_category: "loan", active: true) }
   let(:loan) do
     EmployeeLoan.create!(company: company, employee: employee, name: "Employee Loan", deduction_type: type,
-      original_amount: 3259.97, current_balance: 3259.97, payment_amount: 300, first_deduction_date: period.pay_date)
+      original_amount: 3259.97, current_balance: 3259.97, payment_amount: 300,
+        balance_as_of: period.pay_date, first_deduction_date: period.pay_date)
   end
 
   before do

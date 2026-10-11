@@ -344,6 +344,8 @@ Rails.application.routes.draw do
             post :void
             post :create_correction_run
             get  :correction_history
+            get :corrected_hours
+            post :connect_corrected_hours
             # Per-employee corrective paycheck (off-cycle supplemental period)
             post :corrective_paycheck_preview
             post :corrective_paychecks

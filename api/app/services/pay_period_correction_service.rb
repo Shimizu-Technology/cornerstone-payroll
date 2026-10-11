@@ -133,6 +133,11 @@ class PayPeriodCorrectionService
         )
       )
 
+      source_void_ids = TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: locked, void_event: event).map(&:id)
+      if source_void_ids.any?
+        ActiveRecord.after_all_transactions_commit { AirePayrollEntryAcknowledgement.dispatch_pending!(ids: source_void_ids) }
+      end
+
       # If a committed correction run is being voided, release source linkage so
       # operators can create another correction run from the original source.
       if was_correction_run && source_period.present?
@@ -279,10 +284,18 @@ class PayPeriodCorrectionService
     # check was voided. Check voiding is an issuance/audit concern, not a payroll
     # inclusion flag, and operators need the employee row present so they can
     # recalculate or zero it out explicitly in the correction run.
-    source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
+    # A later correction retains the last corrected inputs, not the first
+    # superseded payroll's obsolete inputs. The native audit chain identifies
+    # the actual generation even when its void event belongs to the root.
+    previous = PayPeriodCorrectionEvent.where(pay_period: source, action_type: "correction_run_committed")
+      .includes(:resulting_pay_period).order(id: :desc).filter_map(&:resulting_pay_period)
+      .find { |period| period.voided? && period.company_id == source.company_id }
+    copy_source = previous || source
+    copy_source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
       copied = target.payroll_items.create!(
         company_id:               target.company_id,
         employee_id:              source_item.employee_id,
+        financial_correction_origin_item: source_item,
         employment_type:          source_item.employment_type,
         pay_rate:                 source_item.pay_rate,
         scheduled_hours:          source_item.scheduled_hours,
@@ -321,7 +334,7 @@ class PayPeriodCorrectionService
         copied.payroll_item_field_entries.create!(entry.attributes.except("id", "payroll_item_id", "created_at", "updated_at"))
       end
     end
-    source.pay_period_excluded_employees.each do |excluded|
+    copy_source.pay_period_excluded_employees.each do |excluded|
       target.pay_period_excluded_employees.create!(excluded.attributes.except("id", "pay_period_id", "created_at", "updated_at"))
     end
   end

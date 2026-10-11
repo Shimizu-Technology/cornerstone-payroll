@@ -69,6 +69,8 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/pay_periods#corrected_hours" => :payroll_operations,
+    "api/v1/admin/pay_periods#connect_corrected_hours" => :payroll_operations,
     "api/v1/admin/annual_retirement_limits#create" => :manage_platform,
     "api/v1/admin/annual_retirement_limits#update" => :manage_platform,
     "api/v1/admin/employee_retirement_year_inputs#create" => :manage_client_configuration,
