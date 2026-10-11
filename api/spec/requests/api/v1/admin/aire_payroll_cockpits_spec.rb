@@ -30,6 +30,83 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
   context "manual payment allocations" do
     let(:pay_period) { create(:pay_period, :committed, company: company) }
 
+    context "when the time source cannot be reached" do
+      let(:employee) { create(:employee, company: company) }
+      let(:item) { create(:payroll_item, :with_check, company: company, pay_period: pay_period, employee: employee, hours_worked: 4) }
+      let!(:allocation) do
+        create(:check_event, payroll_item: item, user: admin, event_type: "delivered", effective_on: PayrollBusinessClock.today)
+        TimeTrackingManualAllocation.create!(company: company, time_tracking_source: source, pay_period: pay_period,
+          payroll_item: item, employee: employee, created_by: admin, source_user_uuid: SecureRandom.uuid,
+          source_time_entry_id: "41", source_time_entry_version: 1, original_work_date: pay_period.start_date,
+          regular_hours: 4, overtime_hours: 0, status: "committed", reconciliation_note: "Exact saved source work for this issued check",
+          payment_issue_intent: { "command_id" => "PRIVATE-ISSUE-INTENT", "source_contract" => "PRIVATE-SOURCE-CONTRACT" })
+      end
+
+      before do
+        allow(client).to receive(:payroll_cockpit_manual_review).and_raise(TimeTracking::Client::Error, "Time source unavailable")
+      end
+
+      it "retains the scoped saved link and pending payment after reload without claiming live hours or exposing the intent" do
+        original = [ item.reload.attributes, allocation.reload.attributes ]
+        get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_review"
+
+        expect(response).to have_http_status(:ok)
+        payload = response.parsed_body
+        expect(payload).to include("source_available" => false, "employees" => [], "exclusions" => [], "summary" => nil, "issues" => nil)
+        expect(payload.fetch("command_access")).to eq("can_manage_manual_allocations" => false)
+        expect(payload.fetch("cornerstone_manual_allocations")).to contain_exactly(include(
+          "id" => allocation.id, "source_time_entry_id" => "41", "regular_hours" => 4.0,
+          "payment_issue_pending" => true, "payroll_item_check_status" => "delivered"))
+        expect(response.body).not_to include("PRIVATE-ISSUE-INTENT", "PRIVATE-SOURCE-CONTRACT")
+        expect([ item.reload.attributes, allocation.reload.attributes ]).to eq(original)
+        expect(response.headers["Cache-Control"]).to include("no-store")
+      end
+
+      it "does not include saved links from another source" do
+        other_source = create(:time_tracking_source, company: company, active: false)
+        other = allocation.dup
+        other.assign_attributes(time_tracking_source: other_source, commit_command_id: SecureRandom.uuid,
+          issue_command_id: SecureRandom.uuid, void_command_id: SecureRandom.uuid)
+        other.save!
+
+        get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_review"
+
+        expect(response.parsed_body.fetch("cornerstone_manual_allocations").pluck("id")).to eq([ allocation.id ])
+      end
+
+      it "does not expose another company's saved links through the fallback" do
+        other_period = create(:pay_period, :committed, company: create(:company))
+
+        get "/api/v1/admin/pay_periods/#{other_period.id}/aire_payroll_cockpit/manual_review"
+
+        expect(response).to have_http_status(:not_found)
+        expect(response.body).not_to include(employee.full_name, "cornerstone_manual_allocations")
+      end
+
+      it "uses the same read-only saved review for a temporary source HTTP failure" do
+        allow(client).to receive(:payroll_cockpit_manual_review).and_raise(
+          TimeTracking::Client::Error.new("Source temporarily unavailable", response_status: 503))
+
+        get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_review"
+
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to include("source_available" => false, "summary" => nil)
+        expect(response.parsed_body.fetch("command_access")).to eq("can_manage_manual_allocations" => false)
+      end
+
+      [ 401, 403, 409, 422 ].each do |status|
+        it "preserves the source denial instead of replacing HTTP #{status} with an offline review" do
+          allow(client).to receive(:payroll_cockpit_manual_review).and_raise(
+            TimeTracking::Client::Error.new("Source denied this review", response_status: status))
+
+          get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/manual_review"
+
+          expect(response).not_to have_http_status(:ok)
+          expect(response.parsed_body).not_to have_key("cornerstone_manual_allocations")
+        end
+      end
+    end
+
     it "audits the actor, allocation command and payment-link explanation" do
       employee = create(:employee, company: company)
       item = create(:payroll_item, :with_check, company: company, pay_period: pay_period, employee: employee, hours_worked: 4)
