@@ -55,6 +55,10 @@ module Api
         end
 
         def pdf
+          ids = @run.manifest.select { |entry| entry["source_type"] == "payroll_item" }.map { |entry| entry["source_id"] }
+          PayrollItem.where(id: ids, company_id: current_company_id).each do |item|
+            item.ensure_financial_source_payment_ready! unless item.voided?
+          end
           if @run.prepared?
             state, issue = CheckPrintRunHistoryVerifier.new(runs: [ @run ]).call.fetch(@run.id)
             return render json: { error: issue }, status: :conflict if state == "outdated"
@@ -72,6 +76,8 @@ module Api
                     filename: @run.filename,
                     type: "application/pdf",
                     disposition: params[:disposition] == "attachment" ? "attachment" : "inline"
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :conflict
         rescue CheckPrintRunSelectionVerifier::StaleSelectionError => e
           render json: { error: e.message }, status: :conflict
         rescue StandardError => e

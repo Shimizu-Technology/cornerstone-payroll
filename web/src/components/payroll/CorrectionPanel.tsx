@@ -33,6 +33,7 @@ import {
 import { useNavigate } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { FinancialCorrectionSourcePanel } from './FinancialCorrectionSourcePanel';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi, type PayrollCorrectionPreflight } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
@@ -349,6 +350,7 @@ export function CorrectionPanel({
 
   return (
     <div ref={correctionPanelRef} className="space-y-4" data-correction-panel tabIndex={-1}>
+      {payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' && payPeriod.source_correction_required && <FinancialCorrectionSourcePanel payPeriod={payPeriod} onConnectionConfirmed={() => onPayPeriodChange(payPeriod)} />}
 
       {/* ---- Voided period status banner ---- */}
       {isVoided && (

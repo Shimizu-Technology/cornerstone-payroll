@@ -58,7 +58,7 @@ class CheckPrintQueueService
   end
 
   def queue_item_for_payroll_item(item)
-    eligible = !item.voided? && item.net_pay.to_d.positive?
+    eligible = !item.voided? && item.net_pay.to_d.positive? && TimeTracking::FinancialCorrectionService.payment_blocker(item).nil?
     {
       key: "payroll_item:#{item.id}",
       source_type: "payroll_item",
@@ -108,7 +108,7 @@ class CheckPrintQueueService
     return "Voided checks cannot be printed" if item.voided?
     return "Checks with no net pay cannot be printed" unless item.net_pay.to_d.positive?
 
-    nil
+    TimeTracking::FinancialCorrectionService.payment_blocker(item)
   end
 
   def check_number_sort_key(check_number, fallback)

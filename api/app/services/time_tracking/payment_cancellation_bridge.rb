@@ -39,7 +39,7 @@ module TimeTracking
       check_activity = PayrollPaymentMethodEligibility.new(item).check_has_activity? if check_activity.nil?
       return unless check_activity
 
-      direct = item.time_tracking_entry_allocations.to_a
+      direct = item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)
       manual = item.time_tracking_manual_allocations.where.not(status: "voided").to_a
       sources = (direct + manual).map(&:time_tracking_source).uniq(&:id)
       return if sources.empty?
@@ -74,7 +74,7 @@ module TimeTracking
     end
 
     def self.validate_original_receipts!(item)
-      item.time_tracking_entry_allocations.each do |row|
+      (item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)).each do |row|
         unless valid_original_receipt?(item, row)
           raise PayrollPaymentMethodService::Error, "The original check's exact source receipt is missing. Review the connected payment before cancelling it."
         end

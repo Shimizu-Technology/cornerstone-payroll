@@ -93,7 +93,7 @@ function CancellationSyncNotice({ state, reviewHref }: { state?: PaymentCancella
 function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
   if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
-  return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
+  return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined} onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod, timeTrackingReviewHref }: ChecksPanelProps) {
@@ -711,7 +711,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       </Button>
                     )}
                     {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
-                      <Button size="sm" className="max-sm:min-h-[44px]" onClick={() => setDeliveryTarget(item)}>
+                      <Button size="sm" className="max-sm:min-h-[44px]" onClick={() => setDeliveryTarget(item)} disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined}>
                         Record Issued
                       </Button>
                     )}
@@ -837,6 +837,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         <Button
                           size="sm"
                           onClick={() => setDeliveryTarget(item)}
+                          disabled={Boolean(item.source_payment_blocker)}
+                          title={item.source_payment_blocker || undefined}
                           className="text-xs px-2 py-2"
                         >
                           Record Issued

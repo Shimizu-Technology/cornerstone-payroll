@@ -1313,6 +1313,15 @@ export interface RunPayrollFieldInputEntry {
   replace_request?: boolean;
 }
 
+export interface CorrectedHoursPreview {
+  required: boolean;
+  status: 'not_required' | 'needs_connection' | 'pending' | 'confirmed' | 'failed' | 'needs_review';
+  expected_digest?: string;
+  error?: string;
+  items: Array<{ payroll_item_id: number; employee_name: string; original_pay_period_id: number; original_payroll_item_id: number;
+    corrected_pay_period_id: number; work_start: string; work_end: string; regular_hours: number; overtime_hours: number }>;
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }, companyId?: number): Promise<PayPeriodListResponse> =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params, { companyId }),
@@ -1459,6 +1468,10 @@ export const payPeriodsApi = {
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   refreshSetup: (id: number, data: { includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/refresh_setup`, data),
+  correctedHours: (id: number) =>
+    api.get<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/corrected_hours`),
+  connectCorrectedHours: (id: number, expected_digest: string) =>
+    api.post<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/connect_corrected_hours`, { expected_digest }),
   correctionPreflight: (id: number) =>
     api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight }>(`/admin/pay_periods/${id}/correction_preflight`),
   reopenUnpaid: (id: number, data: { reason: string; unpaid_acknowledgement: boolean; includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>

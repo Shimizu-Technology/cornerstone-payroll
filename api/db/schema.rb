@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_11_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -111,6 +111,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
     t.check_constraint "contract_version IS NULL AND source_line_key IS NULL AND source_kind IS NULL AND total_hours IS NULL AND regular_hours IS NULL AND overtime_hours IS NULL OR contract_version::text = '2.0'::text AND source_line_key IS NOT NULL AND (source_kind::text = ANY (ARRAY['current'::character varying::text, 'carryover'::character varying::text, 'correction'::character varying::text])) AND total_hours IS NOT NULL AND regular_hours IS NOT NULL AND overtime_hours IS NOT NULL AND total_hours = (regular_hours + overtime_hours)", name: "aire_entry_ack_line_contract_shape"
     t.check_constraint "status::text <> 'payment_cancelled'::text OR contract_version::text = '2.0'::text AND source_user_uuid IS NOT NULL AND payment_method IS NOT NULL AND payment_method::text = 'paper_check'::text AND payment_reference IS NOT NULL AND COALESCE(cancellation_metadata ->> 'cancelled_payment_event_id'::text, ''::text) <> ''::text AND COALESCE(cancellation_metadata ->> 'cancellation_evidence_reference'::text, ''::text) <> ''::text AND COALESCE(cancellation_metadata -> 'payroll_obligation_retained'::text, 'false'::jsonb) = 'true'::jsonb", name: "aire_entry_payment_cancellation_shape"
     t.check_constraint "status::text = ANY (ARRAY['imported'::character varying, 'committed'::character varying, 'payment_prepared'::character varying, 'payment_issued'::character varying, 'payment_failed'::character varying, 'payment_voided'::character varying, 'payment_cancelled'::character varying]::text[])", name: "aire_payroll_entry_ack_status_check"
+    t.bigint "financial_correction_link_id"
+    t.jsonb "wire_payload", default: {}, null: false
+    t.index [ "financial_correction_link_id" ], name: "idx_on_financial_correction_link_id_0706d8c7fe"
   end
 
   create_table "aire_payroll_events", force: :cascade do |t|
@@ -2920,6 +2923,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
     t.check_constraint "payment_delivery_method::text IS DISTINCT FROM 'direct_deposit'::text OR check_number IS NULL", name: "payroll_items_direct_deposit_no_check_number"
     t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying::text, 'import'::character varying::text, 'manual'::character varying::text, 'correction_reference'::character varying::text, 'production_backfill'::character varying::text]))", name: "payroll_items_timekeeping_source_check"
     t.check_constraint "jsonb_typeof(named_loan_payments) = 'object'::text", name: "payroll_items_named_loan_payments_object"
+    t.bigint "financial_correction_origin_item_id"
+    t.index [ "financial_correction_origin_item_id" ], name: "index_payroll_items_on_financial_correction_origin_item_id"
   end
 
   create_table "payroll_liability_check_allocations", force: :cascade do |t|
@@ -3518,6 +3523,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
     t.index [ "time_tracking_source_id" ], name: "idx_on_time_tracking_source_id_73a6f85c95"
     t.check_constraint "source_kind::text = ANY (ARRAY['current'::character varying::text, 'carryover'::character varying::text, 'correction'::character varying::text])", name: "time_tracking_entry_allocations_source_kind_check"
     t.check_constraint "total_hours = (regular_hours + overtime_hours)", name: "time_tracking_entry_allocations_hours_reconcile"
+  end
+
+  create_table "time_tracking_financial_correction_links", force: :cascade do |t|
+    t.datetime "accepted_at"
+    t.jsonb "accepted_receipt", default: {}, null: false
+    t.uuid "command_id", null: false
+    t.datetime "created_at", null: false
+    t.uuid "event_id", null: false
+    t.bigint "original_allocation_id", null: false
+    t.jsonb "payload", null: false
+    t.bigint "payroll_item_id", null: false
+    t.bigint "predecessor_payroll_item_id", null: false
+    t.string "request_digest", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "command_id" ], name: "index_time_tracking_financial_correction_links_on_command_id", unique: true
+    t.index [ "event_id" ], name: "index_time_tracking_financial_correction_links_on_event_id", unique: true
+    t.index [ "original_allocation_id", "payroll_item_id" ], name: "idx_financial_source_successor_item", unique: true
+    t.index [ "original_allocation_id", "predecessor_payroll_item_id" ], name: "idx_financial_source_successor_generation", unique: true
+    t.index [ "original_allocation_id" ], name: "idx_on_original_allocation_id_1f837b81e5"
+    t.index [ "payroll_item_id" ], name: "idx_on_payroll_item_id_ee01f8f68a"
+    t.index [ "predecessor_payroll_item_id" ], name: "idx_on_predecessor_payroll_item_id_704d8c377d"
+    t.check_constraint "accepted_receipt = '{}'::jsonb AND accepted_at IS NULL OR jsonb_typeof(accepted_receipt) = 'object'::text AND accepted_receipt <> '{}'::jsonb AND accepted_at IS NOT NULL", name: "financial_source_acceptance_pair"
   end
 
   create_table "time_tracking_imports", force: :cascade do |t|
@@ -4316,6 +4343,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
+  add_foreign_key "aire_payroll_entry_acknowledgements", "time_tracking_financial_correction_links", column: "financial_correction_link_id", on_delete: :restrict
+  add_foreign_key "payroll_items", "payroll_items", column: "financial_correction_origin_item_id", on_delete: :restrict
+  add_foreign_key "time_tracking_financial_correction_links", "payroll_items", column: "predecessor_payroll_item_id", on_delete: :restrict
+  add_foreign_key "time_tracking_financial_correction_links", "payroll_items", on_delete: :restrict
+  add_foreign_key "time_tracking_financial_correction_links", "time_tracking_entry_allocations", column: "original_allocation_id", on_delete: :restrict
+
   execute <<~SQL
     CREATE OR REPLACE FUNCTION prevent_employee_configuration_review_resolution_mutation()
     RETURNS trigger AS $$
@@ -4682,5 +4715,59 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_10_030000) do
     CREATE TRIGGER immutable_time_tracking_correction_receipts
     BEFORE UPDATE OR DELETE ON time_tracking_correction_receipts
     FOR EACH ROW EXECUTE FUNCTION protect_time_tracking_correction_receipt_evidence();
+  SQL
+  execute <<~SQL
+    CREATE FUNCTION protect_financial_correction_source_evidence() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
+        RAISE EXCEPTION 'Financial correction Source evidence is append-only';
+      END IF;
+      IF (to_jsonb(NEW) - ARRAY['accepted_receipt','accepted_at','updated_at']) IS DISTINCT FROM
+         (to_jsonb(OLD) - ARRAY['accepted_receipt','accepted_at','updated_at']) OR
+         (OLD.accepted_receipt <> '{}'::jsonb AND (NEW.accepted_receipt IS DISTINCT FROM OLD.accepted_receipt OR NEW.accepted_at IS DISTINCT FROM OLD.accepted_at)) THEN
+        RAISE EXCEPTION 'Financial correction Source evidence is immutable';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER immutable_financial_correction_source_links BEFORE UPDATE OR DELETE ON time_tracking_financial_correction_links
+      FOR EACH ROW EXECUTE FUNCTION protect_financial_correction_source_evidence();
+    CREATE TRIGGER immutable_financial_correction_source_links_truncate BEFORE TRUNCATE ON time_tracking_financial_correction_links
+      FOR EACH STATEMENT EXECUTE FUNCTION protect_financial_correction_source_evidence();
+    CREATE FUNCTION protect_financial_correction_origin_and_outbox() RETURNS trigger AS $$
+    BEGIN
+      IF TG_OP = 'TRUNCATE' THEN
+        IF EXISTS (SELECT 1 FROM aire_payroll_entry_acknowledgements WHERE financial_correction_link_id IS NOT NULL) THEN
+          RAISE EXCEPTION 'Financial correction outbox is append-only';
+        END IF;
+        RETURN NULL;
+      END IF;
+      IF TG_OP = 'DELETE' THEN
+        IF OLD.financial_correction_link_id IS NOT NULL THEN
+          RAISE EXCEPTION 'Financial correction outbox is append-only';
+        END IF;
+        RETURN OLD;
+      END IF;
+      IF TG_TABLE_NAME = 'payroll_items' THEN
+        IF OLD.financial_correction_origin_item_id IS NOT NULL AND NEW.financial_correction_origin_item_id IS DISTINCT FROM OLD.financial_correction_origin_item_id THEN
+          RAISE EXCEPTION 'Financial correction origin is immutable';
+        END IF;
+      ELSE
+        IF NEW.financial_correction_link_id IS DISTINCT FROM OLD.financial_correction_link_id OR NEW.wire_payload IS DISTINCT FROM OLD.wire_payload OR
+           (OLD.financial_correction_link_id IS NOT NULL AND
+            (to_jsonb(NEW) - ARRAY['delivered_at','enqueued_at','last_error','updated_at']) IS DISTINCT FROM
+            (to_jsonb(OLD) - ARRAY['delivered_at','enqueued_at','last_error','updated_at'])) THEN
+          RAISE EXCEPTION 'Financial correction outbox payload is immutable';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    CREATE TRIGGER immutable_financial_correction_origin BEFORE UPDATE ON payroll_items
+      FOR EACH ROW EXECUTE FUNCTION protect_financial_correction_origin_and_outbox();
+    CREATE TRIGGER immutable_financial_correction_outbox BEFORE UPDATE OR DELETE ON aire_payroll_entry_acknowledgements
+      FOR EACH ROW EXECUTE FUNCTION protect_financial_correction_origin_and_outbox();
+    CREATE TRIGGER immutable_financial_correction_outbox_truncate BEFORE TRUNCATE ON aire_payroll_entry_acknowledgements
+      FOR EACH STATEMENT EXECUTE FUNCTION protect_financial_correction_origin_and_outbox();
   SQL
 end

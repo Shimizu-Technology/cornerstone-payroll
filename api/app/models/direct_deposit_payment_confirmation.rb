@@ -23,6 +23,7 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
   def valid_payroll_item
     return if payroll_item.blank?
 
+    payroll_item.ensure_financial_source_payment_ready!
     errors.add(:payroll_item, "must be committed direct-deposit payroll") unless
       payroll_item.pay_period.committed? && !payroll_item.pay_period.voided? &&
       !payroll_item.voided? && payroll_item.effective_payment_delivery_method == "direct_deposit" &&
@@ -61,6 +62,10 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
           payment_effective_on: settled_on
         ).id
       end
+    @aire_entry_acknowledgement_ids.concat(TimeTracking::FinancialCorrectionService.links_for(payroll_item).map do |link|
+      AirePayrollEntryAcknowledgement.record_financial_payment!(link: link, key: "bank_confirmation:#{id}", status: "payment_issued",
+        occurred_at: created_at, payment_method: "direct_deposit", payment_reference: bank_reference, payment_effective_on: settled_on).id
+    end)
   end
 
   def dispatch_aire_entry_lifecycle

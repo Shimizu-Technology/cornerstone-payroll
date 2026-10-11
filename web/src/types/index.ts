@@ -1274,6 +1274,7 @@ export interface PayPeriod {
   tax_sync_last_error?: string | null;
   tax_synced_at?: string | null;
   // CPR-71: correction lifecycle fields
+  source_correction_required?: boolean;
   correction_status?: CorrectionStatus | null;
   voided_at?: string | null;
   voided_by_id?: number | null;
@@ -1877,6 +1878,7 @@ export interface PaymentCancellationSync {
 }
 
 export interface CheckItem {
+  source_payment_blocker?: string | null;
   payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   pay_period_id: number;
@@ -1936,6 +1938,7 @@ export interface CheckListMeta {
 }
 
 export interface DirectDepositItem {
+  source_payment_blocker?: string | null;
   payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number; employee_id: number; employee_name: string; net_pay: number;
   payment_confirmation?: { settled_on: string; bank_reference: string; confirmed_at: string } | null;

@@ -14,6 +14,9 @@ class PayrollItem < ApplicationRecord
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_one :non_employee_check_supersession, dependent: :restrict_with_error
+  belongs_to :financial_correction_origin_item, class_name: "PayrollItem", optional: true
+  has_many :time_tracking_financial_correction_links, dependent: :restrict_with_error
+
   has_one :direct_deposit_payment_confirmation, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
@@ -117,6 +120,7 @@ class PayrollItem < ApplicationRecord
   # A verified package prepares a check without asserting that paper was printed.
   # Keep updated_at stable: the package manifest snapshots the rendering inputs.
   def mark_package_prepared!(user:, ip_address: nil)
+    ensure_financial_source_payment_ready!
     return if check_prepared_at.present? && check_prepared_source_updated_at == updated_at
 
     update_columns(check_prepared_at: Time.current, check_prepared_source_updated_at: updated_at)
@@ -132,11 +136,13 @@ class PayrollItem < ApplicationRecord
   # @param ip_address [String, nil]
   # @return [Hash] { already_printed: Boolean, event: CheckEvent }
   def mark_printed!(user:, ip_address: nil)
+    ensure_financial_source_payment_ready!
     raise ArgumentError, "Cannot mark a voided check as printed" if voided?
     raise ArgumentError, "No check number assigned" if check_number.blank?
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE — prevents concurrent print-count undercount
+      ensure_financial_source_payment_ready!
       raise ArgumentError, "Cannot mark a voided check as printed" if voided? # re-check under lock
       raise ArgumentError, "No check number assigned" if check_number.blank? # re-check under lock
 
@@ -158,6 +164,7 @@ class PayrollItem < ApplicationRecord
   end
 
   def mark_delivered!(user:, delivered_on:, delivery_method:, attestation:, evidence_reference: nil, note: nil, ip_address: nil)
+    ensure_financial_source_payment_ready!
     raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
     raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
     raise ArgumentError, "Check actions are only available for committed pay periods" unless pay_period.committed?
@@ -171,6 +178,7 @@ class PayrollItem < ApplicationRecord
 
     ApplicationRecord.transaction do
       lock!
+      ensure_financial_source_payment_ready!
       raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
       raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
 
@@ -201,6 +209,12 @@ class PayrollItem < ApplicationRecord
   # @return [CheckEvent]
   def duplicate_check_linked?
     NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
+  end
+
+  def ensure_financial_source_payment_ready!
+    TimeTracking::FinancialCorrectionService.require_payment_ready!(self)
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise ArgumentError, e.message
   end
 
   def source_accounting_correction_linked?
