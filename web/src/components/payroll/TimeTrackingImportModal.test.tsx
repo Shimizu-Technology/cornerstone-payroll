@@ -528,6 +528,26 @@ describe('accounting posting and source delivery are separate', () => {
     correction_lines: [line], correction_dispositions: [disposition(status, dispositionId)],
     processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } });
 
+  it('discards an unconfirmed correction when returning and retrieving a new frozen preview', async () => {
+    const user = userEvent.setup();
+    const unposted = { ...importData('pending'), correction_dispositions: [], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } };
+    apiMocks.preview.mockResolvedValueOnce({ import: unposted }).mockResolvedValueOnce({ import: { ...unposted, id: 100 } });
+    apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, source_change: line, preview_token: 'old-proof',
+      employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-10-31',
+      original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 },
+      deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} autoPreview />);
+    await user.click(await screen.findByRole('button', { name: 'Review correction' }));
+    await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Old unconfirmed review');
+    await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await user.click(screen.getByRole('button', { name: /Retrieve Finalized Batch|Fetch Hours/ }));
+    await screen.findByRole('button', { name: 'Review correction' });
+    expect(screen.queryByRole('button', { name: 'Confirm accounting correction' })).toBeNull();
+    expect(screen.queryByDisplayValue('Old unconfirmed review')).toBeNull();
+    expect(apiMocks.correctionConfirm).not.toHaveBeenCalled();
+  });
+
   it('shows proof drift as needs review rather than resolving an old confirmed receipt', async () => {
     apiMocks.preview.mockResolvedValue({ import: { ...importData('confirmed'), correction_dispositions: [{ ...disposition('confirmed'),
       verification_status: 'needs_review', verification_error: 'Source installation changed', source_receipt: { ...receipt('confirmed'), can_retry: false } }] } });

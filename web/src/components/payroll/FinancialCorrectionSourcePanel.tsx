@@ -6,7 +6,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import type { PayPeriod } from '@/types';
 
 /** Records ownership of existing corrected work; never calculates or pays it. */
-export function FinancialCorrectionSourcePanel({ payPeriod, onConnectionConfirmed }: { payPeriod: PayPeriod; onConnectionConfirmed?: () => void }) {
+export function FinancialCorrectionSourcePanel({ payPeriod, onConnectionConfirmed }: { payPeriod: PayPeriod; onConnectionConfirmed?: () => void | Promise<void> }) {
   const { activeCompanyId } = useCompany();
   const contextMatches = activeCompanyId === payPeriod.company_id;
   const [data, setData] = useState<CorrectedHoursPreview | null>(null);
@@ -37,7 +37,7 @@ export function FinancialCorrectionSourcePanel({ payPeriod, onConnectionConfirme
       const response = await payPeriodsApi.correctedHours(payPeriod.id);
       if (current === generation.current) {
         setData(response.corrected_hours);
-        if (response.corrected_hours.status === 'confirmed') onConnectionConfirmed?.();
+        if (response.corrected_hours.status === 'confirmed') await onConnectionConfirmed?.();
       }
     } catch (reason) {
       if (current === generation.current) setError(reason instanceof Error ? reason.message : 'Refresh failed.');
@@ -53,7 +53,7 @@ export function FinancialCorrectionSourcePanel({ payPeriod, onConnectionConfirme
       const response = await payPeriodsApi.connectCorrectedHours(payPeriod.id, data.expected_digest);
       if (current === generation.current) {
         setData(response.corrected_hours); setOpen(false);
-        if (response.corrected_hours.status === 'confirmed') onConnectionConfirmed?.();
+        if (response.corrected_hours.status === 'confirmed') await onConnectionConfirmed?.();
       }
     } catch (reason) {
       if (current === generation.current) setError(reason instanceof Error ? reason.message : 'The corrected hours could not be connected.');

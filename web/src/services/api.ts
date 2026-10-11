@@ -1475,9 +1475,9 @@ export const payPeriodsApi = {
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   refreshSetup: (id: number, data: { includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/refresh_setup`, data),
-  correctedHours: (id: number) =>
+  correctedHours: (id: number): Promise<{ corrected_hours: CorrectedHoursPreview }> =>
     api.get<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/corrected_hours`),
-  connectCorrectedHours: (id: number, expected_digest: string) =>
+  connectCorrectedHours: (id: number, expected_digest: string): Promise<{ corrected_hours: CorrectedHoursPreview }> =>
     api.post<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/connect_corrected_hours`, { expected_digest }),
   correctionPreflight: (id: number) =>
     api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight }>(`/admin/pay_periods/${id}/correction_preflight`),

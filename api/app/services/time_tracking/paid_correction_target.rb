@@ -4,6 +4,12 @@ module TimeTracking
   # Frozen allocations stay with their import owner. Financial links establish
   # the separately proven payment owner of the same complete frozen work union.
   class PaidCorrectionTarget
+    EVIDENCE_VERSION = 2
+    ITEM_OPERATIONAL_FIELDS = %w[updated_at check_date ytd_gross ytd_net ytd_withholding_tax
+      ytd_social_security_tax ytd_medicare_tax ytd_retirement ytd_roth_retirement].freeze
+    PERIOD_OPERATIONAL_FIELDS = %w[updated_at pay_date tax_sync_status tax_sync_attempts
+      tax_sync_idempotency_key tax_sync_last_error tax_synced_at].freeze
+
     def initialize(allocation:, source:, line:)
       @allocation = allocation
       @source = source
@@ -35,9 +41,11 @@ module TimeTracking
         raise ArgumentError, "Current paid target has changed work, rate or payroll ownership"
       end
       payment = OriginalPaymentProof.call(target, financial_target: chain.any? ? self : nil)
-      evidence = { "version" => 1, "origin_payroll_item_id" => origin.id, "target_payroll_item_id" => target.id,
+      evidence = { "version" => EVIDENCE_VERSION, "origin_payroll_item_id" => origin.id, "target_payroll_item_id" => target.id,
         "origin_work" => proof.fetch(:evidence).deep_stringify_keys,
-        "target" => target.attributes, "target_period" => target.pay_period.attributes,
+        "target" => target.attributes.except(*ITEM_OPERATIONAL_FIELDS),
+        "target_period" => target.pay_period.attributes.except(*PERIOD_OPERATIONAL_FIELDS),
+        "target_tax_year" => target.pay_period.pay_date.year,
         "financial_links" => chains.flatten.uniq(&:id).sort_by(&:id).map(&:attributes),
         "financial_proofs" => financial_proofs.map(&:deep_stringify_keys),
         "current_payment" => payment.deep_stringify_keys }
@@ -50,7 +58,8 @@ module TimeTracking
     # A posted disposition retains its issuance proof when ordinary clearing
     # history appends. Preview/confirmation still digest the complete live proof.
     def matches_saved_evidence?(stored)
-      return false unless stored.is_a?(Hash)
+      stored = stable_saved_evidence(stored)
+      return false unless stored
       current = resolve.fetch(:evidence)
       saved_payment = stored["current_payment"]
       payment = current["current_payment"]
@@ -119,6 +128,32 @@ module TimeTracking
     end
 
     private
+
+    # Legacy v1 is projected in memory only. Require its complete original
+    # column coverage before excluding the documented operational values.
+    def stable_saved_evidence(stored)
+      return nil unless stored.is_a?(Hash) && stored["target"].is_a?(Hash) && stored["target_period"].is_a?(Hash)
+      return nil unless stored["version"].is_a?(Integer)
+      case stored["version"]
+      when EVIDENCE_VERSION
+        return nil unless stored["target_tax_year"].is_a?(Integer)
+        return nil unless stored["target"].keys.sort == (PayrollItem.column_names - ITEM_OPERATIONAL_FIELDS).sort &&
+          stored["target_period"].keys.sort == (PayPeriod.column_names - PERIOD_OPERATIONAL_FIELDS).sort
+        stored.deep_dup
+      when 1
+        return nil if stored.key?("target_tax_year")
+        return nil unless stored["target"].keys.sort == PayrollItem.column_names.sort &&
+          stored["target_period"].keys.sort == PayPeriod.column_names.sort
+        normalized = stored.deep_dup
+        normalized["version"] = EVIDENCE_VERSION
+        normalized["target_tax_year"] = Date.iso8601(stored["target_period"].fetch("pay_date")).year
+        normalized["target"] = normalized["target"].except(*ITEM_OPERATIONAL_FIELDS)
+        normalized["target_period"] = normalized["target_period"].except(*PERIOD_OPERATIONAL_FIELDS)
+        normalized
+      end
+    rescue Date::Error, TypeError, KeyError
+      nil
+    end
 
     def chain_for(allocation, links)
       owner = allocation.payroll_item_id

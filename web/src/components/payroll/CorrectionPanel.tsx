@@ -24,6 +24,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -33,6 +34,7 @@ import {
 import { useNavigate } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { useCompany } from '@/contexts/CompanyContext';
 import { FinancialCorrectionSourcePanel } from './FinancialCorrectionSourcePanel';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi, type PayrollCorrectionPreflight } from '@/services/api';
@@ -125,6 +127,18 @@ export function CorrectionPanel({
   );
 
   const [preflight, setPreflight] = useState<PayrollCorrectionPreflight | null>(null);
+  const { activeCompanyId } = useCompany();
+  const sourceRefreshGeneration = useRef(0);
+  useLayoutEffect(() => {
+    sourceRefreshGeneration.current += 1;
+    return () => { sourceRefreshGeneration.current += 1; };
+  }, [payPeriod.id, payPeriod.company_id, activeCompanyId]);
+  const refreshConfirmedPeriod = async (): Promise<void> => {
+    const generation = sourceRefreshGeneration.current;
+    const response = await payPeriodsApi.get(payPeriod.id, payPeriod.company_id);
+    if (sourceRefreshGeneration.current === generation) onPayPeriodChange(response.pay_period);
+  };
+
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [unpaidAcknowledgement, setUnpaidAcknowledgement] = useState(false);
   const [showReopenModal, setShowReopenModal] = useState(false);
@@ -350,7 +364,7 @@ export function CorrectionPanel({
 
   return (
     <div ref={correctionPanelRef} className="space-y-4" data-correction-panel tabIndex={-1}>
-      {payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' && payPeriod.source_correction_required && <FinancialCorrectionSourcePanel payPeriod={payPeriod} onConnectionConfirmed={() => onPayPeriodChange(payPeriod)} />}
+      {payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' && payPeriod.source_correction_required && <FinancialCorrectionSourcePanel payPeriod={payPeriod} onConnectionConfirmed={refreshConfirmedPeriod} />}
 
       {/* ---- Voided period status banner ---- */}
       {isVoided && (

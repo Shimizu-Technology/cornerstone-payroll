@@ -615,4 +615,18 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       expect(JSON.parse(response.body)["error"]).to match(/committed/i)
     end
   end
+
+  it "returns a recoverable validation response when reopening encounters a liability posting error" do
+    setup_ytd
+    retained = [ PayPeriod, PayrollItem, EmployeeYtdTotal, CompanyYtdTotal, PayPeriodCorrectionEvent, AuditLog ].to_h do |model|
+      [ model, model.order(:id).map(&:attributes) ]
+    end
+    expect(PayrollLiabilityPostingService).to receive(:reverse!).and_raise(PayrollLiabilityPostingService::Error, "Liability posting requires review")
+    post "/api/v1/admin/pay_periods/#{committed_period.id}/reopen_unpaid",
+      params: { unpaid_acknowledgement: true, reason: "Correct synthetic unpaid payroll" }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(JSON.parse(response.body).fetch("error")).to eq("Liability posting requires review")
+    retained.each { |model, rows| expect(model.order(:id).map(&:attributes)).to eq(rows) }
+  end
+
 end
