@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PdfPreview } from './PdfPreview';
 
 const pdfMocks = vi.hoisted(() => ({ destroy: vi.fn(), getDocument: vi.fn(), getPage: vi.fn(), cancel: vi.fn() }));
-vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: pdfMocks.getDocument }));
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: pdfMocks.getDocument }));
 
 beforeEach(() => {
   pdfMocks.destroy.mockReset();
