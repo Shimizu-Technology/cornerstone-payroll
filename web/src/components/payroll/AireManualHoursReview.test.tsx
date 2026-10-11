@@ -67,6 +67,17 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
+  it('does not turn an offline saved-link response into zero payable hours or a successful readiness check', async () => {
+    apiMocks.manualReview.mockResolvedValue({ ...review, source_available: false, source_error: 'Time source unavailable',
+      employees: [], exclusions: [], issues: null, summary: null });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Time source unavailable'));
+    expect(screen.queryByText('Time tracking payable now')).toBeNull();
+    expect(screen.queryByText('Regular and OT totals match')).toBeNull();
+    expect(screen.queryByText(/Time tracking has no payable time/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh check' })).toBeTruthy();
+  });
+
   it('shows exact time tracking regular, overtime, carryover, and the Payroll correction to make', async () => {
     render(
       <AireManualHoursReview

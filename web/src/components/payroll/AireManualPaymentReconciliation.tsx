@@ -37,6 +37,11 @@ const stateLabel = (allocation: AireManualAllocation) => allocation.payment_canc
   voided: 'Allocation voided',
 }[allocation.status] || 'Review allocation status');
 
+const paymentStateLabel = (allocation: AireManualAllocation, sourceUnavailable: boolean) => allocation.payment_cancellation_pending
+  ? stateLabel(allocation)
+  : allocation.payment_issue_pending ? 'Payment saved in Payroll; time tracking confirmation pending'
+    : sourceUnavailable && allocation.status === 'issued' ? 'Last confirmed in time tracking' : stateLabel(allocation);
+
 export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, payPeriodVoided, payrollItems, onChanged, refreshToken = 0 }: Props) {
   const { hasCapability } = useAuth();
   const { activeCompanyId } = useCompany();
@@ -57,6 +62,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
   const generation = useRef(0);
   const actionGeneration = useRef(0);
   const committed = payPeriodStatus === 'committed' && !payPeriodVoided;
+  const sourceUnavailable = review?.source_available === false;
 
   const load = useCallback(async (resetDraft = false) => {
     const current = ++generation.current;
@@ -66,6 +72,7 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
       const result = await payPeriodsApi.airePayrollManualReview(payPeriodId);
       if (current !== generation.current) return;
       setReview(result); setAllocations(result.cornerstone_manual_allocations || []); setNeedsRefresh(false);
+      if (result.source_available === false) setNeedsRefresh(true);
     } catch (caught) {
       if (current === generation.current) {
         setReview(null); setNeedsRefresh(true);
@@ -174,6 +181,11 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
     {loading && <p role="status" className="text-sm">Loading exact source hours and existing links…</p>}
     {error && <p role="alert" className="rounded-lg bg-danger-50 p-3 text-sm text-danger-800">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-primary-50 p-3 text-sm text-primary-900">{notice}</p>}
+    {sourceUnavailable && <div role="alert" className="rounded-lg bg-warning-50 p-3 text-sm text-warning-900">
+      <p className="font-semibold">Time tracking is unavailable. Your saved Payroll links are shown below.</p>
+      <p className="mt-1">Live hours and eligibility cannot be checked. Refresh reconciliation after the connection returns.</p>
+      {review.source_error && <p className="mt-1">{review.source_error}</p>}
+    </div>}
     {hasCapability('manage_own_aire_account_link') && review?.command_access?.delegation_configured === false && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
       <p>Your own time tracking access is needed before linking hours. Connecting does not grant manager approvals or configuration rights.</p>
       <Link className="mt-2 inline-flex min-h-11 items-center font-semibold underline underline-offset-4" to={aireAccountConnectionPath(undefined, currentAppPath(location.pathname, location.search))}>Connect my time tracking account</Link>
@@ -185,17 +197,17 @@ export function AireManualPaymentReconciliation({ payPeriodId, payPeriodStatus, 
           <p className="mt-1">{hours(allocation.regular_hours)} regular · {hours(allocation.overtime_hours)} OT · {activeCompanyId && allocation.pay_period_id === payPeriodId && allocation.payroll_item_id
             ? <Link className="font-semibold text-primary-800 underline underline-offset-4" to={payrollItemPath(activeCompanyId, payPeriodId, allocation.payroll_item_id, { returnTo: currentAppPath(location.pathname, location.search) })}>Payroll item {allocation.payroll_item_id}</Link>
             : 'payroll item review needed'}</p>
-          <Badge className="mt-2" variant={allocation.status === 'issued' && !allocation.payment_cancellation_pending ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{stateLabel(allocation)}</Badge>
+          <Badge className="mt-2" variant={allocation.status === 'issued' && !allocation.payment_cancellation_pending && !allocation.payment_issue_pending && !sourceUnavailable ? 'success' : allocation.status === 'voided' ? 'default' : 'warning'}>{paymentStateLabel(allocation, sourceUnavailable)}</Badge>
           {!allocation.payment_cancellation_pending && allocation.status === 'issued' && allocation.payment_evidence?.provenance === 'aire_issued_receipt'
             ? <p className="mt-2">Time tracking issued receipt · reference {allocation.payment_evidence.reference} · paid {formatDate(allocation.payment_evidence.effective_on)}</p>
-            : <p className="mt-2 text-neutral-600">{allocation.payment_cancellation_pending ? 'The original payment was cancelled in Payroll. These hours stay reserved while the cancellation syncs. Time tracking has not confirmed the cancellation or replacement yet.' : 'Verified issued receipt details are not available in this review.'}</p>}
-          {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">Time tracking status confirmed {formatGuamDateTime(allocation.last_synced_at)}</p>}
+            : <p className="mt-2 text-neutral-600">{allocation.payment_cancellation_pending ? 'The original payment was cancelled in Payroll. These hours stay reserved while the cancellation syncs. Time tracking has not confirmed the cancellation or replacement yet.' : allocation.payment_issue_pending ? 'The payment is saved in Payroll and is awaiting time tracking confirmation.' : sourceUnavailable ? 'Refresh after reconnection to retrieve the live receipt.' : 'Verified issued receipt details are not available in this review.'}</p>}
+          {allocation.last_synced_at && <p className="mt-1 text-xs text-neutral-600">{sourceUnavailable ? 'Last time tracking confirmation' : 'Time tracking status confirmed'} {formatGuamDateTime(allocation.last_synced_at)}</p>}
           {allocation.last_sync_error && <p role="alert" className="mt-2 text-danger-800">{allocation.last_sync_error}</p>}
         </div>{canManage && allocation.status !== 'voided' && <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" disabled={busy || loading}
           onClick={() => void retry(allocation)}>{allocation.status === 'issued' && !allocation.payment_cancellation_pending && !allocation.last_sync_error ? 'Refresh status' : 'Retry sync'} for entry {allocation.source_time_entry_id}</Button>}</div>
       </li>)}
     </ul>}
-    {review && <>
+    {review && !sourceUnavailable && <>
       {!canManage ? <p className="text-sm text-neutral-600">Linking is unavailable for this account and company. A permitted Payroll role and connected time tracking account or delegation are required.</p>
         : !committed ? <p className="text-sm text-neutral-600">Commit a nonvoid payroll run before linking its manually entered hours.</p>
           : <form onSubmit={event => void submit(event)} className="space-y-4 border-t border-neutral-200 pt-4">

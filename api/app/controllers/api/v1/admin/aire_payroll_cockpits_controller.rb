@@ -69,6 +69,7 @@ module Api
           )
           receipts = TimeTracking::ManualAllocationReceiptPresenter.new(source: @source, payload: payload)
           render json: cockpit_presenter.manual_review(payload).merge(
+            "source_available" => true,
             "command_access" => command_access_payload,
             "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
               .includes(:employee, payroll_item: :check_events)
@@ -80,7 +81,13 @@ module Api
               .map { |review| historical_classification_json(review) }
           )
         rescue TimeTracking::Client::Error => e
-          render_source_error(e)
+          if @source&.active? && @source.company_id == @pay_period.company_id &&
+             StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company) &&
+             (e.response_status.nil? || e.response_status >= 500)
+            render_saved_manual_review(e)
+          else
+            render_source_error(e)
+          end
         end
 
         def time_entries
@@ -376,6 +383,7 @@ module Api
             overtime_hours: allocation.overtime_hours.to_f,
             status: allocation.status,
             payment_cancellation_pending: allocation.payment_cancellation_intent.present?,
+            payment_issue_pending: allocation.payment_issue_intent.present?,
             payroll_item_check_status: allocation.payroll_item.check_status,
             payment_method: allocation.payroll_item.effective_payment_delivery_method,
             remote_allocation_id: allocation.remote_allocation_id,
@@ -384,6 +392,25 @@ module Api
             last_synced_at: allocation.last_synced_at&.iso8601,
             payment_evidence: payment_evidence
           }.compact
+        end
+
+        def render_saved_manual_review(error)
+          render json: {
+            start_date: @pay_period.start_date.iso8601,
+            end_date: @pay_period.end_date.iso8601,
+            generated_at: Time.current.iso8601,
+            source_available: false,
+            source_error: error.message,
+            command_access: { can_manage_manual_allocations: false },
+            cornerstone_manual_allocations: @pay_period.time_tracking_manual_allocations
+              .where(company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
+              .includes(:employee, payroll_item: :check_events).order(:id)
+              .map { |allocation| manual_allocation_json(allocation) },
+            employees: [],
+            exclusions: [],
+            issues: nil,
+            summary: nil
+          }
         end
 
         def historical_classification_json(review)

@@ -44,6 +44,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
     setError(null);
     try {
       const result = await payPeriodsApi.airePayrollManualReview(payPeriodId);
+      if (result.source_available === false) throw new Error(result.source_error || 'Time tracking is unavailable. Refresh to review live hours.');
       if (generation === requestGeneration.current) setReview(result);
     } catch (caught) {
       if (generation === requestGeneration.current) {
@@ -84,9 +85,9 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
   const matchedCount = rows.filter((row) => row.matched).length;
   const mismatchCount = rows.length - matchedCount;
-  const attentionCount = Number(review?.summary.exclusion_count || 0)
-    + Number(review?.issues.missing_category_count || 0)
-    + Number(review?.issues.negative_adjustment_count || 0);
+  const attentionCount = Number(review?.summary?.exclusion_count || 0)
+    + Number(review?.issues?.missing_category_count || 0)
+    + Number(review?.issues?.negative_adjustment_count || 0);
   const isCommitted = payPeriodStatus === 'committed';
 
   return (
@@ -118,7 +119,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <div><p className="font-semibold">The live time tracking preview could not load.</p><p className="mt-2 leading-5">{error} Refresh before using time tracking hours for payroll.</p></div>
           </div>
-        ) : review && (
+        ) : review && review.summary && (
           <>
             <div className="grid gap-4 border-b border-neutral-200 bg-white p-4 sm:grid-cols-3 sm:p-6">
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">

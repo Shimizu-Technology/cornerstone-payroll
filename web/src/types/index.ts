@@ -999,6 +999,8 @@ export interface AirePayrollManualReview {
   start_date: string;
   end_date: string;
   generated_at: string;
+  source_available?: boolean;
+  source_error?: string;
   command_access?: { can_manage_manual_allocations: boolean; delegation_configured?: boolean };
   payment_attestations?: Array<{
     id: number; source_time_entry_id: string; source_user_uuid: string; hours: number;
@@ -1022,7 +1024,7 @@ export interface AirePayrollManualReview {
     open_clock_count: number;
     pending_overtime_count: number;
     denied_overtime_count: number;
-  };
+  } | null;
   summary: {
     employee_count: number;
     adjustment_count: number;
@@ -1033,7 +1035,7 @@ export interface AirePayrollManualReview {
     carryover_count: number;
     correction_count: number;
     exclusion_count: number;
-  };
+  } | null;
 }
 
 export interface AireManualAllocation {
@@ -1050,6 +1052,7 @@ export interface AireManualAllocation {
   overtime_hours: number;
   status: string;
   payment_cancellation_pending?: boolean;
+  payment_issue_pending?: boolean;
   payroll_item_check_status?: string;
   payment_method?: string;
   remote_allocation_id?: string;
