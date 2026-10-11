@@ -174,6 +174,7 @@ module TimeTracking
       require_capability!(:manual_allocations)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
+        historical_manual_issue: true,
         body: {
           command_id: command_id,
           expected_version: expected_version,
@@ -515,7 +516,8 @@ module TimeTracking
 
     private
 
-    def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false)
+    def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false,
+                     historical_manual_issue: false)
       request = case method
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
@@ -554,7 +556,7 @@ module TimeTracking
       if validate_source
         validate_source_identity!(payload)
       elsif @source.source_type != "aire_services" || payload["integration"].present? || payload.dig("export", "integration").present?
-        validate_integration_response!(payload)
+        validate_integration_response!(payload, historical: historical_manual_issue)
       end
       payload
     rescue JSON::ParserError
@@ -702,7 +704,7 @@ module TimeTracking
       normalized_id
     end
 
-    def delegated_request_json(uri, body:)
+    def delegated_request_json(uri, body:, historical_manual_issue: false)
       headers = payroll_actor_headers
       require_secure_payroll_transport!(uri)
 
@@ -712,7 +714,8 @@ module TimeTracking
         method: :post,
         body: body,
         headers: headers,
-        surface_remote_error: true
+        surface_remote_error: true,
+        historical_manual_issue: historical_manual_issue
       )
     end
 
@@ -907,14 +910,15 @@ module TimeTracking
       raise Error, e.message
     end
 
-    def validate_integration_response!(payload)
+    def validate_integration_response!(payload, historical: false)
       result = ConnectionIdentity.validate!(source: @source, payload: payload)
       if @source.source_type != "aire_services" && result.legacy
         raise Error, "#{@source.name} omitted its verified integration descriptor"
       end
       # A response may narrow support only after a fresh operator connection
-      # verification. Never accept an acknowledgement from a changed contract.
-      if @source.remote_identity_pinned? && !result.legacy &&
+      # verification. Manual ISSUE replay is checked against its saved original
+      # contract by ManualAllocationService; installation validation still applies.
+      if !historical && @source.remote_identity_pinned? && !result.legacy &&
         (result.protocol != @source.source_protocol || result.protocol_version != @source.source_protocol_version ||
           result.capabilities != @source.source_capabilities.sort || result.policy_constraints != @source.source_policy_constraints)
         raise Error, "#{@source.name} integration contract changed; test the connection before continuing"

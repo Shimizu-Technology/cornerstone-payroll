@@ -27,7 +27,7 @@ RSpec.describe "Manual allocation instrument cancellation" do
 
   before do
     allow(TimeTracking::Client).to receive(:for_payroll_actor).with(source, actor: actor).and_return(client)
-    allow(client).to receive(:issue_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501", "version" => 1, "status" => "issued" })
+    allow(client).to receive(:issue_payroll_manual_allocation) { |request| manual_issue_receipt(allocation, request) }
     allow(client).to receive(:cancel_payroll_manual_allocation_payment) { |**request| cancellation_ack(version: 2, request: request) }
   end
 
@@ -77,9 +77,28 @@ RSpec.describe "Manual allocation instrument cancellation" do
     expect(allocation.status).to eq("committed")
     retire
     service.sync!(allocation, raise_on_failure: true)
-    expect(client).to have_received(:issue_payroll_manual_allocation).with(**original_intent.symbolize_keys).twice
+    expect(client).to have_received(:issue_payroll_manual_allocation).with(**original_intent.except("source_instance_id", "source_contract").symbolize_keys).twice
     expect(client).to have_received(:cancel_payroll_manual_allocation_payment).with(hash_including(expected_version: 1))
     expect(allocation.reload.status).to eq("committed")
+  end
+
+  it "does not cancel or advance after an unverified replay of a remotely issued payment" do
+    item.check_events.create!(event_type: "delivered", check_number: "8000", user: actor)
+    allow(client).to receive(:issue_payroll_manual_allocation).and_raise(TimeTracking::Client::Error, "Synthetic lost issue response")
+    service.sync!(allocation)
+    saved = allocation.reload.payment_issue_intent
+    retire
+    cancellation = allocation.reload.payment_cancellation_intent
+    allow(client).to receive(:issue_payroll_manual_allocation) do |request|
+      manual_issue_receipt(allocation, request, replayed: true).tap do |receipt|
+        receipt["manual_allocation"]["issued_payment"]["payment_reference"] = "WRONG-CHECK"
+      end
+    end
+    service.sync!(allocation)
+    expect(allocation.reload).to have_attributes(status: "committed", remote_version: 0,
+      payment_issue_intent: saved, payment_cancellation_intent: cancellation)
+    expect(client).not_to have_received(:cancel_payroll_manual_allocation_payment)
+    expect(allocation.last_sync_error).to include("exact issued manual payment")
   end
 
   it "replays the frozen cancellation command after a remote cancellation succeeds but its local ack fails" do
@@ -116,7 +135,7 @@ RSpec.describe "Manual allocation instrument cancellation" do
     expect(allocation.reload.issue_command_id).to eq(old_issue_command)
     expect(allocation.payment_cancellation_intent).to be_present
     allow(client).to receive(:cancel_payroll_manual_allocation_payment) { |**request| cancellation_ack(version: 1, request: request) }
-    allow(client).to receive(:issue_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501", "version" => 2, "status" => "issued" })
+    allow(client).to receive(:issue_payroll_manual_allocation) { |request| manual_issue_receipt(allocation, request) }
     service.sync!(allocation, raise_on_failure: true)
     expect(client).to have_received(:issue_payroll_manual_allocation).with(hash_including(payment_method: "direct_deposit", payment_reference: "Synthetic replacement transfer", expected_version: 1))
     expect(allocation.reload.status).to eq("issued")

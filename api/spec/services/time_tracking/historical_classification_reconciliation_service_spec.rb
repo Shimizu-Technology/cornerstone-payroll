@@ -4,7 +4,10 @@ require "rails_helper"
 
 RSpec.describe TimeTracking::HistoricalClassificationReconciliationService do
   let(:company) { create(:company) }
-  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services",
+    expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+    source_protocol_version: "1.0", identity_verified_at: Time.current,
+    source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES) }
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
   let(:period) do
@@ -54,7 +57,8 @@ RSpec.describe TimeTracking::HistoricalClassificationReconciliationService do
       { "manual_allocation" => { "id" => next_id.to_s, "version" => 0 } }
     end
     allow(client).to receive(:issue_payroll_manual_allocation) do |args|
-      { "manual_allocation" => { "id" => args.fetch(:allocation_id), "version" => 1 } }
+      allocation = TimeTrackingManualAllocation.find_by!(remote_allocation_id: args.fetch(:allocation_id))
+      manual_issue_receipt(allocation, args)
     end
   end
 

@@ -4,7 +4,10 @@ require "rails_helper"
 
 RSpec.describe TimeTracking::ManualAllocationService do
   let(:company) { create(:company) }
-  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services",
+    expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+    source_protocol_version: "1.0", identity_verified_at: Time.current,
+    source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES) }
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) { create(:employee, company: company, department: create(:department, company: company)) }
   let(:period) do
@@ -107,9 +110,9 @@ RSpec.describe TimeTracking::ManualAllocationService do
 
   it "does not mark the hours paid until a delivered check event exists" do
     allocation = create_link
-    allow(client).to receive(:issue_payroll_manual_allocation).and_return(
-      "manual_allocation" => { "id" => "501", "version" => 1 }
-    )
+    allow(client).to receive(:issue_payroll_manual_allocation) do |request|
+      manual_issue_receipt(allocation, request)
+    end
     service.sync!(allocation)
     expect(allocation.reload.status).to eq("committed")
 
@@ -128,9 +131,9 @@ RSpec.describe TimeTracking::ManualAllocationService do
     item.update!(payment_delivery_method: "direct_deposit", check_number: nil, net_pay: 100)
     allocation = create_link
     expect(allocation.reload.status).to eq("committed")
-    allow(client).to receive(:issue_payroll_manual_allocation).and_return(
-      "manual_allocation" => { "id" => "501", "version" => 1 }
-    )
+    allow(client).to receive(:issue_payroll_manual_allocation) do |request|
+      manual_issue_receipt(allocation, request)
+    end
 
     service.sync!(allocation)
     expect(allocation.reload.status).to eq("committed")
@@ -182,9 +185,9 @@ RSpec.describe TimeTracking::ManualAllocationService do
 
   it "keeps delivered hours paid when a paycheck is later voided pending nonpayment evidence" do
     allocation = create_link
-    allow(client).to receive(:issue_payroll_manual_allocation).and_return(
-      "manual_allocation" => { "id" => "501", "version" => 1 }
-    )
+    allow(client).to receive(:issue_payroll_manual_allocation) do |request|
+      manual_issue_receipt(allocation, request)
+    end
     allow(client).to receive(:void_payroll_manual_allocation)
     create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
                          effective_on: PayrollBusinessClock.today)
@@ -244,5 +247,22 @@ RSpec.describe TimeTracking::ManualAllocationService do
 
     expect(allocation.reload.status).to eq("committed")
     expect(allocation.last_sync_error).to include("invalid manual allocation acknowledgement")
+  end
+  [ { "status" => "committed" }, { "status" => "issued", "payment_reference" => "WRONG-CHECK" } ].each do |incorrect|
+    it "retains committed hours and the original issue intent for an unverified payment receipt #{incorrect}" do
+      allocation = create_link
+      create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+      allow(client).to receive(:issue_payroll_manual_allocation).and_return(
+        "manual_allocation" => { "id" => "501", "version" => 1 }.merge(incorrect)
+      )
+
+      service.sync!(allocation.reload)
+
+      expect(allocation.reload.status).to eq("committed")
+      expect(allocation.payment_issue_intent).to include("command_id" => allocation.issue_command_id,
+        "payment_reference" => item.check_number)
+      expect(allocation.last_sync_error).to be_present
+    end
   end
 end
