@@ -66,6 +66,11 @@ interface PayrollItemEditModalProps {
 type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean; applied_amount?: number };
 const EMPTY_WAGE_RATES: EmployeeWageRate[] = [];
 
+interface SavedDeductionField {
+  label: string;
+  amount: number | null;
+}
+
 interface EditableFields {
   hours_worked: number;
   overtime_hours: number;
@@ -84,6 +89,7 @@ interface EditableFields {
   wage_rate_hours: PayrollItemWageRateHours[];
   check_date: string;
   check_memo: string;
+  custom_deductions: SavedDeductionField[];
   payroll_adjustments: PayrollAdjustmentField[];
   payroll_field_entries: EditablePayrollItemFieldEntry[];
 }
@@ -116,9 +122,11 @@ export function PayrollItemEditModal({
     wage_rate_hours: [],
     check_date: '',
     check_memo: '',
+    custom_deductions: [],
     payroll_adjustments: [],
     payroll_field_entries: [],
   });
+  const [initialCustomDeductions, setInitialCustomDeductions] = useState<SavedDeductionField[]>([]);
   const [saving, setSaving] = useState(false);
   const [initialPayrollAdjustments, setInitialPayrollAdjustments] = useState<NormalizedPayrollAdjustment[]>([]);
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
@@ -152,6 +160,11 @@ export function PayrollItemEditModal({
           }))
         : [];
 
+      const savedDeductions = (item.custom_deductions || []).map(deduction => ({
+        label: deduction.label,
+        amount: Number(deduction.amount),
+      }));
+      setInitialCustomDeductions(savedDeductions);
       setFields({
         hours_worked: item.hours_worked || 0,
         overtime_hours: item.overtime_hours || 0,
@@ -170,6 +183,7 @@ export function PayrollItemEditModal({
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
         check_memo: item.check_memo || '',
+        custom_deductions: savedDeductions,
         payroll_adjustments: itemPayrollAdjustments,
         payroll_field_entries: (item.payroll_field_entries || [])
           .filter(entry => entry.active === true)
@@ -202,6 +216,7 @@ export function PayrollItemEditModal({
   const effectiveReportedTips = Math.max(reportedTipsInput, tipsPaidOutInput);
   const tipsPaidOutExceedsReportedTips = tipsPaidOutInput > reportedTipsInput;
   const normalizedPayrollAdjustments = normalizePayrollAdjustments(fields.payroll_adjustments);
+  const customDeductionsDirty = JSON.stringify(fields.custom_deductions) !== JSON.stringify(initialCustomDeductions);
   const payrollAdjustmentsDirty = JSON.stringify(normalizedPayrollAdjustments) !== JSON.stringify(initialPayrollAdjustments);
 
   const handleChange = (field: keyof EditableFields, value: string) => {
@@ -267,6 +282,17 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const handleSavedDeductionAmountChange = (index: number, amount: number | null) => {
+    setFields(prev => ({
+      ...prev,
+      custom_deductions: prev.custom_deductions.map((deduction, i) => i === index ? { ...deduction, amount } : deduction),
+    }));
+  };
+
+  const removeSavedDeduction = (index: number) => {
+    setFields(prev => ({ ...prev, custom_deductions: prev.custom_deductions.filter((_, i) => i !== index) }));
+  };
+
   const handlePayrollFieldEntryAmountChange = (index: number, amount: number | null) => {
     if (Number(fields.payroll_field_entries[index]?.amount) === (amount ?? 0)) return;
     setPayrollFieldEntriesDirty(true);
@@ -282,6 +308,10 @@ export function PayrollItemEditModal({
     setSaving(true);
     setError(null);
     try {
+      if (customDeductionsDirty) {
+        const invalid = fields.custom_deductions.find(deduction => deduction.amount == null || !Number.isFinite(deduction.amount) || deduction.amount <= 0);
+        if (invalid) throw new Error(`Enter a positive amount for ${invalid.label}, or remove that deduction.`);
+      }
       const tipsPaidOut = parseFloat(String(fields.tips_paid_out)) || 0;
       const reportedTips = Math.max(parseFloat(String(fields.reported_tips)) || 0, tipsPaidOut);
       const qualifiedOvertime = Number(fields.qualified_overtime_compensation);
@@ -306,6 +336,10 @@ export function PayrollItemEditModal({
         check_date: fields.check_date || null,
         check_memo: fields.check_memo || null,
       };
+
+      if (customDeductionsDirty) {
+        payload.custom_deductions = fields.custom_deductions.map(deduction => ({ label: deduction.label, amount: deduction.amount }));
+      }
 
       if (payrollAdjustmentsDirty) {
         payload.payroll_adjustments = normalizedPayrollAdjustments;
@@ -689,6 +723,41 @@ export function PayrollItemEditModal({
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Retained one-time deductions are separate from recurring setup. */}
+          {initialCustomDeductions.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <h4 className="text-sm font-medium text-gray-700">Saved one-time deductions</h4>
+              <p className="mt-1 text-xs text-gray-500">After-tax amounts saved on this payroll. Edit an amount or remove a mistaken deduction; employee defaults and linked loans stay separate.</p>
+              <div className="mt-3 space-y-3">
+                {fields.custom_deductions.map((deduction, index) => (
+                  <div key={`${deduction.label}-${index}`} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-center">
+                    <p className="break-words text-sm font-medium text-gray-900">{deduction.label}</p>
+                    <NumericInput
+                      aria-label={`${deduction.label} amount`}
+                      className="min-h-11"
+                      value={deduction.amount}
+                      onValueChange={amount => handleSavedDeductionAmountChange(index, amount)}
+                      emptyValue={null}
+                      notifyEmptyOnChange
+                      min={0}
+                      fixedDecimalsOnBlur={2}
+                      disabled={saving || removing}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11"
+                      aria-label={`Remove ${deduction.label}`}
+                      disabled={saving || removing}
+                      onClick={() => removeSavedDeduction(index)}
+                    >Remove</Button>
+                  </div>
+                ))}
+                {fields.custom_deductions.length === 0 && <p className="text-sm text-gray-600">All saved one-time deductions removed. Save and recalculate to apply this change.</p>}
               </div>
             </div>
           )}
