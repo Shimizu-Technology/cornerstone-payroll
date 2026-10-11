@@ -363,5 +363,4 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     period.update_columns(pay_date: Date.new(2027, 1, 15))
     expect { disposition.reload.verified! }.to raise_error(ArgumentError, /evidence no longer matches/)
   end
-
 end

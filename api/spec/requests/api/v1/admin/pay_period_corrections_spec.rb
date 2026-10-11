@@ -628,5 +628,4 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     expect(JSON.parse(response.body).fetch("error")).to eq("Liability posting requires review")
     retained.each { |model, rows| expect(model.order(:id).map(&:attributes)).to eq(rows) }
   end
-
 end
