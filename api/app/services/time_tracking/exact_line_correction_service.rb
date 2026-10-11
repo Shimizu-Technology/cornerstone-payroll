@@ -22,6 +22,8 @@ module TimeTracking
         original_source_time_entry_version: frozen_line(context[:allocation].time_tracking_import, context[:allocation])["source_time_entry_version"],
         source_change: context[:line], **context[:line].slice("total_hours", "regular_hours", "overtime_hours").symbolize_keys, original_pay_period_id: context[:original].pay_period_id,
         original_payroll_item_id: context[:original].id, original_check_number: context[:original].check_number,
+        frozen_origin_pay_period_id: context[:origin].pay_period_id, frozen_origin_payroll_item_id: context[:origin].id,
+        financial_successor_link_ids: context[:target_proof]["financial_links"].map { |link| link["id"] },
         employee_name: context[:original].employee.full_name, pay_date: @import.pay_period.pay_date,
         original: money[:original], corrected: money[:corrected], deltas: money[:deltas],
         accounting_only: true
@@ -41,7 +43,9 @@ module TimeTracking
       # Committed replay remains available while the remote source is offline.
       remote_proof = fetch_remote_proof unless existing_disposition
       disposition = nil
-      @import.pay_period.with_lock do
+      ApplicationRecord.transaction do
+        Company.lock.find(@source.company_id)
+        @import.pay_period.lock!
         @source.lock!
         @actor.lock!
         validate_actor!
@@ -55,16 +59,15 @@ module TimeTracking
           next
         end
         context = validated_context!(remote_proof: remote_proof)
-        context[:original].pay_period.lock!
-        context[:original].lock!
+        context[:target_resolver].lock!
         context = validated_context!(remote_proof: remote_proof)
         money = financial_preview(context)
         proof = proof_digest(context, money)
         raise ArgumentError, "Source or payroll history changed; review the accounting correction again" unless proof == token["proof_digest"]
-        period, item = IssueCorrectivePaycheckService.issue!(
+        period, item = IssueCorrectivePaycheckService.new(
           original_pay_period: context[:original].pay_period, employee: context[:original].employee,
           corrected_inputs: context[:inputs], pay_date: @import.pay_period.pay_date,
-          reason: reason, actor: @actor)
+          reason: reason, actor: @actor, source_accounting_target: context[:target_resolver]).issue!
         disposition = TimeTrackingCorrectionDisposition.create!(
           company_id: @source.company_id, time_tracking_source: @source, time_tracking_import: @import,
           original_allocation: context[:allocation], corrective_payroll_item: item, created_by: @actor,
@@ -150,13 +153,16 @@ module TimeTracking
         source_user_id: @identity[0], source_user_uuid: employee["source_user_uuid"], source_time_entry_id: @identity[1], line_key: @identity[2]).to_a
       raise ArgumentError, "The exact original allocation is missing or ambiguous; reconcile source history first" unless allocations.one?
       allocation = allocations.first
-      original = allocation.payroll_item
+      resolver = PaidCorrectionTarget.new(allocation: allocation, source: @source, line: line)
+      target = resolver.resolve
+      origin = target[:origin]
+      original = target[:target]
       validate_batch!(allocation.time_tracking_import)
       original_line = frozen_line(allocation.time_tracking_import, allocation)
       mapping = TimeTrackingEmployeeMapping.find_by(time_tracking_source_id: @source.id, source_user_uuid: employee["source_user_uuid"])
       rates = original.wage_rate_hours
       unless original_line && allocation.source_kind.in?(%w[current carryover]) && original.employment_type == "hourly" &&
-        original.pay_period.can_issue_corrective_paycheck? && !original.voided? &&
+        !original.voided? &&
         allocation.time_tracking_import.status == "applied" &&
         mapping&.employee_id == original.employee_id && mapping.source_user_id == @identity[0] &&
         original.employee.active? && original.employee.hourly? && original.employee.active_wage_rates.count == 1 &&
@@ -166,9 +172,8 @@ module TimeTracking
         %w[total_hours regular_hours overtime_hours].all? { |key| allocation.public_send(key) == original_line[key].to_d }
         raise ArgumentError, "This correction needs review of original identity, category, rate or hours; automatic correction is unavailable"
       end
-      original_proof = OriginalAllocationProof.new(payroll_item: original, source: @source,
-        source_user_id: @identity[0], source_user_uuid: employee["source_user_uuid"]).call
-      payment_proof = OriginalPaymentProof.call(original)
+      original_proof = target[:original_proof]
+      payment_proof = target[:payment_proof]
       unless allocation.regular_hours + line["regular_hours"].to_d >= 0 && allocation.overtime_hours + line["overtime_hours"].to_d >= 0
         raise ArgumentError, "Correction exceeds the original source line's REG/OT hours; review other days separately"
       end
@@ -185,7 +190,8 @@ module TimeTracking
         overtime_hours: original.overtime_hours.to_d + line["overtime_hours"].to_d }
       raise ArgumentError, "Correction exceeds the original paid hours" if inputs.values.any?(&:negative?)
       { employee: employee, line: line, allocation: allocation, original: original, inputs: inputs,
-        original_proof: original_proof[:evidence], payment_proof: payment_proof }
+        original_proof: original_proof, payment_proof: payment_proof, origin: origin,
+        target_proof: target[:evidence], target_resolver: resolver }
     rescue PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error => e
       raise ArgumentError, e.message
     end
@@ -219,8 +225,8 @@ module TimeTracking
     end
 
     def financial_preview(context)
-      result = IssueCorrectivePaycheckService.preview(original_pay_period: context[:original].pay_period,
-        employee: context[:original].employee, corrected_inputs: context[:inputs])
+      result = IssueCorrectivePaycheckService.new(original_pay_period: context[:original].pay_period,
+        employee: context[:original].employee, corrected_inputs: context[:inputs], source_accounting_target: context[:target_resolver]).preview
       unless result[:deltas][:gross_pay].to_d.negative? && result[:deltas][:net_pay].to_d.negative? && !result[:meta][:will_generate_check]
         raise ArgumentError, "This line does not produce a negative accounting-only adjustment; review payroll manually"
       end
@@ -232,6 +238,7 @@ module TimeTracking
         source: @source.attributes.slice("id", "company_id", "expected_source_instance_id", "connection_uuid", "remote_source_identifier", "base_url"),
         line: context[:line], original: context[:original].attributes, original_period: context[:original].pay_period.attributes,
         original_batches_and_allocations: context[:original_proof], original_payment: context[:payment_proof],
+        financial_succession: context[:target_proof],
         employee: context[:original].employee.attributes, wage_rates: context[:original].employee.employee_wage_rates.order(:id).map(&:attributes),
         money: money, pay_date: @import.pay_period.pay_date.to_s }.deep_stringify_keys)
     end
@@ -247,8 +254,8 @@ module TimeTracking
         contract_version: "2.0", source_line_key: disposition.line_key, source_kind: "correction",
         total_hours: disposition.total_hours.to_s, regular_hours: disposition.regular_hours.to_s, overtime_hours: disposition.overtime_hours.to_s,
         metadata: { accounting_only: true, correction_disposition_id: disposition.id.to_s,
-          original_pay_period_id: disposition.original_allocation.pay_period_id.to_s,
-          original_payroll_item_id: disposition.original_allocation.payroll_item_id.to_s,
+          original_pay_period_id: item.correction_for_payroll_item.pay_period_id.to_s,
+          original_payroll_item_id: item.correction_for_payroll_item_id.to_s,
           corrective_pay_period_id: period.id.to_s, corrective_payroll_item_id: item.id.to_s } }
     end
   end

@@ -150,7 +150,7 @@ class IssueCorrectivePaycheckService
   end
 
   def initialize(original_pay_period:, employee:, corrected_inputs:,
-                 pay_date: nil, reason: nil, actor: nil, notes: nil, expected_review_digest: nil)
+                 pay_date: nil, reason: nil, actor: nil, notes: nil, expected_review_digest: nil, source_accounting_target: nil)
     @original_pay_period = original_pay_period
     @employee            = employee
     @corrected_inputs    = (corrected_inputs || {}).symbolize_keys
@@ -160,6 +160,7 @@ class IssueCorrectivePaycheckService
     @actor               = actor
     @notes               = notes
     @expected_review_digest = expected_review_digest
+    @source_accounting_target = source_accounting_target
   end
 
   # Returns the original snapshot, the recomputed corrected snapshot, and
@@ -167,6 +168,7 @@ class IssueCorrectivePaycheckService
   # preview before the operator commits.
   def preview
     validate_for_preview!
+    assert_source_accounting_negative! if @source_accounting_target
     {
       original:  snapshot(original_item),
       recorded: recorded_snapshot,
@@ -273,6 +275,7 @@ class IssueCorrectivePaycheckService
 
   def validate_for_issue!
     validate_for_preview!
+    assert_source_accounting_negative! if @source_accounting_target
     raise ArgumentError, "reason is required" if @reason.blank?
     raise ArgumentError, "pay_date is required" if @pay_date.blank?
 
@@ -317,13 +320,29 @@ class IssueCorrectivePaycheckService
 
   def assert_correctable!(period)
     validate_named_loan_replay!
-    unless period.can_issue_corrective_paycheck?
+    unless period.can_issue_corrective_paycheck? || verified_source_accounting_target?(period)
       raise InvalidStateError,
             "Pay period must be a regular committed (non-voided) period to issue a corrective paycheck"
     end
     if original_item.voided?
       raise InvalidStateError,
             "Cannot issue a corrective paycheck for an item whose original check is voided"
+    end
+  end
+
+  def verified_source_accounting_target?(period)
+    return false unless @source_accounting_target.is_a?(TimeTracking::PaidCorrectionTarget)
+    context = @source_accounting_target.assert_for!(original_item, @corrected_inputs)
+    context[:linked] && period.correction_run? && period.committed? && !period.voided?
+  end
+
+  def assert_source_accounting_negative!
+    unless @source_accounting_target.is_a?(TimeTracking::PaidCorrectionTarget)
+      raise InvalidStateError, "Source accounting requires a verified payment target"
+    end
+    @source_accounting_target.assert_for!(original_item, @corrected_inputs)
+    unless delta_hash[:gross_pay].to_d.negative? && net_delta.negative?
+      raise InvalidStateError, "Source accounting can only record a negative adjustment without a new payment"
     end
   end
 
@@ -790,7 +809,9 @@ class IssueCorrectivePaycheckService
       timekeeping_source: "correction_reference",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
       calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
-        "corrective_paycheck" => { "version" => 1, "input_adjustments" => input_adjustments }
+        "corrective_paycheck" => { "version" => 1, "input_adjustments" => input_adjustments }.tap do |context|
+          context["source_accounting_target"] = @source_accounting_target.resolve.fetch(:evidence) if @source_accounting_target
+        end
       ),
 
       # Tip deltas are stored too because W-2GU / 941 / SWICA reporting derives

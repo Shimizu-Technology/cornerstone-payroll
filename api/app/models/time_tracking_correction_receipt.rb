@@ -47,8 +47,8 @@ class TimeTrackingCorrectionReceipt < ApplicationRecord
       "source_time_entry_id" => row.source_time_entry_id, "source_user_uuid" => row.source_user_uuid,
       "source_line_key" => row.line_key, "source_kind" => "correction",
       "metadata" => { "accounting_only" => true, "correction_disposition_id" => row.id.to_s,
-        "original_pay_period_id" => row.original_allocation.pay_period_id.to_s,
-        "original_payroll_item_id" => row.original_allocation.payroll_item_id.to_s,
+        "original_pay_period_id" => item.correction_for_payroll_item.pay_period_id.to_s,
+        "original_payroll_item_id" => item.correction_for_payroll_item_id.to_s,
         "corrective_pay_period_id" => item.pay_period_id.to_s, "corrective_payroll_item_id" => item.id.to_s }
     }
     unless expected.all? { |key, value| payload[key] == value } &&

@@ -219,6 +219,7 @@ class PayrollItem < ApplicationRecord
 
   def source_accounting_correction_linked?
     TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: id).exists? ||
+      TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: correction_payroll_items.select(:id)).exists? ||
       TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
   end
 

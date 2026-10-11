@@ -692,8 +692,9 @@ export function TimeTrackingImportModal({
               ))}
               {correction && (
                 <section aria-label="Confirm accounting correction" className="space-y-3 rounded-xl border border-warning-300 p-4">
-                  <p className="font-semibold">{correction.employee_name} · original check {correction.original_check_number || 'unassigned'}</p>
-                  <p className="text-sm">Original payroll #{correction.original_pay_period_id}, item #{correction.original_payroll_item_id}. Corrective supplemental pay date: {formatDate(correction.pay_date)}.</p>
+                  <p className="font-semibold">{correction.employee_name} · paid check {correction.original_check_number || 'unassigned'}</p>
+                  <p className="text-sm">Paid payroll #{correction.original_pay_period_id}, item #{correction.original_payroll_item_id}. Corrective supplemental pay date: {formatDate(correction.pay_date)}.</p>
+                  {correction.frozen_origin_payroll_item_id !== undefined && correction.frozen_origin_payroll_item_id !== correction.original_payroll_item_id && <p className="text-sm">The hours were originally recorded in payroll #{correction.frozen_origin_pay_period_id}, item #{correction.frozen_origin_payroll_item_id}. Payment is recorded in the paid payroll above.</p>}
                   <p className="text-sm">Source entry #{correction.source_time_entry_id}{correction.original_source_time_entry_version != null && correction.source_change.source_time_entry_version != null ? ` · version ${correction.original_source_time_entry_version} → ${correction.source_change.source_time_entry_version}` : ''}: {formatHours(correction.source_change.regular_hours)} REG / {formatHours(correction.source_change.overtime_hours)} OT.</p>
                   <dl className="grid grid-cols-2 gap-2 text-sm">
                     <dt>Gross</dt><dd>{formatCurrency(correction.original.gross_pay)} → {formatCurrency(correction.corrected.gross_pay)} ({formatCurrency(correction.deltas.gross_pay)})</dd>
@@ -702,7 +703,7 @@ export function TimeTrackingImportModal({
                     <dt>Income tax delta</dt><dd>{formatCurrency(correction.deltas.withholding_tax)}</dd>
                     <dt>Net</dt><dd>{formatCurrency(correction.original.net_pay)} → {formatCurrency(correction.corrected.net_pay)} ({formatCurrency(correction.deltas.net_pay)})</dd>
                   </dl>
-                  <p className="text-sm font-medium">Accounting correction only. The original check remains. No new payment or recovery is recorded.</p>
+                  <p className="text-sm font-medium">Accounting correction only. The paid check remains. No new payment or recovery is recorded.</p>
                   <label className="block text-sm">Reason<textarea className="mt-2 w-full rounded-lg border p-2" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
                   <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={correctionAcknowledged} onChange={(event) => setCorrectionAcknowledged(event.target.checked)} />I reviewed the signed adjustment and understand no new payment or recovery is recorded.</label>
                   <Button disabled={correctionBusy || !correctionAcknowledged || correctionReason.trim().length < 10} onClick={() => void confirmCorrection()}>Confirm accounting correction</Button>
@@ -711,6 +712,7 @@ export function TimeTrackingImportModal({
               {(preview.correction_dispositions || []).map((done) => (
                 <section key={done.id} aria-label="Accounting correction delivery" className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                   <p className="font-semibold">Recorded in Payroll supplemental #{done.corrective_pay_period_id}, item #{done.corrective_payroll_item_id}: {formatHours(done.total_hours)} hours.</p>
+                  {done.original_payroll_item_id !== undefined && <p>Against paid payroll #{done.original_pay_period_id}, item #{done.original_payroll_item_id}.{done.frozen_origin_payroll_item_id !== undefined && done.frozen_origin_payroll_item_id !== done.original_payroll_item_id && ` The hours were originally recorded in payroll #${done.frozen_origin_pay_period_id}, item #${done.frozen_origin_payroll_item_id}.`}</p>}
                   <p>No new payment or recovery recorded. The accounting entry is already posted; refresh or retry only its source confirmation.</p>
                   {done.verification_error ? (
                     <div role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-2 text-warning-900">

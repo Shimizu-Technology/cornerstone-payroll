@@ -1153,6 +1153,9 @@ export interface ExactTimeCorrectionPreview extends ExactTimeCorrectionLine {
   original_pay_period_id: number;
   original_payroll_item_id: number;
   original_check_number: string | null;
+  frozen_origin_pay_period_id?: number;
+  frozen_origin_payroll_item_id?: number;
+  financial_successor_link_ids?: number[];
   employee_name: string;
   pay_date: string;
   original: Record<string, number>;
@@ -1167,6 +1170,10 @@ export interface ExactTimeCorrectionDisposition extends ExactTimeCorrectionLine 
   id: number;
   corrective_pay_period_id: number;
   corrective_payroll_item_id: number;
+  original_pay_period_id?: number;
+  original_payroll_item_id?: number;
+  frozen_origin_pay_period_id?: number;
+  frozen_origin_payroll_item_id?: number;
   accounting_only: true;
   source_receipt?: import('@/types').SourceAccountingReceiptState | null;
 }

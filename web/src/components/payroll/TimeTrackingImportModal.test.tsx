@@ -335,11 +335,13 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   const user = userEvent.setup();
   const line = { source_user_id: '42', source_time_entry_id: '101', line_key: '7:2500', regular_hours: -1, overtime_hours: 0, total_hours: -1 };
   apiMocks.preview.mockResolvedValue({ import: { id: 99, status: 'previewed', correction_lines: [line], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } } });
-  apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, preview_token: 'signed-proof', source_change: line, employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-11-15', original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 }, deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
-  apiMocks.correctionConfirm.mockResolvedValue({ disposition_id: 1, import: { id: 99, status: 'previewed', correction_lines: [line], correction_dispositions: [{ ...line, id: 1, corrective_pay_period_id: 100, corrective_payroll_item_id: 101, accounting_only: true }], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
+  apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, preview_token: 'signed-proof', source_change: line, employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, frozen_origin_pay_period_id: 8, frozen_origin_payroll_item_id: 9, financial_successor_link_ids: [3], original_check_number: '30000', pay_date: '2026-11-15', original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 }, deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
+  apiMocks.correctionConfirm.mockResolvedValue({ disposition_id: 1, import: { id: 99, status: 'previewed', correction_lines: [line], correction_dispositions: [{ ...line, id: 1, corrective_pay_period_id: 100, corrective_payroll_item_id: 101, original_pay_period_id: 10, original_payroll_item_id: 11, frozen_origin_pay_period_id: 8, frozen_origin_payroll_item_id: 9, accounting_only: true }], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
   render(<TimeTrackingImportModal open onClose={() => {}} payPeriod={payPeriod} employees={[]} onImportComplete={() => {}} autoPreview />);
   await user.click(await screen.findByRole('button', { name: 'Review correction' }));
-  expect(await screen.findByText(/original check 30000/)).toBeTruthy();
+  expect(await screen.findByText(/paid check 30000/)).toBeTruthy();
+  expect(screen.getByText(/The hours were originally recorded in payroll #8, item #9/)).toBeTruthy();
+  expect(screen.getByText(/Paid payroll #10, item #11/)).toBeTruthy();
   const confirm = screen.getByRole('button', { name: 'Confirm accounting correction' });
   expect(confirm.hasAttribute('disabled')).toBe(true);
   await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Approved source correction');
@@ -348,6 +350,7 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   await user.click(confirm);
   await waitFor(() => expect(apiMocks.correctionConfirm).toHaveBeenCalledWith(17, { import_id: 99, ...{ source_user_id: line.source_user_id, source_time_entry_id: line.source_time_entry_id, line_key: line.line_key }, preview_token: 'signed-proof', reason: 'Approved source correction', acknowledge_accounting_only: true }));
   expect(await screen.findByText(/Recorded in Payroll supplemental #100/)).toBeTruthy();
+  expect(screen.getByText(/Against paid payroll #10, item #11/)).toBeTruthy();
   const correctionLink = screen.getByRole('link', { name: 'View correction' });
   const href = new URL(correctionLink.getAttribute('href')!, 'http://payroll.test');
   expect(href.pathname).toBe('/companies/3/pay-runs/100/payroll-items/101');

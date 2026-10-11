@@ -95,8 +95,9 @@ module TimeTracking
         error = state[:verification_error]
         { verification_status: error ? "needs_review" : "verified", verification_error: error, id: row.id, source_user_id: row.source_user_id, source_time_entry_id: row.source_time_entry_id,
           line_key: row.line_key, total_hours: row.total_hours.to_f, regular_hours: row.regular_hours.to_f,
-          overtime_hours: row.overtime_hours.to_f, original_pay_period_id: row.original_allocation.pay_period_id,
-          original_payroll_item_id: row.original_allocation.payroll_item_id,
+          overtime_hours: row.overtime_hours.to_f, original_pay_period_id: row.corrective_payroll_item.correction_for_payroll_item.pay_period_id,
+          frozen_origin_pay_period_id: row.original_allocation.pay_period_id, frozen_origin_payroll_item_id: row.original_allocation.payroll_item_id,
+          original_payroll_item_id: row.corrective_payroll_item.correction_for_payroll_item_id,
           corrective_pay_period_id: row.corrective_payroll_item.pay_period_id,
           corrective_payroll_item_id: row.corrective_payroll_item_id, accounting_only: true,
           source_receipt: row.time_tracking_correction_receipt&.delivery_snapshot&.merge(verification_error: error, can_retry: error ? false : row.time_tracking_correction_receipt.retryable?) }

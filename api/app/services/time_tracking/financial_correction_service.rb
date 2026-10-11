@@ -121,6 +121,30 @@ module TimeTracking
       raise Error, "Source confirmation needs review: #{e.message}"
     end
 
+    # Read-only proof of a previously accepted link. Accounting dispositions may
+    # refer to that history without enabling another ownership transfer.
+    def accepted_chain_proof!(link)
+      unless link.accepted? && link.valid? && link.payroll_item.pay_period_id == @period.id
+        raise Error, "Financial successor receipt or ownership is unverified"
+      end
+      allocation = link.original_allocation
+      validate_frozen!(allocation)
+      proof = financial_proof(link.predecessor_payroll_item, link.payroll_item, committing: false)
+      receipt = original_void_receipt!(allocation, link.predecessor_payroll_item)
+      command = link.payload.fetch("obligation_correction")
+      line = OriginalAllocationProof.new(payroll_item: allocation.payroll_item, source: allocation.time_tracking_source,
+        source_user_id: allocation.source_user_id, source_user_uuid: allocation.verified_source_user_uuid).call[:lines]
+        .find { |row| row["source_time_entry_id"].to_s == allocation.source_time_entry_id && row["line_key"] == allocation.line_key }
+      unless command["financial_assertion"] == proof && command["source_time_entry_version"] == line["source_time_entry_version"] &&
+        command.dig("predecessor", "payment_voided_event_id") == receipt.event_id
+        raise Error, "Accepted financial command no longer matches the frozen work and reversal proof"
+      end
+      Client.new(allocation.time_tracking_source).validate_financial_correction_receipt!(link.accepted_receipt, expected: link.payload, historical: true)
+      { link: link.attributes, financial_assertion: proof, void_event_id: receipt.event_id }
+    rescue ArgumentError, Client::Error => e
+      raise Error, e.message
+    end
+
     # Called under the same company/period locks as native commit or catch-up.
     def plans(committing: false, item: nil)
       return [] unless @period.correction_run? && @period.source_pay_period_id.present?
