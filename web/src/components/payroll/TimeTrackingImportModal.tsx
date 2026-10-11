@@ -383,6 +383,9 @@ export function TimeTrackingImportModal({
     const isCurrentRequest = beginScopedRequest();
     setLoading(true);
     setError(null);
+    setCorrection(null);
+    setCorrectionReason('');
+    setCorrectionAcknowledged(false);
     try {
       const res = await payPeriodsApi.previewTimeTrackingImport(payPeriod.id, {
         source_id: selectedSource.id,
@@ -1117,7 +1120,7 @@ export function TimeTrackingImportModal({
           )}
           {step === 'review' && (
             <>
-              <Button variant="outline" disabled={correctionBusy} onClick={() => { if (!correctionBusy) setStep('select'); }}>Back</Button>
+              <Button variant="outline" disabled={loading || correctionBusy} onClick={() => { if (!loading && !correctionBusy) { requestGenerationRef.current += 1; setCorrection(null); setCorrectionReason(''); setCorrectionAcknowledged(false); setStep('select'); } }}>Back</Button>
               <Button onClick={handleApply} disabled={loading || correctionBusy || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}

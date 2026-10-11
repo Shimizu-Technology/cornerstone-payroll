@@ -109,7 +109,7 @@ module Api
           )
           render json: { source_pay_period: pay_period_json(@pay_period.reload),
             correction_run: pay_period_json(correction, include_items: true) }, status: :created
-        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, ActiveRecord::RecordInvalid => e
+        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 

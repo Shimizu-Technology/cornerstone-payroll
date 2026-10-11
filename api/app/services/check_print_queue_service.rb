@@ -58,7 +58,8 @@ class CheckPrintQueueService
   end
 
   def queue_item_for_payroll_item(item)
-    eligible = !item.voided? && item.net_pay.to_d.positive? && TimeTracking::FinancialCorrectionService.payment_blocker(item).nil?
+    blocker = TimeTracking::FinancialCorrectionService.payment_blocker(item) if !item.voided? && item.net_pay.to_d.positive?
+    eligible = !item.voided? && item.net_pay.to_d.positive? && blocker.nil?
     {
       key: "payroll_item:#{item.id}",
       source_type: "payroll_item",
@@ -73,7 +74,7 @@ class CheckPrintQueueService
       printed_at: item.check_printed_at&.iso8601,
       prepared_at: item.check_prepared_at&.iso8601,
       eligible: eligible,
-      disabled_reason: payroll_item_disabled_reason(item)
+      disabled_reason: payroll_item_disabled_reason(item, blocker)
     }
   end
 
@@ -104,11 +105,11 @@ class CheckPrintQueueService
     nil
   end
 
-  def payroll_item_disabled_reason(item)
+  def payroll_item_disabled_reason(item, blocker)
     return "Voided checks cannot be printed" if item.voided?
     return "Checks with no net pay cannot be printed" unless item.net_pay.to_d.positive?
 
-    TimeTracking::FinancialCorrectionService.payment_blocker(item)
+    blocker
   end
 
   def check_number_sort_key(check_number, fallback)

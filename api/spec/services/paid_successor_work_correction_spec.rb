@@ -284,4 +284,84 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(current.reload.net_pay).to eq(92.35)
     expect(disposition.corrective_payroll_item.net_pay).to eq(-23.09)
   end
+
+  [ "tax sync", "pay date correction" ].each do |operation|
+    it "keeps posted successor evidence verifiable after supported #{operation} and retries its same receipt" do
+      period, current = paid_successor
+      current.update!(check_date: period.pay_date) if operation == "pay date correction"
+      disposition = confirm
+      receipt = disposition.time_tracking_correction_receipt
+      retained = [ disposition.attributes, receipt.payload.deep_dup, current.check_events.order(:id).map(&:attributes) ]
+      if operation == "tax sync"
+        allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
+        allow_any_instance_of(PayrollTaxSyncService).to receive(:post_to_cst).and_return(Struct.new(:code, :body).new("204", ""))
+        PayrollTaxSyncJob.new.perform(period.id)
+        expect(period.reload.tax_sync_status).to eq("synced")
+      else
+        PayPeriodPayDateCorrectionService.call(pay_period: period, actor: actor,
+          new_pay_date: period.pay_date + 1.day, reason: "Correct the clerical synthetic pay date")
+        expect(current.reload.check_date).to eq(period.reload.pay_date)
+      end
+      expect(disposition.reload.verified!).to eq(disposition)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).verify_complete!).to eq(true)
+      receipt.update!(last_error: "Synthetic Source outage", enqueued_at: Time.current)
+      expect(receipt.dispatch!(retry_failed: true)).to be(true)
+      allow_any_instance_of(TimeTracking::Client).to receive(:record_accounting_correction_event).with(**receipt.payload.deep_symbolize_keys).and_return({})
+      TimeTrackingCorrectionReceiptJob.new.perform(receipt.id)
+      expect(receipt.reload.delivered_at).to be_present
+      expect([ disposition.reload.attributes, receipt.payload, current.check_events.order(:id).map(&:attributes) ]).to eq(retained)
+      expect(current.reload.net_pay).to eq(92.35)
+      expect(disposition.corrective_payroll_item.net_pay).to eq(-23.09)
+    end
+  end
+
+
+  it "verifies complete legacy target evidence without rewriting saved rows and rejects omitted material fields" do
+    period, current = paid_successor
+    resolver = TimeTracking::PaidCorrectionTarget.new(allocation: allocation, source: source,
+      line: next_import.raw_payload["employees"].first["adjustments"].first)
+    legacy = resolver.resolve.fetch(:evidence).deep_dup
+    legacy["version"] = 1
+    legacy.delete("target_tax_year")
+    legacy["target"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(current.attributes)))
+    legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes)))
+    retained = legacy.deep_dup
+    allow(PayrollTaxSyncService).to receive(:configured?).and_return(true)
+    allow_any_instance_of(PayrollTaxSyncService).to receive(:post_to_cst).and_return(Struct.new(:code, :body).new("204", ""))
+    PayrollTaxSyncJob.new.perform(period.id)
+    expect(resolver.matches_saved_evidence?(legacy)).to be(true)
+    expect(legacy).to eq(retained)
+    legacy["target"].delete("withholding_tax")
+    expect(resolver.matches_saved_evidence?(legacy)).to be(false)
+  end
+
+  { "net_pay" => 90, "withholding_tax" => 2, "social_security_tax" => 5, "medicare_tax" => 1,
+    "employer_social_security_tax" => 5, "employer_medicare_tax" => 1, "additional_withholding_override" => 3,
+    "withholding_tax_override" => 4, "calculation_context_snapshot" => { "tampered" => true },
+    "tax_rule_snapshot" => { "tampered" => true }, "timekeeping_context_snapshot" => { "tampered" => true } }.each do |field, value|
+    it "rejects posted material target #{field} drift" do
+      _period, current = paid_successor
+      disposition = confirm
+      current.update_columns(field => value)
+      expect { disposition.reload.verified! }.to raise_error(ArgumentError, /evidence no longer matches/)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).presentation.first[:verification_status]).to eq("needs_review")
+    end
+  end
+
+
+  it "keeps a cross-year date change and unknown target evidence versions fail closed" do
+    period, _current = paid_successor
+    disposition = confirm
+    resolver = TimeTracking::PaidCorrectionTarget.new(allocation: allocation, source: source,
+      line: next_import.raw_payload["employees"].first["adjustments"].first)
+    stored = disposition.corrective_payroll_item.calculation_context_snapshot.dig("corrective_paycheck", "source_accounting_target")
+    [ 99, "1", 1.0, nil ].each do |version|
+      expect(resolver.matches_saved_evidence?(stored.merge("version" => version))).to be(false)
+    end
+    expect { PayPeriodPayDateCorrectionService.call(pay_period: period, actor: actor,
+      new_pay_date: Date.new(2027, 1, 15), reason: "Synthetic cross-year change") }.to raise_error(PayPeriodPayDateCorrectionService::Error, /same tax year/)
+    period.update_columns(pay_date: Date.new(2027, 1, 15))
+    expect { disposition.reload.verified! }.to raise_error(ArgumentError, /evidence no longer matches/)
+  end
+
 end

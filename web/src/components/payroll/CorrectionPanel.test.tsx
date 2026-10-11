@@ -5,9 +5,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CorrectionPanel } from './CorrectionPanel';
 import { Card } from '@/components/ui/card';
 import type { PayPeriod } from '@/types';
-const mocks = vi.hoisted(() => ({ preflight: vi.fn(), reopen: vi.fn(), void: vi.fn() }));
-vi.mock('@/services/api', () => ({ payPeriodsApi: { correctionPreflight: mocks.preflight, reopenUnpaid: mocks.reopen, void: mocks.void } }));
-afterEach(cleanup);
+const mocks = vi.hoisted(() => ({ preflight: vi.fn(), reopen: vi.fn(), void: vi.fn(), get: vi.fn(), corrected: vi.fn(), company: 2 }));
+vi.mock('@/services/api', () => ({ payPeriodsApi: { correctionPreflight: mocks.preflight, reopenUnpaid: mocks.reopen, void: mocks.void, get: mocks.get, correctedHours: mocks.corrected } }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: mocks.company }) }));
+afterEach(() => { cleanup(); mocks.company = 2; });
 const period = { id: 83, company_id: 2, status: 'committed', can_void: true, pay_date: '2026-10-10' } as PayPeriod;
 const preflight = { eligible: true, blockers: [], employee_checks: [{ id: 10, check_number: '3108', payee: 'Example Employee', amount: 1393.15, status: 'assigned', already_voided: false }], other_payments: [{ id: 11, check_number: '3109', payee: 'Treasurer of Guam', amount: 103.66, status: 'assigned', already_voided: false }], requires_unpaid_acknowledgement: true };
 function mount(inCard = false) {
@@ -143,4 +144,36 @@ it('returns to its own panel when pointer activation did not focus the opener', 
   expect(document.activeElement).not.toBe(unrelated);
   expect(mocks.void).not.toHaveBeenCalled();
   unrelated.remove();
+});
+
+
+it('refreshes the parent pay period after source confirmation and exposes refresh failures for retry', async () => {
+  vi.clearAllMocks();
+  const onChange = vi.fn();
+  const linked = { ...period, source_correction_required: false, source_payment_blocker: null };
+  mocks.corrected.mockResolvedValue({ corrected_hours: { required: true, status: 'confirmed', items: [] } });
+  mocks.get.mockRejectedValueOnce(new Error('Payroll refresh unavailable')).mockResolvedValueOnce({ pay_period: linked });
+  render(<MemoryRouter><CorrectionPanel payPeriod={{ ...period, source_correction_required: true }} onPayPeriodChange={onChange} returnTo="/companies/2/pay-runs" /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh connection' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Payroll refresh unavailable');
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh connection' }));
+  await waitFor(() => expect(mocks.get).toHaveBeenCalledWith(83, 2));
+  await waitFor(() => expect(onChange).toHaveBeenCalledExactlyOnceWith(linked));
+});
+
+it('ignores a parent period refresh that completes after the operator changes payroll context', async () => {
+  vi.clearAllMocks();
+  const onChange = vi.fn();
+  let resolve!: (value: { pay_period: PayPeriod }) => void;
+  mocks.corrected.mockResolvedValue({ corrected_hours: { required: true, status: 'confirmed', items: [] } });
+  mocks.get.mockReturnValue(new Promise(yes => { resolve = yes; }));
+  const { rerender } = render(<MemoryRouter><CorrectionPanel payPeriod={{ ...period, source_correction_required: true }} onPayPeriodChange={onChange} returnTo="/companies/2/pay-runs" /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh connection' }));
+  await waitFor(() => expect(mocks.get).toHaveBeenCalledWith(83, 2));
+  mocks.company = 8;
+  rerender(<MemoryRouter><CorrectionPanel payPeriod={{ ...period, source_correction_required: true }} onPayPeriodChange={onChange} returnTo="/companies/2/pay-runs" /></MemoryRouter>);
+  resolve({ pay_period: { ...period, source_correction_required: false } });
+  await Promise.resolve();
+  expect(onChange).not.toHaveBeenCalled();
 });
