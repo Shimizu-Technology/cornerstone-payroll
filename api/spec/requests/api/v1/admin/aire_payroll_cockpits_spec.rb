@@ -77,10 +77,11 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       it "does not expose another company's saved links through the fallback" do
         other_period = create(:pay_period, :committed, company: create(:company))
 
+        expect(client).not_to receive(:payroll_cockpit_manual_review)
         get "/api/v1/admin/pay_periods/#{other_period.id}/aire_payroll_cockpit/manual_review"
 
         expect(response).to have_http_status(:not_found)
-        expect(response.body).not_to include(employee.full_name, "cornerstone_manual_allocations")
+        expect(response.body).not_to include(employee.full_name, "PRIVATE-ISSUE-INTENT", "PRIVATE-SOURCE-CONTRACT")
       end
 
       it "uses the same read-only saved review for a temporary source HTTP failure" do
