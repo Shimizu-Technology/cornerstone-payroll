@@ -246,12 +246,31 @@ module TimeTracking
     def issue_with_durable_intent!(allocation, **payload)
       allocation.with_lock do
         if allocation.payment_issue_intent.blank?
-          allocation.update!(payment_issue_intent: payload.stringify_keys)
+          original_source = allocation.time_tracking_source.reload
+          unless original_source.remote_identity_pinned?
+            raise TimeTracking::Client::Error, "Verify the original source installation before issuing manual payroll hours"
+          end
+          allocation.update!(payment_issue_intent: payload.stringify_keys.merge(
+            "source_instance_id" => original_source.expected_source_instance_id,
+            "source_contract" => {
+              "protocol" => original_source.source_protocol,
+              "protocol_version" => original_source.source_protocol_version,
+              "capabilities" => original_source.source_capabilities.sort,
+              "policy_constraints" => original_source.source_policy_constraints
+            }))
         end
       end
       # Reuse the saved original command and tuple after an uncertain response.
-      intent = allocation.reload.payment_issue_intent.symbolize_keys
-      client_for(allocation).issue_payroll_manual_allocation(**intent)
+      intent = allocation.reload.payment_issue_intent
+      issue_saved_intent!(allocation, intent)
+    end
+
+    def issue_saved_intent!(allocation, intent)
+      # The client reloads the source. Check the saved pin after that reload so
+      # a reconfigured installation cannot receive the original command.
+      client = client_for(allocation)
+      verify_issue_source!(allocation, intent)
+      client.issue_payroll_manual_allocation(**intent.except("source_instance_id", "source_contract").symbolize_keys)
     end
 
     def sync_cancellation!(allocation)
@@ -262,8 +281,8 @@ module TimeTracking
       # A remote issue may have succeeded before its local status write failed.
       # Replay that exact durable command, then cancel its acknowledged version.
       if allocation.payment_issue_intent.present? && !intent.key?("expected_version")
-        result = client_for(allocation).issue_payroll_manual_allocation(**allocation.payment_issue_intent.symbolize_keys)
-        remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
+        result = issue_saved_intent!(allocation, allocation.payment_issue_intent)
+        remote = issued_allocation_acknowledgement!(result, allocation)
         allocation.with_lock { allocation.update!(remote_version: remote.fetch("version")) }
       end
       unless intent.key?("expected_version")
@@ -352,13 +371,102 @@ module TimeTracking
     end
 
     def persist_remote_transition!(allocation, from, to, result)
-      remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
+      remote = to == "issued" ? issued_allocation_acknowledgement!(result, allocation) :
+        remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
       allocation.with_lock do
         next unless allocation.status == from
 
         allocation.update!(payment_issue_intent: {}, status: to, remote_version: remote.fetch("version"),
                            last_sync_error: nil, last_synced_at: Time.current)
       end
+    end
+
+    def verify_issue_source!(allocation, intent)
+      original_source = allocation.time_tracking_source.reload
+      contract = intent["source_contract"]
+      unless original_source.remote_identity_pinned? && intent["source_instance_id"].present? &&
+        intent["source_instance_id"] == original_source.expected_source_instance_id && contract.is_a?(Hash) &&
+        contract["protocol"] == ConnectionIdentity::PROTOCOL &&
+        ConnectionIdentity::SUPPORTED_PROTOCOL_VERSIONS.include?(contract["protocol_version"]) &&
+        contract["capabilities"].is_a?(Array) && contract["capabilities"].include?("manual_allocations") &&
+        contract["policy_constraints"].is_a?(Hash)
+        raise TimeTracking::Client::Error, "The saved manual payment needs its original verified source installation; review the source before retrying"
+      end
+    end
+
+    def issued_allocation_acknowledgement!(result, allocation)
+      remote = remote_allocation_acknowledgement!(result, expected_id: allocation.remote_allocation_id)
+      intent = allocation.payment_issue_intent
+      verify_issue_source!(allocation, intent)
+      identity = ConnectionIdentity.validate!(source: allocation.time_tracking_source, payload: result)
+      contract = intent["source_contract"]
+      unless !identity.legacy && identity.source_instance_id == intent["source_instance_id"] &&
+        contract.is_a?(Hash) && identity.protocol == contract["protocol"] && identity.protocol_version == contract["protocol_version"] &&
+        identity.capabilities.include?("manual_allocations") && identity.capabilities == contract["capabilities"] &&
+        identity.policy_constraints == contract["policy_constraints"] &&
+        valid_issued_allocation?(result, remote, allocation, intent)
+        raise TimeTracking::Client::Error, "The source did not prove this exact issued manual payment; update the source receipt support and retry the saved sync"
+      end
+
+      remote
+    rescue ConnectionIdentity::Error => e
+      raise TimeTracking::Client::Error, e.message
+    end
+
+    def valid_issued_allocation?(result, remote, allocation, intent)
+      command = result["command"]
+      return false unless command.is_a?(Hash) && command["id"] == intent["command_id"] &&
+        [ true, false ].include?(command["replayed"]) && intent["command_id"] == allocation.issue_command_id &&
+        intent["allocation_id"].to_s == allocation.remote_allocation_id.to_s && remote["status"] == "issued" &&
+        intent["expected_version"].is_a?(Integer) && remote["version"] > intent["expected_version"] &&
+        valid_issued_command_result?(result, remote, intent)
+
+      expected = {
+        "source_time_entry_id" => allocation.source_time_entry_id,
+        "source_time_entry_version" => allocation.source_time_entry_version,
+        "source_user_uuid" => allocation.source_user_uuid,
+        "work_date" => allocation.original_work_date.iso8601,
+        "pay_date" => allocation.pay_period.pay_date.iso8601,
+        "external_pay_period_id" => allocation.pay_period_id.to_s,
+        "external_payroll_item_id" => allocation.payroll_item_id.to_s
+      }
+      return false unless expected.all? { |key, value| remote[key] == value }
+      return false unless cancellation_hours_match?(remote["regular_hours"], allocation.regular_hours) &&
+        cancellation_hours_match?(remote["overtime_hours"], allocation.overtime_hours) &&
+        cancellation_hours_match?(remote["total_hours"], allocation.total_hours)
+
+      payment = remote["issued_payment"]
+      return false unless payment.is_a?(Hash) && valid_issue_event_id?(payment["event_id"]) && payment["event_type"] == "issued"
+      return false unless %w[payment_method payment_reference payment_effective_on].all? do |key|
+        remote[key] == intent[key] && payment[key] == intent[key]
+      end
+
+      [ remote["issued_at"], payment["occurred_at"] ].all? do |time|
+        time.is_a?(String) && Time.iso8601(time) == Time.iso8601(intent.fetch("occurred_at"))
+      end
+    rescue ArgumentError, TypeError, KeyError
+      false
+    end
+
+    def valid_issue_event_id?(value)
+      (value.is_a?(String) && value.present?) || (value.is_a?(Integer) && value.positive?)
+    end
+
+    def valid_issued_command_result?(result, remote, intent)
+      receipt = result["command_result"]
+      return false unless receipt.is_a?(Hash) && receipt["expected_version"].is_a?(Integer) &&
+        receipt["result_version"].is_a?(Integer) && receipt["expected_version"] == intent["expected_version"] &&
+        receipt["result_version"] == remote["version"] && receipt["status"] == "issued" &&
+        receipt["manual_allocation_id"].to_s == remote["id"].to_s && receipt["integration"] == result["integration"]
+
+      snapshot = receipt["manual_allocation"]
+      return false unless snapshot.is_a?(Hash) && snapshot["issued_payment"].is_a?(Hash) && remote["issued_payment"].is_a?(Hash)
+
+      fields = %w[id version source_time_entry_id source_time_entry_version source_user_uuid work_date pay_date
+        time_category_id regular_hours overtime_hours total_hours external_pay_period_id external_payroll_item_id
+        status payment_method payment_reference payment_effective_on issued_at]
+      fields.all? { |key| snapshot[key] == remote[key] } &&
+        snapshot["issued_payment"].except("reason") == remote["issued_payment"].except("reason")
     end
 
     def remote_allocation_acknowledgement!(result, expected_id: nil)

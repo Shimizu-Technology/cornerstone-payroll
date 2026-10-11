@@ -63,10 +63,18 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_account_link).and_return("account_link" => {
       "connected" => true, "aire_user_email" => actor.email
     })
-    allow(client).to receive(:commit_payroll_manual_allocation)
-      .and_return("manual_allocation" => { "id" => "501", "version" => 0 })
-    allow(client).to receive(:issue_payroll_manual_allocation)
-      .and_return("manual_allocation" => { "id" => "501", "version" => 1 })
+    allow(client).to receive(:commit_payroll_manual_allocation) do
+      unless source.remote_identity_pinned?
+        source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+          source_protocol_version: "1.0", identity_verified_at: Time.current,
+          source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
+      end
+      { "manual_allocation" => { "id" => "501", "version" => 0 } }
+    end
+    allow(client).to receive(:issue_payroll_manual_allocation) do |request|
+      allocation = TimeTrackingManualAllocation.find_by!(issue_command_id: request.fetch(:command_id))
+      manual_issue_receipt(allocation, request)
+    end
   end
 
   it "preflights exact identities, checks, and source entries without writing" do
@@ -324,7 +332,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["finalized_batch_entries"] << manifest["finalized_batch_entries"].first.merge(
       "source_line_key" => "category:2", "regular_hours" => "3.00")
     source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-      source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
     source.update_column(:historical_reconciliation_required, true)
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = period.end_date.iso8601
@@ -350,7 +359,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
   it "rejects old scope and does not certify entries left outside approved dispositions" do
     source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-      source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = (period.end_date - 1).iso8601
     expect { described_class.new(manifest: manifest, actor: actor).preview! }
@@ -391,7 +401,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
     before do
       source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-        source_protocol_version: "2.0", identity_verified_at: Time.current)
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
       source.update_column(:historical_reconciliation_required, true)
       item.update!(hours_worked: 3.05, gross_pay: 30.5, net_pay: 25)
       manifest["source_instance_id"] = source.expected_source_instance_id
@@ -536,7 +547,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
     before do
       source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-        source_protocol_version: "2.0", identity_verified_at: Time.current)
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
       source.update_column(:historical_reconciliation_required, true)
       manifest["source_instance_id"] = source.expected_source_instance_id
       manifest["history_through_work_date"] = period.end_date.iso8601
@@ -705,7 +717,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
   it "keeps completion closed when the fresh final inventory gains an unreviewed entry" do
     source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-      source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
     source.update_column(:historical_reconciliation_required, true)
     manifest["source_instance_id"] = source.expected_source_instance_id
     manifest["history_through_work_date"] = period.end_date.iso8601
@@ -734,7 +747,8 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     create(:company_assignment, user: actor, company: company)
     expect(StaffRolePolicy.allowed?(actor, :manage_client_configuration)).to be(false)
     source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
-      source_protocol_version: "2.0", identity_verified_at: Time.current)
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
     source.update_column(:historical_reconciliation_required, true)
     mapping = TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee,
       source_user_id: "91", source_user_uuid: nil)
