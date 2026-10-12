@@ -53,4 +53,32 @@ RSpec.describe TimeTracking::Client, "saved payment-resolution actor" do
     client.resolve_payroll_payment_attestation(attestation_id: "501", verified_saved_capability: true, **command)
     expect(request).to have_been_requested.twice
   end
+
+  it "sends verified period filters before Source pagination and keeps legacy reads unchanged" do
+    verified = create(:time_tracking_source, company: company, source_type: "custom", remote_source_identifier: "compatible_clock",
+      base_url: "https://clock.example.test", shared_secret: "test-secret", expected_source_instance_id: SecureRandom.uuid,
+      source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: %w[payment_attestations payment_attestation_resolution_v1])
+    integration = { protocol: verified.source_protocol, protocol_version: verified.source_protocol_version,
+      source_instance_id: verified.expected_source_instance_id, source_type: "compatible_clock", capabilities: verified.source_capabilities }
+    client = described_class.new(verified, actor: actor,
+      destination_policy: TimeTracking::DestinationPolicy.new(environment: "test", resolver: ->(_host) { [ "8.8.8.8" ] }))
+    uuid = SecureRandom.uuid
+    request = stub_request(:get, "https://clock.example.test/api/v1/payroll/cockpit/payment_attestations")
+      .with(query: { source_user_uuid: uuid, page: 1, per_page: 250, start_date: "2026-08-01", end_date: "2026-08-15" })
+      .to_return(status: 200, headers: { "Content-Type" => "application/json" }, body: { integration: integration, payment_attestations: [], pagination: { total_pages: 1 } }.to_json)
+    client.payroll_payment_attestations(source_user_uuid: uuid, start_date: "2026-08-01", end_date: "2026-08-15")
+    expect(request).to have_been_requested.once
+    expect { client.payroll_payment_attestations(source_user_uuid: uuid, start_date: "2026-08-01") }
+      .to raise_error(described_class::Error, /Both work-period dates/)
+    verified.update!(source_capabilities: [ "payment_attestations" ])
+    legacy_read = stub_request(:get, "https://clock.example.test/api/v1/payroll/cockpit/payment_attestations")
+      .with(query: { source_user_uuid: uuid, page: 1, per_page: 250 })
+      .to_return(status: 200, headers: { "Content-Type" => "application/json" },
+        body: { integration: integration.merge(capabilities: verified.source_capabilities), payment_attestations: [] }.to_json)
+    client.payroll_payment_attestations(source_user_uuid: uuid)
+    expect(legacy_read).to have_been_requested.once
+    expect { client.payroll_payment_attestations(source_user_uuid: uuid, start_date: "2026-08-01", end_date: "2026-08-15") }
+      .to raise_error(described_class::Error, /does not support/)
+  end
 end

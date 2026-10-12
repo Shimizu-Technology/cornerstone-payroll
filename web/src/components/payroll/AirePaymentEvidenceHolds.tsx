@@ -110,7 +110,13 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
         : 'The saved receipt is still pending. Hours remain reserved; payment changes remain blocked.');
       await load();
       if (current === actionGeneration.current) onChanged();
-    } catch (caught) { if (current === actionGeneration.current) setError(caught instanceof Error ? caught.message : 'Could not reconcile the saved match'); }
+    } catch (caught) {
+      if (current === actionGeneration.current) {
+        const message = caught instanceof Error ? caught.message : 'Could not reconcile the saved match';
+        await load();
+        if (current === actionGeneration.current) setError(message);
+      }
+    }
     finally { if (current === actionGeneration.current) setBusy(false); }
   };
 

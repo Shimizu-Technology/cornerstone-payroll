@@ -86,15 +86,12 @@ module Api
             company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
           payment_resolution_service.sync!(allocation)
           render json: { payment_resolution: payment_resolution_service.present(allocation.reload) }
-        rescue TimeTracking::PaymentAttestationResolutionService::Error => e
+        rescue TimeTracking::PaymentAttestationResolutionService::Error, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Not found" }, status: :not_found
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
-        end
-
-        def payment_resolution_service
-          @payment_resolution_service ||= TimeTracking::PaymentAttestationResolutionService.new(
-            pay_period: @pay_period, source: @source, actor: current_user)
         end
 
         def manual_review
@@ -377,6 +374,11 @@ module Api
         end
 
         private
+
+        def payment_resolution_service
+          @payment_resolution_service ||= TimeTracking::PaymentAttestationResolutionService.new(
+            pay_period: @pay_period, source: @source, actor: current_user)
+        end
 
         def require_manual_reconciliation_access!
           return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)

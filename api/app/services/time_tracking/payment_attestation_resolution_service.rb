@@ -12,6 +12,7 @@ module TimeTracking
 
     def create!(attestation_id:, source_user_uuid:, payroll_item_id:, expected_version:, reason:)
       authorize!
+      source_user_uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)
       explanation = reason.to_s.strip
       raise Error, "Explain this exact payment match in at least 20 characters" if explanation.length < 20
       existing = source.time_tracking_manual_allocations.find_by(source_payment_attestation_id: attestation_id.to_s)
@@ -42,12 +43,12 @@ module TimeTracking
       end
       # Cross-period adjustment items are allowed, scoped to the same company.
       item = PayrollItem.joins(:pay_period).where(pay_periods: { company_id: pay_period.company_id }).find(payroll_item_id)
+      client = actor_client
       allocation = PaymentCancellationBridge.with_item_lock(item.id) do
         item.pay_period.with_lock do
           item.with_lock do
             validate_item!(item, source_user_uuid, regular, overtime)
             payment = native_payment!(item)
-            client = actor_client
             intent = hold.slice("source_time_entry_id", "source_time_entry_version", "source_user_uuid", "work_date")
               .merge("command_id" => SecureRandom.uuid, "expected_version" => hold.fetch("version"),
                 "regular_hours" => regular.to_s("F"), "overtime_hours" => overtime.to_s("F"),
@@ -94,8 +95,13 @@ module TimeTracking
         end
       end
       allocation
-    rescue Client::Error, ConnectionIdentity::Error, KeyError, TypeError, NoMethodError => e
-      allocation.with_lock { allocation.update!(last_sync_error: e.message) }
+    rescue Client::Error, ConnectionIdentity::Error, KeyError, TypeError, NoMethodError, ActiveRecord::RecordInvalid => e
+      # A failed acknowledgement leaves dirty in-memory attributes. Record only
+      # the error on the durable pending row, without replacing any saved tuple
+      # or overwriting a concurrent successful reconciliation.
+      TimeTrackingManualAllocation.where(id: allocation.id, payment_resolution_receipt: {})
+        .where.not(payment_resolution_intent: {}).update_all(last_sync_error: e.message, updated_at: Time.current)
+      allocation.reload
       raise Client::Error, e.message if raise_on_failure
 
       allocation
@@ -171,7 +177,8 @@ module TimeTracking
       end
       result = []
       1.upto(10) do |page|
-        payload = actor_client.payroll_payment_attestations(source_user_uuid: uuid, page: page)
+        payload = actor_client.payroll_payment_attestations(source_user_uuid: uuid, page: page,
+          start_date: pay_period.start_date.iso8601, end_date: pay_period.end_date.iso8601)
         result.concat(payload.fetch("payment_attestations"))
         return result if page >= Integer(payload.fetch("pagination").fetch("total_pages"))
       end
