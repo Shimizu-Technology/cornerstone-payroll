@@ -27,11 +27,8 @@ module TimeTracking
             .merge("source_user_uuid" => mapping.source_user_uuid, "employee_name" => mapping.employee.full_name)
         end
       end
-      holds = payload.fetch("payment_attestations", []).filter_map do |hold|
-        next unless mappings[hold["source_user_uuid"]] && in_period?(hold["original_work_date"])
-
-        find_attestation!(hold.fetch("id"), hold.fetch("source_user_uuid"))
-      end
+      holds = mappings.keys.flat_map { |uuid| attestations_for(uuid) }.select { |hold| in_period?(hold["work_date"]) }
+        .map { |hold| hold.merge("employee_name" => mappings.fetch(hold["source_user_uuid"]).employee.full_name) }
       { candidates: candidates.uniq { |entry| entry.fetch("source_time_entry_id") }, payment_attestations: holds }
     end
 
@@ -53,6 +50,10 @@ module TimeTracking
       mapping!(source_user_uuid)
       hold = find_attestation!(attestation_id, source_user_uuid)
       conflict!("This payment hold belongs to a different work period") unless in_period?(hold["work_date"])
+      if TimeTrackingManualAllocation.pending_payment_resolution.exists?(time_tracking_source: @source,
+        source_payment_attestation_id: attestation_id.to_s)
+        conflict!("Reconcile the saved reported-payment match before withdrawing this report")
+      end
       # A source edit must not prevent a reasoned retraction. The frozen hold identity
       # scopes the command; AIRE serializes it against finalization and routes review.
       @client.retract_payroll_payment_attestation(attestation_id: attestation_id,
