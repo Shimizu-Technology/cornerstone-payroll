@@ -16,7 +16,7 @@ module Api
           ).call
 
           render json: { import: import_json(import) }
-        rescue TimeTracking::Client::Error, ArgumentError => e
+        rescue TimeTracking::Client::Error, ArgumentError, TimeTrackingEmployeeMapping::IdentityConflict => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
