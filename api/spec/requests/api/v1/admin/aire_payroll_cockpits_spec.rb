@@ -983,6 +983,11 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_resolutions/1/retry"
       expect(response).to have_http_status(:forbidden)
     end
+    it "returns a controlled JSON404 for a missing saved resolution" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_resolutions/999999/retry"
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body).to eq("error" => "Not found")
+    end
     it "rejects an unassigned accountant despite the historical staff capability" do
       home = create(:company, organization: company.organization)
       admin.update!(role: "accountant", company: home)

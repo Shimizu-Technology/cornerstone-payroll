@@ -175,3 +175,18 @@ it('retains resolved Source report history after pending list becomes empty', as
   expect(screen.getByText(/current source allocation: committed/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Retract hold' })).toBeNull();
 });
+
+
+it('refreshes the durable pending error after a rejected saved retry and keeps the new action feedback visible', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValueOnce({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true, payment_resolutions: [savedMatch] })
+    .mockResolvedValue({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true,
+      payment_resolutions: [{ ...savedMatch, last_sync_error: 'New saved receipt rejection' }] });
+  mocks.retry.mockRejectedValue(new Error('New saved receipt rejection'));
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Retry saved match' }));
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+  expect((await screen.findByRole('alert')).textContent).toContain('New saved receipt rejection');
+  expect(screen.queryByText('Lost Source receipt')).toBeNull();
+  expect(screen.getAllByText('New saved receipt rejection').length).toBe(2);
+});

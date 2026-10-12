@@ -242,6 +242,44 @@ RSpec.describe TimeTracking::PaymentAttestationResolutionService do
     expect(allocation.last_sync_error).to include("did not prove")
   end
 
+  it "normalizes UUID case for new and existing exact matches and scopes Source reads to this work period" do
+    allocation = service.create!(attestation_id: "501", source_user_uuid: uuid.upcase, payroll_item_id: item.id, expected_version: 3, reason: reason)
+    expect(allocation.source_user_uuid).to eq(uuid)
+    expect(client).to have_received(:payroll_payment_attestations).with(source_user_uuid: uuid, page: 1,
+      start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
+    expect { service.create!(attestation_id: "501", source_user_uuid: uuid.upcase, payroll_item_id: item.id, expected_version: 3, reason: reason) }
+      .not_to change(TimeTrackingManualAllocation, :count)
+  end
+
+  it "records local acknowledgement failure without losing the saved command and reconciles its exact replay" do
+    fail_ack = true
+    allow(TimeTrackingManualAllocation).to receive(:create!).and_wrap_original do |original, **attributes|
+      record = original.call(**attributes)
+      allow(record).to receive(:update!).and_wrap_original do |update, **changes|
+        if changes.key?(:payment_resolution_receipt) && fail_ack
+          fail_ack = false
+          record.assign_attributes(changes)
+          record.errors.add(:base, "Synthetic local acknowledgement write failed")
+          raise ActiveRecord::RecordInvalid, record
+        end
+        update.call(**changes)
+      end
+      record
+    end
+    allocation = create_match
+    original_intent = allocation.reload.payment_resolution_intent
+    expect(allocation.status).to eq("pending_commit")
+    expect(allocation.remote_allocation_id).to be_nil
+    expect(allocation.last_sync_error).to include("Synthetic local acknowledgement write failed")
+    expect(allocation.payment_resolution_receipt).to eq({})
+    service.sync!(allocation)
+    expect(allocation.reload.status).to eq("issued")
+    expect(allocation.payment_resolution_intent).to eq(original_intent)
+    requests = []
+    expect(client).to have_received(:resolve_payroll_payment_attestation).twice { |payload| requests << payload }
+    expect(requests.first).to eq(requests.last)
+  end
+
   it "requires explicit capability for AIRE and compatible producers, never legacy fallback" do
     source.update!(source_capabilities: [])
     expect { create_match }.to raise_error(described_class::Error, /capability/)

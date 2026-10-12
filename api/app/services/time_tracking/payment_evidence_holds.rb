@@ -83,7 +83,11 @@ module TimeTracking
       @attestations[uuid] ||= begin
         accumulated = []
         1.upto(10) do |page|
-          payload = @client.payroll_payment_attestations(source_user_uuid: uuid, page: page)
+          query = { source_user_uuid: uuid, page: page }
+          if @source.supports?(:payment_attestation_resolution_v1)
+            query.merge!(start_date: @pay_period.start_date.iso8601, end_date: @pay_period.end_date.iso8601)
+          end
+          payload = @client.payroll_payment_attestations(**query)
           rows = payload.fetch("payment_attestations")
           accumulated.concat(rows)
           total_pages = Integer(payload.fetch("pagination").fetch("total_pages"))

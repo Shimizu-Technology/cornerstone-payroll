@@ -289,9 +289,16 @@ module TimeTracking
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
-    def payroll_payment_attestations(source_user_uuid:, page: 1)
+    def payroll_payment_attestations(source_user_uuid:, page: 1, start_date: nil, end_date: nil)
       require_capability!(:payment_attestations)
-      uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
+      query = { source_user_uuid: source_user_uuid, page: page, per_page: 250 }
+      if start_date.present? || end_date.present?
+        require_capability!(:payment_attestation_resolution_v1)
+        raise Error, "Both work-period dates are required for payment evidence review" if start_date.blank? || end_date.blank?
+
+        query.merge!(start_date: start_date, end_date: end_date)
+      end
+      uri = payroll_cockpit_uri("/payment_attestations", query)
       require_secure_payroll_transport!(uri)
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
