@@ -642,7 +642,8 @@ class PayrollCalculator
       "default" => default,
       "tracking_mode" => loan.tracking_mode,
       "payment_amount" => loan.payment_amount.to_s,
-      "first_deduction_date" => loan.first_deduction_date.to_s
+      "first_deduction_date" => loan.first_deduction_date.to_s,
+      "scheduled_request" => NamedPayrollLoanInput.scheduled_request(loan, pay_period.pay_date).to_d.to_s("F")
     }
   end
 
