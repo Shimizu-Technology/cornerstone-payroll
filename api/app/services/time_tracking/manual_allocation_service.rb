@@ -115,6 +115,10 @@ module TimeTracking
     def sync!(allocation, raise_on_failure: false)
       PaymentCancellationBridge.with_item_lock(allocation.payroll_item_id) do
         validate_sync_source!(allocation.reload)
+        if allocation.payment_resolution_pending?
+          PaymentAttestationResolutionService.new(pay_period: pay_period, source: source, actor: actor).sync!(allocation, raise_on_failure: true)
+          return allocation
+        end
         4.times do
           allocation.reload
           transitioned = if allocation.payment_cancellation_intent.present? && allocation.status != "pending_commit"

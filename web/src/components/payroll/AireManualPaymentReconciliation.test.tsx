@@ -424,3 +424,18 @@ it('ignores older same-period reviews and clears drafts when the period changes'
   expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
   expect((screen.getByLabelText('Regular hours to link') as HTMLInputElement).value).toBe('');
 });
+
+
+it('recovers a cross-period reported-payment match from its actual issued run without starting a new payment', async () => {
+  const pending = { ...allocation, status: 'pending_commit', source_payment_attestation_id: '501', payment_resolution_pending: true };
+  mocks.review.mockResolvedValue({ ...review, employees: [], cornerstone_manual_allocations: [pending] });
+  mocks.retry.mockResolvedValue({ manual_allocation: { ...pending, status: 'issued', payment_resolution_pending: false } });
+  render(<AireManualPaymentReconciliation {...props} />);
+  expect(await screen.findByText('Existing payment match receipt pending')).toBeTruthy();
+  expect(screen.getByText(/Retry sync reconciles that same command; it creates no new payment/)).toBeTruthy();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'Retry sync for entry 40' }));
+  expect(mocks.retry).toHaveBeenCalledWith(67, 9);
+  expect(mocks.money).not.toHaveBeenCalled();
+  expect(mocks.create).not.toHaveBeenCalled();
+});

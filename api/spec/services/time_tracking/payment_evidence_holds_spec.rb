@@ -77,8 +77,19 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
       { "source_user_uuid" => SecureRandom.uuid, "adjustments" => [ row ] }
     ], "payment_attestations" => [ hold.merge("original_work_date" => hold["work_date"]) ])
     expect(service.review[:candidates]).to eq([ row.except("source_kind").merge("source_user_uuid" => uuid, "employee_name" => employee.full_name) ])
-    expect(service.review[:payment_attestations]).to eq([ hold ])
+    expect(service.review[:payment_attestations]).to eq([ hold.merge("employee_name" => employee.full_name) ])
   end
+  it "requests only immutable work-period history from an explicitly verified resolution producer" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, identity_verified_at: Time.current,
+      source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0",
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ])
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [], "payment_attestations" => [])
+    expect(client).to receive(:payroll_payment_attestations).with(source_user_uuid: uuid, page: 1,
+      start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
+      .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 1 })
+    expect(service.review[:payment_attestations].first["id"]).to eq(hold["id"])
+  end
+
   it "fails explicitly when evidence history exceeds the bounded ten pages" do
     allow(client).to receive(:payroll_payment_attestations).and_return(
       "payment_attestations" => [], "pagination" => { "total_pages" => 11 })

@@ -27,6 +27,8 @@ module TimeTracking
     end
 
     def self.blocker_for(item, check_activity: nil)
+      pending_resolution = resolution_blocker_for(item)
+      return pending_resolution if pending_resolution
       return unless item.pay_period.committed?
       if item.source_accounting_correction_linked?
         return "This payment has an exact source accounting correction. Payment cancellation is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
@@ -56,6 +58,12 @@ module TimeTracking
         return "Finish syncing the earlier check cancellation before changing this payment method again."
       end
       nil
+    end
+
+    def self.resolution_blocker_for(item)
+      if item.time_tracking_manual_allocations.pending_payment_resolution.exists?
+        "Reconcile the saved reported-payment match before changing or voiding this payment. Its hours remain reserved."
+      end
     end
 
     def self.original_receipt(item, row, number)

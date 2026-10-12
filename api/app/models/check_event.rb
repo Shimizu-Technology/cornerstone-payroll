@@ -21,7 +21,18 @@ class CheckEvent < ApplicationRecord
   validate :user_belongs_to_payroll_organization
 
   before_validation :default_effective_on
+  before_create :guard_pending_payment_resolution
   before_update :prevent_mutation
+
+  def guard_pending_payment_resolution
+    return unless event_type.in?(%w[voided replaced renumbered delivered])
+
+    PayrollItem.where(id: payroll_item_id).lock.pluck(:id)
+    return unless (message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(payroll_item))
+
+    errors.add(:base, message)
+    raise ActiveRecord::RecordInvalid, self
+  end
   before_destroy :prevent_mutation
 
   scope :for_check,   ->(number) { where(check_number: number) }
@@ -59,7 +70,7 @@ class CheckEvent < ApplicationRecord
 
   def prevent_mutation
     errors.add(:base, "Check event history is append-only")
-    throw :abort
+    raise ActiveRecord::RecordInvalid, self
   end
 
   def effective_date_is_not_in_the_future
