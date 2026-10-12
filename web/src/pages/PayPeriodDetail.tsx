@@ -1302,12 +1302,18 @@ export function PayPeriodDetail({
     || payrollFieldDraftsChanged
   );
   const hasPendingCalculationChanges = isCalculated && hasStagedWorksheetChanges;
-  const standaloneLoanConflicts = namedLoanOptions.filter(option => (
-    option.eligible
-    && toNumber(loansMap[String(option.employee_id)]) > 0
-    && toNumber(option.current_amount) <= 0
-    && !(option.mode === 'override' && toNumber(option.requested_amount) === 0)
-  ));
+  const standaloneLoanConflicts = namedLoanOptions.filter(option => {
+    const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
+    const mode = draft?.mode ?? option.mode;
+    const requestedAmount = draft ? draft.amount : option.requested_amount;
+    const hasStagedNamedRepayment = hasStagedWorksheetChanges && draft?.mode === 'override'
+      && draft.amount != null && draft.amount > 0;
+    return option.eligible
+      && toNumber(loansMap[String(option.employee_id)]) > 0
+      && toNumber(option.current_amount) <= 0
+      && !hasStagedNamedRepayment
+      && !(mode === 'override' && requestedAmount != null && toNumber(requestedAmount) === 0);
+  });
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;

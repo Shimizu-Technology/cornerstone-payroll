@@ -111,6 +111,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
       } else {
         await page.getByLabel(`Loan deduction this payroll for ${name}`, { exact: true }).filter({ visible: true }).fill('40');
       }
+      await expect(page.getByText(/Clear the standalone one-time deduction/)).toHaveCount(0);
       await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
       await expect.poll(async () => (await period(scenario.period_id)).status).toBe('calculated');
       const saved = await period(scenario.period_id);

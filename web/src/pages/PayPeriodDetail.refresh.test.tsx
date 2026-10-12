@@ -484,3 +484,21 @@ it('saves both named and standalone amounts through worksheet recalculation', as
   expect(apiMocks.runPayroll.mock.calls[0][1].named_loan_payments).toEqual({ '30': { '2': { mode: 'override', amount: 300 } } });
   expect(apiMocks.runPayroll.mock.calls[0][1].loan_deductions).toEqual({ '30': 40 });
 });
+
+it('updates the separate-deduction warning for a staged zero skip while requiring recalculation', async () => {
+  const card = await renderLoanWorksheet('calculated', undefined, 40, 40);
+  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
+  fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
+  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('accepts a staged positive linked request alongside a separate amount without warning to clear it', async () => {
+  const card = await renderLoanWorksheet('calculated', undefined, 40, 40);
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
+  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
