@@ -68,11 +68,17 @@ class EmployeeLoan < ApplicationRecord
           raise ArgumentError, "Payroll loan payment belongs to another employee or client"
         end
         raise ArgumentError, "Reversed payroll payments cannot be reapplied; create a correction payroll" if existing
+        lock_repayment_configuration!
         snapshot = schedule_snapshot.to_h.stringify_keys
         if snapshot["tracking_mode"].present? && snapshot["tracking_mode"] != tracking_mode
           raise ArgumentError, "#{name}: deduction type changed. Unapprove and recalculate this payroll before committing"
         end
-        if snapshot["default"] && (snapshot["payment_amount"].to_s != payment_amount.to_s || snapshot["first_deduction_date"].to_s != first_deduction_date.to_s)
+        default_request_changed = snapshot["default"] && (
+          snapshot.key?("scheduled_request") ?
+            snapshot["scheduled_request"].to_d != NamedPayrollLoanInput.scheduled_request(self, transaction_pay_date(pay_period, date)).to_d :
+            payment_amount.nil?
+        )
+        if snapshot["default"] && (snapshot["payment_amount"].to_s != payment_amount.to_s || snapshot["first_deduction_date"].to_s != first_deduction_date.to_s || default_request_changed)
           raise ArgumentError, "#{name}: repayment schedule changed. Unapprove and recalculate this payroll before committing"
         end
         unless active? && repayment_schedule_active_on?(transaction_pay_date(pay_period, date)) && scheduled_payment_for(pay_date: transaction_pay_date(pay_period, date), requested_amount: amount) == amount
@@ -238,6 +244,17 @@ class EmployeeLoan < ApplicationRecord
   end
 
   private
+
+  # Keep schedule edits behind the loan payment until its transaction finishes.
+  # Loan controller edits take the same loan -> schedule lock order.
+  def lock_repayment_configuration!
+    assignments = employee_payroll_fields.order(:id).lock.to_a
+    PayrollFieldDefinition.where(id: assignments.map(&:payroll_field_definition_id)).order(:id).lock.load
+    if deduction_type_id.present?
+      employee.employee_deductions.where(deduction_type_id: deduction_type_id).order(:id).lock.load
+    end
+  end
+
 
   def training_replay_balance_before(pay_date)
     return current_balance unless company&.training_replay?
