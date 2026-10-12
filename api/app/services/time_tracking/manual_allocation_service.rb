@@ -13,36 +13,36 @@ module TimeTracking
     def create!(payroll_item_id:, source_time_entry_id:, source_time_entry_version:,
                 source_user_uuid:, regular_hours:, overtime_hours:, original_work_date:, note:,
                 classification_reconciliation: nil)
-      raise Error, "Commit the payroll before linking paid AIRE hours" unless pay_period.committed? && !pay_period.voided?
-      raise Error, "Connect an active AIRE source first" unless source&.active? && source.company_id == pay_period.company_id
+      raise Error, "Commit the payroll before linking paid hours" unless pay_period.committed? && !pay_period.voided?
+      raise Error, "Connect an active time-tracking source first" unless source&.active? && source.company_id == pay_period.company_id
 
       raise Error, "This source does not support manual payroll allocations" unless source.supports?(:manual_allocations)
 
       item = pay_period.payroll_items.find(payroll_item_id)
-      raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
-      raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
+      raise Error, "A voided paycheck cannot pay these hours" if item.voided?
+      raise Error, "Use the finalized source batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
 
       uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_user_uuid)
       mapping = source.time_tracking_employee_mappings.find_by(source_user_uuid: uuid, employee_id: item.employee_id)
-      raise Error, "Map this AIRE person to the payroll employee before linking hours" unless mapping
+      raise Error, "Map this source employee to the payroll employee before linking hours" unless mapping
 
       entry_id = source_time_entry_id.to_s
       version = begin
         Integer(source_time_entry_version.to_s, 10)
       rescue ArgumentError
-        raise Error, "Refresh AIRE and choose a valid dated time entry with exact hours"
+        raise Error, "Refresh the source and choose a valid dated time entry with exact hours"
       end
-      raise Error, "Refresh the AIRE time entry before linking it" if version.negative?
+      raise Error, "Refresh the source time entry before linking it" if version.negative?
       regular = decimal_hours!(regular_hours)
       overtime = decimal_hours!(overtime_hours)
-      raise Error, "Choose at least some AIRE hours" unless (regular + overtime).positive?
+      raise Error, "Choose at least some hours" unless (regular + overtime).positive?
       work_date = begin
         Date.iso8601(original_work_date.to_s)
       rescue Date::Error
-        raise Error, "Refresh AIRE and choose a valid dated time entry with exact hours"
+        raise Error, "Refresh the source and choose a valid dated time entry with exact hours"
       end
       explanation = note.to_s.strip
-      raise Error, "Explain which issued or committed payroll item covers these AIRE hours" if explanation.length < 10
+      raise Error, "Explain which issued or committed payroll item covers these hours" if explanation.length < 10
       validate_classification_reconciliation!(classification_reconciliation, item, entry_id, uuid, version, work_date, regular, overtime) if classification_reconciliation
       if !classification_reconciliation && TimeTrackingClassificationReconciliation.exists?(payroll_item_id: item.id)
         raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
@@ -61,11 +61,11 @@ module TimeTracking
       end
 
       allocation = item.with_lock do
-        raise Error, "A voided paycheck cannot pay AIRE hours" if item.voided?
+        raise Error, "A voided paycheck cannot pay these hours" if item.voided?
         unless item.effective_payment_delivery_method.in?(%w[paper_check direct_deposit])
-          raise Error, "Choose a supported payroll payment method before linking AIRE hours"
+          raise Error, "Choose a supported payroll payment method before linking hours"
         end
-        raise Error, "Use the finalized AIRE batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
+        raise Error, "Use the finalized source batch reconciliation for this paycheck" if item.time_tracking_entry_allocations.exists?
         if !classification_reconciliation && TimeTrackingClassificationReconciliation.exists?(payroll_item_id: item.id)
           raise Error, "Finish the reviewed historical classification reconciliation for this paycheck"
         end
@@ -75,17 +75,17 @@ module TimeTracking
           if matching_classification_allocation?(existing, classification_reconciliation, uuid, version, work_date, regular, overtime)
             next existing
           end
-          raise Error, "This AIRE time entry is already linked to this payroll item"
+          raise Error, "This source time entry is already linked to this payroll item"
         end
         allocated = item.pay_period.time_tracking_manual_allocations.where(payroll_item_id: item.id).where.not(status: "voided")
         if classification_reconciliation
           if allocated.sum(:regular_hours).to_d + allocated.sum(:overtime_hours).to_d + regular + overtime >
              item.hours_worked.to_d.round(2) + item.overtime_hours.to_d.round(2)
-            raise Error, "Selected AIRE hours exceed the total hours on this issued paycheck"
+            raise Error, "Selected hours exceed the total hours on this issued paycheck"
           end
         elsif allocated.sum(:regular_hours).to_d + regular > item.hours_worked.to_d.round(2) ||
               allocated.sum(:overtime_hours).to_d + overtime > item.overtime_hours.to_d.round(2)
-          raise Error, "Selected AIRE hours exceed the regular or overtime hours on this paycheck"
+          raise Error, "Selected hours exceed the regular or overtime hours on this paycheck"
         end
 
         TimeTrackingManualAllocation.create!(
@@ -155,14 +155,14 @@ module TimeTracking
              reconciliation.pay_period_id == pay_period.id && reconciliation.payroll_item_id == item.id &&
              reconciliation.time_tracking_source_id == source.id && reconciliation.employee_id == item.employee_id &&
              reconciliation.source_user_uuid == uuid
-        raise Error, "Historical classification review does not match this AIRE person and issued check"
+        raise Error, "Historical classification review does not match this source employee and issued check"
       end
       snapshot = Array(reconciliation.source_entries).find { |row| row["source_time_entry_id"].to_s == entry_id }
       unless snapshot && snapshot["source_time_entry_version"].is_a?(Integer) && snapshot["source_time_entry_version"] == version &&
              snapshot["original_work_date"] == work_date.iso8601 &&
              BigDecimal(snapshot["regular_hours"].to_s) == regular &&
              BigDecimal(snapshot["overtime_hours"].to_s) == overtime
-        raise Error, "This AIRE entry is not in the reviewed historical classification exception"
+        raise Error, "This source entry is not in the reviewed historical classification exception"
       end
       delivery = delivered_check_event_for(item)
       unless item.effective_payment_delivery_method == "paper_check" && item.check_number == reconciliation.check_number &&
@@ -359,11 +359,11 @@ module TimeTracking
       return false unless allocation.payroll_item.reload.voided?
 
       # A delivered check may still be cashed after a software void. Keep
-      # AIRE's paid claim until nonpayment/replacement evidence is reviewed.
+      # the source's paid claim until nonpayment/replacement evidence is reviewed.
       allocation.with_lock do
         if allocation.status == "issued"
           allocation.update!(
-            last_sync_error: "Delivered check was voided in Cornerstone. Verify bank nonpayment or replacement before releasing these AIRE hours."
+            last_sync_error: "Delivered check was voided in Cornerstone. Verify bank nonpayment or replacement before releasing these hours."
           )
         end
       end
@@ -475,7 +475,7 @@ module TimeTracking
       version = remote.is_a?(Hash) ? remote["version"] : nil
       valid_version = version.is_a?(Integer) && version >= 0
       unless id.match?(/\A[1-9]\d*\z/) && valid_version && (expected_id.nil? || id == expected_id.to_s)
-        raise TimeTracking::Client::Error, "AIRE returned an invalid manual allocation acknowledgement; retry the sync"
+        raise TimeTracking::Client::Error, "The source returned an invalid manual allocation acknowledgement; retry the sync"
       end
 
       remote
@@ -493,7 +493,7 @@ module TimeTracking
              adjustment["original_work_date"] == work_date.iso8601 &&
              regular <= BigDecimal(adjustment["regular_hours"].to_s) &&
              overtime <= BigDecimal(adjustment["overtime_hours"].to_s)
-        raise Error, "AIRE no longer shows these exact unpaid hours. Refresh the manual hours check."
+        raise Error, "The source no longer shows these exact unpaid hours. Refresh the manual hours check."
       end
     end
 
@@ -504,7 +504,7 @@ module TimeTracking
         source&.id == original_source.id && source.company_id == allocation.company_id
 
       raise TimeTracking::Client::Error.new(
-        "The manual allocation's original AIRE source is inactive or does not match this payroll. Review the source before retrying.",
+        "The manual allocation's original time-tracking source is inactive or does not match this payroll. Review the source before retrying.",
         response_status: 422
       )
     end
