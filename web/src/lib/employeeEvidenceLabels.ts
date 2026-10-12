@@ -13,7 +13,18 @@ export function receiptScopeLabel(value: string | null | undefined): string {
 }, "Receipt scope not recognized · line confirmation unavailable");
 }
 
-export function evidenceSourceLabel(value: string | null | undefined): string {
+export function evidenceSourceLabel(value: string | null | undefined, receiptScope?: string | null, identityState?: string | null): string {
+  const frozenReceiptScopes: Readonly<Record<string, string>> = {
+    frozen_batch_and_exact_authenticated_receipt: 'exact_line',
+    frozen_batch_with_unambiguous_entry_receipt: 'unambiguous_entry',
+    frozen_batch_with_ambiguous_entry_receipt: 'ambiguous_entry',
+    frozen_batch_with_batch_receipt: 'batch',
+    frozen_batch_with_none_receipt: 'none',
+  };
+  if (value && Object.hasOwn(frozenReceiptScopes, value)) {
+    if (identityState && identityState !== 'verified') return 'Saved batch · receipt identity needs review';
+    if (receiptScope !== frozenReceiptScopes[value]) return 'Saved batch · receipt scope needs review';
+  }
   return label(value, {
   "frozen_batch_and_exact_authenticated_receipt": "Saved batch and receipt for this line",
   "frozen_batch_with_unambiguous_entry_receipt": "Saved batch and receipt for the entry's only line",
@@ -25,13 +36,14 @@ export function evidenceSourceLabel(value: string | null | undefined): string {
 }, "Evidence source needs review");
 }
 
-export function coverageStateLabel(value: string | null | undefined, identityState?: string | null, receiptScope?: string | null): string {
+export function coverageStateLabel(value: string | null | undefined, identityState?: string | null, receiptScope?: string | null, manualEvidence = false): string {
   // Compatible producers can supply unfamiliar or conflicting fields independently.
   // Keep their hours intact, but do not present unconfirmed line coverage as issued.
   if (value === 'issued' && identityState && identityState !== 'verified') {
     return 'Employee identity needs review · payment coverage unconfirmed';
   }
-  if (value === 'issued' && receiptScope && !['exact_line', 'unambiguous_entry'].includes(receiptScope)) {
+  const lineReceiptConfirmed = receiptScope === 'exact_line' || receiptScope === 'unambiguous_entry';
+  if (value === 'issued' && !lineReceiptConfirmed && !(manualEvidence && !receiptScope)) {
     return 'Receipt needs review · line coverage unconfirmed';
   }
   return label(value, {
@@ -60,7 +72,7 @@ export function sourceKindLabel(value: string | null | undefined): string {
   "correction": "Correction hours",
   "manual": "Manually linked hours",
   "payment_attestation": "Reported payment"
-}, "Source hours");
+}, "Source hours · source needs review");
 }
 
 export function settlementStatusLabel(value: string | null | undefined): string {

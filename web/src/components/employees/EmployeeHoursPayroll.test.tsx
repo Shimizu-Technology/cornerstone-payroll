@@ -156,7 +156,24 @@ it.each([
   mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
   expect(await screen.findByText(/Entry #18 · .*needs review.*coverage unconfirmed/)).toBeTruthy();
   expect(screen.queryByText('Entry #18 · Issued payment coverage')).toBeNull();
+  expect(screen.queryByText('Saved batch and receipt for this line')).toBeNull();
+  expect(screen.getByText(context.identity_state === 'verified' ? 'Saved batch · receipt scope needs review' : 'Saved batch · receipt identity needs review')).toBeTruthy();
   expect(screen.getByText('Source REG 8.00 · OT 2.00')).toBeTruthy();
   expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage40.00');
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+});
+
+it.each([
+  { source_kind: 'current', provenance: 'frozen_batch_and_exact_authenticated_receipt', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
+  { source_kind: undefined, provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
+  { source_kind: 'current', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+])('keeps missing receipt scope unconfirmed except known manual evidence $source_kind', async (line) => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'missing-scope', source_time_entry_id: '18', coverage_state: 'issued', identity_state: 'verified', regular_hours: 8, overtime_hours: 0, ...line }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText(`Entry #18 · ${line.label}`)).toBeTruthy();
+  expect(screen.getByText('Source REG 8.00 · OT 0.00')).toBeTruthy();
   expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
 });
