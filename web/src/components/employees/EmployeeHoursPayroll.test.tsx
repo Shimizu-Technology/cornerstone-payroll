@@ -97,8 +97,8 @@ describe('Employee hours and payroll evidence', () => {
     } } });
     mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
     expect(await screen.findByText('1 retained line needs a receipt review. Confirm payment coverage for each frozen line.')).toBeTruthy();
-    expect(screen.getByText('Receipt scope: batch')).toBeTruthy();
-    expect(screen.getByText('Entry #18 · Receipt receipt_review')).toBeTruthy();
+    expect(screen.getByText('Receipt scope: Batch receipt only · no line confirmation')).toBeTruthy();
+    expect(screen.getByText('Entry #18 · Receipt needs review · line coverage unconfirmed')).toBeTruthy();
     expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage0.00');
     expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
   });
@@ -110,7 +110,35 @@ describe('Employee hours and payroll evidence', () => {
     expect(await screen.findByRole('link', { name: /Open exact source entry/ })).toHaveProperty('href', 'https://example.com/employee/42?entry=18');
     const actual = screen.getByText('Exact linked payroll results').parentElement!;
     expect(within(actual).getByText('Saved REG 41.00 · OT 0.00 · Holiday 0.00 · PTO 0.00')).toBeTruthy();
-    expect(within(actual).getByText(/Pay run status: draft/)).toBeTruthy();
+    expect(within(actual).getByText(/Pay run status: Draft/)).toBeTruthy();
     expect(screen.getByRole('link', { name: /Open exact payroll item/ }).getAttribute('href')).toContain('/pay-runs/5/payroll-items/9');
   });
+});
+
+it('explains saved receipt scope without using it to confirm a payment', async () => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'prepared', source_time_entry_id: '18', coverage_state: 'committed', identity_state: 'verified', receipt_scope: 'exact_line', regular_hours: 8, overtime_hours: 2, provenance: 'frozen_batch_and_exact_authenticated_receipt', reason: 'Chels kept this original note.' }],
+    settlement_cases: [{ public_id: 'case', source_time_entry_id: '18', status: 'in_payroll', origin_reason: 'created_after_cutoff', held_total_hours: 10 }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText('Entry #18 · Payroll committed · no active issued coverage')).toBeTruthy();
+  expect(screen.getByText('Receipt scope: Receipt for this saved line')).toBeTruthy();
+  expect(screen.getByText('Saved batch and receipt for this line')).toBeTruthy();
+  expect(screen.getByText('Chels kept this original note.')).toBeTruthy();
+  expect(screen.getByText(/Included in payroll · receipt confirmation pending · Historical reason: Entry was added after cutoff/)).toBeTruthy();
+  expect(screen.getByText('Source REG 8.00 · OT 2.00')).toBeTruthy();
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+});
+
+it('keeps unfamiliar evidence labels unresolved and preserves signed and unknown hours', async () => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'unknown', source_time_entry_id: '18', coverage_state: 'future_paid', identity_state: 'future_verified', receipt_scope: 'constructor', regular_hours: -1, overtime_hours: null, provenance: 'historical_attestation' }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText('Entry #18 · Coverage status needs review')).toBeTruthy();
+  expect(screen.getByText('Employee identity needs review')).toBeTruthy();
+  expect(screen.getByText('Receipt scope: Receipt scope not recognized · line confirmation unavailable')).toBeTruthy();
+  expect(screen.getByText('Evidence source needs review')).toBeTruthy();
+  expect(screen.getByText('Source REG -1.00 · OT Unknown')).toBeTruthy();
+  expect(screen.queryByText(/future_paid|future_verified|historical_attestation/)).toBeNull();
 });
