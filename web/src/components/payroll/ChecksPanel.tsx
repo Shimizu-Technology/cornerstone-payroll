@@ -1,12 +1,11 @@
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
-import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ReactElement } from 'react';
-import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, DirectDepositItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
@@ -124,7 +123,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
   const [depositTarget, setDepositTarget] = useState<DirectDepositItem | null>(null);
   const [deliveryTarget, setDeliveryTarget] = useState<CheckItem | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [checkPreview, setCheckPreview] = useState<PdfArtifact | null>(null);
+  const previewRequest = useRef(0);
+  const invalidatePreview = useCallback(() => { previewRequest.current++; }, []);
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
   const load = useCallback(async () => {
@@ -153,7 +154,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   useEffect(() => {
     setDepositTarget(null); setDeliveryTarget(null); setVoidTarget(null); setReprintTarget(null);
-  }, [runScope]);
+    previewRequest.current++;
+    setCheckPreview(null);
+    setPreviewItem(null);
+    setActionLoading(null);
+    return invalidatePreview;
+  }, [runScope, invalidatePreview]);
 
   const invalidateLoad = useCallback(() => { loadRequest.current++; }, []);
 
@@ -165,46 +171,35 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
 
-  // ---- Preview single check PDF ----
+  // Previewing never prepares or issues a check.
   const handlePreviewPdf = async (item: CheckItem) => {
+    const request = ++previewRequest.current;
+    const scope = currentRunScope.current;
     setActionLoading({ id: item.id, action: 'preview' });
     try {
       const blob = await checksApi.checkPdf(item.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
+      if (request !== previewRequest.current || scope !== currentRunScope.current) return;
+      setCheckPreview({
+        blob,
+        filename: `check_${item.check_number || item.id}.pdf`,
+        title: `Check #${item.check_number} — ${item.employee_name}`,
+        note: `Review this check here. Saving a package prepares it; recording its handoff marks it issued.${isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is available when needed.'}`,
+      });
       setPreviewItem(item);
     } catch (err) {
-      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
+      if (request === previewRequest.current && scope === currentRunScope.current) {
+        notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
+      }
     } finally {
-      setActionLoading(null);
+      if (request === previewRequest.current && scope === currentRunScope.current) setActionLoading(null);
     }
   };
 
   const handleClosePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+    previewRequest.current++;
+    setCheckPreview(null);
     setPreviewItem(null);
-  };
-
-  const handleDownloadFromPreview = () => {
-    if (!previewUrl || !previewItem) return;
-    const a = document.createElement('a');
-    a.href = previewUrl;
-    a.download = `check_${previewItem.check_number || previewItem.id}.pdf`;
-    a.click();
-  };
-
-  const handlePrintFromPreview = () => {
-    if (!previewUrl) return;
-    const printWindow = window.open(previewUrl);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        printWindow.print();
-      });
-    } else {
-      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups for this site to print checks.' });
-    }
+    setActionLoading(null);
   };
 
   const handleDownloadStubForItem = async (item: Pick<CheckItem, 'id' | 'employee_name'>) => {
@@ -928,63 +923,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
       <PdfPreview artifact={statementPreview} onClose={() => setStatementPreview(null)} />
 
-      {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
-      {previewUrl && previewItem && createPortal(
-        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
-          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Check #{previewItem.check_number} — {previewItem.employee_name}
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Preview sized for desktop review and printing checks onto stock paper. Generate a saved package to mark this check prepared.
-                  {isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is also available when needed.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {!previewItem.voided && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handlePrintStubForItem(previewItem)}
-                      disabled={isActionLoading(previewItem.id, 'stub')}
-                    >
-                      Print Stub
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleDownloadStubForItem(previewItem)}
-                      disabled={isActionLoading(previewItem.id, 'stub')}
-                    >
-                      Download Stub
-                    </Button>
-                  </>
-                )}
-                <Button variant="outline" size="sm" onClick={handlePrintFromPreview}>
-                  Print
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleDownloadFromPreview}>
-                  Download PDF
-                </Button>
-                <Button size="sm" onClick={handleClosePreview}>
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 bg-gray-100 p-5">
-              <iframe
-                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
-                className="h-full w-full rounded-xl border bg-white shadow-lg"
-                title="Check Preview"
-              />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <PdfPreview artifact={checkPreview} onClose={handleClosePreview} actions={previewItem && !previewItem.voided ? <>
+        <Button variant="outline" disabled={isActionLoading(previewItem.id, 'stub')} onClick={() => void handlePrintStubForItem(previewItem)}>Print Stub</Button>
+        <Button variant="outline" disabled={isActionLoading(previewItem.id, 'stub')} onClick={() => void handleDownloadStubForItem(previewItem)}>Download Stub</Button>
+      </> : null} />
     </div>
   );
 }

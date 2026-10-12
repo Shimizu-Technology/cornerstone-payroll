@@ -115,7 +115,7 @@ export function PdfDocumentView({ blob, className }: { blob: Blob | null; classN
   );
 }
 
-export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null; onClose: () => void }) {
+export function PdfPreview({ artifact, onClose, actions }: { artifact: PdfArtifact | null; onClose: () => void; actions?: ReactNode }) {
   const [urlState, setUrlState] = useState<{ artifact: PdfArtifact; url: string } | null>(null);
   const url = urlState?.artifact === artifact ? urlState.url : null;
   useEffect(() => {
@@ -137,7 +137,8 @@ export function PdfPreview({ artifact, onClose }: { artifact: PdfArtifact | null
               <DialogTitle>{artifact?.title || 'PDF preview'}</DialogTitle>
               <DialogDescription>{artifact?.note || 'Review the PDF here, then print or download a copy if needed.'}</DialogDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {actions}
               <Button variant="outline" disabled={!url} onClick={() => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); }}><Printer className="mr-2 h-4 w-4" />Open to print</Button>
               <Button variant="outline" disabled={!url || !artifact} onClick={() => {
                 if (url && artifact) downloadPdf(artifact, url);
