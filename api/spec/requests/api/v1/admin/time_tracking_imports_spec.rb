@@ -81,45 +81,56 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
       create(:time_tracking_source, company: company, source_type: "custom", name: "Neutral Time")
     end
 
-    it "returns an actionable 422 without saving an import or changing the mapping or payroll" do
-      CompanyWorkweek.create!(company: company, starts_on_weekday: 0, starts_at_minutes: 0,
-        timezone: "Pacific/Guam", source: "operator_confirmed", confirmation_status: "confirmed",
-        confirmed_by: admin_user, confirmed_at: Time.current, effective_on: Date.new(2020, 1, 1),
-        notes: "Confirmed for identity preview regression")
-      employee = create(:employee, company: company)
-      actual_uuid = SecureRandom.uuid
-      other_uuid = SecureRandom.uuid
-      mapping = TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
-        employee: employee, source_user_id: "1", source_user_uuid: other_uuid)
-      fetch_start = pay_period.start_date.beginning_of_week(:sunday)
-      fetch_end = pay_period.end_date.end_of_week(:sunday)
-      days = (fetch_start..fetch_end).map do |date|
-        { "work_date" => date.iso8601, "hours" => date == pay_period.start_date ? 4 : 0, "categories" => [] }
+    [
+      { description: "a reused numeric ID belongs to another permanent identity", two_mappings: false,
+        message: "different permanent identity" },
+      { description: "the numeric ID and UUID resolve to different saved mappings", two_mappings: true,
+        message: "two saved payroll mappings" }
+    ].each do |scenario|
+      it "returns 422 without changing records when #{scenario[:description]}" do
+        CompanyWorkweek.create!(company: company, starts_on_weekday: 0, starts_at_minutes: 0,
+          timezone: "Pacific/Guam", source: "operator_confirmed", confirmation_status: "confirmed",
+          confirmed_by: admin_user, confirmed_at: Time.current, effective_on: Date.new(2020, 1, 1),
+          notes: "Confirmed for identity preview regression")
+        employee = create(:employee, company: company)
+        actual_uuid = SecureRandom.uuid
+        other_uuid = SecureRandom.uuid
+        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+          employee: employee, source_user_id: "1", source_user_uuid: other_uuid)
+        fetch_start = pay_period.start_date.beginning_of_week(:sunday)
+        fetch_end = pay_period.end_date.end_of_week(:sunday)
+        days = (fetch_start..fetch_end).map do |date|
+          { "work_date" => date.iso8601, "hours" => date == pay_period.start_date ? 4 : 0, "categories" => [] }
+        end
+        payload = { "source" => "neutral_time", "employees" => [
+          { "source_user_id" => "1", "source_user_uuid" => actual_uuid, "display_name" => "Actual Person",
+            "days" => days, "issues" => {} },
+          { "source_user_id" => "2", "source_user_uuid" => other_uuid, "display_name" => "Other Person",
+            "days" => days.map { |day| day.merge("hours" => 0) }, "issues" => {} }
+        ] }
+        allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(payload)
+        if scenario[:two_mappings]
+          TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+            employee: create(:employee, company: company), source_user_id: "2", source_user_uuid: actual_uuid)
+        end
+        original_mappings = TimeTrackingEmployeeMapping.order(:id).map(&:attributes)
+        original_period = pay_period.attributes
+        original_source = source.attributes
+
+        expect do
+          post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import",
+               params: { source_id: source.id }, headers: { "X-Company-Id" => company.id.to_s }
+        end.not_to change { [ TimeTrackingImport.count, PayrollItem.count, PayrollLiabilityPosting.count ] }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include(scenario[:message])
+        expect(response.parsed_body.fetch("error")).to match(/Review.*mapping/)
+        expect(response.parsed_body.fetch("error")).not_to include("AIRE")
+        expect(response.parsed_body).not_to have_key("import")
+        expect(TimeTrackingEmployeeMapping.order(:id).map(&:attributes)).to eq(original_mappings)
+        expect(pay_period.reload.attributes).to eq(original_period)
+        expect(source.reload.attributes).to eq(original_source)
       end
-      payload = { "source" => "neutral_time", "employees" => [
-        { "source_user_id" => "1", "source_user_uuid" => actual_uuid, "display_name" => "Actual Person",
-          "days" => days, "issues" => {} },
-        { "source_user_id" => "2", "source_user_uuid" => other_uuid, "display_name" => "Other Person",
-          "days" => days.map { |day| day.merge("hours" => 0) }, "issues" => {} }
-      ] }
-      allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(payload)
-      original_mapping = mapping.attributes
-      original_period = pay_period.attributes
-      original_source = source.attributes
-
-      expect do
-        post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_time_tracking_import",
-             params: { source_id: source.id }, headers: { "X-Company-Id" => company.id.to_s }
-      end.not_to change { [ TimeTrackingImport.count, PayrollItem.count, PayrollLiabilityPosting.count ] }
-
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("different permanent identity")
-      expect(response.parsed_body.fetch("error")).to match(/Review.*mapping/)
-      expect(response.parsed_body.fetch("error")).not_to include("AIRE")
-      expect(response.parsed_body).not_to have_key("import")
-      expect(mapping.reload.attributes).to eq(original_mapping)
-      expect(pay_period.reload.attributes).to eq(original_period)
-      expect(source.reload.attributes).to eq(original_source)
     end
   end
 
