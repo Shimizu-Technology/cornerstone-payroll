@@ -2,7 +2,7 @@
 
 Payroll operators review current time alongside frozen source coverage and saved payroll. AIRE owns source hours and receipt scope; Cornerstone owns check components and payment delivery. Raw integration terms on the employee page make that comparison harder to understand.
 
-This change maps recognized evidence values to readable display labels. Stored values, financial calculations, receipt verification, source hours, and links are unchanged. A receipt for a saved line does not confirm issuance. Commitment remains separate from active issued coverage; an unfamiliar value requires review. Operator notes remain verbatim. Source accounting corrections and derived paid-case completion retain their existing meanings.
+This change maps recognized evidence values to readable display labels. Stored values, financial calculations, receipt verification, source hours, and links are unchanged. If an issued row also supplies an unrecognized or mismatched identity, or a receipt scope that cannot confirm its line, its display requires review while retaining the reported numeric coverage. Manually linked evidence without a receipt scope remains supported. A receipt for a saved line does not confirm issuance. Commitment remains separate from active issued coverage; an unfamiliar value requires review. Operator notes remain verbatim. Source accounting corrections and derived paid-case completion retain their existing meanings.
 
 Sources: the employee evidence producer and types, employee workspace renderer, and the retained I05 desktop/mobile audit. Implementation starts from the reviewed payment-resolution integration merge in each repository.
 
