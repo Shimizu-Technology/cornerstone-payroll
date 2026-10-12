@@ -38,7 +38,7 @@ vi.mock('@/services/api', () => ({
 }));
 
 const pdfMocks = vi.hoisted(() => ({ getDocument: vi.fn(), getPage: vi.fn(), destroy: vi.fn(), cancel: vi.fn() }));
-vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: pdfMocks.getDocument }));
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: pdfMocks.getDocument }));
 
 const printerProfile = {
   id: 8,
