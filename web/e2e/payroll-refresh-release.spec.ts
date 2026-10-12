@@ -13,6 +13,8 @@ interface Fixture {
   delivered: Scenario;
   multirate: Scenario;
   unavailable: Scenario;
+  combined: Scenario;
+  skipped: Scenario;
   unselected_employee_id: number;
 }
 interface Item { employee_id: number; hours_worked: string; overtime_hours: string; gross_pay: string; withholding_tax: string; net_pay: string; loan_payment: string; voided: boolean }
@@ -94,6 +96,39 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await calculate(page, fixture.desktop.period_id);
     await finalize(page, fixture.desktop.period_id, fixture.desktop.loan_id!);
   });
+
+  for (const phone of [false, true]) {
+    test(`${phone ? 'phone skips named repayment' : 'desktop includes named repayment'} alongside a standalone deduction`, async ({ page }) => {
+      const scenario = phone ? fixture.skipped : fixture.combined;
+      const name = phone ? 'QA Skipped Loan' : 'QA Combined Deduction';
+      if (phone) await page.setViewportSize({ width: 390, height: 844 });
+      await open(page, scenario.period_id);
+      await page.getByRole('combobox', { name: `${name} Loan repayment choice`, exact: true }).filter({ visible: true }).selectOption('override');
+      await page.getByLabel(`${name} Loan repayment amount`, { exact: true }).filter({ visible: true }).fill(phone ? '0' : '300');
+      await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).filter({ visible: true }).click();
+      if (phone) {
+        await page.getByRole('region', { name: `Payroll entry for ${name}`, exact: true }).getByLabel('Standalone one-time deduction', { exact: true }).fill('40');
+      } else {
+        await page.getByLabel(`Loan deduction this payroll for ${name}`, { exact: true }).filter({ visible: true }).fill('40');
+      }
+      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
+      await expect.poll(async () => (await period(scenario.period_id)).status).toBe('calculated');
+      const saved = await period(scenario.period_id);
+      expect(saved.payroll_items).toHaveLength(1);
+      expect(Number(saved.payroll_items[0].loan_payment)).toBe(phone ? 40 : 340);
+      expect(Number(saved.payroll_items[0].net_pay)).toBe(phone ? 1353.15 : 1053.15);
+      await page.getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
+      await expect.poll(async () => (await period(scenario.period_id)).status).toBe('approved');
+      page.once('dialog', dialog => dialog.accept());
+      await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).filter({ visible: true }).click();
+      await expect.poll(async () => (await period(scenario.period_id)).status).toBe('committed');
+      const ledger = await loan(scenario.loan_id!);
+      expect(Number(ledger.current_balance)).toBe(phone ? 3259.97 : 2959.97);
+      const payments = ledger.transactions.filter(row => row.transaction_type === 'payment');
+      expect(payments).toHaveLength(phone ? 0 : 1);
+      if (!phone) expect(Number(payments[0].amount)).toBe(300);
+    });
+  }
 
   test('one period void retires employee and FIT checks and restores the tracked balance', async ({ page }) => {
     await open(page, fixture.desktop.period_id);

@@ -317,13 +317,13 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
 });
 
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0) {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, standaloneAmount = 0, namedAmount = 0, namedRequest?: number) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
-  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: 0, loan_payment: loanPayment };
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14, gross_pay: 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: standaloneAmount, loan_payment: loanPayment };
   const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item], ...(comparisonResponse ? { cycle: 'regular' } : {}) } as unknown as PayPeriod;
-  const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: 0, eligible: true, mode: 'default' }];
+  const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: namedAmount, eligible: true, mode: namedRequest === undefined ? 'default' : 'override', requested_amount: namedRequest }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
@@ -460,4 +460,27 @@ it('labels the saved loan total as loan deductions while keeping standalone entr
   expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '+ Tips & Deductions' }));
   expect(await screen.findByRole('columnheader', { name: 'Standalone deduction' })).toBeTruthy();
+});
+
+it('allows approval with a calculated linked payment and an unrelated standalone deduction', async () => {
+  await renderLoanWorksheet('calculated', undefined, 340, 40, 300);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('allows a separate standalone deduction when the named repayment is explicitly skipped', async () => {
+  await renderLoanWorksheet('calculated', undefined, 40, 40, 0, 0);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('blocks approval when a standalone deduction has replaced the due named repayment', async () => {
+  await renderLoanWorksheet('calculated', undefined, 40, 40);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('saves both named and standalone amounts through worksheet recalculation', async () => {
+  await renderLoanWorksheet('calculated', undefined, 340, 40, 300, 300);
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].named_loan_payments).toEqual({ '30': { '2': { mode: 'override', amount: 300 } } });
+  expect(apiMocks.runPayroll.mock.calls[0][1].loan_deductions).toEqual({ '30': 40 });
 });

@@ -809,9 +809,6 @@ export function PayPeriodDetail({
           if (draft.mode === 'override' && draft.amount == null) throw new Error('Enter the linked loan repayment amount, or choose the scheduled default.');
           named_loan_payments[employeeId][loanId] = draft.mode === 'override' ? { mode: 'override', amount: draft.amount ?? 0 } : { mode: 'default' };
         });
-        if (toNumber(loansMap[employeeId]) > 0 && namedLoanOptions.some(option => String(option.employee_id) === employeeId && option.eligible)) {
-          throw new Error('Use Linked loan repayments to credit the saved loan. Clear the separate one-time deduction before calculating.');
-        }
       });
 
       // Build hours payload
@@ -883,7 +880,6 @@ export function PayPeriodDetail({
         if (!assignment.editable && !isLoanField) return;
         const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
         const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
-        if (isLoanField && toNumber(loansMap[String(assignment.employee_id)]) > 0 && draft.mode === 'default') return;
         if (draft.mode === 'override' && draft.amount == null) {
           const fieldName = worksheetPayrollFields.find(
             (field) => field.id === assignment.payroll_field_definition_id,
@@ -1306,7 +1302,12 @@ export function PayPeriodDetail({
     || payrollFieldDraftsChanged
   );
   const hasPendingCalculationChanges = isCalculated && hasStagedWorksheetChanges;
-  const standaloneLoanConflicts = namedLoanOptions.filter(option => option.eligible && toNumber(loansMap[String(option.employee_id)]) > 0);
+  const standaloneLoanConflicts = namedLoanOptions.filter(option => (
+    option.eligible
+    && toNumber(loansMap[String(option.employee_id)]) > 0
+    && toNumber(option.current_amount) <= 0
+    && !(option.mode === 'override' && toNumber(option.requested_amount) === 0)
+  ));
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;
