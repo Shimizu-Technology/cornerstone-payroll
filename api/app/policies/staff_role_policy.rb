@@ -114,6 +114,8 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_cockpits#payment_evidence" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#create_payment_attestation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#retract_payment_attestation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#resolve_payment_attestation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#retry_payment_resolution" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#finalize" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,

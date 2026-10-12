@@ -6,7 +6,7 @@ module Api
       class AirePayrollCockpitsController < BaseController
         before_action :set_pay_period_and_source
         before_action :disable_http_caching
-        before_action :require_payment_evidence_access!, only: %i[payment_evidence create_payment_attestation retract_payment_attestation]
+        before_action :require_payment_evidence_access!, only: %i[payment_evidence create_payment_attestation retract_payment_attestation resolve_payment_attestation retry_payment_resolution]
         before_action :require_manual_reconciliation_access!, only: %i[create_manual_allocation retry_manual_allocation]
 
         def show
@@ -33,9 +33,17 @@ module Api
         end
 
         def payment_evidence
-          render json: payment_evidence_service.review
+          review = payment_evidence_service.review
+          review[:payment_attestations] = review[:payment_attestations].map do |hold|
+            hold.merge("payment_options" => payment_resolution_service.payment_options(hold.fetch("source_user_uuid")))
+          end
+          render json: review.merge(
+            resolution_access: @source.supports?(:payment_attestation_resolution_v1) && manual_reconciliation_allowed?,
+            payment_resolutions: payment_resolution_service.history
+          )
         rescue TimeTracking::Client::Error => e
-          render_source_error(e)
+          render json: { candidates: [], payment_attestations: [], resolution_access: false,
+            payment_resolutions: payment_resolution_service.history, source_available: false, source_error: e.message }
         end
 
         def create_payment_attestation
@@ -56,6 +64,32 @@ module Api
           render json: result
         rescue ArgumentError, ActionController::ParameterMissing => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def resolve_payment_attestation
+          permitted = params.permit(:source_user_uuid, :payroll_item_id, :expected_version, :reason)
+          allocation = payment_resolution_service.create!(attestation_id: params[:payment_attestation_id], **permitted.to_h.symbolize_keys)
+          record_command_audit!(action: "aire_payroll_cockpit#payment_report_match_saved",
+            record_type: "TimeTrackingManualAllocation", record_id: allocation.id,
+            command_id: allocation.payment_resolution_intent.fetch("command_id"), reason: allocation.reconciliation_note, result: {})
+          render json: { payment_resolution: payment_resolution_service.present(allocation) }, status: :created
+        rescue TimeTracking::PaymentAttestationResolutionService::Error, ArgumentError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_payment_resolution
+          allocation = TimeTrackingManualAllocation.resolution_history_for_period(@pay_period).find_by!(id: params[:manual_allocation_id],
+            company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
+          payment_resolution_service.sync!(allocation)
+          render json: { payment_resolution: payment_resolution_service.present(allocation.reload) }
+        rescue TimeTracking::PaymentAttestationResolutionService::Error, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Not found" }, status: :not_found
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
         end
@@ -341,6 +375,11 @@ module Api
 
         private
 
+        def payment_resolution_service
+          @payment_resolution_service ||= TimeTracking::PaymentAttestationResolutionService.new(
+            pay_period: @pay_period, source: @source, actor: current_user)
+        end
+
         def require_manual_reconciliation_access!
           return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)
 
@@ -384,6 +423,8 @@ module Api
             status: allocation.status,
             payment_cancellation_pending: allocation.payment_cancellation_intent.present?,
             payment_issue_pending: allocation.payment_issue_intent.present?,
+            payment_resolution_pending: allocation.payment_resolution_pending?,
+            source_payment_attestation_id: allocation.source_payment_attestation_id,
             payroll_item_check_status: allocation.payroll_item.check_status,
             payment_method: allocation.payroll_item.effective_payment_delivery_method,
             remote_allocation_id: allocation.remote_allocation_id,

@@ -5,6 +5,7 @@ require "uri"
 require "json"
 require "openssl"
 require "timeout"
+require "digest"
 
 module TimeTracking
   class Client
@@ -35,6 +36,37 @@ module TimeTracking
         new(source, delegation: delegation)
       else
         raise Error, "Connect your payroll-capable time tracking account in payroll before reviewing source hours"
+      end
+    end
+
+    def payroll_command_binding
+      if @actor
+        { "kind" => "account_link", "actor_id" => @actor.id }
+      elsif @delegation
+        { "kind" => "delegation", "actor_id" => @delegation.user_id,
+          "delegation_id" => @delegation.id, "credential_fingerprint" => Digest::SHA256.hexdigest(@delegation.token) }
+      else
+        raise Error, "The saved payroll command requires an authenticated actor"
+      end
+    end
+
+    def self.for_saved_payroll_actor(source, actor:, binding:)
+      raise Error, "Retry as the original payroll operator" unless binding.is_a?(Hash) && binding["actor_id"] == actor.id
+      if binding["kind"] == "account_link"
+        connected = new(source).payroll_account_link(external_actor_id: actor.id).dig("account_link", "connected") == true
+        raise Error, "Reconnect the original payroll operator account before retrying the saved match" unless connected
+
+        new(source, actor: actor)
+      elsif binding["kind"] == "delegation"
+        delegation = source.delegation_for(actor)
+        unless delegation && delegation.id == binding["delegation_id"] &&
+            Digest::SHA256.hexdigest(delegation.token) == binding["credential_fingerprint"]
+          raise Error, "The original saved payroll delegation changed; review it before retrying"
+        end
+
+        new(source, delegation: delegation)
+      else
+        raise Error, "The original saved payroll actor binding is unavailable"
       end
     end
 
@@ -257,9 +289,16 @@ module TimeTracking
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
-    def payroll_payment_attestations(source_user_uuid:, page: 1)
+    def payroll_payment_attestations(source_user_uuid:, page: 1, start_date: nil, end_date: nil)
       require_capability!(:payment_attestations)
-      uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
+      query = { source_user_uuid: source_user_uuid, page: page, per_page: 250 }
+      if start_date.present? || end_date.present?
+        require_capability!(:payment_attestation_resolution_v1)
+        raise Error, "Both work-period dates are required for payment evidence review" if start_date.blank? || end_date.blank?
+
+        query.merge!(start_date: start_date, end_date: end_date)
+      end
+      uri = payroll_cockpit_uri("/payment_attestations", query)
       require_secure_payroll_transport!(uri)
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
@@ -276,6 +315,11 @@ module TimeTracking
       require_capability!(:payment_attestations)
       delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/retract"),
         body: { command_id: command_id, expected_version: expected_version, reason: reason })
+    end
+
+    def resolve_payroll_payment_attestation(attestation_id:, verified_saved_capability: false, **payload)
+      require_capability!(:payment_attestation_resolution_v1) unless verified_saved_capability
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/resolve"), body: payload, historical_manual_issue: verified_saved_capability)
     end
 
     def payroll_cockpit_time_entry(entry_id:)
