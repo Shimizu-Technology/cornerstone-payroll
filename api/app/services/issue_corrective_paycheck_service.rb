@@ -254,6 +254,8 @@ class IssueCorrectivePaycheckService
   # ---------------------------------------------------------------------
   def validate_for_preview!
     raise OriginalNotFoundError, "Original payroll item not found for employee in this pay period" if original_item.nil?
+    pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
+    raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
 
     if original_item.employment_type == "contractor"
@@ -319,6 +321,8 @@ class IssueCorrectivePaycheckService
   end
 
   def assert_correctable!(period)
+    pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
+    raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
     unless period.can_issue_corrective_paycheck? || verified_source_accounting_target?(period)
       raise InvalidStateError,

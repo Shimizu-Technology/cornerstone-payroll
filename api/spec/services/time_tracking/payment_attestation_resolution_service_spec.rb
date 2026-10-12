@@ -171,6 +171,18 @@ RSpec.describe TimeTracking::PaymentAttestationResolutionService do
     expect(PayrollRevisionPaymentPreflight.new(pay_period: period).call[:blockers].join).to include("Reconcile the saved")
   end
 
+  it "blocks corrective paycheck preview and issuance before creating supplemental money while resolution is uncertain" do
+    allow(client).to receive(:resolve_payroll_payment_attestation).and_raise(TimeTracking::Client::Error, "Lost receipt")
+    create_match
+    expect { IssueCorrectivePaycheckService.preview(original_pay_period: period, employee: employee, corrected_inputs: { hours_worked: 7 }) }
+      .to raise_error(IssueCorrectivePaycheckService::InvalidStateError, /Reconcile the saved/)
+    expect do
+      expect { IssueCorrectivePaycheckService.issue!(original_pay_period: period, employee: employee,
+        corrected_inputs: { hours_worked: 7 }, pay_date: Date.current, reason: reason, actor: actor) }
+        .to raise_error(IssueCorrectivePaycheckService::InvalidStateError, /Reconcile the saved/)
+    end.not_to change(PayPeriod, :count)
+  end
+
   it "rejects printed-only evidence, unavailable or changed Source context and REG/OT over-capacity before reserving", skip_delivery: true do
     item.update!(check_printed_at: Time.current)
     expect { create_match }.to raise_error(ArgumentError, /Original payment not verified/)

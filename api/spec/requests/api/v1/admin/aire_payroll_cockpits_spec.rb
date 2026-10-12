@@ -974,6 +974,15 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations", params: payload
       expect(response).to have_http_status(:forbidden)
     end
+    it "protects both match and saved retry endpoints before source access for an employee role" do
+      admin.update!(role: "employee")
+      expect(TimeTracking::Client).not_to receive(:for_payroll_actor)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_attestations/501/resolve",
+        params: { source_user_uuid: uuid, payroll_item_id: 1, expected_version: 3, reason: reason }
+      expect(response).to have_http_status(:forbidden)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_resolutions/1/retry"
+      expect(response).to have_http_status(:forbidden)
+    end
     it "rejects an unassigned accountant despite the historical staff capability" do
       home = create(:company, organization: company.organization)
       admin.update!(role: "accountant", company: home)
