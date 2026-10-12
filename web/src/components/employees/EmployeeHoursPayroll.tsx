@@ -86,7 +86,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
             </div>)}</div> : <p className="text-sm text-neutral-600">No current entries. Retained coverage may still exist.</p>}
             <h4 className="font-semibold">Retained source coverage</h4>
             {period.coverage_lines?.length ? <div className="divide-y rounded-xl border border-neutral-200">{period.coverage_lines.map((line) => <div key={line.id} className="space-y-1 p-4 text-sm">
-              <p className="font-semibold">Entry #{line.source_time_entry_id} · {coverageStateLabel(line.coverage_state)}</p>
+              <p className="font-semibold">Entry #{line.source_time_entry_id} · {coverageStateLabel(line.coverage_state, line.identity_state, line.receipt_scope)}</p>
               {line.identity_state && line.identity_state !== 'verified' && <p className="font-semibold text-amber-800">{identityStateLabel(line.identity_state)}</p>}
               {line.source_category_id === null && <p className="font-semibold text-amber-800">Frozen work category unknown · Needs review</p>}
               {line.receipt_scope && <p className="text-neutral-600">Receipt scope: {receiptScopeLabel(line.receipt_scope)}</p>}

@@ -25,7 +25,15 @@ export function evidenceSourceLabel(value: string | null | undefined): string {
 }, "Evidence source needs review");
 }
 
-export function coverageStateLabel(value: string | null | undefined): string {
+export function coverageStateLabel(value: string | null | undefined, identityState?: string | null, receiptScope?: string | null): string {
+  // Compatible producers can supply unfamiliar or conflicting fields independently.
+  // Keep their hours intact, but do not present unconfirmed line coverage as issued.
+  if (value === 'issued' && identityState && identityState !== 'verified') {
+    return 'Employee identity needs review · payment coverage unconfirmed';
+  }
+  if (value === 'issued' && receiptScope && !['exact_line', 'unambiguous_entry'].includes(receiptScope)) {
+    return 'Receipt needs review · line coverage unconfirmed';
+  }
   return label(value, {
   "issued": "Issued payment coverage",
   "committed": "Payroll committed · no active issued coverage",

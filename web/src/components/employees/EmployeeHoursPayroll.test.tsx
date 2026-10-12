@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeHoursPayroll } from './EmployeeHoursPayroll';
 import { SavedHours } from './SavedHours';
 import type { EmployeePayHistoryReport, EmployeePayHistoryRecord } from '@/services/api';
+afterEach(cleanup);
 const mocks = vi.hoisted(() => ({ evidence: vi.fn() }));
 vi.mock('@/services/api', () => ({ employeesApi: { hoursEvidence: mocks.evidence } }));
 const totals = { worked_hours: 82, eligible_hours: 82, pending_hours: 0, denied_hours: 0,
@@ -23,7 +24,6 @@ function mount(path = '/companies/1/employees/2/hours-payroll?return_to=%2Femplo
   render(<MemoryRouter initialEntries={[path]}><EmployeeHoursPayroll employeeId={2} companyId={1} report={{ history: [item] } as EmployeePayHistoryReport} returnTo={path} /><Location /></MemoryRouter>);
 }
 describe('Employee hours and payroll evidence', () => {
-  afterEach(cleanup);
   beforeEach(() => { vi.clearAllMocks(); mocks.evidence.mockResolvedValue(evidence); });
   it('shows all-filter totals and source-only periods beside actual saved REG/OT', async () => {
     mount();
@@ -141,4 +141,22 @@ it('keeps unfamiliar evidence labels unresolved and preserves signed and unknown
   expect(screen.getByText('Evidence source needs review')).toBeTruthy();
   expect(screen.getByText('Source REG -1.00 · OT Unknown')).toBeTruthy();
   expect(screen.queryByText(/future_paid|future_verified|historical_attestation/)).toBeNull();
+});
+
+it.each([
+  { identity_state: 'future_verified', receipt_scope: 'exact_line' },
+  { identity_state: 'frozen_owner_mismatch', receipt_scope: 'exact_line' },
+  { identity_state: 'verified', receipt_scope: 'batch' },
+  { identity_state: 'verified', receipt_scope: 'ambiguous_entry' },
+  { identity_state: 'verified', receipt_scope: 'future_exact_line' },
+])('requires review of contradictory issued evidence $identity_state/$receipt_scope', async (context) => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'conflicting', source_time_entry_id: '18', coverage_state: 'issued', ...context, regular_hours: 8, overtime_hours: 2, provenance: 'frozen_batch_and_exact_authenticated_receipt' }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText(/Entry #18 · .*needs review.*coverage unconfirmed/)).toBeTruthy();
+  expect(screen.queryByText('Entry #18 · Issued payment coverage')).toBeNull();
+  expect(screen.getByText('Source REG 8.00 · OT 2.00')).toBeTruthy();
+  expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage40.00');
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
 });
