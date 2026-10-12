@@ -8,6 +8,7 @@ import { FeedbackProvider } from '@/components/ui/action-feedback';
 
 const apiMocks = vi.hoisted(() => ({
   list: vi.fn(),
+  checkPdf: vi.fn(),
   markDelivered: vi.fn(),
   confirmDirectDepositPayment: vi.fn(),
   batchPdf: vi.fn(),
@@ -15,18 +16,23 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/services/api', () => ({
-  checksApi: { list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
+  checksApi: { checkPdf: apiMocks.checkPdf, list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
   payStubsApi: { batchPdf: apiMocks.batchPdf, directDepositStubsPdf: apiMocks.directDepositStubsPdf },
 }));
 
+const previewMocks = vi.hoisted(() => ({ show: vi.fn() }));
+
 vi.mock('@/components/documents/PdfPreview', () => ({
-  PdfPreview: ({ artifact, onClose }: { artifact: { blob: Blob; filename: string; title?: string } | null; onClose: () => void }) => artifact ? (
+  PdfPreview: ({ artifact, onClose, actions }: { artifact: { blob: Blob; filename: string; title?: string } | null; onClose: () => void; actions?: import('react').ReactNode }) => {
+    if (artifact) previewMocks.show(artifact);
+    return artifact ? (
     <section role="dialog" aria-label={artifact.title}>
       <p>{artifact.filename}</p>
       <p>Shared PDF preview</p>
+      {actions}
       <button onClick={onClose}>Close PDF preview</button>
     </section>
-  ) : null,
+  ) : null; },
 }));
 
 const check = {
@@ -388,5 +394,53 @@ describe('ChecksPanel cancellation sync evidence', () => {
     expect(notices).toHaveLength(2);
     const otherRow = screen.getAllByRole('row').find(row => within(row).queryByText('Other Employee'))!;
     expect(within(otherRow).queryByText(/Check cancellation/)).toBeNull();
+  });
+});
+
+
+describe('individual check preview', () => {
+  beforeEach(() => { vi.clearAllMocks(); apiMocks.checkPdf.mockReset(); });
+  afterEach(cleanup);
+
+  it('opens the original PDF with matching filename and stub actions without issuing a payment', async () => {
+    const blob = new Blob(['original-check'], { type: 'application/pdf' });
+    apiMocks.checkPdf.mockResolvedValue(blob);
+    renderStatements([paperStatement]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[0]);
+    const dialog = await screen.findByRole('dialog', { name: 'Check #8101 — Avery Example' });
+    expect(previewMocks.show).toHaveBeenLastCalledWith(expect.objectContaining({ blob, filename: 'check_8101.pdf' }));
+    expect(within(dialog).getByRole('button', { name: 'Print Stub' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Download Stub' })).toBeTruthy();
+    expect(apiMocks.markDelivered).not.toHaveBeenCalled();
+    expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close PDF preview' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('ignores a previous period response arriving after navigation', async () => {
+    let resolve!: (blob: Blob) => void;
+    apiMocks.checkPdf.mockReturnValue(new Promise<Blob>((done) => { resolve = done; }));
+    const view = renderStatements([paperStatement]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[0]);
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [], meta });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 9, status: 'committed' } as PayPeriod} /></FeedbackProvider>);
+    await act(async () => { resolve(new Blob(['old-period'])); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(previewMocks.show).not.toHaveBeenCalled();
+  });
+
+  it('keeps the most recently requested check when an older request finishes later', async () => {
+    let resolveFirst!: (blob: Blob) => void;
+    const latest = new Blob(['latest-check']);
+    apiMocks.checkPdf.mockReturnValueOnce(new Promise<Blob>((done) => { resolveFirst = done; })).mockResolvedValueOnce(latest);
+    apiMocks.list.mockResolvedValue({ checks: [check, { ...check, id: 43, check_number: '8102', employee_name: 'Second Employee' }], direct_deposit_items: [], earnings_statement_items: [], meta });
+    render(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} /></FeedbackProvider>);
+    const buttons = await screen.findAllByRole('button', { name: 'Preview' });
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    await screen.findByRole('dialog', { name: 'Check #8102 — Second Employee' });
+    await act(async () => { resolveFirst(new Blob(['earlier-check'])); });
+    expect(previewMocks.show).toHaveBeenLastCalledWith(expect.objectContaining({ blob: latest, filename: 'check_8102.pdf' }));
+    expect(screen.queryByRole('dialog', { name: 'Check #8101 — Avery Example' })).toBeNull();
   });
 });

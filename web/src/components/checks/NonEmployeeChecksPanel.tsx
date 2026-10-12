@@ -1,6 +1,6 @@
-import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -104,8 +104,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
+  const [preview, setPreview] = useState<PdfArtifact | null>(null);
+  const previewRequest = useRef(0);
+  const invalidatePreview = useCallback(() => { previewRequest.current++; }, []);
+  const previewScope = `${companyId}:${payPeriodId}`;
+  const currentPreviewScope = useRef(previewScope);
+  currentPreviewScope.current = previewScope;
+
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -141,7 +146,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     // no fragile setTimeout(0) remount trick needed.
     setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
     setCheckNumberDrafts(prev => ({ ...prev, [updated.id]: updated.check_number || '' }));
-    setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
   // Keep the parent's onChecksLoaded callback in a ref so loadChecks doesn't
@@ -239,46 +243,34 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
+  useEffect(() => {
+    previewRequest.current++;
+    setPreview(null);
+    setPdfLoading(null);
+    return invalidatePreview;
+  }, [previewScope, invalidatePreview]);
+
   const handlePreviewPdf = async (check: NonEmployeeCheck) => {
+    const request = ++previewRequest.current;
+    const scope = currentPreviewScope.current;
     setPdfLoading(check.id);
     try {
-      const blob = await nonEmployeeChecksApi.checkPdf(
-        check.id,
-        isFirstHawaiian4Up ? { startingSlot } : undefined
-      );
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      setPreviewCheck(check);
+      const blob = await nonEmployeeChecksApi.checkPdf(check.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
+      if (request !== previewRequest.current || scope !== currentPreviewScope.current) return;
+      setPreview({ blob, filename: `ne_check_${check.check_number || check.id}.pdf`,
+        title: `${check.payable_to}${check.check_number ? ` — Check #${check.check_number}` : ''}`,
+        note: `${CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type} · ${fmt(check.amount)}` });
     } catch (err) {
-      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
+      if (request === previewRequest.current && scope === currentPreviewScope.current) notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
     } finally {
-      setPdfLoading(null);
+      if (request === previewRequest.current && scope === currentPreviewScope.current) setPdfLoading(null);
     }
   };
 
   const handleClosePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-    setPreviewCheck(null);
-  };
-
-  const handleDownloadFromPreview = () => {
-    if (!previewUrl || !previewCheck) return;
-    const a = document.createElement('a');
-    a.href = previewUrl;
-    a.download = `ne_check_${previewCheck.check_number || previewCheck.id}.pdf`;
-    a.click();
-  };
-
-  const handlePrintFromPreview = () => {
-    if (!previewUrl) return;
-    const printWindow = window.open(previewUrl);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => { printWindow.print(); });
-    } else {
-      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups to print checks.' });
-    }
+    previewRequest.current++;
+    setPreview(null);
+    setPdfLoading(null);
   };
 
   const openBlobForPrint = (blob: Blob) => {
@@ -748,43 +740,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
       <Form500EditorModal open={form500Open} onClose={() => setForm500Open(false)} payPeriodId={payPeriodId} />
 
-      {/* Full-page PDF Preview modal — rendered as portal for proper z-index */}
-      {previewUrl && previewCheck && createPortal(
-        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
-          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  {previewCheck.payable_to}
-                  {previewCheck.check_number && ` — Check #${previewCheck.check_number}`}
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  {CHECK_TYPE_LABELS[previewCheck.check_type as NonEmployeeCheckType] || previewCheck.check_type} &middot; {fmt(previewCheck.amount)}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={handlePrintFromPreview}>
-                  Print
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleDownloadFromPreview}>
-                  Download PDF
-                </Button>
-                <Button size="sm" onClick={handleClosePreview}>
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 bg-gray-100 p-5">
-              <iframe
-                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
-                className="h-full w-full rounded-xl border bg-white shadow-lg"
-                title="Check Preview"
-              />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <PdfPreview artifact={preview} onClose={handleClosePreview} />
     </Card>
   );
 }
