@@ -1,8 +1,8 @@
-import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
-import { CheckCircle2, Copy, Download, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
+import { CheckCircle2, Copy, Download, FileText, Search, Settings, Trash2 } from 'lucide-react';
+import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -158,10 +158,12 @@ export function ChecksPayments() {
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
-  const [previewTitle, setPreviewTitle] = useState('Check preview');
-  const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [previewBusyId, setPreviewBusyId] = useState<number | null>(null);
+  const [preview, setPreview] = useState<PdfArtifact | null>(null);
+  const previewRequest = useRef(0);
+  const invalidatePreview = useCallback(() => { previewRequest.current++; }, []);
+  const currentPreviewCompany = useRef(activeCompanyId);
+  currentPreviewCompany.current = activeCompanyId;
   const [startingSlot, setStartingSlot] = useState(1);
   const [payingCheck, setPayingCheck] = useState<NonEmployeeCheck | null>(null);
   const [linkingCheck, setLinkingCheck] = useState<NonEmployeeCheck | null>(null);
@@ -174,7 +176,6 @@ export function ChecksPayments() {
   const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
   const [paymentConfirmation, setPaymentConfirmation] = useState('');
   const [paymentDate, setPaymentDate] = useState(localDateString());
-  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -332,7 +333,6 @@ export function ChecksPayments() {
 
   const handleSavedCheck = (updated: NonEmployeeCheck) => {
     setChecks(prev => prev.map(check => (check.id === updated.id ? updated : check)));
-    setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
   const handlePrepareLiabilities = (obligations: PayrollLiabilityCenterObligation[]) => {
@@ -461,53 +461,38 @@ export function ChecksPayments() {
     }
   };
 
-  const handlePreview = async (check: NonEmployeeCheck) => {
-    setBusyId(check.id);
-    setPreviewLoaded(false);
+  useEffect(() => {
+    previewRequest.current++;
+    setPreview(null);
+    setPreviewBusyId(null);
+    return invalidatePreview;
+  }, [activeCompanyId, invalidatePreview]);
+
+  const openPreview = async (check: NonEmployeeCheck, voucher = false) => {
+    const request = ++previewRequest.current;
+    const scope = currentPreviewCompany.current;
+    setPreviewBusyId(check.id);
     try {
-      const blob = await nonEmployeeChecksApi.checkPdf(
-        check.id,
-        company?.check_stock_type === 'first_hawaiian_4up' ? { startingSlot } : undefined
-      );
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(URL.createObjectURL(blob));
-      setPreviewCheck(check);
-      setPreviewTitle('Check preview');
+      const blob = voucher ? await nonEmployeeChecksApi.voucherPdf(check.id)
+        : await nonEmployeeChecksApi.checkPdf(check.id, company?.check_stock_type === 'first_hawaiian_4up' ? { startingSlot } : undefined);
+      if (request !== previewRequest.current || scope !== currentPreviewCompany.current) return;
+      setPreview({ blob,
+        filename: voucher ? `payment_voucher_${check.id}.pdf` : `ne_check_${check.check_number || check.id}.pdf`,
+        title: voucher ? 'Payment voucher' : 'Check preview',
+        note: `${check.payable_to} · ${formatCurrency(Number(check.amount))} · Check #${check.check_number || '-'}` });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate check PDF');
+      if (request === previewRequest.current && scope === currentPreviewCompany.current) setError(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
-      setBusyId(null);
+      if (request === previewRequest.current && scope === currentPreviewCompany.current) setPreviewBusyId(null);
     }
   };
 
-  const handleVoucherPreview = async (check: NonEmployeeCheck) => {
-    setBusyId(check.id);
-    setPreviewLoaded(false);
-    try {
-      const blob = await nonEmployeeChecksApi.voucherPdf(check.id);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(URL.createObjectURL(blob));
-      setPreviewCheck(check);
-      setPreviewTitle('Payment voucher');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate payment voucher');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
+  const handlePreview = (check: NonEmployeeCheck) => openPreview(check);
+  const handleVoucherPreview = (check: NonEmployeeCheck) => openPreview(check, true);
   const closePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-    setPreviewCheck(null);
-    setPreviewLoaded(false);
-  };
-
-  const handlePrintPreview = () => {
-    const frameWindow = previewFrameRef.current?.contentWindow;
-    if (!frameWindow || !previewLoaded) return;
-    frameWindow.focus();
-    frameWindow.print();
+    previewRequest.current++;
+    setPreview(null);
+    setPreviewBusyId(null);
   };
 
   const exportRegisterCsv = () => {
@@ -887,10 +872,10 @@ export function ChecksPayments() {
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
-                      {check.payment_method === 'check' && !check.supersession && <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
+                      {check.payment_method === 'check' && !check.supersession && <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id || previewBusyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Preview
                       </Button>}
-                      <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id}>
+                      <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id || previewBusyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Voucher
                       </Button>
                       {!check.voided && !check.supersession && !check.pay_period_id && check.payment_method === 'check' && !check.printed_at && (
@@ -990,34 +975,7 @@ export function ChecksPayments() {
 
       <NonEmployeeCheckEditModal check={editingCheck} onClose={() => setEditingCheck(null)} onSaved={(updated) => { handleSavedCheck(updated); void loadLiabilities(); }} />
 
-      {previewUrl && previewCheck && createPortal(
-        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-neutral-950/70 p-4`}>
-          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-neutral-900">{previewTitle}</h2>
-                <p className="text-sm text-neutral-500">{formatCurrency(Number(previewCheck.amount))} · Check #{previewCheck.check_number || '-'}</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={handlePrintPreview} disabled={!previewLoaded}>
-                  <Printer className="mr-1.5 h-4 w-4" /> {previewLoaded ? 'Print' : 'Loading...'}
-                </Button>
-                <Button onClick={closePreview}>Close</Button>
-              </div>
-            </div>
-            <div className="flex-1 bg-neutral-100 p-4">
-              <iframe
-                ref={previewFrameRef}
-                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
-                className="h-full w-full rounded-lg border bg-white"
-                title={previewTitle}
-                onLoad={() => setPreviewLoaded(true)}
-              />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <PdfPreview artifact={preview} onClose={closePreview} />
     </div>
   );
 }
