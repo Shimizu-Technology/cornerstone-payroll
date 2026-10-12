@@ -56,10 +56,10 @@ RSpec.describe TimeTracking::ManualAllocationService do
       source.update!(active: false)
       expect { service.sync!(allocation, raise_on_failure: true) }.to raise_error(TimeTracking::Client::Error) { |error|
         expect(error.response_status).to eq(422)
-        expect(error.message).to include("original AIRE source is inactive")
+        expect(error.message).to include("original time-tracking source is inactive")
       }
       expect(allocation.reload.attributes.except("last_sync_error", "updated_at")).to eq(before_state)
-      expect(allocation.last_sync_error).to include("original AIRE source is inactive")
+      expect(allocation.last_sync_error).to include("original time-tracking source is inactive")
       expect(TimeTracking::Client).not_to have_received(:for_payroll_actor)
       expect(item.reload.check_events).to be_empty
     end
@@ -206,7 +206,7 @@ RSpec.describe TimeTracking::ManualAllocationService do
       service.create!(payroll_item_id: item.id, source_time_entry_id: "41", source_time_entry_version: 2,
                       source_user_uuid: SecureRandom.uuid, regular_hours: "6.10", overtime_hours: "0.00",
                       original_work_date: "2026-08-15", note: "These issued check hours are the old AIRE carryover")
-    end.to raise_error(described_class::Error, /Map this AIRE person/)
+    end.to raise_error(described_class::Error, /Map this source employee/)
   end
 
   it "rejects source hours that exceed the committed paycheck" do
