@@ -108,6 +108,9 @@ module Api
 
           assignments = []
           EmployeePayrollField.transaction do
+            # Payroll commit locks the company before its repayment schedules.
+            # Serialize multi-schedule edits before taking caller-ordered locks.
+            @employee.company.lock!
             permitted_assignments.each do |attrs|
               assignment = if attrs[:id].present?
                 @employee.employee_payroll_fields.find(attrs.delete(:id))
