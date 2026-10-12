@@ -77,7 +77,7 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
       { "source_user_uuid" => SecureRandom.uuid, "adjustments" => [ row ] }
     ], "payment_attestations" => [ hold.merge("original_work_date" => hold["work_date"]) ])
     expect(service.review[:candidates]).to eq([ row.except("source_kind").merge("source_user_uuid" => uuid, "employee_name" => employee.full_name) ])
-    expect(service.review[:payment_attestations]).to eq([ hold ])
+    expect(service.review[:payment_attestations]).to eq([ hold.merge("employee_name" => employee.full_name) ])
   end
   it "fails explicitly when evidence history exceeds the bounded ten pages" do
     allow(client).to receive(:payroll_payment_attestations).and_return(

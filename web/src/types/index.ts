@@ -1053,6 +1053,8 @@ export interface AireManualAllocation {
   status: string;
   payment_cancellation_pending?: boolean;
   payment_issue_pending?: boolean;
+  payment_resolution_pending?: boolean;
+  source_payment_attestation_id?: string;
   payroll_item_check_status?: string;
   payment_method?: string;
   remote_allocation_id?: string;
@@ -2568,6 +2570,27 @@ export interface DashboardStats {
   pending_approvals: number;
 }
 
+export interface ReportedPaymentResolution {
+  id: number;
+  source_payment_attestation_id: string;
+  payroll_item_id: number;
+  pay_period_id: number;
+  employee_name: string;
+  original_work_date: string;
+  regular_hours: number;
+  overtime_hours: number;
+  status: 'pending' | 'matched';
+  allocation_status: string;
+  payment_method: string;
+  payment_reference: string;
+  payment_effective_on: string;
+  note: string;
+  original_report?: { reason?: string; attested_at: string; hours: number };
+  last_sync_error: string | null;
+  can_retry: boolean;
+  hours_reserved: boolean;
+}
+
 export interface AirePaymentEvidenceHold {
   id: string;
   version: number;
@@ -2580,6 +2603,11 @@ export interface AirePaymentEvidenceHold {
   status: string;
   reason: string;
   source_changed: boolean;
+  resolution_context?: { available: boolean; reason: string | null; regular_hours: string | null; overtime_hours: string | null; total_hours: string | null; weekly_context_fingerprint: string | null };
+  payment_options?: Array<{ payroll_item_id: number; pay_period_id: number; pay_date: string; gross_pay: number; net_pay: number; regular_hours: number; overtime_hours: number; payment_recorded_at: string; regular_hours_available: number; overtime_hours_available: number; payment_method: string; payment_reference: string; payment_effective_on: string }>;
+  resolved_manual_allocation_id?: string;
+  resolved_issued_event_id?: string;
+  resolved_at?: string;
 }
 
 export interface AirePaymentEvidenceReview {
@@ -2592,4 +2620,8 @@ export interface AirePaymentEvidenceReview {
     total_hours: number;
   }>;
   payment_attestations: AirePaymentEvidenceHold[];
+  source_available?: boolean;
+  source_error?: string;
+  resolution_access?: boolean;
+  payment_resolutions?: ReportedPaymentResolution[];
 }

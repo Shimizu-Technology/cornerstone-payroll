@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_11_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_13_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3643,6 +3643,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_11_050000) do
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
     t.uuid "void_command_id", null: false
+    t.string "source_payment_attestation_id"
+    t.jsonb "payment_resolution_intent", default: {}, null: false
+    t.jsonb "payment_resolution_receipt", default: {}, null: false
     t.index [ "classification_reconciliation_id" ], name: "idx_manual_allocations_classification_reconciliation"
     t.index [ "commit_command_id" ], name: "index_time_tracking_manual_allocations_on_commit_command_id", unique: true
     t.index [ "company_id" ], name: "index_time_tracking_manual_allocations_on_company_id"
@@ -3651,6 +3654,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_11_050000) do
     t.index [ "issue_command_id" ], name: "index_time_tracking_manual_allocations_on_issue_command_id", unique: true
     t.index [ "pay_period_id" ], name: "index_time_tracking_manual_allocations_on_pay_period_id"
     t.index [ "payroll_item_id" ], name: "index_time_tracking_manual_allocations_on_payroll_item_id"
+    t.index [ "time_tracking_source_id", "source_payment_attestation_id" ], name: "index_manual_allocations_on_source_payment_attestation", unique: true
     t.index [ "time_tracking_source_id", "source_time_entry_id", "payroll_item_id" ], name: "index_manual_time_allocations_on_source_entry_and_item", unique: true
     t.index [ "time_tracking_source_id" ], name: "idx_on_time_tracking_source_id_e71b0095b1"
     t.index [ "void_command_id" ], name: "index_time_tracking_manual_allocations_on_void_command_id", unique: true

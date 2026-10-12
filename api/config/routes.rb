@@ -292,6 +292,8 @@ Rails.application.routes.draw do
             get :payment_evidence
             post :payment_attestations, action: :create_payment_attestation
             post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
@@ -309,6 +311,8 @@ Rails.application.routes.draw do
             get :payment_evidence
             post :payment_attestations, action: :create_payment_attestation
             post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries

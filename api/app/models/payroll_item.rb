@@ -223,7 +223,28 @@ class PayrollItem < ApplicationRecord
       TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
   end
 
+  validate :pending_payment_resolution_cannot_change, on: :update
+  before_update :guard_pending_payment_resolution
+
+  def pending_payment_resolution_cannot_change
+    return unless changes_to_save.keys.any? { |key| key != "updated_at" }
+    message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+    errors.add(:base, message) if message
+  end
+
+  def guard_pending_payment_resolution
+    return unless changes_to_save.keys.any? { |key| key != "updated_at" }
+
+    self.class.where(id: id).lock.pluck(:id)
+    return unless (message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self))
+
+    errors.add(:base, message)
+    raise ActiveRecord::RecordInvalid, self
+  end
+
   def void!(user:, reason:, ip_address: nil)
+    message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+    raise ArgumentError, message if message
     raise ArgumentError, "This item has an exact source accounting correction. Voiding is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support." if source_accounting_correction_linked?
     raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Already voided" if voided?

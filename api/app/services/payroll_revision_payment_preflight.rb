@@ -22,6 +22,9 @@ class PayrollRevisionPaymentPreflight
     blockers << "Only a committed, active payroll can be reversed" unless pay_period.committed? && !pay_period.voided? && pay_period.superseded_by_id.nil?
     blockers << "Copied or promoted history must use the historical correction workflow" if pay_period.training_baseline? || pay_period.promotion_source_pay_period_id.present?
     employee_items.each do |item|
+      if (pending = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(item))
+        blockers << "#{item.employee_full_name}: #{pending}"
+      end
       if item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?
         blockers << "#{item.employee_full_name}: direct-deposit reversal is not supported; verify the external payment first"
       end
