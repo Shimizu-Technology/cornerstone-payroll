@@ -41,10 +41,10 @@ class TimeTrackingEmployeeMapping < ApplicationRecord
     return unless source_uuid
 
     if by_uuid && by_id && by_uuid.id != by_id.id
-      raise IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
+      raise IdentityConflict, "Time-tracking employee identity conflicts with two saved payroll mappings. Review the employee mappings before importing."
     end
     if by_id&.source_user_uuid.present? && normalize_uuid(by_id.source_user_uuid) != source_uuid
-      raise IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
+      raise IdentityConflict, "The time-tracking employee ID is already linked to a different permanent identity. Review the employee mapping before importing."
     end
   end
 
