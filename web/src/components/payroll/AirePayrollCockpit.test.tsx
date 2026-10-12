@@ -14,6 +14,8 @@ import type {
 } from '@/types';
 import { AirePayrollCockpit } from './AirePayrollCockpit';
 import { AireManualPaymentReconciliation } from './AireManualPaymentReconciliation';
+import { FeedbackProvider } from '@/components/ui/action-feedback';
+import { ApiError } from '@/services/api';
 
 const apiMocks = vi.hoisted(() => ({
   overview: vi.fn(),
@@ -858,6 +860,59 @@ describe('AirePayrollCockpit', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledTimes(2));
     expect(apiMocks.review.mock.calls[1][2].command_id).toBe(apiMocks.review.mock.calls[0][2].command_id);
+  });
+
+  it('publishes one stale-review notification and reannounces one identical retry with the refreshed version', async () => {
+    const user = userEvent.setup();
+    apiMocks.review.mockRejectedValue(new ApiError('Entry version changed', 409));
+    const view = render(<FeedbackProvider><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Approve time' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), { target: { value: 'Verified source review' } });
+    const latest = fixtures();
+    latest.entries.time_entries = latest.entries.time_entries.map(entry => ({ ...entry, version: 4 }));
+    latest.exceptions.time_exceptions = latest.exceptions.time_exceptions.map(entry => ({ ...entry, version: 4 }));
+    apiMocks.entries.mockResolvedValue(latest.entries);
+    apiMocks.exceptions.mockResolvedValue(latest.exceptions);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    const notifications = within(document.querySelector('[data-feedback-portal]') as HTMLElement);
+    await waitFor(() => expect(notifications.getAllByRole('alert')).toHaveLength(1));
+    expect(apiMocks.review).toHaveBeenCalledOnce();
+    expect(apiMocks.review.mock.calls[0][2].expected_version).toBe(3);
+    expect(notifications.getByRole('alert').textContent).toContain('review it again before deciding');
+    await waitFor(() => expect(apiMocks.entries).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+    await user.click(notifications.getByRole('button', { name: /Dismiss notification/ }));
+    expect(notifications.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    await waitFor(() => expect(notifications.getAllByRole('alert')).toHaveLength(1));
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+    expect(apiMocks.review.mock.calls[1][2].expected_version).toBe(4);
+    expect(apiMocks.review.mock.calls[1][2].command_id).not.toBe(apiMocks.review.mock.calls[0][2].command_id);
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(notifications.getAllByRole('alert')).toHaveLength(1);
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+    view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await waitFor(() => expect(notifications.queryByRole('alert')).toBeNull());
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not publish a late stale-review error after leaving its pay period', async () => {
+    const user = userEvent.setup();
+    let reject!: (error: Error) => void;
+    apiMocks.review.mockImplementationOnce(() => new Promise<void>((_, fail) => { reject = fail; }));
+    const view = render(<FeedbackProvider><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Approve time' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), { target: { value: 'Verified source review' } });
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await act(async () => { reject(new ApiError('Entry version changed', 409)); });
+    expect(within(document.querySelector('[data-feedback-portal]') as HTMLElement).queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.review).toHaveBeenCalledOnce();
+    expect(apiMocks.review.mock.calls[0][0]).toBe(17);
   });
 
   it('reports a post-lock Cornerstone refresh failure separately from the successful time tracking command', async () => {

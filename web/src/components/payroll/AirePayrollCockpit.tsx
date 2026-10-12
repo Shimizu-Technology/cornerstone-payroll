@@ -2,7 +2,6 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import {
-  AlertTriangle,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -787,8 +786,7 @@ export function AirePayrollCockpit({
             </div>
 
             {visibleError && (
-              <ActionFeedback tone="error" message={visibleError}><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>{visibleError}</p></ActionFeedback>
+              <ActionFeedback tone="error" message={visibleError} />
             )}
 
             {commandSuccess && !visibleError && (
