@@ -315,8 +315,8 @@ export function EmployeeList() {
       <div className="p-4 sm:p-6 lg:p-8">
         <EmployeeIntakeSettingsPanel key={companyId} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
         {/* Filters */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row">
-          <div className="relative flex-1 sm:max-w-md">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
+          <div className="relative w-full sm:w-72 sm:shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               type="text"
@@ -327,7 +327,7 @@ export function EmployeeList() {
             />
           </div>
           
-          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
             <Select
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
