@@ -13,12 +13,18 @@ module RecurringPayItemSetupMutation
       yield
       raise ActiveRecord::Rollback unless response.successful?
 
-      if response.successful?
-        @recalculation_pay_period_ids = change.invalidate_changed!
-        payload = JSON.parse(response.body)
-        payload["recalculation_pay_period_ids"] = @recalculation_pay_period_ids
-        response.body = JSON.generate(payload)
-      end
+      @recalculation_pay_period_ids = change.invalidate_changed!
+      payload = JSON.parse(response.body)
+      payload["recalculation_pay_period_ids"] = @recalculation_pay_period_ids
+      response.body = JSON.generate(payload)
     end
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved => e
+    # The action may already have rendered a successful create/edit response.
+    # The transaction has rolled back, so discard it before returning failure.
+    self.response_body = nil
+    # Rails 8 resets the HTTP body for nil but keeps its controller render marker.
+    @_response_body = nil
+    errors = e.record&.errors&.full_messages.presence || [ e.message ]
+    render json: { errors: errors }, status: :unprocessable_entity
   end
 end

@@ -204,15 +204,58 @@ RSpec.describe "Recurring setup calculation currentness", type: :request do
     expect(period.reload).to be_draft
   end
 
-  it "rolls back the setup if invalidating a review package fails" do
-    period, _, _, package = calculated_period
-    allow_any_instance_of(PayPeriod).to receive(:invalidate_calculation!).and_raise(ActiveRecord::RecordInvalid.new(period))
-    patch "#{path}/#{assignment.id}/pay_item", params: { employee_payroll_field: { amount: 300 } }, as: :json
-    expect(response).to have_http_status(:unprocessable_entity)
-    expect(assignment.reload.amount).to eq(250)
-    expect(period.reload).to be_calculated
-    expect(package.reload.status).to eq("pending")
+
+  [ ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved ].each do |error_class|
+    it "returns truthful JSON and rolls back creation when post-render invalidation raises #{error_class}" do
+      period, item, entry, package = calculated_period
+      old_item, old_entry = item.attributes, entry.attributes
+      failure = period.dup
+      failure.errors.add(:base, "Review invalidation failed")
+      error = error_class == ActiveRecord::RecordInvalid ? error_class.new(failure) : error_class.new("Review invalidation failed", failure)
+      allow_any_instance_of(PayPeriod).to receive(:invalidate_calculation!).and_raise(error)
+      previous_definitions = PayrollFieldDefinition.count
+      previous_assignments = EmployeePayrollField.count
+      previous_audits = AuditLog.count
+      post "#{path}/create_and_assign", params: {
+        scope: "employee_only", payroll_field: { name: "Rolled back addition", kind: "addition", tax_treatment: "taxable_addition" },
+        employee_payroll_field: { amount: 75 }
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.media_type).to eq("application/json")
+      expect(response.parsed_body).to eq("errors" => [ "Review invalidation failed" ])
+      expect(PayrollFieldDefinition.count).to eq(previous_definitions)
+      expect(EmployeePayrollField.count).to eq(previous_assignments)
+      expect(AuditLog.count).to eq(previous_audits)
+      expect(period.reload).to be_calculated
+      expect(package.reload.status).to eq("pending")
+      expect(item.reload.attributes).to eq(old_item)
+      expect(entry.reload.attributes).to eq(old_entry)
+    end
+
+    it "returns truthful JSON and rolls back edited source and reviews when invalidation raises #{error_class}" do
+      period, item, entry, package = calculated_period(status: "approved")
+      old_period, old_item, old_entry, old_package = period.attributes, item.attributes, entry.attributes, package.attributes
+      failure = period.dup
+      failure.errors.add(:base, "Review invalidation failed")
+      error = error_class == ActiveRecord::RecordInvalid ? error_class.new(failure) : error_class.new("Review invalidation failed", failure)
+      allow_any_instance_of(PayPeriod).to receive(:invalidate_calculation!) do |record|
+        record.supersede_current_review_package!(reason: "Started invalidation")
+        raise error
+      end
+      patch "#{path}/#{assignment.id}/pay_item", params: {
+        payroll_field: { name: "Rolled back rename" }, employee_payroll_field: { amount: 300 }
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body).to eq("errors" => [ "Review invalidation failed" ])
+      expect(assignment.reload.amount).to eq(250)
+      expect(field.reload.name).not_to eq("Rolled back rename")
+      expect(period.reload.attributes).to eq(old_period)
+      expect(package.reload.attributes).to eq(old_package)
+      expect(item.reload.attributes).to eq(old_item)
+      expect(entry.reload.attributes).to eq(old_entry)
+    end
   end
+
   it "preserves cloned approved baseline evidence while invalidating mutable practice calculations" do
     admin = create(:user, company: company, organization: company.organization, role: "admin")
     employee.update!(department: nil)

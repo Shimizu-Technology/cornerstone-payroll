@@ -3,6 +3,15 @@
 # One definition shape for the client library and employee pay-item editors.
 class PayrollFieldSerializer
   def self.call(field)
+    assignments = field.employee_payroll_fields
+    if field.association(:employee_payroll_fields).loaded?
+      active_count = assignments.count(&:active?)
+      employee_count = assignments.map(&:employee_id).uniq.length
+    else
+      active_count = assignments.active.count
+      employee_count = assignments.distinct.count(:employee_id)
+    end
+
     {
       id: field.id,
       company_id: field.company_id,
@@ -21,8 +30,8 @@ class PayrollFieldSerializer
       sort_order: field.sort_order,
       payee_name: field.payee_name,
       reference_number: field.reference_number,
-      active_assignment_count: field.employee_payroll_fields.count(&:active?),
-      assigned_employee_count: field.employee_payroll_fields.map(&:employee_id).uniq.length,
+      active_assignment_count: active_count,
+      assigned_employee_count: employee_count,
       created_at: field.created_at,
       updated_at: field.updated_at
     }
