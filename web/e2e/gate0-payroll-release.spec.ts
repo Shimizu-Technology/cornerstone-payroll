@@ -926,7 +926,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(quickItemDialog).toBeVisible();
     const delayedFieldName = `Delayed primary field ${randomUUID()}`;
     await quickItemDialog.getByLabel('Name', { exact: true }).fill(delayedFieldName);
-    await quickItemDialog.getByLabel('Amount', { exact: true }).fill('1');
+    await quickItemDialog.getByLabel(/^Amount(?! type)/).fill('1');
     await quickItemDialog.getByRole('button', { name: 'Save addition', exact: true }).click();
     await quickFieldStarted;
     await page.evaluate((path): void => {

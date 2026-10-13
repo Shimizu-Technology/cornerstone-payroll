@@ -69,7 +69,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await dialog.getByLabel('Name', { exact: true }).fill(name);
     await dialog.getByLabel('Tax treatment', { exact: true }).selectOption('taxable_addition');
     await dialog.getByLabel('Amount type', { exact: true }).selectOption('fixed');
-    await dialog.getByLabel('Amount', { exact: true }).fill(amount);
+    await dialog.getByLabel(/^Amount(?! type)/).fill(amount);
   }
   async function saveAddition(page: Page, dialog: Locator): Promise<void> {
     await dialog.getByRole('button', { name: 'Save addition', exact: true }).click();
@@ -92,10 +92,10 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   test('accountant discovers the local action and saves a private recurring $250 addition', async ({ page }) => {
     await openEmployee(page, fixture.companies.aire, fixture.employees.recipient);
     const dialog = await startAddition(page);
-    await expect(dialog.getByRole('radio', { name: 'Only QA Allowance Recipient', exact: true })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: /^Only QA Allowance Recipient/ })).toBeChecked();
     await fillAddition(dialog, 'Assistant Chief Pilot QA', '250');
-    await dialog.getByLabel('First payday', { exact: true }).fill('2026-10-13');
-    await expect(dialog.getByLabel('Last payday', { exact: true })).toHaveValue('');
+    await dialog.getByLabel(/^First payday/).fill('2026-10-13');
+    await expect(dialog.getByLabel(/^Last payday/)).toHaveValue('');
     await expect(dialog.getByLabel(/Payee|Reference number/)).toHaveCount(0);
     await saveAddition(page, dialog);
     personal = (await assignments(aireApi, fixture.employees.recipient)).find(row => row.payroll_field.name === 'Assistant Chief Pilot QA')!;
@@ -120,7 +120,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       await page.keyboard.press('Enter');
       const dialog = page.getByRole('dialog', { name: 'Add addition', exact: true });
       await fillAddition(dialog, 'Admin allowance QA', '250');
-      await dialog.getByLabel('First payday', { exact: true }).fill('2026-10-13');
+      await dialog.getByLabel(/^First payday/).fill('2026-10-13');
       const bounds = await dialog.boundingBox();
       expect(bounds!.width).toBeLessThanOrEqual(390);
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
@@ -137,7 +137,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await openEmployee(page, fixture.companies.aire, fixture.employees.admin_recipient);
     const dialog = await startAddition(page);
     await fillAddition(dialog, 'Reusable aviation allowance QA', '75');
-    await dialog.getByRole('radio', { name: 'Reusable for Synthetic Aviation QA', exact: true }).check();
+    await dialog.getByRole('radio', { name: /^Reusable for Synthetic Aviation QA/ }).check();
     await expect(dialog).toContainText(/assign|other employees/i);
     await saveAddition(page, dialog);
     shared = (await assignments(aireApi, fixture.employees.admin_recipient)).find(row => row.payroll_field.name === 'Reusable aviation allowance QA')!;
@@ -155,7 +155,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await dialog.getByRole('radio', { name: 'Use existing client field', exact: true }).check();
     await dialog.getByLabel('Client field', { exact: true }).selectOption(String(shared.payroll_field_definition_id));
     await dialog.getByRole('radio', { name: 'Set employee amount', exact: true }).check();
-    await dialog.getByLabel('Amount', { exact: true }).fill('90');
+    await dialog.getByLabel(/^Amount(?! type)/).fill('90');
     await saveAddition(page, dialog);
     const saved = await assignments(aireApi, fixture.employees.coworker);
     expect(saved).toHaveLength(1);
@@ -174,9 +174,9 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       await openEmployee(page, fixture.companies.mosa, employeeId);
       await page.getByTestId(`pay-item-${assignmentId}`).getByRole('button', { name: 'Edit', exact: true }).click();
       const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
-      await dialog.getByLabel('First payday', { exact: true }).fill('2026-10-01');
-      await dialog.getByRole('button', { name: /More options/i }).click();
-      await dialog.getByLabel('Notes', { exact: true }).fill('Synthetic date-only edit preserves amount semantics.');
+      await dialog.getByLabel(/^First payday/).fill('2026-10-01');
+      await dialog.locator('summary').filter({ hasText: 'More options' }).click();
+      await dialog.getByLabel(/^Notes/).fill('Synthetic date-only edit preserves amount semantics.');
       await saveAddition(page, dialog);
       expect((await assignments(mosaApi, employeeId)).find(row => row.id === assignmentId)!.amount).toBe(expected);
     }
@@ -245,7 +245,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await dialog.getByRole('button', { name: 'Save addition', exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText(/failure|retry/i);
     await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('Retry allowance QA');
-    await expect(dialog.getByLabel('Amount', { exact: true })).toHaveValue('11');
+    await expect(dialog.getByLabel(/^Amount(?! type)/)).toHaveValue('11');
     await saveAddition(page, dialog);
     expect((await assignments(aireApi, fixture.employees.admin_recipient)).filter(row => row.payroll_field.name === 'Retry allowance QA')).toHaveLength(1);
   });
@@ -303,8 +303,8 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
     await dialog.getByLabel('Name', { exact: true }).fill('Assistant Chief Pilot QA renamed');
     await dialog.getByLabel('Tax treatment', { exact: true }).selectOption('non_taxable_addition');
-    await dialog.getByLabel('Amount', { exact: true }).fill('260');
-    await dialog.getByLabel('Last payday', { exact: true }).fill('2026-12-31');
+    await dialog.getByLabel(/^Amount(?! type)/).fill('260');
+    await dialog.getByLabel(/^Last payday/).fill('2026-12-31');
     await saveAddition(page, dialog);
     const saved = (await assignments(aireApi, fixture.employees.recipient)).find(row => row.id === personal.id)!;
     expect(saved.amount).toBe(260);
@@ -355,7 +355,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       await page.getByRole('button', { name: action, exact: true }).click();
       const dialog = page.getByRole('dialog', { name: action, exact: true });
       await dialog.getByLabel('Name', { exact: true }).fill(name);
-      await dialog.getByLabel('Amount', { exact: true }).fill(amount);
+      await dialog.getByLabel(/^Amount(?! type)/).fill(amount);
       await dialog.getByRole('button', { name: save, exact: true }).click();
       await expect(dialog).toHaveCount(0);
       const saved = (await assignments(aireApi, fixture.employees.admin_recipient)).find(row => row.payroll_field.name === name)!;
