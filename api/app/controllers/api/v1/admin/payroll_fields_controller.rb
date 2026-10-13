@@ -4,7 +4,9 @@ module Api
   module V1
     module Admin
       class PayrollFieldsController < BaseController
+        include RecurringPayItemSetupMutation
         before_action :set_payroll_field, only: [ :show, :update, :destroy ]
+        around_action :with_recurring_pay_item_setup_invalidation, only: [ :create, :update, :destroy ]
 
         def index
           fields = PayrollFieldDefinition.where(company_id: current_company_id)
