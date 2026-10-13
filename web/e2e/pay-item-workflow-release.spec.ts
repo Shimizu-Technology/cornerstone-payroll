@@ -191,6 +191,15 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       await saveAddition(page, dialog);
       expect((await assignments(mosaApi, employeeId)).find(row => row.id === assignmentId)!.amount).toBe(expected);
     }
+    await openEmployee(page, fixture.companies.mosa, fixture.employees.inherited);
+    await page.getByTestId(`pay-item-${fixture.assignments.percentage}`).getByRole('button', { name: 'Edit', exact: true }).click();
+    const percentageDialog = page.getByRole('dialog', { name: 'Edit deduction', exact: true });
+    await percentageDialog.getByLabel(/^First payday/).fill('2026-10-01');
+    await percentageDialog.locator('summary').filter({ hasText: 'More options' }).click();
+    await percentageDialog.getByLabel(/^Notes/).fill('Synthetic percentage inheritance remains blank.');
+    await percentageDialog.getByRole('button', { name: 'Save deduction', exact: true }).click();
+    await expect(percentageDialog).toHaveCount(0);
+    expect((await assignments(mosaApi, fixture.employees.inherited)).find(row => row.id === fixture.assignments.percentage)!.percentage).toBeNull();
   });
 
   test('regular payroll applies scoped additions once, honors dates, and retains the legacy chief allowance', async ({ page }) => {
@@ -328,6 +337,20 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect((await period(aireApi, fixture.periods.before_start)).status).toBe('calculated');
     expect((await period(aireApi, fixture.periods.special)).status).toBe('calculated');
     expect(await period(aireApi, fixture.periods.chief_history)).toEqual(chiefHistory);
+  });
+
+  test('a future addition does not invalidate earlier or recurring-off payrolls', async ({ page }) => {
+    const before = await calculate(aireApi, fixture.periods.regular);
+    await openEmployee(page, fixture.companies.aire, fixture.employees.recipient);
+    const dialog = await startAddition(page);
+    await fillAddition(dialog, 'Future allowance QA', '10');
+    await dialog.getByLabel(/^First payday/).fill('2026-11-01');
+    await saveAddition(page, dialog);
+    const future = (await assignments(aireApi, fixture.employees.recipient)).find(row => row.payroll_field.name === 'Future allowance QA')!;
+    await expect(page.getByTestId(`pay-item-${future.id}`)).toContainText('Starts 2026-11-01');
+    expect(await period(aireApi, fixture.periods.regular)).toEqual(before);
+    expect((await period(aireApi, fixture.periods.before_start)).status).toBe('calculated');
+    expect((await period(aireApi, fixture.periods.special)).status).toBe('calculated');
   });
 
   test('stopping and reactivating a schedule retains its identity and history', async ({ page }) => {
@@ -471,14 +494,16 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
 
   test('optional legacy conversion atomically replaces the chief allowance and recalculates it exactly once', async ({ page }) => {
     await openEmployee(page, fixture.companies.aire, fixture.employees.chief);
-    await expect(page.getByText('Legacy recurring items', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Move to typed setup', exact: true }).click();
-    const heading = page.getByRole('heading', { name: 'Move legacy item to typed setup', exact: true });
+    const additions = page.getByRole('region', { name: 'Additions', exact: true });
+    await expect(additions).toContainText('Chief Pilot');
+    await expect(additions).toContainText('Existing recurring item');
+    await additions.getByRole('button', { name: 'Update setup', exact: true }).click();
+    const heading = page.getByRole('heading', { name: 'Update recurring item setup', exact: true });
     const converter = heading.locator('ancestor::div[contains(@class, "rounded-2xl")][1]');
     await expect(converter.getByPlaceholder('Auto loan, 401(k), phone allowance')).toHaveValue('Chief Pilot');
     await converter.getByRole('combobox').filter({ has: page.locator('option[value="other"]') }).selectOption('other');
     await converter.getByLabel(/^First payday/).fill('2026-10-13');
-    await converter.getByRole('button', { name: 'Move to typed setup', exact: true }).click();
+    await converter.getByRole('button', { name: 'Save setup', exact: true }).click();
     await expect(heading).toHaveCount(0);
     const chiefAssignments = await assignments(aireApi, fixture.employees.chief);
     expect(chiefAssignments.filter(assignment => assignment.payroll_field.name === 'Chief Pilot')).toHaveLength(1);
