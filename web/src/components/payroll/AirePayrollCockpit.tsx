@@ -351,7 +351,15 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   );
 }
 
-export function AirePayrollCockpit({
+export function AirePayrollCockpit(props: Props) {
+  const { activeCompanyId } = useCompany();
+  const liveScope = props.calendar.source_capabilities?.includes('payroll_cockpit') ?? true;
+  // A source change is a new workspace, even when it retains the payroll ID.
+  // Remount before rendering so old details and commands never cross scopes.
+  return <AirePayrollCockpitWorkspace key={`${activeCompanyId ?? 'none'}:${props.payPeriodId}:${props.calendar.source_id ?? 'none'}:${liveScope}`} {...props} />;
+}
+
+function AirePayrollCockpitWorkspace({
   payPeriodId,
   payPeriodStatus = 'draft',
   payrollHours = {},

@@ -168,6 +168,10 @@ it.each([
   { source_kind: 'manual', provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
   { source_kind: undefined, provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
   { source_kind: 'current', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: 'frozen_batch_and_exact_authenticated_receipt', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: undefined, label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: '', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'future_manual', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
 ])('keeps missing receipt scope unconfirmed except known manual evidence $source_kind', async (line) => {
   mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
     ...period, entries: [], coverage_lines: [{ id: 'missing-scope', source_time_entry_id: '18', coverage_state: 'issued', identity_state: 'verified', regular_hours: 8, overtime_hours: 0, ...line }],

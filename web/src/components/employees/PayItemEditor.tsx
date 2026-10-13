@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -34,6 +35,7 @@ interface Props {
 }
 
 export function PayItemEditor({ draft, employeeName, companyName, availableFields, selectedField, linkedLoan, duplicateName, saving, error, onChange, onSelectField, onSave, onClose }: Props) {
+  const newItemScope = useRef(draft.source === 'new' ? draft.scope : 'employee_only');
   const editing = Boolean(draft.assignmentId);
   const group = payItemGroups.find((item) => item.kind === draft.kind)!;
   const sharedEdit = editing && draft.scope === 'client_wide';
@@ -55,8 +57,8 @@ export function PayItemEditor({ draft, employeeName, companyName, availableField
         </div>
         <fieldset disabled={saving} className="space-y-5 px-5 py-5 sm:px-6">
           {!editing && <fieldset className="space-y-2"><legend className="mb-2 text-sm font-semibold text-neutral-900">Choose an item</legend>
-            <label className="flex gap-2 text-sm"><input type="radio" name="pay-item-source" checked={draft.source === 'new'} onChange={() => onChange({ ...newPayItemDraft(draft.kind), dirty: true })} />Create new item</label>
-            <label className="flex gap-2 text-sm"><input type="radio" name="pay-item-source" checked={draft.source === 'existing'} disabled={availableFields.length === 0} onChange={() => onChange({ source: 'existing', scope: 'client_wide', fieldId: undefined, name: '', useDefault: true, amount: '' })} />Use existing client field</label>
+            <label className="flex gap-2 text-sm"><input type="radio" name="pay-item-source" checked={draft.source === 'new'} onChange={() => onChange({ ...newPayItemDraft(draft.kind), scope: newItemScope.current, startDate: draft.startDate, endDate: draft.endDate, dirty: true })} />Create new item</label>
+            <label className="flex gap-2 text-sm"><input type="radio" name="pay-item-source" checked={draft.source === 'existing'} disabled={availableFields.length === 0} onChange={() => { newItemScope.current = draft.scope; onChange({ source: 'existing', scope: 'client_wide', fieldId: undefined, name: '', useDefault: true, amount: '' }); }} />Use existing client field</label>
             {availableFields.length === 0 && <p className="text-xs text-neutral-500">No unassigned reusable {group.singular}s are available yet.</p>}
           </fieldset>}
           {draft.source === 'existing' && !editing && <label className="block text-sm font-medium">Client field

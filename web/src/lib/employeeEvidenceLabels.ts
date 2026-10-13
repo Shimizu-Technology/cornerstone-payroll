@@ -36,13 +36,14 @@ export function evidenceSourceLabel(value: string | null | undefined, receiptSco
 }, "Evidence source needs review");
 }
 
-export function coverageStateLabel(value: string | null | undefined, identityState?: string | null, receiptScope?: string | null, manualEvidence = false): string {
+export function coverageStateLabel(value: string | null | undefined, identityState?: string | null, receiptScope?: string | null, sourceKind?: string | null, provenance?: string | null): string {
   // Compatible producers can supply unfamiliar or conflicting fields independently.
   // Keep their hours intact, but do not present unconfirmed line coverage as issued.
   if (value === 'issued' && identityState && identityState !== 'verified') {
     return 'Employee identity needs review · payment coverage unconfirmed';
   }
   const lineReceiptConfirmed = receiptScope === 'exact_line' || receiptScope === 'unambiguous_entry';
+  const manualEvidence = (sourceKind == null || sourceKind === 'manual') && provenance === 'manual_source_allocation';
   if (value === 'issued' && !lineReceiptConfirmed && !(manualEvidence && !receiptScope)) {
     return 'Receipt needs review · line coverage unconfirmed';
   }
@@ -110,4 +111,3 @@ export function payRunStatusLabel(value: string | null | undefined): string {
   "committed": "Committed"
 }, "Pay run status unavailable");
 }
-
