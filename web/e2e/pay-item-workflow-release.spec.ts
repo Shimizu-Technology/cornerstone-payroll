@@ -308,7 +308,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   });
 
   test('personal editing affects only that employee and preserves saved payroll history', async ({ page }) => {
-    const before = await period(aireApi, fixture.periods.regular);
+    const before = await calculate(aireApi, fixture.periods.regular);
     await openEmployee(page, fixture.companies.aire, fixture.employees.recipient);
     await page.getByTestId(`pay-item-${personal.id}`).getByRole('button', { name: 'Edit', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
@@ -391,7 +391,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   });
 
   test('shared default editing shows impact, requires recalculation, and preserves explicit zero and committed history', async ({ page }) => {
-    const before = await period(mosaApi, fixture.periods.hospitality);
+    const before = await calculate(mosaApi, fixture.periods.hospitality);
     await page.goto(`/companies/${fixture.companies.mosa}/payroll-fields`);
     const row = page.getByTestId(`shared-field-${fixture.fields.fixed}`);
     await expect(row).toContainText(/Used by 2 people/);
