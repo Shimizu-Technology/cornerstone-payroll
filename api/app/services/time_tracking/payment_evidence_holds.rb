@@ -89,7 +89,8 @@ module TimeTracking
           end
           payload = @client.payroll_payment_attestations(**query)
           rows = payload.fetch("payment_attestations")
-          accumulated.concat(rows)
+          # A producer response cannot assign another employee's holds to this query.
+          accumulated.concat(rows.select { |row| row["source_user_uuid"] == uuid })
           total_pages = Integer(payload.fetch("pagination").fetch("total_pages"))
           break if page >= total_pages
           conflict!("Payment evidence history is too large for this view; review it with your administrator") if page == 10

@@ -90,6 +90,23 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
     expect(service.review[:payment_attestations].first["id"]).to eq(hold["id"])
   end
 
+  it "ignores mismatched employee holds without hiding that employee's available hours" do
+    row = { "source_time_entry_id" => "42", "source_kind" => "current", "source_time_entry_version" => 2,
+      "original_work_date" => period.start_date.iso8601, "total_hours" => 4 }
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [
+      { "source_user_uuid" => uuid, "adjustments" => [ row ] }
+    ])
+    other_hold = hold.merge("source_user_uuid" => SecureRandom.uuid, "source_time_entry_id" => "42")
+    allow(client).to receive(:payroll_payment_attestations).and_return("payment_attestations" => [
+      hold, other_hold, other_hold.except("source_user_uuid")
+    ], "pagination" => { "total_pages" => 1 })
+
+    review = service.review
+    expect(review[:payment_attestations]).to eq([ hold.merge("employee_name" => employee.full_name) ])
+    expect(review[:candidates]).to eq([ row.except("source_kind").merge("source_user_uuid" => uuid,
+      "employee_name" => employee.full_name) ])
+  end
+
   it "fails explicitly when evidence history exceeds the bounded ten pages" do
     allow(client).to receive(:payroll_payment_attestations).and_return(
       "payment_attestations" => [], "pagination" => { "total_pages" => 11 })
