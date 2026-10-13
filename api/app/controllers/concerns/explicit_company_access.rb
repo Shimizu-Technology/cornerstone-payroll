@@ -10,8 +10,8 @@ module ExplicitCompanyAccess
   private
 
   def require_explicit_company_access
-    requested_company = request.headers["X-Company-Id"].presence
-    return unless requested_company
+    requested_company = request.headers["X-Company-Id"]
+    return if requested_company.nil?
     return if requested_company.match?(/\A[1-9]\d*\z/) && current_user&.can_access_company?(requested_company.to_i)
 
     render json: { error: "You do not have access to this company" }, status: :forbidden

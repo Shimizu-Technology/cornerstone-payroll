@@ -26,10 +26,16 @@ RSpec.describe "Portal request company scope", type: :request do
       let(:role) { surface == "client" ? "client" : "accountant" }
       let(:base) { "/api/v1/#{surface}/portal_threads" }
 
-      %w[inaccessible malformed].each do |scope|
-        context "with an #{scope} company header" do
+      %w[inaccessible malformed empty whitespace].each do |scope|
+        context "with #{scope} company scope" do
           let(:headers) do
-            { "X-Company-Id" => scope == "inaccessible" ? inaccessible.id.to_s : "#{home.id}invalid" }
+            value = case scope
+            when "inaccessible" then inaccessible.id.to_s
+            when "malformed" then "#{home.id}invalid"
+            when "empty" then ""
+            when "whitespace" then " "
+            end
+            { "X-Company-Id" => value }
           end
 
           it "denies show before marking the home conversation read" do
