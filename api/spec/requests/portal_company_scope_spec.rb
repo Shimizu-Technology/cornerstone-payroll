@@ -39,15 +39,22 @@ RSpec.describe "Portal request company scope", type: :request do
           end
 
           it "denies show before marking the home conversation read" do
+            sender = create(:user, company: home, organization: organization,
+              role: surface == "client" ? "accountant" : "client", platform_owner: false)
+            ClientPortalMessage.create!(company: home, client_portal_thread: thread,
+              author: sender, body: "Unread incoming message")
+            thread.reload
+            expect(thread.unread_for?(user)).to be(true)
             original = thread.attributes
             get "#{base}/#{thread.id}", headers: headers
             expect(response).to have_http_status(:forbidden)
             expect(thread.reload.attributes).to eq(original)
+            expect(thread.unread_for?(user)).to be(true)
           end
 
           it "denies update without changing the home conversation" do
             original = thread.attributes
-            patch "#{base}/#{thread.id}", headers: headers, params: { subject: "Wrong client", status: "resolved" }
+            patch "#{base}/#{thread.id}", headers: headers, params: { subject: "Wrong client" }
             expect(response).to have_http_status(:forbidden)
             expect(thread.reload.attributes).to eq(original)
           end
@@ -82,6 +89,24 @@ RSpec.describe "Portal request company scope", type: :request do
         expect(response).to have_http_status(:ok)
         expect(response.parsed_body.dig("data", "id")).to eq(thread.id)
         expect(thread.reload.unread_for?(user)).to be(false)
+      end
+
+      it "allows an explicit accessible home-company read" do
+        get "#{base}/#{thread.id}", headers: { "X-Company-Id" => home.id.to_s }
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("data", "id")).to eq(thread.id)
+        expect(thread.reload.unread_for?(user)).to be(false)
+      end
+
+      it "allows an explicit accessible home-company message" do
+        thread
+        expect do
+          post "#{base}/#{thread.id}/messages", headers: { "X-Company-Id" => home.id.to_s },
+            params: { body: "Authorized explicit home message" }
+        end.to change(ClientPortalMessage, :count).by(1)
+        expect(response).to have_http_status(:created)
+        expect(ClientPortalMessage.last.company_id).to eq(home.id)
+        expect(ClientPortalMessage.last.author_id).to eq(user.id)
       end
 
       it "preserves no-header home-company message creation" do
