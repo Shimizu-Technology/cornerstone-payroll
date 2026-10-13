@@ -45,7 +45,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   test.afterAll(async () => { await aireApi.dispose(); await mosaApi.dispose(); });
 
   async function assignments(api: APIRequestContext, employeeId: number): Promise<Assignment[]> {
-    const response = await api.get(`admin/employees/${employeeId}/payroll_fields`);
+    const response = await api.get(`admin/employees/${employeeId}/payroll_fields?include_inactive=true`);
     expect(response.ok(), await response.text()).toBeTruthy();
     return (await response.json()).employee_payroll_fields;
   }
