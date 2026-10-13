@@ -4,8 +4,10 @@ module Api
   module V1
     module Admin
       class EmployeePayrollFieldsController < BaseController
+        include RecurringPayItemSetupMutation
         before_action :set_employee
         before_action :set_assignment, only: [ :update, :destroy, :pay_item ]
+        around_action :with_recurring_pay_item_setup_invalidation, only: [ :create, :create_and_assign, :create_personal, :convert_legacy, :update, :pay_item, :bulk_update, :destroy ]
 
         def index
           assignments = @employee.employee_payroll_fields
