@@ -51,5 +51,4 @@ RSpec.describe "Native Cable ticket company scope", type: :request do
     expect(response).to have_http_status(:forbidden)
     expect(ClientPortalMessage.count).to eq(0)
   end
-
 end
