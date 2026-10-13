@@ -1,11 +1,15 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { payrollFieldsApi } from '@/services/api';
 import type { PayrollFieldAmountType, PayrollFieldCategory, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldReportingGroup, PayrollFieldTaxTreatment } from '@/types';
 
@@ -48,37 +52,78 @@ const defaultField: Partial<PayrollFieldDefinition> = {
   category: 'other',
   reporting_group: null,
   amount_type: 'fixed',
-  default_amount: 0,
-  default_percentage: 0,
+  default_amount: null,
+  default_percentage: null,
   show_in_payroll_grid: true,
   active: true,
   sort_order: 0,
 };
 
-export function PayrollFields() {
+function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { companyId: number; companyName: string; selectedFieldId: number | null }) {
   const [fields, setFields] = useState<PayrollFieldDefinition[]>([]);
-  const [draft, setDraft] = useState<Partial<PayrollFieldDefinition>>(defaultField);
+  const { user } = useAuth();
+  const draftKey = `shared-pay-field-draft:v1:${user?.id ?? 0}:${companyId}`;
+  const [draft, setDraftState] = useState<Partial<PayrollFieldDefinition>>(defaultField);
+  const [dirty, setDirty] = useState(false);
+  const [recovered, setRecovered] = useState(false);
+  const restoredRef = useRef(false);
+  const setDraft = (update: Partial<PayrollFieldDefinition> | ((current: Partial<PayrollFieldDefinition>) => Partial<PayrollFieldDefinition>)) => { setDraftState(update); setDirty(true); };
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [impact, setImpact] = useState<{ kind: 'save' | 'archive' | 'reactivate'; field: PayrollFieldDefinition; payload?: Partial<PayrollFieldDefinition> } | null>(null);
+  const mountedRef = useRef(true);
+  const requestRef = useRef(0);
+  const savingRef = useRef(false);
+  const selectedRef = useRef<number | null>(null);
+  const editorHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; requestRef.current += 1; };
+  }, []);
 
   const loadFields = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
     try {
-      const res = await payrollFieldsApi.list();
+      const res = await payrollFieldsApi.list(undefined, companyId);
+      if (!mountedRef.current || requestRef.current !== request) return;
       setFields(res.payroll_fields);
       setError(null);
+      if (!restoredRef.current) {
+        restoredRef.current = true;
+        try {
+          const stored = JSON.parse(sessionStorage.getItem(draftKey) || 'null') as { draft?: Partial<PayrollFieldDefinition>; editingId?: number | null } | null;
+          if (stored?.draft && typeof stored.draft.name === 'string' && ['addition', 'deduction', 'employer_contribution'].includes(stored.draft.kind || '') && (!stored.editingId || res.payroll_fields.some((field) => field.id === stored.editingId))) {
+            setDraftState(stored.draft); setEditingId(stored.editingId ?? null); setDirty(true); setRecovered(true); return;
+          }
+        } catch { /* Recoverable storage can be unavailable. */ }
+      }
+      if (selectedFieldId && selectedRef.current !== selectedFieldId) {
+        const field = res.payroll_fields.find((candidate) => candidate.id === selectedFieldId);
+        if (field) { selectedRef.current = selectedFieldId; setEditingId(field.id); setDraftState(field); }
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load payroll fields');
+      if (mountedRef.current && requestRef.current === request) setError(err instanceof Error ? err.message : 'Failed to load payroll fields');
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestRef.current === request) setLoading(false);
     }
-  }, [setError]);
+  }, [companyId, draftKey, selectedFieldId, setError]);
 
   useEffect(() => {
     void loadFields();
   }, [loadFields]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ draft, editingId })); } catch { /* Keep the in-memory draft. */ }
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, draft, editingId, draftKey]);
 
   const setKind = (kind: PayrollFieldKind) => {
     setDraft((prev) => ({
@@ -89,102 +134,135 @@ export function PayrollFields() {
   };
 
   const resetDraft = () => {
-    setDraft(defaultField);
-    setEditingId(null);
+    setDraftState(defaultField);
+    setEditingId(null); setDirty(false); setRecovered(false);
+    try { sessionStorage.removeItem(draftKey); } catch { /* Storage can be unavailable. */ }
+  };
+
+  const persistField = async (payload: Partial<PayrollFieldDefinition>, fieldId: number | null) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      if (fieldId) await payrollFieldsApi.update(fieldId, payload, companyId);
+      else await payrollFieldsApi.create(payload, companyId);
+      if (!mountedRef.current) return;
+      resetDraft(); setImpact(null);
+      setSuccess(fieldId ? 'Shared field saved. Recalculate affected unfinished payrolls before finalizing.' : 'Client-wide field created. Assign it on each person’s profile to include it in their pay.');
+      await loadFields();
+    } catch (err) {
+      if (mountedRef.current) setError(err instanceof Error ? err.message : 'Failed to save payroll field');
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+    }
   };
 
   const saveField = async () => {
+    if (savingRef.current) return;
     setError(null);
     if (!draft.name?.trim()) {
       setError('Name is required');
       return;
     }
-    setSaving(true);
-    try {
-      const payload = {
-        ...draft,
-        name: draft.name.trim(),
+    const rawValue = draft.amount_type === 'percentage' ? draft.default_percentage : draft.default_amount;
+    if (rawValue != null && (!Number.isFinite(rawValue) || rawValue < 0)) { setError('Enter a valid default of zero or more, or leave it blank.'); return; }
+    const payload: Partial<PayrollFieldDefinition> = {
+        name: draft.name.trim(), description: draft.description,
+        kind: draft.kind, tax_treatment: draft.tax_treatment, category: draft.category,
+        amount_type: draft.amount_type, active: draft.active, sort_order: draft.sort_order,
+        show_in_payroll_grid: draft.show_in_payroll_grid,
+        payee_name: draft.payee_name, reference_number: draft.reference_number,
         reporting_group: draft.reporting_group || null,
-        default_amount: draft.amount_type === 'fixed' ? Number(draft.default_amount || 0) : null,
-        default_percentage: draft.amount_type === 'percentage' ? Number(draft.default_percentage || 0) : null,
+        default_amount: draft.amount_type === 'fixed' || draft.amount_type === 'manual' ? draft.default_amount ?? null : null,
+        default_percentage: draft.amount_type === 'percentage' || draft.amount_type === 'manual' ? draft.default_percentage ?? null : null,
       };
-      if (editingId) {
-        await payrollFieldsApi.update(editingId, payload);
-      } else {
-        await payrollFieldsApi.create(payload);
-      }
-      resetDraft();
-      await loadFields();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save payroll field');
-    } finally {
-      setSaving(false);
+    const field = fields.find((candidate) => candidate.id === editingId);
+    if (field && (field.assigned_employee_count ?? 0) > 0) {
+      setImpact({ kind: 'save', field, payload });
+      return;
     }
+    await persistField(payload, editingId);
   };
 
   const editField = (field: PayrollFieldDefinition) => {
+    if (dirty) { setError('Save or discard your current field changes before editing another field.'); return; }
     setEditingId(field.id);
-    setDraft(field);
+    setDraftState(field);
+    setSuccess(null);
+    editorHeadingRef.current?.scrollIntoView?.({ block: 'start' });
+    editorHeadingRef.current?.focus({ preventScroll: true });
   };
 
-  const archiveField = async (field: PayrollFieldDefinition) => {
-    if (!window.confirm(`Archive ${field.name}? Existing payroll history stays unchanged.`)) return;
+  const changeFieldStatus = async (field: PayrollFieldDefinition) => {
+    if (savingRef.current) return;
+    if (dirty) { setError('Save or discard your current field changes before changing another field.'); return; }
     setError(null);
+    savingRef.current = true; setSaving(true);
     try {
-      await payrollFieldsApi.archive(field.id);
+      if (field.active) await payrollFieldsApi.archive(field.id, companyId);
+      else await payrollFieldsApi.update(field.id, { active: true }, companyId);
+      if (!mountedRef.current) return;
       if (editingId === field.id) {
         resetDraft();
       }
       await loadFields();
-      setError(null);
+      setImpact(null);
+      setSuccess(`${field.name} ${field.active ? 'archived' : 'reactivated'}. Recalculate affected unfinished payrolls before finalizing.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to archive payroll field');
+      if (mountedRef.current) setError(err instanceof Error ? err.message : 'Failed to change payroll field');
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
     }
   };
 
   return (
     <div>
       <Header
-        title="Payroll Fields"
-        description="Create reusable client-wide additions, deductions, and employer contributions."
+        title="Client-wide payroll fields"
+        description={`Reusable additions, deductions, and employer contributions for ${companyName}.`}
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {success && <ActionFeedback tone="success" message={success} />}
+        {recovered && <ActionFeedback tone="info" message={`Recovered your unfinished client-wide field for ${companyName}.`} />}
+        <p className="rounded-xl border border-primary-100 bg-primary-50 p-4 text-sm text-primary-950">Client-wide means available to assign. Creating a field here does not add it to everyone’s pay. <Link className="font-semibold underline" to={`/companies/${companyId}/employees`}>Open a person’s profile</Link> to assign it or create an employee-specific item.</p>
 
         <Card>
           <CardContent className="space-y-4 py-5">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">{editingId ? 'Edit payroll field' : 'Create payroll field'}</h2>
+              <h2 ref={editorHeadingRef} tabIndex={-1} className="scroll-mt-24 text-lg font-semibold text-gray-900">{editingId ? 'Edit client-wide field' : 'Create client-wide field'}</h2>
               <p className="mt-1 text-sm text-gray-500">Define the payroll behavior once, then assign it to employees who need it.</p>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-4">
               <div className="lg:col-span-2">
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Name</label>
-                <Input value={draft.name || ''} onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="Auto Loan, 401(k), Rent" />
+                <Input aria-label="Name" value={draft.name || ''} onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="Auto Loan, 401(k), Rent" />
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Type</label>
-                <Select value={draft.kind || 'deduction'} onChange={(e) => setKind(e.target.value as PayrollFieldKind)}>
+                <Select aria-label="Type" value={draft.kind || 'deduction'} onChange={(e) => setKind(e.target.value as PayrollFieldKind)}>
                   {kindOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </Select>
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Tax treatment</label>
-                <Select value={draft.tax_treatment || 'post_tax_deduction'} onChange={(e) => setDraft((prev) => ({ ...prev, tax_treatment: e.target.value as PayrollFieldTaxTreatment }))}>
+                <Select aria-label="Tax treatment" value={draft.tax_treatment || 'post_tax_deduction'} onChange={(e) => setDraft((prev) => ({ ...prev, tax_treatment: e.target.value as PayrollFieldTaxTreatment }))}>
                   {treatmentOptionsForKind(draft.kind || 'deduction').map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </Select>
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Category</label>
-                <Select value={draft.category || 'other'} onChange={(e) => setDraft((prev) => ({ ...prev, category: e.target.value as PayrollFieldCategory }))}>
+                <Select aria-label="Category" value={draft.category || 'other'} onChange={(e) => setDraft((prev) => ({ ...prev, category: e.target.value as PayrollFieldCategory }))}>
                   {categoryOptions.map((category) => <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>)}
                 </Select>
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Report group</label>
-                <Select value={draft.reporting_group || ''} onChange={(e) => setDraft((prev) => ({ ...prev, reporting_group: e.target.value ? e.target.value as PayrollFieldReportingGroup : null }))}>
+                <Select aria-label="Report group" value={draft.reporting_group || ''} onChange={(e) => setDraft((prev) => ({ ...prev, reporting_group: e.target.value ? e.target.value as PayrollFieldReportingGroup : null }))}>
                   {reportingGroupOptions.map((option) => <option key={option.value || 'none'} value={option.value}>{option.label}</option>)}
                 </Select>
                 <p className="mt-1 text-xs text-gray-500">
@@ -193,7 +271,7 @@ export function PayrollFields() {
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default</label>
-                <Select value={draft.amount_type || 'fixed'} onChange={(e) => setDraft((prev) => ({ ...prev, amount_type: e.target.value as PayrollFieldAmountType }))}>
+                <Select aria-label="Amount type" value={draft.amount_type || 'fixed'} onChange={(e) => setDraft((prev) => ({ ...prev, amount_type: e.target.value as PayrollFieldAmountType, ...(e.target.value === 'manual' && prev.amount_type !== 'manual' ? { default_amount: null, default_percentage: null } : {}) }))}>
                   {amountTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                 </Select>
               </div>
@@ -201,12 +279,12 @@ export function PayrollFields() {
               {draft.amount_type === 'percentage' ? (
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default %</label>
-                  <Input type="number" step="0.0001" value={draft.default_percentage ?? 0} onChange={(e) => setDraft((prev) => ({ ...prev, default_percentage: Number(e.target.value) }))} />
+                  <Input aria-label="Default percentage" type="number" min="0" step="0.0001" value={draft.default_percentage ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, default_percentage: e.target.value === '' ? null : Number(e.target.value) }))} />
                 </div>
               ) : draft.amount_type === 'fixed' ? (
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default amount</label>
-                  <Input type="number" step="0.01" value={draft.default_amount ?? 0} onChange={(e) => setDraft((prev) => ({ ...prev, default_amount: Number(e.target.value) }))} />
+                  <Input aria-label="Default amount" type="number" min="0" step="0.01" value={draft.default_amount ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, default_amount: e.target.value === '' ? null : Number(e.target.value) }))} /><p className="mt-1 text-xs text-neutral-500">Optional. Leave blank to enter amounts for each person.</p>
                 </div>
               ) : null}
               <div>
@@ -218,9 +296,14 @@ export function PayrollFields() {
               </div>
             </div>
 
+            <details className="rounded-xl border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold">More options</summary><div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-medium">Description<Input aria-label="Description" className="mt-1" value={draft.description || ''} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+              {draft.kind !== 'addition' && <><label className="text-sm font-medium">Payee<Input aria-label="Payee" className="mt-1" value={draft.payee_name || ''} onChange={(event) => setDraft((current) => ({ ...current, payee_name: event.target.value }))} /></label><label className="text-sm font-medium">Reference number<Input aria-label="Reference number" className="mt-1" value={draft.reference_number || ''} onChange={(event) => setDraft((current) => ({ ...current, reference_number: event.target.value }))} /></label></>}
+            </div></details>
+            <p className="text-xs text-neutral-600">Hiding a payroll column does not stop an item from calculating. Archive the field or stop a person’s assignment to suspend its automatic use.</p>
             <div className="grid gap-2 sm:flex [&>button]:w-full sm:[&>button]:w-auto">
-              <Button onClick={saveField} disabled={saving}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create field'}</Button>
-              {editingId && <Button variant="outline" onClick={resetDraft}>Cancel</Button>}
+              <Button onClick={() => void saveField()} disabled={saving || loading}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create field'}</Button>
+              {(editingId || dirty) && <Button variant="outline" onClick={resetDraft} disabled={saving}>{dirty ? 'Discard changes' : 'Cancel'}</Button>}
             </div>
           </CardContent>
         </Card>
@@ -235,11 +318,11 @@ export function PayrollFields() {
               <>
                 <div className="space-y-3 py-4 sm:hidden">
                   {fields.map((field) => (
-                    <MobileRecordCard key={field.id}>
+                    <MobileRecordCard key={field.id}><div data-testid={`shared-field-mobile-${field.id}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-neutral-950">{field.name}</p>
-                          <p className="mt-1 text-sm capitalize text-neutral-500">{field.kind.replace(/_/g, ' ')}</p>
+                          <p className="mt-1 text-sm capitalize text-neutral-500">Client-wide · {field.kind.replace(/_/g, ' ')}</p><p className="mt-1 text-xs text-neutral-500">Used by {field.assigned_employee_count ?? 0} people</p>
                         </div>
                         <span className={field.active ? 'text-sm font-medium text-green-700' : 'text-sm text-neutral-500'}>{field.active ? 'Active' : 'Archived'}</span>
                       </div>
@@ -247,14 +330,14 @@ export function PayrollFields() {
                         <MobileField label="Treatment" value={<span className="capitalize">{field.tax_treatment.replace(/_/g, ' ')}</span>} />
                         <MobileField label="Category" value={<span className="capitalize">{field.category.replace(/_/g, ' ')}</span>} />
                         <MobileField label="Report group" value={field.reporting_group ? reportingGroupOptions.find((option) => option.value === field.reporting_group)?.label || field.reporting_group : 'None'} />
-                        <MobileField label="Default" value={field.amount_type === 'percentage' ? `${field.default_percentage || 0}%` : field.amount_type === 'fixed' ? `$${Number(field.default_amount || 0).toFixed(2)}` : 'Manual'} />
+                        <MobileField label="Default" value={field.amount_type === 'percentage' ? (field.default_percentage == null ? 'Per person' : `${field.default_percentage}%`) : field.amount_type === 'fixed' ? (field.default_amount == null ? 'Per person' : `$${Number(field.default_amount).toFixed(2)}`) : 'Manual'} />
                         <MobileField label="Payroll review" value={field.show_in_payroll_grid === false ? 'Hidden' : 'Shown'} />
                       </div>
                       <MobileCardActions>
-                        <Button variant="outline" size="sm" onClick={() => editField(field)}>Edit</Button>
-                        {field.active && <Button variant="ghost" size="sm" onClick={() => archiveField(field)}>Archive</Button>}
+                        <Button variant="outline" size="sm" onClick={() => editField(field)} disabled={saving}>Edit</Button>
+                        <Button variant="ghost" size="sm" disabled={saving} onClick={() => setImpact({ kind: field.active ? 'archive' : 'reactivate', field })}>{field.active ? 'Archive' : 'Reactivate'}</Button>
                       </MobileCardActions>
-                    </MobileRecordCard>
+                    </div></MobileRecordCard>
                   ))}
                 </div>
                 <div className="hidden overflow-x-auto sm:block">
@@ -273,19 +356,19 @@ export function PayrollFields() {
                   </thead>
                   <tbody className="divide-y">
                     {fields.map((field) => (
-                      <tr key={field.id}>
-                        <td className="px-4 py-3 font-medium text-gray-900">{field.name}</td>
+                      <tr key={field.id} data-testid={`shared-field-${field.id}`}>
+                        <td className="px-4 py-3 font-medium text-gray-900">{field.name}<p className="mt-1 text-xs font-normal text-neutral-500">Client-wide · Used by {field.assigned_employee_count ?? 0} people</p></td>
                         <td className="px-4 py-3 capitalize">{field.kind.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3 capitalize">{field.tax_treatment.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3 capitalize">{field.category.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3">{field.reporting_group ? reportingGroupOptions.find((option) => option.value === field.reporting_group)?.label || field.reporting_group : '—'}</td>
                         <td className="px-4 py-3 text-right font-mono">
-                          {field.amount_type === 'percentage' ? `${field.default_percentage || 0}%` : field.amount_type === 'fixed' ? `$${Number(field.default_amount || 0).toFixed(2)}` : 'Manual'}
+                          {field.amount_type === 'percentage' ? (field.default_percentage == null ? 'Per person' : `${field.default_percentage}%`) : field.amount_type === 'fixed' ? (field.default_amount == null ? 'Per person' : `$${Number(field.default_amount).toFixed(2)}`) : 'Manual'}
                         </td>
                         <td className="px-4 py-3">{field.active ? 'Active' : 'Archived'}</td>
                         <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="sm" onClick={() => editField(field)}>Edit</Button>
-                          {field.active && <Button variant="ghost" size="sm" onClick={() => archiveField(field)}>Archive</Button>}
+                          <Button variant="ghost" size="sm" onClick={() => editField(field)} disabled={saving}>Edit</Button>
+                          <Button variant="ghost" size="sm" disabled={saving} onClick={() => setImpact({ kind: field.active ? 'archive' : 'reactivate', field })}>{field.active ? 'Archive' : 'Reactivate'}</Button>
                         </td>
                       </tr>
                     ))}
@@ -297,8 +380,25 @@ export function PayrollFields() {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={Boolean(impact)} onOpenChange={(open) => { if (!open && !saving) { setImpact(null); setError(null); } }} dismissOnEscape={!saving}>
+        <DialogContent className="dialog-center-mobile"><DialogTitle>Review shared field changes</DialogTitle>
+          {impact && <><p className="mt-3 text-sm font-semibold">{impact.field.name} · {companyName}</p><p className="mt-2 text-sm text-neutral-700">Used by {impact.field.assigned_employee_count ?? 0} people, with {impact.field.active_assignment_count ?? 0} active assignments.</p>
+          <p className="mt-3 text-sm text-neutral-700">{impact.kind === 'save' ? 'Shared name, tax treatment and calculation settings affect everyone using this field. Default amounts affect only people who use the client default; their own amounts stay separate.' : impact.kind === 'archive' ? 'Archiving stops automatic use of this field for assigned people. Their saved payroll history stays intact.' : 'Reactivating makes this field available again to its active assignments, within their payday dates.'}</p>
+          <p className="mt-3 text-sm text-neutral-600">Affected unfinished payrolls must be recalculated before approval. Finalized paychecks stay unchanged.</p>
+          {error && <ActionFeedback tone="error" message={error} />}
+          <div className="mt-5 flex flex-wrap justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => { setImpact(null); setError(null); }}>Cancel</Button><Button disabled={saving} onClick={() => { if (impact.kind === 'save' && impact.payload) void persistField(impact.payload, impact.field.id); else void changeFieldStatus(impact.field); }}>{saving ? 'Saving…' : impact.kind === 'save' ? 'Save changes' : impact.kind === 'archive' ? 'Archive field' : 'Reactivate field'}</Button></div></>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+export function PayrollFields() {
+  const { activeCompanyId, activeCompany, loading } = useCompany();
+  const [params] = useSearchParams();
+  const selected = Number(params.get('field_id'));
+  if (loading || !activeCompanyId) return <div role="status" className="p-6 text-sm text-neutral-600">Loading payroll client…</div>;
+  return <ClientPayrollFields key={activeCompanyId} companyId={activeCompanyId} companyName={activeCompany?.name || 'this client'} selectedFieldId={Number.isSafeInteger(selected) && selected > 0 ? selected : null} />;
 }
 
 export default PayrollFields;

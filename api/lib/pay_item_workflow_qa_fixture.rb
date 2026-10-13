@@ -40,6 +40,8 @@ class PayItemWorkflowQaFixture
     admin_recipient = employee(aire, "Admin Recipient", contractor: true)
     chief = employee(aire, "Legacy Chief")
     chief.update!(default_payroll_adjustments: [ { "label" => "Chief Pilot", "amount" => 750, "treatment" => "taxable_addition", "active" => true } ])
+    stale_profile = employee(aire, "Stale Profile", contractor: true)
+    stale_profile.update!(default_payroll_adjustments: [ { "label" => "Stale profile legacy allowance QA", "amount" => 45, "treatment" => "taxable_addition", "active" => true } ])
     inherited = employee(mosa, "Inherited Default")
     explicit_zero = employee(mosa, "Zero Override")
     private_owner = employee(mosa, "Private Owner")
@@ -76,16 +78,17 @@ class PayItemWorkflowQaFixture
     special = period(aire, [ recipient ], pay_date: Date.new(2026, 10, 16), recurring: false)
     hospitality = period(mosa, [ inherited, explicit_zero, private_owner ], pay_date: Date.new(2026, 10, 15))
     admin_regular = period(aire, [ admin_recipient ], pay_date: Date.new(2026, 10, 15))
+    stale_regular = period(aire, [ stale_profile ], pay_date: Date.new(2026, 10, 15))
     {
       schema_version: 1, accountant_email: accountant.email, admin_email: admin.email,
       companies: { aire: aire.id, mosa: mosa.id },
       employees: { recipient: recipient.id, coworker: coworker.id, admin_recipient: admin_recipient.id,
-        chief: chief.id, inherited: inherited.id, zero: explicit_zero.id, private_owner: private_owner.id },
+        chief: chief.id, inherited: inherited.id, zero: explicit_zero.id, private_owner: private_owner.id, stale_profile: stale_profile.id },
       fields: { fixed: fixed.id, percentage: percentage.id, manual: manual.id, contribution: contribution.id,
         personal: private_field.id, paused: paused.id, ended: ended.id, standalone: standalone.id },
       assignments: assignments.transform_values(&:id), loan_id: loan.id,
       periods: { history: history.id, chief_history: chief_history.id, regular: regular.id,
-        before_start: before_start.id, special: special.id, hospitality: hospitality.id, admin_regular: admin_regular.id }
+        before_start: before_start.id, special: special.id, hospitality: hospitality.id, admin_regular: admin_regular.id, stale_regular: stale_regular.id }
     }
   end
 

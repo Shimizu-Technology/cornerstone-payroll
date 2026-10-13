@@ -253,6 +253,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const canUsePrinterProfiles = hasCapability('use_printer_profiles');
   const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
     if (item.href === '/check-settings') return canUsePrinterProfiles;
+    if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (!canManageClientConfiguration) return false;
     if (item.href === '/time-tracking-sources') return isAdmin;
     return true;
