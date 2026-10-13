@@ -521,7 +521,7 @@ async function mockEmployeeFormDependencies(page: Page): Promise<void> {
   }));
   await page.route('**/api/v1/admin/departments**', (route) => fulfillJson(route, { data: [] }));
   await page.route('**/api/v1/admin/payroll_fields**', (route) => fulfillJson(route, { payroll_fields: [] }));
-  await page.route('**/api/v1/admin/employees/900/payroll_fields', (route) => fulfillJson(route, { employee_payroll_fields: [] }));
+  await page.route('**/api/v1/admin/employees/900/payroll_fields**', (route) => fulfillJson(route, { employee_payroll_fields: [] }));
 }
 
 test('preserves decimal employer matches and explains every migrated setup review item', async ({ page }) => {

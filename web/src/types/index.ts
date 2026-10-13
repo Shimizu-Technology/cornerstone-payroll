@@ -131,6 +131,8 @@ export interface PayrollFieldDefinition {
   reference_number?: string | null;
   created_at?: string;
   updated_at?: string;
+  assigned_employee_count?: number;
+  active_assignment_count?: number;
 }
 
 export interface EmployeePayrollField {
@@ -144,7 +146,7 @@ export interface EmployeePayrollField {
   end_date?: string | null;
   notes?: string | null;
   employee_loan_id?: number | null;
-  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
+  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'owner_employee_id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active' | 'payee_name' | 'reference_number' | 'assigned_employee_count' | 'active_assignment_count'>;
 }
 
 export interface PayPeriodPayrollFieldAssignment {
