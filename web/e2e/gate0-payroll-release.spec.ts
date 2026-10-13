@@ -904,7 +904,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     let releaseQuickField: (() => void) | undefined;
     const quickFieldStarted = new Promise<void>((resolve): void => { markQuickFieldStarted = resolve; });
     const quickFieldReleased = new Promise<void>((resolve): void => { releaseQuickField = resolve; });
-    const createPersonalPath = `/api/v1/admin/employees/${fixture.employee_id}/payroll_fields/create_personal`;
+    const createPersonalPath = `/api/v1/admin/employees/${fixture.employee_id}/payroll_fields/create_and_assign`;
     await page.route(`**${createPersonalPath}`, async (route): Promise<void> => {
       if (route.request().method() !== 'POST' || route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
         await route.continue();
@@ -918,14 +918,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
     await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
-    const addEmployeeItemButton = page.getByRole('button', { name: 'Add employee-only item' });
+    const addEmployeeItemButton = page.getByRole('button', { name: 'Add addition', exact: true });
     await expect(addEmployeeItemButton).toBeVisible();
     await waitForUiCommit(page);
     await addEmployeeItemButton.click();
-    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toBeVisible();
+    const quickItemDialog = page.getByRole('dialog', { name: 'Add addition', exact: true });
+    await expect(quickItemDialog).toBeVisible();
     const delayedFieldName = `Delayed primary field ${randomUUID()}`;
-    await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill(delayedFieldName);
-    await page.getByRole('button', { name: 'Create and assign' }).click();
+    await quickItemDialog.getByLabel('Name', { exact: true }).fill(delayedFieldName);
+    await quickItemDialog.getByLabel(/^Amount(?! type)/).fill('1');
+    await quickItemDialog.getByRole('button', { name: 'Save addition', exact: true }).click();
     await quickFieldStarted;
     await page.evaluate((path): void => {
       window.history.pushState({}, '', path);
@@ -944,7 +946,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(createdFieldResponse.ok()).toBe(true);
     await waitForUiCommit(page);
     await expect(page.getByText(delayedFieldName, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Add addition', exact: true })).toHaveCount(0);
     await context.close();
   });
 
