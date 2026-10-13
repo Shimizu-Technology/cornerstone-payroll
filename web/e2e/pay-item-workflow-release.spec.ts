@@ -657,4 +657,55 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect(historical.reporting_group).toBe('401k_pre_tax');
     expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
   });
+
+  test('saving a stale profile cannot restore a legacy item converted by another operator', async ({ page }) => {
+    const label = 'Stale profile legacy allowance QA';
+    const employeePath = `admin/employees/${fixture.employees.chief}`;
+    const seeded = await aireApi.patch(employeePath, { data: { employee: {
+      default_payroll_adjustments: [{ label, amount: 45, treatment: 'taxable_addition', active: true }],
+    } } });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+    await openEmployee(page, fixture.companies.aire, fixture.employees.chief);
+    const additions = page.getByRole('region', { name: 'Additions', exact: true });
+    await expect(additions).toContainText(label);
+    await expect(additions).toContainText('Existing recurring item');
+    const otherOperator = await request.newContext({ baseURL: apiBase, extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.companies.aire),
+    } });
+    let converted: Assignment | undefined;
+    try {
+      const response = await otherOperator.post(`${employeePath}/payroll_fields/convert_legacy`, { data: {
+        legacy: { kind: 'adjustment', label, amount: 45, treatment: 'taxable_addition', notes: '' },
+        payroll_field: { name: label, category: 'other' },
+        employee_payroll_field: { start_date: '2026-10-13', end_date: null },
+      } });
+      expect(response.ok(), await response.text()).toBeTruthy();
+      converted = (await response.json()).employee_payroll_field as Assignment;
+    } finally { await otherOperator.dispose(); }
+    let profilePayload: Record<string, unknown> | undefined;
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === `/api/v1/${employeePath}` && request.method() === 'PATCH') {
+        profilePayload = request.postDataJSON() as Record<string, unknown>;
+      }
+    });
+    await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
+    await expect(page).not.toHaveURL(new RegExp(`/employees/${fixture.employees.chief}/edit`));
+    expect(profilePayload).toBeDefined();
+    const submittedEmployee = (profilePayload!.employee || profilePayload) as Record<string, unknown>;
+    expect(submittedEmployee).not.toHaveProperty('default_payroll_adjustments');
+    expect(submittedEmployee).not.toHaveProperty('default_custom_earnings');
+    const employee = await aireApi.get(employeePath);
+    expect((await employee.json()).data.default_payroll_adjustments).toEqual([]);
+    const matches = (await assignments(aireApi, fixture.employees.chief)).filter(assignment => assignment.payroll_field.name === label);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe(converted!.id);
+    expect(matches[0].amount).toBe(45);
+    const chief = item(await calculate(aireApi, fixture.periods.regular), fixture.employees.chief);
+    expect(chief.payroll_adjustments.some(adjustment => adjustment.label === label)).toBe(false);
+    const entries = chief.payroll_field_entries.filter(entry => entry.payroll_field_definition_id === converted!.payroll_field_definition_id);
+    expect(entries).toHaveLength(1);
+    expect(Number(entries[0].amount)).toBe(45);
+    expect(Number(chief.gross_pay)).toBe(1995);
+    expect(await period(aireApi, fixture.periods.chief_history)).toEqual(chiefHistory);
+  });
 });
