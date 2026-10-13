@@ -47,7 +47,7 @@ class PayItemWorkflowQaFixture
     percentage = field(mosa, "Shared percentage deduction", kind: "deduction", tax_treatment: "post_tax_deduction", amount_type: "percentage", default_percentage: 2, default_amount: nil)
     manual = field(mosa, "Shared manual addition", amount_type: "manual", default_amount: 10)
     contribution = field(mosa, "Shared employer benefit", kind: "employer_contribution", tax_treatment: "employer_contribution", default_amount: 50, category: "benefit")
-    private_field = field(mosa, "Private allowance", owner_employee: private_owner, default_amount: nil)
+    private_field = field(mosa, "Private allowance", owner_employee: private_owner, default_amount: nil, reporting_group: "401k_pre_tax")
     paused = field(mosa, "Paused allowance", default_amount: 400)
     ended = field(mosa, "Ended allowance", default_amount: 500)
     assignments = {
