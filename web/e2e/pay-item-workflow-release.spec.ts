@@ -12,9 +12,9 @@ interface Fixture {
   periods: Record<'history' | 'chief_history' | 'regular' | 'before_start' | 'special' | 'hospitality' | 'admin_regular', number>;
   loan_id: number;
 }
-interface Definition { id: number; name: string; owner_employee_id: number | null; default_amount: number | null; assigned_employee_count: number; active_assignment_count: number }
+interface Definition { id: number; name: string; owner_employee_id: number | null; default_amount: number | null; assigned_employee_count: number; active_assignment_count: number; reporting_group?: string | null }
 interface Assignment { id: number; employee_id: number; payroll_field_definition_id: number; amount: number | null; percentage: number | null; active: boolean; start_date: string | null; end_date: string | null; payroll_field: Definition }
-interface Entry { label: string; amount: number | string; kind: string; tax_treatment: string; source: string; payroll_field_definition_id: number }
+interface Entry { label: string; amount: number | string; kind: string; tax_treatment: string; source: string; payroll_field_definition_id: number; reporting_group?: string | null }
 interface Item { id: number; employee_id: number; gross_pay: string; net_pay: string; withholding_tax: string; payroll_field_entries: Entry[]; payroll_adjustments: { label: string; amount: number }[] }
 interface Period { id: number; status: string; payroll_items: Item[] }
 
@@ -631,6 +631,30 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect(Number(manual.amount)).toBe(35);
     expect(manual.source).toBe('employee_default');
     expect(Number(saved.gross_pay)).toBe(1361);
+    expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
+  });
+
+  test('personal date and note edits preserve an existing report group outside the retirement category', async ({ page }) => {
+    await openEmployee(page, fixture.companies.mosa, fixture.employees.private_owner);
+    await page.getByTestId(`pay-item-${fixture.assignments.personal}`).getByRole('button', { name: 'Edit', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
+    await dialog.getByLabel(/^First payday/).fill('2026-10-01');
+    await dialog.locator('summary').filter({ hasText: 'More options' }).click();
+    await expect(dialog.getByLabel('Category', { exact: true })).toHaveValue('other');
+    await dialog.getByLabel(/^Notes/).fill('Synthetic date-only edit retains the original report classification.');
+    await saveAddition(page, dialog);
+    const savedAssignment = (await assignments(mosaApi, fixture.employees.private_owner)).find(candidate => candidate.id === fixture.assignments.personal)!;
+    expect(savedAssignment.amount).toBe(80);
+    expect(savedAssignment.payroll_field_definition_id).toBe(fixture.fields.personal);
+    expect(savedAssignment.payroll_field.owner_employee_id).toBe(fixture.employees.private_owner);
+    expect(savedAssignment.payroll_field.reporting_group).toBe('401k_pre_tax');
+    const saved = item(await calculate(mosaApi, fixture.periods.hospitality), fixture.employees.private_owner);
+    const entry = saved.payroll_field_entries.find(candidate => candidate.payroll_field_definition_id === fixture.fields.personal)!;
+    expect(entry.reporting_group).toBe('401k_pre_tax');
+    expect(Number(entry.amount)).toBe(80);
+    expect(Number(saved.gross_pay)).toBe(1280);
+    const historical = item(history, fixture.employees.private_owner).payroll_field_entries.find(candidate => candidate.payroll_field_definition_id === fixture.fields.personal)!;
+    expect(historical.reporting_group).toBe('401k_pre_tax');
     expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
   });
 });
