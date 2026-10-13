@@ -638,7 +638,13 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   });
 
   test('personal date and note edits preserve an existing report group outside the retirement category', async ({ page }) => {
+    const setup = await mosaApi.patch(`admin/employees/${fixture.employees.private_owner}/payroll_fields/${fixture.assignments.personal}/pay_item`, { data: {
+      employee_payroll_field: { amount: null }, payroll_field: { default_amount: 80 },
+    } });
+    expect(setup.ok(), await setup.text()).toBeTruthy();
     await openEmployee(page, fixture.companies.mosa, fixture.employees.private_owner);
+    await expect(page.getByTestId(`pay-item-${fixture.assignments.personal}`)).toContainText('Uses item default');
+    await expect(page.getByTestId(`pay-item-${fixture.assignments.personal}`)).not.toContainText('Uses client default');
     await page.getByTestId(`pay-item-${fixture.assignments.personal}`).getByRole('button', { name: 'Edit', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
     await dialog.getByLabel(/^First payday/).fill('2026-10-01');
@@ -647,7 +653,8 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await dialog.getByLabel(/^Notes/).fill('Synthetic date-only edit retains the original report classification.');
     await saveAddition(page, dialog);
     const savedAssignment = (await assignments(mosaApi, fixture.employees.private_owner)).find(candidate => candidate.id === fixture.assignments.personal)!;
-    expect(savedAssignment.amount).toBe(80);
+    expect(savedAssignment.amount).toBeNull();
+    expect(savedAssignment.payroll_field.default_amount).toBe(80);
     expect(savedAssignment.payroll_field_definition_id).toBe(fixture.fields.personal);
     expect(savedAssignment.payroll_field.owner_employee_id).toBe(fixture.employees.private_owner);
     expect(savedAssignment.payroll_field.reporting_group).toBe('401k_pre_tax');
