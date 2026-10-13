@@ -213,4 +213,48 @@ RSpec.describe "Recurring setup calculation currentness", type: :request do
     expect(period.reload).to be_calculated
     expect(package.reload.status).to eq("pending")
   end
+  it "preserves cloned approved baseline evidence while invalidating mutable practice calculations" do
+    admin = create(:user, company: company, organization: company.organization, role: "admin")
+    employee.update!(department: nil)
+    [ Date.new(2026, 9, 30), Date.new(2026, 10, 30) ].each do |pay_date|
+      source = create(:pay_period, :committed, company: company, start_date: pay_date - 14, end_date: pay_date - 1, pay_date: pay_date)
+      source_item = create(:payroll_item, company: company, employee: employee, pay_period: source, gross_pay: 1250, net_pay: 1100)
+      create(:payroll_item_field_entry, payroll_item: source_item, payroll_field_definition: field, amount: 250)
+      source
+    end
+    original_adapter = ActiveJob::Base.queue_adapter
+    ActiveJob::Base.queue_adapter = :test
+    workspace = TestWorkspace::Create.new(
+      source_company: company, actor: admin, acknowledgement: TestWorkspace::Create::ACKNOWLEDGEMENT,
+      assignments: [ { user_id: accountant.id, workspace_access_level: "operator" } ], copy_mode: "all_committed"
+    ).call
+    TestWorkspace::Cloner.new(company: workspace, actor: admin).call
+    baselines = workspace.pay_periods.order(:pay_date).to_a
+    expect(baselines.map(&:status)).to eq([ "approved", "approved" ])
+    expect(baselines.map(&:test_workspace_role)).to eq([ "baseline", "baseline" ])
+    baseline_snapshots = baselines.map { |period| [ period.attributes, period.payroll_items.map(&:attributes), period.payroll_items.flat_map { |item| item.payroll_item_field_entries.map(&:attributes) } ] }
+    target_employee = workspace.employees.find_by!(test_workspace_source_employee_id: employee.id)
+    target_assignment = target_employee.employee_payroll_fields.sole
+    practice_source = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 10, 15),
+      start_date: Date.new(2026, 10, 1), end_date: Date.new(2026, 10, 14))
+    practice = create(:pay_period, :calculated, company: workspace, pay_date: Date.new(2026, 10, 15),
+      start_date: Date.new(2026, 10, 1), end_date: Date.new(2026, 10, 14), calculated_at: Time.current,
+      test_workspace_role: "practice", test_workspace_source_pay_period: practice_source)
+    item = create(:payroll_item, company: workspace, employee: target_employee, pay_period: practice, gross_pay: 1250, net_pay: 1100)
+    create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: target_assignment.payroll_field_definition, amount: 250)
+    package = PayrollReview::RevisionService.new(pay_period: practice, actor: accountant).issue!
+    allow_any_instance_of(Api::V1::Admin::EmployeePayrollFieldsController).to receive(:current_company_id).and_return(workspace.id)
+
+    patch "/api/v1/admin/employees/#{target_employee.id}/payroll_fields/#{target_assignment.id}/pay_item", params: { employee_payroll_field: { amount: 300 } }, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["recalculation_pay_period_ids"]).to eq([ practice.id ])
+    expect(practice.reload).to be_draft
+    expect(package.reload.status).to eq("superseded")
+    expect(target_assignment.reload.amount).to eq(300)
+    expect(assignment.reload.amount).to eq(250)
+    expect(baselines.map { |period| [ period.reload.attributes, period.payroll_items.reload.map(&:attributes), period.payroll_items.flat_map { |row| row.payroll_item_field_entries.reload.map(&:attributes) } ] }).to eq(baseline_snapshots)
+  ensure
+    ActiveJob::Base.queue_adapter = original_adapter if original_adapter
+  end
 end
