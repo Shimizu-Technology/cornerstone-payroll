@@ -341,6 +341,7 @@ function AppRoutes() {
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
           <Route path="payroll-go-live" element={<StaffOnlyRoute><PayrollGoLive /></StaffOnlyRoute>} />
+          <Route path="payroll-fields" element={<CapabilityRoute capability="manage_payroll_fields"><PayrollFields /></CapabilityRoute>} />
         </Route>
         <Route path="historical-payroll" element={<HistoricalPayrollRoute><HistoricalPayroll /></HistoricalPayrollRoute>} />
         <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />
@@ -350,7 +351,7 @@ function AppRoutes() {
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
-        <Route path="payroll-fields" element={<ManagerOnlyRoute><PayrollFields /></ManagerOnlyRoute>} />
+        <Route path="payroll-fields" element={<CapabilityRoute capability="manage_payroll_fields"><PayrollFields /></CapabilityRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
         <Route path="tools/invoices" element={<AdminOnlyRoute><FinanceBookGate><InvoiceCenter /></FinanceBookGate></AdminOnlyRoute>} />

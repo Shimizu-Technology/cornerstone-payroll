@@ -5,6 +5,7 @@ module Api
     module Admin
       class EmployeesController < BaseController
         include Auditable
+        include RecurringPayItemSetupMutation
         audit_actions :terminate, :reactivate
         before_action :set_employee, only: [
           :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification,
@@ -13,6 +14,7 @@ module Api
         before_action :validate_department_scope!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
         before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
+        around_action :with_recurring_pay_item_setup_invalidation, only: :update
 
         # GET /api/v1/admin/employees
         def index
