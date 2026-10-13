@@ -75,6 +75,7 @@ class PayItemWorkflowQaFixture
     before_start = period(aire, [ recipient ], pay_date: Date.new(2026, 10, 12))
     special = period(aire, [ recipient ], pay_date: Date.new(2026, 10, 16), recurring: false)
     hospitality = period(mosa, [ inherited, explicit_zero, private_owner ], pay_date: Date.new(2026, 10, 15))
+    admin_regular = period(aire, [ admin_recipient ], pay_date: Date.new(2026, 10, 15))
     {
       schema_version: 1, accountant_email: accountant.email, admin_email: admin.email,
       companies: { aire: aire.id, mosa: mosa.id },
@@ -84,7 +85,7 @@ class PayItemWorkflowQaFixture
         personal: private_field.id, paused: paused.id, ended: ended.id, standalone: standalone.id },
       assignments: assignments.transform_values(&:id), loan_id: loan.id,
       periods: { history: history.id, chief_history: chief_history.id, regular: regular.id,
-        before_start: before_start.id, special: special.id, hospitality: hospitality.id }
+        before_start: before_start.id, special: special.id, hospitality: hospitality.id, admin_regular: admin_regular.id }
     }
   end
 

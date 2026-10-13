@@ -9,7 +9,7 @@ interface Fixture {
   employees: Record<'recipient' | 'coworker' | 'admin_recipient' | 'chief' | 'inherited' | 'zero' | 'private_owner', number>;
   fields: Record<'fixed' | 'percentage' | 'manual' | 'contribution' | 'personal' | 'paused' | 'ended' | 'standalone', number>;
   assignments: Record<'inherited' | 'zero' | 'personal' | 'percentage' | 'manual' | 'contribution' | 'paused' | 'ended', number>;
-  periods: Record<'history' | 'chief_history' | 'regular' | 'before_start' | 'special' | 'hospitality', number>;
+  periods: Record<'history' | 'chief_history' | 'regular' | 'before_start' | 'special' | 'hospitality' | 'admin_regular', number>;
   loan_id: number;
 }
 interface Definition { id: number; name: string; owner_employee_id: number | null; default_amount: number | null; assigned_employee_count: number; active_assignment_count: number }
@@ -343,5 +343,35 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect(fixed.active_assignment_count).toBe(2);
     expect(fields.every(row => row.owner_employee_id === null)).toBe(true);
     expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
+  });
+
+  test('deduction and employer contribution actions save distinct items with the correct effect on pay', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openEmployee(page, fixture.companies.aire, fixture.employees.admin_recipient);
+    for (const [action, name, amount, save] of [
+      ['Add deduction', 'Standalone personal deduction QA', '20', 'Save deduction'],
+      ['Add employer contribution', 'Personal employer benefit QA', '40', 'Save contribution'],
+    ]) {
+      await page.getByRole('button', { name: action, exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: action, exact: true });
+      await dialog.getByLabel('Name', { exact: true }).fill(name);
+      await dialog.getByLabel('Amount', { exact: true }).fill(amount);
+      await dialog.getByRole('button', { name: save, exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      const saved = (await assignments(aireApi, fixture.employees.admin_recipient)).find(row => row.payroll_field.name === name)!;
+      expect(saved.amount).toBe(Number(amount));
+      await expect(page.getByTestId(`pay-item-${saved.id}`)).toContainText('Employee-specific');
+    }
+    const saved = item(await calculate(aireApi, fixture.periods.admin_regular), fixture.employees.admin_recipient);
+    const deduction = saved.payroll_field_entries.find(row => row.label === 'Standalone personal deduction QA')!;
+    const contribution = saved.payroll_field_entries.find(row => row.label === 'Personal employer benefit QA')!;
+    expect(deduction.kind).toBe('deduction');
+    expect(deduction.tax_treatment).toBe('post_tax_deduction');
+    expect(Number(deduction.amount)).toBe(20);
+    expect(contribution.kind).toBe('employer_contribution');
+    expect(Number(contribution.amount)).toBe(40);
+    const additions = saved.payroll_field_entries.filter(row => row.kind === 'addition').reduce((sum, row) => sum + Number(row.amount), 0);
+    expect(Number(saved.gross_pay)).toBe(1000 + additions);
+    expect(Number(saved.net_pay)).toBe(Number(saved.gross_pay) - 20);
   });
 });
