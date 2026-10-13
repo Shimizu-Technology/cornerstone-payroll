@@ -108,6 +108,26 @@ RSpec.describe TimeTracking::PaymentAttestationResolutionService do
     expect(client).to have_received(:resolve_payroll_payment_attestation).once
   end
 
+  it "keeps an authorization-denied manual retry pending with a controlled error and unchanged payment evidence" do
+    allow(client).to receive(:resolve_payroll_payment_attestation).and_raise(TimeTracking::Client::Error, "Lost receipt")
+    allocation = create_match
+    before_state = allocation.reload.attributes.except("last_sync_error", "updated_at")
+    before_payment = [ item.reload.attributes, delivery.reload.attributes ]
+    allow(TestWorkspaceAccessPolicy).to receive(:allowed?).and_return(false)
+    manual = TimeTracking::ManualAllocationService.new(pay_period: period, source: source, actor: actor)
+
+    expect { manual.sync!(allocation, raise_on_failure: true) }.to raise_error(TimeTracking::Client::Error) { |error|
+      expect(error.response_status).to eq(422)
+      expect(error.message).to include("cannot reconcile reported payments")
+    }
+    expect(allocation.reload.attributes.except("last_sync_error", "updated_at")).to eq(before_state)
+    expect(allocation.last_sync_error).to include("cannot reconcile reported payments")
+    expect([ item.reload.attributes, delivery.reload.attributes ]).to eq(before_payment)
+    expect(client).to have_received(:resolve_payroll_payment_attestation).once
+    expect(manual.sync!(allocation)).to eq(allocation)
+    expect(allocation.reload.payment_resolution_pending?).to be(true)
+  end
+
   it "replays the captured contract after current capabilities change and blocks a changed installation" do
     allow(client).to receive(:resolve_payroll_payment_attestation).and_raise(TimeTracking::Client::Error, "Lost receipt")
     allocation = create_match
