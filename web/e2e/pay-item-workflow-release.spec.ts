@@ -42,6 +42,11 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     history = await period(mosaApi, fixture.periods.history);
     chiefHistory = await period(aireApi, fixture.periods.chief_history);
   });
+  test.beforeEach(async ({ page }) => {
+    // The payday fixtures are fixed; keep form defaults independent of the date
+    // this release lane is rerun. Timers still run normally.
+    await page.clock.setFixedTime(new Date('2026-10-13T00:00:00+10:00'));
+  });
   test.afterAll(async () => { await aireApi.dispose(); await mosaApi.dispose(); });
 
   async function assignments(api: APIRequestContext, employeeId: number): Promise<Assignment[]> {
@@ -114,6 +119,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, extraHTTPHeaders: { 'X-E2E-User-Email': fixture.admin_email } });
     try {
       const page = await context.newPage();
+      await page.clock.setFixedTime(new Date('2026-10-13T00:00:00+10:00'));
       await openEmployee(page, fixture.companies.aire, fixture.employees.admin_recipient);
       const trigger = page.getByRole('button', { name: 'Add addition', exact: true });
       await trigger.focus();
@@ -172,6 +178,11 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       [fixture.employees.zero, fixture.assignments.zero, 0],
     ] as const) {
       await openEmployee(page, fixture.companies.mosa, employeeId);
+      if (employeeId === fixture.employees.inherited) {
+        await expect(page.getByTestId(`pay-item-${fixture.assignments.ended}`)).toContainText('Ended 2026-09-30');
+        await page.getByRole('checkbox', { name: /^Show stopped items/ }).check();
+        await expect(page.getByTestId(`pay-item-${fixture.assignments.paused}`)).toContainText('Paused');
+      }
       await page.getByTestId(`pay-item-${assignmentId}`).getByRole('button', { name: 'Edit', exact: true }).click();
       const dialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
       await dialog.getByLabel(/^First payday/).fill('2026-10-01');
@@ -332,7 +343,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
 
   test('accountant can open the shared library and sees client scope and assignment impact', async ({ page }) => {
     await page.goto(`/companies/${fixture.companies.mosa}/payroll-fields`);
-    await expect(page.getByRole('heading', { name: 'Payroll Fields', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Client-wide payroll fields', exact: true })).toBeVisible();
     await expect(page.getByText('Shared fixed allowance', { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(page.getByText('Private allowance', { exact: true })).toHaveCount(0);
     const response = await mosaApi.get('admin/payroll_fields');
