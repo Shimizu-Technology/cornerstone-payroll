@@ -605,4 +605,32 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
       expect(((await response.json()).payroll_fields as Definition[]).some(field => field.name.startsWith('Unfinished '))).toBe(false);
     }
   });
+
+  test('editing shared manual metadata retains its stored default and employee override', async ({ page }) => {
+    const before = await calculate(mosaApi, fixture.periods.hospitality);
+    await page.goto(`/companies/${fixture.companies.mosa}/payroll-fields`);
+    const row = page.getByTestId(`shared-field-${fixture.fields.manual}`);
+    await row.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByLabel('Amount type', { exact: true })).toHaveValue('manual');
+    await page.getByLabel('Name', { exact: true }).fill('Shared manual addition renamed QA');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    const review = page.getByRole('dialog', { name: 'Review shared field changes', exact: true });
+    await review.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(review).toHaveCount(0);
+    const response = await mosaApi.get(`admin/payroll_fields/${fixture.fields.manual}`);
+    const definition = (await response.json()).payroll_field as Definition;
+    expect(definition.default_amount).toBe(10);
+    const assignment = (await assignments(mosaApi, fixture.employees.inherited)).find(candidate => candidate.id === fixture.assignments.manual)!;
+    expect(assignment.amount).toBe(35);
+    const invalidated = await period(mosaApi, fixture.periods.hospitality);
+    expect(invalidated.status).toBe('draft');
+    expect(invalidated.payroll_items).toEqual(before.payroll_items);
+    const saved = item(await calculate(mosaApi, fixture.periods.hospitality), fixture.employees.inherited);
+    const manual = saved.payroll_field_entries.find(entry => entry.payroll_field_definition_id === fixture.fields.manual)!;
+    expect(manual.label).toBe('Shared manual addition renamed QA');
+    expect(Number(manual.amount)).toBe(35);
+    expect(manual.source).toBe('employee_default');
+    expect(Number(saved.gross_pay)).toBe(1361);
+    expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
+  });
 });
