@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -151,6 +152,87 @@ it.each([
   fireEvent.change(within(card).getByLabelText('Bonus this payroll for Ana Cruz'), { target: { value: '25' } });
   expect(within(row).getByText(editedGross)).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+async function renderTaxableFieldPreview(recurring: boolean) {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_recurring_items: recurring,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0 }] } as unknown as PayPeriod;
+  const field = { id: 8, company_id: 7, name: 'Allowance', kind: 'addition', tax_treatment: 'taxable_addition', category: 'allowance', amount_type: 'fixed', default_amount: 75, active: true, show_in_payroll_grid: true, sort_order: 0 };
+  const percentage = { ...field, id: 9, name: 'Percentage allowance', amount_type: 'percentage', default_amount: null, default_percentage: 10, sort_order: 1 };
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [field, percentage], assignments: [
+    { employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', assigned_amount: null, default_amount: 75, suggested_amount: 75, editable: true, overridden: false },
+    { employee_id: 30, payroll_field_definition_id: 9, amount_type: 'percentage', assigned_percentage: null, default_percentage: 10, editable: true, overridden: false },
+  ] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const input = await screen.findByLabelText('Allowance requested amount for Ana Cruz') as HTMLInputElement;
+  const row = input.closest('tr')!;
+  return { input, row };
+}
+
+it.each([
+  { recurring: false, gross: '$64.00', withOverride: '$89.00', defaultInput: '' },
+  { recurring: true, gross: '$145.40', withOverride: '$95.40', defaultInput: '75.00' },
+])('previews fixed and percentage defaults with recurring setup $recurring and keeps explicit amounts', async ({ recurring, gross, withOverride, defaultInput }) => {
+  const { input, row } = await renderTaxableFieldPreview(recurring);
+  expect(input.value).toBe(defaultInput);
+  expect(within(row).getByText(gross)).toBeTruthy();
+  fireEvent.change(input, { target: { value: '25' } });
+  expect(within(row).getByText(withOverride)).toBeTruthy();
+  fireEvent.click(within(row).getByRole('button', { name: /Override/ }));
+  expect(input.value).toBe(defaultInput);
+  expect(within(row).getByText(gross)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('submits an explicit amount equal to the excluded employee default as a one-time override', async () => {
+  const { input } = await renderTaxableFieldPreview(false);
+  fireEvent.change(input, { target: { value: '25' } });
+  fireEvent.change(input, { target: { value: '75' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 75, replace_request: true });
+});
+
+it('can tab through untouched excluded fields and calculate without creating empty overrides', async () => {
+  const user = userEvent.setup();
+  const { input } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']).toEqual({ '8': { mode: 'default' }, '9': { mode: 'default' } });
+});
+
+it('keeps a cleared explicit request invalid until it is deliberately reset to excluded setup', async () => {
+  const user = userEvent.setup();
+  const { input, row } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.type(input, '25');
+  await user.clear(input);
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  await user.click(within(row).getByRole('button', { name: 'Enter an amount or clear this payroll amount' }));
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'default' });
+});
+
+it('retains an explicit zero override after blur when recurring setup is excluded', async () => {
+  const user = userEvent.setup();
+  const { input } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.type(input, '0');
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 0, replace_request: true });
 });
 
 it('reserves the time tracking source preference for the guided verified-batch review', async () => {
