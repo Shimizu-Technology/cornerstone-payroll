@@ -5,19 +5,53 @@ module Api
     module Admin
       class EmployeePayrollFieldsController < BaseController
         before_action :set_employee
-        before_action :set_assignment, only: [ :update, :destroy ]
+        before_action :set_assignment, only: [ :update, :destroy, :pay_item ]
 
         def index
-          assignments = @employee.employee_payroll_fields.active.includes(:payroll_field_definition).order("payroll_field_definitions.sort_order ASC", "payroll_field_definitions.name ASC")
+          assignments = @employee.employee_payroll_fields
+          assignments = assignments.active unless ActiveModel::Type::Boolean.new.cast(params[:include_inactive])
+          assignments = assignments.includes(payroll_field_definition: :employee_payroll_fields).order("payroll_field_definitions.sort_order ASC", "payroll_field_definitions.name ASC")
           render json: { employee_payroll_fields: assignments.map { |assignment| assignment_json(assignment) } }
         end
 
         def create
           attrs = assignment_params
-          assignment = upsert_assignment(attrs)
+          assignment = nil
+          EmployeePayrollField.transaction do
+            @employee.company.lock!
+            assignment = upsert_assignment(attrs)
+          end
           status = assignment.previously_new_record? ? :created : :ok
           render json: { employee_payroll_field: assignment_json(assignment) }, status: status
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        end
+
+        def create_and_assign
+          field, assignment, created = EmployeePayItemService.new(employee: @employee).create_and_assign(
+            scope: params[:scope],
+            field_attributes: params.require(:payroll_field).to_unsafe_h,
+            assignment_attributes: params.require(:employee_payroll_field).to_unsafe_h
+          )
+          render json: {
+            payroll_field: personal_field_json(field),
+            employee_payroll_field: assignment_json(assignment)
+          }, status: created ? :created : :ok
+        rescue EmployeePayItemService::InvalidSetup, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActionController::ParameterMissing => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
+        end
+
+        def pay_item
+          field, assignment = EmployeePayItemService.new(employee: @employee).update(
+            assignment: @assignment,
+            assignment_attributes: params.require(:employee_payroll_field).to_unsafe_h,
+            field_attributes: params[:payroll_field]&.to_unsafe_h
+          )
+          render json: {
+            payroll_field: personal_field_json(field),
+            employee_payroll_field: assignment_json(assignment)
+          }
+        rescue EmployeePayItemService::InvalidSetup, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActionController::ParameterMissing => e
           render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
@@ -86,7 +120,14 @@ module Api
         end
 
         def update
-          if @assignment.update(assignment_params)
+          attrs = assignment_params
+          saved = false
+          EmployeePayrollField.transaction do
+            @employee.company.lock!
+            @assignment.reload
+            saved = @assignment.update(attrs)
+          end
+          if saved
             render json: { employee_payroll_field: assignment_json(@assignment) }
           else
             render json: { errors: @assignment.errors.full_messages }, status: :unprocessable_entity
@@ -132,7 +173,10 @@ module Api
         end
 
         def destroy
-          @assignment.update!(active: false)
+          EmployeePayrollField.transaction do
+            @employee.company.lock!
+            @assignment.reload.update!(active: false)
+          end
           render json: { employee_payroll_field: assignment_json(@assignment) }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
           render json: { errors: [ e.message ] }, status: :unprocessable_entity
@@ -204,29 +248,12 @@ module Api
             end_date: assignment.end_date,
             notes: assignment.notes,
             employee_loan_id: assignment.employee_loan_id,
-            payroll_field: field && {
-              id: field.id,
-              name: field.name,
-              kind: field.kind,
-              tax_treatment: field.tax_treatment,
-              category: field.category,
-              reporting_group: field.reporting_group,
-              amount_type: field.amount_type,
-              default_amount: field.default_amount&.to_f,
-              default_percentage: field.default_percentage&.to_f,
-              show_in_payroll_grid: field.show_in_payroll_grid,
-              active: field.active
-            }
+            payroll_field: field && PayrollFieldSerializer.call(field)
           }
         end
 
         def personal_field_json(field)
-          field.as_json(only: [
-            :id, :company_id, :owner_employee_id, :name, :description, :kind,
-            :tax_treatment, :category, :reporting_group, :amount_type,
-            :default_amount, :default_percentage, :show_in_payroll_grid,
-            :active, :sort_order, :payee_name, :reference_number
-          ])
+          PayrollFieldSerializer.call(field)
         end
       end
     end
