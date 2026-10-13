@@ -638,21 +638,31 @@ export const employeeBulkImportApi = {
 };
 
 export const payrollFieldsApi = {
-  list: (params?: { active?: boolean; employee_id?: number }) =>
-    api.get<{ payroll_fields: PayrollFieldDefinition[] }>('/admin/payroll_fields', params),
-  create: (data: Partial<PayrollFieldDefinition>) =>
-    api.post<{ payroll_field: PayrollFieldDefinition }>('/admin/payroll_fields', { payroll_field: data }),
-  update: (id: number, data: Partial<PayrollFieldDefinition>) =>
-    api.patch<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`, { payroll_field: data }),
-  archive: (id: number) =>
-    api.delete<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`),
+  list: (params?: { active?: boolean; employee_id?: number }, companyId?: number) =>
+    api.get<{ payroll_fields: PayrollFieldDefinition[] }>('/admin/payroll_fields', params, { companyId }),
+  create: (data: Partial<PayrollFieldDefinition>, companyId?: number) =>
+    api.post<{ payroll_field: PayrollFieldDefinition }>('/admin/payroll_fields', { payroll_field: data }, { companyId }),
+  update: (id: number, data: Partial<PayrollFieldDefinition>, companyId?: number) =>
+    api.patch<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`, { payroll_field: data }, { companyId }),
+  archive: (id: number, companyId?: number) =>
+    api.delete<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`, { companyId }),
 };
 
 export const employeePayrollFieldsApi = {
-  list: (employeeId: number) =>
-    api.get<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields`),
-  create: (employeeId: number, data: Partial<EmployeePayrollField>) =>
-    api.post<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields`, { employee_payroll_field: data }),
+  list: (employeeId: number, companyId?: number, includeInactive = false) =>
+    api.get<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields`, { include_inactive: includeInactive }, { companyId }),
+  create: (employeeId: number, data: Partial<EmployeePayrollField>, companyId?: number) =>
+    api.post<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields`, { employee_payroll_field: data }, { companyId }),
+  createAndAssign: (employeeId: number, scope: 'employee_only' | 'client_wide', field: Partial<PayrollFieldDefinition>, assignment: Partial<EmployeePayrollField>, companyId?: number) =>
+    api.post<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
+      `/admin/employees/${employeeId}/payroll_fields/create_and_assign`,
+      { scope, payroll_field: field, employee_payroll_field: assignment }, { companyId },
+    ),
+  updatePayItem: (employeeId: number, id: number, assignment: Partial<EmployeePayrollField>, field?: Partial<PayrollFieldDefinition>, companyId?: number) =>
+    api.patch<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
+      `/admin/employees/${employeeId}/payroll_fields/${id}/pay_item`,
+      { employee_payroll_field: assignment, ...(field ? { payroll_field: field } : {}) }, { companyId },
+    ),
   createPersonal: (employeeId: number, field: Partial<PayrollFieldDefinition>, assignment: Partial<EmployeePayrollField>, companyId?: number) =>
     api.post<{ payroll_field: PayrollFieldDefinition; employee_payroll_field: EmployeePayrollField }>(
       `/admin/employees/${employeeId}/payroll_fields/create_personal`,
@@ -670,10 +680,10 @@ export const employeePayrollFieldsApi = {
     { legacy, payroll_field: field, employee_payroll_field: assignment },
     { companyId },
   ),
-  update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>) =>
-    api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
-  archive: (employeeId: number, id: number) =>
-    api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`),
+  update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>, companyId?: number) =>
+    api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }, { companyId }),
+  archive: (employeeId: number, id: number, companyId?: number) =>
+    api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { companyId }),
   bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[], companyId?: number): Promise<{ employee_payroll_fields: EmployeePayrollField[] }> =>
     api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }, { companyId }),
 };

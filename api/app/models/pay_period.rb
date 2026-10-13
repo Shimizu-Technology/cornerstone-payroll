@@ -178,6 +178,7 @@ class PayPeriod < ApplicationRecord
   end
   before_destroy :prevent_training_baseline_mutation
 
+  scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
@@ -293,7 +294,7 @@ class PayPeriod < ApplicationRecord
   def invalidate_later_rehearsal_calculations!
     return unless test_workspace?
 
-    company.pay_periods
+    company.pay_periods.without_training_baselines
       .where(status: %w[calculated approved])
       .where("pay_date > :date OR (pay_date = :date AND id > :id)", date: pay_date, id: id)
       .find_each do |later|

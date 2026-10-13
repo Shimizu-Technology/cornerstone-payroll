@@ -255,6 +255,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
     if (item.href === '/app/aire-account-connection') return hasCapability('manage_own_aire_account_link');
     if (item.href === '/check-settings') return canUsePrinterProfiles;
+    if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (!canManageClientConfiguration) return false;
     if (item.href === '/time-tracking-sources') return isAdmin;
     return true;

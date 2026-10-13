@@ -289,14 +289,33 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe('AirePayrollCockpit', () => {
+  it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
+    render(<AirePayrollCockpit payPeriodId={17} calendar={{
+      ...calendar,
+      source_name: 'Neutral Weekly Time',
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
+      publication: published ? calendar.publication : null,
+    }} onRefresh={vi.fn()} />);
+
+    expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
+    expect(screen.getByText(/Neutral Weekly Time provides cutoff batches/)).toBeTruthy();
+    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    expect(screen.queryByText('Time tracking payroll workspace')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
+  });
+
   it('replaces the live preview with the verified batch action', async () => {
     const user = userEvent.setup();
     const onReviewFinalizedBatch = vi.fn();
     const verifiedCalendar: AirePayrollCalendarState = {
       ...calendar,
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
       cutoff_state: 'batch_verified',
       finalized_batch: {
         event_id: 'event-17',
@@ -330,6 +349,9 @@ describe('AirePayrollCockpit', () => {
     await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
     expect(apiMocks.manualReview).not.toHaveBeenCalled();
+    for (const api of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
   });
 
   it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {
@@ -772,7 +794,7 @@ describe('AirePayrollCockpit', () => {
     expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
   });
 
-  it('does not let an older refresh overwrite a newer payroll view', async () => {
+  it.each([{ payPeriodId: 18, sourceId: 1 }, { payPeriodId: 17, sourceId: 2 }])('does not let an older refresh overwrite period $payPeriodId/source $sourceId', async ({ payPeriodId, sourceId }) => {
     const stale = fixtures();
     const current = fixtures();
     current.overview.employees[0] = { ...current.overview.employees[0], full_name: 'Current Employee' };
@@ -797,7 +819,7 @@ describe('AirePayrollCockpit', () => {
 
     const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(1));
-    view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
+    view.rerender(<AirePayrollCockpit payPeriodId={payPeriodId} calendar={{ ...calendar, source_id: sourceId }} onRefresh={vi.fn()} />);
     expect(await screen.findByText('Current Employee')).toBeTruthy();
 
     await act(async () => { releaseStale?.(); });
@@ -816,6 +838,52 @@ describe('AirePayrollCockpit', () => {
     view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
 
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull());
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('clears prior-source details and open commands while a replacement source loads for the same period', async () => {
+    const user = userEvent.setup();
+    const view = render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByRole('heading', { name: 'Correct time in time tracking' })).toBeTruthy();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const next = fixtures(false);
+    next.overview.employees = [];
+    next.entries.time_entries = [];
+    next.exceptions.time_exceptions = [];
+    apiMocks.overview.mockImplementationOnce(async () => { await gate; return { aire_payroll_cockpit: next.overview }; });
+    apiMocks.entries.mockImplementationOnce(async () => { await gate; return next.entries; });
+    apiMocks.exceptions.mockImplementationOnce(async () => { await gate; return next.exceptions; });
+    apiMocks.settlements.mockImplementationOnce(async () => { await gate; return next.settlements; });
+    view.rerender(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, source_id: 2 }} onRefresh={vi.fn()} /></MemoryRouter>);
+
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+    await act(async () => { release(); });
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+  });
+
+  it('closes live commands when the same source stops advertising the cockpit', async () => {
+    const user = userEvent.setup();
+    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar,
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
+    }} onRefresh={vi.fn()} />);
+    expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull();
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).toHaveBeenCalledTimes(1);
+    }
     expect(apiMocks.correct).not.toHaveBeenCalled();
   });
 

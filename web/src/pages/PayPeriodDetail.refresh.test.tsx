@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -114,6 +115,125 @@ const sourceCalendar: AirePayrollCalendarState = {
 };
 
 afterEach(cleanup);
+
+it.each([
+  { recurring: false, expectedGross: '$64.00', editedGross: '$89.00', firstEmployee: 'Ana Cruz' },
+  { recurring: true, expectedGross: '$214.00', editedGross: '$239.00', firstEmployee: 'Zed Cruz' },
+])('previews and sorts draft gross with recurring setup $recurring while retaining explicit bonus', async ({ recurring, expectedGross, editedGross, firstEmployee }) => {
+  vi.clearAllMocks();
+  const employee = {
+    id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
+    pay_rate: 16, pay_frequency: 'semimonthly', status: 'active',
+    default_custom_earnings: [{ name: 'Allowance', amount: 120 }],
+    default_payroll_adjustments: [
+      { label: 'Additional allowance', amount: 30, treatment: 'taxable_addition', active: true },
+      { label: 'Inactive allowance', amount: 90, treatment: 'taxable_addition', active: false },
+    ],
+  } as unknown as Employee;
+  const other = { ...employee, id: 31, first_name: 'Zed', pay_rate: 100, default_custom_earnings: [], default_payroll_adjustments: [] };
+  const period = {
+    ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_recurring_items: recurring,
+    payroll_items: [
+      { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0 },
+      { id: 2, employee_id: 31, employment_type: 'hourly', pay_rate: 100, hours_worked: 1, overtime_hours: 0 },
+    ],
+  } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const row = screen.getAllByRole('link', { name: 'Ana Cruz' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(row).getByText(expectedGross)).toBeTruthy();
+  const sort = screen.getByRole('option', { name: 'Est. Gross Low-High' }).closest('select')!;
+  fireEvent.change(sort, { target: { value: 'gross:asc' } });
+  const table = row.closest('table')!;
+  expect(within(table).getAllByRole('link')[0].textContent).toBe(firstEmployee);
+  fireEvent.change(within(card).getByLabelText('Bonus this payroll for Ana Cruz'), { target: { value: '25' } });
+  expect(within(row).getByText(editedGross)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+async function renderTaxableFieldPreview(recurring: boolean) {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_recurring_items: recurring,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0 }] } as unknown as PayPeriod;
+  const field = { id: 8, company_id: 7, name: 'Allowance', kind: 'addition', tax_treatment: 'taxable_addition', category: 'allowance', amount_type: 'fixed', default_amount: 75, active: true, show_in_payroll_grid: true, sort_order: 0 };
+  const percentage = { ...field, id: 9, name: 'Percentage allowance', amount_type: 'percentage', default_amount: null, default_percentage: 10, sort_order: 1 };
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [field, percentage], assignments: [
+    { employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', assigned_amount: null, default_amount: 75, suggested_amount: 75, editable: true, overridden: false },
+    { employee_id: 30, payroll_field_definition_id: 9, amount_type: 'percentage', assigned_percentage: null, default_percentage: 10, editable: true, overridden: false },
+  ] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const input = await screen.findByLabelText('Allowance requested amount for Ana Cruz') as HTMLInputElement;
+  const row = input.closest('tr')!;
+  return { input, row };
+}
+
+it.each([
+  { recurring: false, gross: '$64.00', withOverride: '$89.00', defaultInput: '' },
+  { recurring: true, gross: '$145.40', withOverride: '$95.40', defaultInput: '75.00' },
+])('previews fixed and percentage defaults with recurring setup $recurring and keeps explicit amounts', async ({ recurring, gross, withOverride, defaultInput }) => {
+  const { input, row } = await renderTaxableFieldPreview(recurring);
+  expect(input.value).toBe(defaultInput);
+  expect(within(row).getByText(gross)).toBeTruthy();
+  fireEvent.change(input, { target: { value: '25' } });
+  expect(within(row).getByText(withOverride)).toBeTruthy();
+  fireEvent.click(within(row).getByRole('button', { name: /Override/ }));
+  expect(input.value).toBe(defaultInput);
+  expect(within(row).getByText(gross)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('submits an explicit amount equal to the excluded employee default as a one-time override', async () => {
+  const { input } = await renderTaxableFieldPreview(false);
+  fireEvent.change(input, { target: { value: '25' } });
+  fireEvent.change(input, { target: { value: '75' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 75, replace_request: true });
+});
+
+it('can tab through untouched excluded fields and calculate without creating empty overrides', async () => {
+  const user = userEvent.setup();
+  const { input } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']).toEqual({ '8': { mode: 'default' }, '9': { mode: 'default' } });
+});
+
+it('keeps a cleared explicit request invalid until it is deliberately reset to excluded setup', async () => {
+  const user = userEvent.setup();
+  const { input, row } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.type(input, '25');
+  await user.clear(input);
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  await user.click(within(row).getByRole('button', { name: 'Enter an amount or clear this payroll amount' }));
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'default' });
+});
+
+it('retains an explicit zero override after blur when recurring setup is excluded', async () => {
+  const user = userEvent.setup();
+  const { input } = await renderTaxableFieldPreview(false);
+  await user.click(input);
+  await user.type(input, '0');
+  await user.tab();
+  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 0, replace_request: true });
+});
 
 it('reserves the time tracking source preference for the guided verified-batch review', async () => {
   vi.clearAllMocks();
@@ -712,13 +832,13 @@ it('refreshes accounting correction metadata and every source panel while preser
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 888, replace_request: true });
 });
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }) {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }, standaloneAmount = 0, namedAmount = 0, namedRequest?: number) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: rates?.profile ?? 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
-  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: rates?.saved ?? 16, hours_worked: rates ? 4 : 80.3, overtime_hours: rates ? 0 : 14, gross_pay: rates ? 100 : 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: 0, loan_payment: loanPayment };
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: rates?.saved ?? 16, hours_worked: rates ? 4 : 80.3, overtime_hours: rates ? 0 : 14, gross_pay: rates ? 100 : 1620.8, net_pay: 1393.15 - loanPayment, loan_deduction: standaloneAmount, loan_payment: loanPayment };
   const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item], ...(comparisonResponse ? { cycle: 'regular' } : {}) } as unknown as PayPeriod;
-  const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: 0, eligible: true, mode: 'default' }];
+  const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: namedAmount, eligible: true, mode: namedRequest === undefined ? 'default' : 'override', requested_amount: namedRequest }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
@@ -1071,4 +1191,45 @@ it('keeps a late refresh POST rejection out of the new run', async () => {
   await act(async () => reject(new Error('Old refresh request was rejected.')));
   expect(screen.queryByText('Old refresh request was rejected.')).toBeNull();
   expect(screen.getByText('New active refresh scope')).toBeTruthy();
+});
+
+it('allows approval with a calculated linked payment and an unrelated standalone deduction', async () => {
+  await renderLoanWorksheet('calculated', undefined, 340, undefined, 40, 300);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('allows a separate standalone deduction when the named repayment is explicitly skipped', async () => {
+  await renderLoanWorksheet('calculated', undefined, 40, undefined, 40, 0, 0);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('blocks approval when a standalone deduction has replaced the due named repayment', async () => {
+  await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('saves both named and standalone amounts through worksheet recalculation', async () => {
+  await renderLoanWorksheet('calculated', undefined, 340, undefined, 40, 300, 300);
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].named_loan_payments).toEqual({ '30': { '2': { mode: 'override', amount: 300 } } });
+  expect(apiMocks.runPayroll.mock.calls[0][1].loan_deductions).toEqual({ '30': 40 });
+});
+
+it('updates the separate-deduction warning for a staged zero skip while requiring recalculation', async () => {
+  const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
+  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
+  fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
+  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('accepts a staged positive linked request alongside a separate amount without warning to clear it', async () => {
+  const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
+  fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
+  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
 });
