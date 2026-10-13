@@ -714,4 +714,44 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect(Number(chief.gross_pay)).toBe(1045);
     expect(await period(aireApi, fixture.periods.chief_history)).toEqual(chiefHistory);
   });
+
+  test('a recovered library edit remains explicit when another field is requested and invalid caches are cleared', async ({ page }) => {
+    page.on('dialog', dialog => dialog.accept());
+    const library = `/companies/${fixture.companies.mosa}/payroll-fields`;
+    const fieldA = fixture.fields.fixed;
+    const fieldB = fixture.fields.contribution;
+    const latestResponse = await mosaApi.get(`admin/payroll_fields/${fieldB}`);
+    expect(latestResponse.ok()).toBeTruthy();
+    const latestB = (await latestResponse.json()).payroll_field as Definition;
+    await page.goto(library);
+    await page.getByTestId(`shared-field-${fieldA}`).getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByLabel('Name', { exact: true }).fill('Unfinished shared allowance revision QA');
+    await page.getByLabel('Default amount', { exact: true }).fill('127');
+    const cachedKey = async () => page.evaluate(companyId => Object.keys(sessionStorage).find(key =>
+      key.startsWith('shared-pay-field-draft:v1:') && key.endsWith(`:${companyId}`)), fixture.companies.mosa);
+    await expect.poll(cachedKey).toBeTruthy();
+    const key = (await cachedKey())!;
+    await page.goto(`${library}?field_id=${fieldB}`);
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Unfinished shared allowance revision QA');
+    await expect(page.getByLabel('Default amount', { exact: true })).toHaveValue('127');
+    await expect(page.getByText(/requested.*(not opened|not open|save|discard)/i)).toBeVisible();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(latestB.name);
+    await expect(page.getByLabel('Default amount', { exact: true })).toHaveValue(String(latestB.default_amount));
+    await expect.poll(() => page.evaluate(cacheKey => sessionStorage.getItem(cacheKey), key)).toBeNull();
+
+    for (const invalid of ['{invalid JSON', JSON.stringify({ draft: { ...latestB, name: 'Stale cached field QA' }, editingId: Number.MAX_SAFE_INTEGER })]) {
+      await page.evaluate(({ cacheKey, value }) => sessionStorage.setItem(cacheKey, value), { cacheKey: key, value: invalid });
+      await page.reload();
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue(latestB.name);
+      await expect(page.getByLabel('Default amount', { exact: true })).toHaveValue(String(latestB.default_amount));
+      await expect.poll(() => page.evaluate(cacheKey => sessionStorage.getItem(cacheKey), key)).toBeNull();
+      await page.reload();
+      await expect(page.getByLabel('Name', { exact: true })).toHaveValue(latestB.name);
+      await expect(page.getByText(/Recovered your unfinished client-wide field/)).toHaveCount(0);
+    }
+    const fieldAResponse = await mosaApi.get(`admin/payroll_fields/${fieldA}`);
+    expect((await fieldAResponse.json()).payroll_field.name).toBe('Shared fixed allowance');
+    expect(await period(mosaApi, fixture.periods.history)).toEqual(history);
+  });
 });
