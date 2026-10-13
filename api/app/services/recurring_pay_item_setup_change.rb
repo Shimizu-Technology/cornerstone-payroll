@@ -11,7 +11,7 @@ class RecurringPayItemSetupChange
   def initialize(company:, employee_ids: nil)
     @company = company
     @employee_ids = employee_ids
-    scope = company.pay_periods.where(status: %w[calculated approved])
+    scope = company.pay_periods.without_training_baselines.where(status: %w[calculated approved])
     scope = scope.where(id: PayrollItem.where(employee_id: employee_ids).select(:pay_period_id)) if employee_ids
     @periods = scope.order(:id).lock.to_a
     @items = PayrollItem.where(pay_period_id: @periods.map(&:id)).includes(:payroll_item_field_entries).to_a.group_by(&:pay_period_id)
