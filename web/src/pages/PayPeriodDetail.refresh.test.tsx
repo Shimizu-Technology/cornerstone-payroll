@@ -115,6 +115,44 @@ const sourceCalendar: AirePayrollCalendarState = {
 
 afterEach(cleanup);
 
+it.each([
+  { recurring: false, expectedGross: '$64.00', editedGross: '$89.00', firstEmployee: 'Ana Cruz' },
+  { recurring: true, expectedGross: '$214.00', editedGross: '$239.00', firstEmployee: 'Zed Cruz' },
+])('previews and sorts draft gross with recurring setup $recurring while retaining explicit bonus', async ({ recurring, expectedGross, editedGross, firstEmployee }) => {
+  vi.clearAllMocks();
+  const employee = {
+    id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
+    pay_rate: 16, pay_frequency: 'semimonthly', status: 'active',
+    default_custom_earnings: [{ name: 'Allowance', amount: 120 }],
+    default_payroll_adjustments: [
+      { label: 'Additional allowance', amount: 30, treatment: 'taxable_addition', active: true },
+      { label: 'Inactive allowance', amount: 90, treatment: 'taxable_addition', active: false },
+    ],
+  } as unknown as Employee;
+  const other = { ...employee, id: 31, first_name: 'Zed', pay_rate: 100, default_custom_earnings: [], default_payroll_adjustments: [] };
+  const period = {
+    ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_recurring_items: recurring,
+    payroll_items: [
+      { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0 },
+      { id: 2, employee_id: 31, employment_type: 'hourly', pay_rate: 100, hours_worked: 1, overtime_hours: 0 },
+    ],
+  } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const row = screen.getAllByRole('link', { name: 'Ana Cruz' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(row).getByText(expectedGross)).toBeTruthy();
+  const sort = screen.getByRole('option', { name: 'Est. Gross Low-High' }).closest('select')!;
+  fireEvent.change(sort, { target: { value: 'gross:asc' } });
+  const table = row.closest('table')!;
+  expect(within(table).getAllByRole('link')[0].textContent).toBe(firstEmployee);
+  fireEvent.change(within(card).getByLabelText('Bonus this payroll for Ana Cruz'), { target: { value: '25' } });
+  expect(within(row).getByText(editedGross)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
 it('reserves the time tracking source preference for the guided verified-batch review', async () => {
   vi.clearAllMocks();
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
