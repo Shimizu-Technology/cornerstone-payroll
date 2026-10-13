@@ -747,14 +747,18 @@ export function PayPeriodDetail({
     if (!assignment) return;
 
     const key = `${employeeId}:${fieldId}`;
+    const excludesRecurring = payPeriod?.includes_recurring_items === false;
     const normalizedAmount = amount == null ? null : Math.max(0, amount);
     const defaultAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
 
     setPayrollFieldDrafts((previous) => {
       const current = previous[key];
-      if (current && payrollFieldAmountsEqual(current.amount, normalizedAmount)) return previous;
+      if (excludesRecurring && normalizedAmount == null && current?.mode !== 'override') return previous;
+      if (current && payrollFieldAmountsEqual(current.amount, normalizedAmount)
+        && !(current.mode === 'default' && excludesRecurring)) return previous;
 
       const returnedToDefault = !assignment.overridden
+        && !excludesRecurring
         && payrollFieldAmountsEqual(normalizedAmount, defaultAmount);
 
       return {
@@ -843,9 +847,6 @@ export function PayPeriodDetail({
           if (draft.mode === 'override' && draft.amount == null) throw new Error('Enter the linked loan repayment amount, or choose the scheduled default.');
           named_loan_payments[employeeId][loanId] = draft.mode === 'override' ? { mode: 'override', amount: draft.amount ?? 0 } : { mode: 'default' };
         });
-        if (toNumber(loansMap[employeeId]) > 0 && namedLoanOptions.some(option => String(option.employee_id) === employeeId && option.eligible)) {
-          throw new Error('Use Linked loan repayments to credit the saved loan. Clear the separate one-time deduction before calculating.');
-        }
       });
 
       // Build hours payload
@@ -917,7 +918,6 @@ export function PayPeriodDetail({
         if (!assignment.editable && !isLoanField) return;
         const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
         const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
-        if (isLoanField && toNumber(loansMap[String(assignment.employee_id)]) > 0 && draft.mode === 'default') return;
         if (draft.mode === 'override' && draft.amount == null) {
           const fieldName = worksheetPayrollFields.find(
             (field) => field.id === assignment.payroll_field_definition_id,
@@ -1385,7 +1385,18 @@ export function PayPeriodDetail({
     || payrollFieldDraftsChanged
   );
   const hasPendingCalculationChanges = isCalculated && hasStagedWorksheetChanges;
-  const standaloneLoanConflicts = namedLoanOptions.filter(option => option.eligible && toNumber(loansMap[String(option.employee_id)]) > 0);
+  const standaloneLoanConflicts = namedLoanOptions.filter(option => {
+    const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
+    const mode = draft?.mode ?? option.mode;
+    const requestedAmount = draft ? draft.amount : option.requested_amount;
+    const hasStagedNamedRepayment = hasStagedWorksheetChanges && draft?.mode === 'override'
+      && draft.amount != null && draft.amount > 0;
+    return option.eligible
+      && toNumber(loansMap[String(option.employee_id)]) > 0
+      && toNumber(option.current_amount) <= 0
+      && !hasStagedNamedRepayment
+      && !(mode === 'override' && requestedAmount != null && toNumber(requestedAmount) === 0);
+  });
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;
@@ -1396,6 +1407,7 @@ export function PayPeriodDetail({
 
       const draft = payrollFieldDrafts[key];
       if (draft?.mode === 'override') return total + Math.max(0, toNumber(draft.amount));
+      if (payPeriod.includes_recurring_items === false) return total;
 
       if (assignment.amount_type === 'percentage') {
         const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
@@ -1407,6 +1419,7 @@ export function PayPeriodDetail({
   );
 
   const recurringTaxableAdditions = (employee: Employee) => (
+    payPeriod.includes_recurring_items === false ? 0 :
     (employee.default_custom_earnings || []).reduce((total, earning) => total + toNumber(earning.amount), 0)
     + (employee.default_payroll_adjustments || []).reduce((total, adjustment) => (
       adjustment.active !== false && adjustment.treatment === 'taxable_addition' ? total + toNumber(adjustment.amount) : total
@@ -1863,14 +1876,14 @@ export function PayPeriodDetail({
           <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {payableItems.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
+              <div key={item.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm sm:flex-row sm:items-center">
+                <span className="min-w-0 sm:flex-1">
+                  <span className="block break-words font-medium text-neutral-950 sm:truncate">{item.employee_name}</span>
                   {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
                 </span>
-                <div className="shrink-0 text-right">
+                <div className="text-right sm:shrink-0">
                   <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
-                  <Button size="sm" variant="outline" className="min-h-11" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
+                  <Button size="sm" variant="outline" className="min-h-11 w-full sm:w-auto" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
                 </div>
               </div>
             ))}
@@ -2612,7 +2625,7 @@ export function PayPeriodDetail({
                   {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && <p className="text-xs text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>}
                   <NamedLoanInputs options={namedLoanOptions.filter(option => option.employee_id === emp.id)} drafts={namedLoanDrafts[String(emp.id)] || {}} includesRecurring={payPeriod.includes_recurring_items} onChange={(loanId, draft) => setNamedLoanDrafts(previous => ({ ...previous, [String(emp.id)]: { ...previous[String(emp.id)], [String(loanId)]: draft } }))} />
                   {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Standalone one-time deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
-                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
+                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.mode !== 'override' && payPeriod.includes_recurring_items === false ? null : draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>{payPeriod.includes_recurring_items === false ? 'Clear this payroll amount' : 'Use employee default'}</button>}{assignment.editable && draft?.mode !== 'override' && payPeriod.includes_recurring_items === false && <p className="mt-1 text-xs text-neutral-500">Recurring setup excluded</p>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
               {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
@@ -2944,7 +2957,7 @@ export function PayPeriodDetail({
                                 <div className="flex items-center justify-center gap-1.5">
                                   <span className="text-xs text-gray-400">$</span>
                                   <NumericInput
-                                    value={draft?.amount ?? null}
+                                    value={draft?.mode !== 'override' && payPeriod.includes_recurring_items === false ? null : draft?.amount ?? null}
                                     onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)}
                                     emptyValue={null}
                                     notifyEmptyOnChange
@@ -2970,7 +2983,7 @@ export function PayPeriodDetail({
                                       onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
                                       className="text-center text-[10px] font-semibold leading-tight text-red-600 transition-colors hover:text-red-700 hover:underline"
                                     >
-                                      Enter an amount or use the employee default
+                                      {payPeriod.includes_recurring_items === false ? 'Enter an amount or clear this payroll amount' : 'Enter an amount or use the employee default'}
                                     </button>
                                   ) : draft?.mode === 'override' ? (
                                     <button
@@ -2978,11 +2991,11 @@ export function PayPeriodDetail({
                                       onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
                                       className="text-[10px] font-medium text-blue-700 hover:text-blue-900 hover:underline"
                                     >
-                                      Override · use {defaultLabel}
+                                      {payPeriod.includes_recurring_items === false ? 'Override · clear this payroll amount' : `Override · use ${defaultLabel}`}
                                     </button>
                                   ) : (
                                     <span className="text-[10px] text-gray-500">
-                                      {field.amount_type === 'manual' ? 'Enter for this payroll' : `Using ${defaultLabel}`}
+                                      {field.amount_type === 'manual' ? 'Enter for this payroll' : payPeriod.includes_recurring_items === false ? 'Recurring setup excluded' : `Using ${defaultLabel}`}
                                     </span>
                                   )
                                 ) : (

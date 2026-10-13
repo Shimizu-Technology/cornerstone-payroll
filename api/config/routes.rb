@@ -251,8 +251,12 @@ Rails.application.routes.draw do
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do
               post :bulk_update
+              post :create_and_assign
               post :create_personal
               post :convert_legacy
+            end
+            member do
+              patch :pay_item
             end
           end
         end

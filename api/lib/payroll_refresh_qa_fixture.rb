@@ -101,6 +101,12 @@ class PayrollRefreshQaFixture
       unavailable_period, unavailable_item = build_period.call(unavailable_employee, "draft")
       unavailable_item.update!(named_loan_payments: { unavailable_loan.id.to_s => "300.00" })
       unavailable_loan.update!(status: "suspended")
+      combined_employee = build_employee.call("Combined Deduction")
+      combined_loan = build_loan.call(combined_employee)
+      combined_period, combined_item = build_period.call(combined_employee, "draft")
+      skipped_employee = build_employee.call("Skipped Loan")
+      skipped_loan = build_loan.call(skipped_employee)
+      skipped_period, skipped_item = build_period.call(skipped_employee, "draft")
       companion = build_employee.call("Unselected Bonus")
       companion.update!(default_payroll_adjustments: [
         { "label" => "Synthetic recurring bonus", "amount" => 100, "treatment" => "taxable_addition", "active" => true }
@@ -114,6 +120,8 @@ class PayrollRefreshQaFixture
         delivered: { period_id: delivered_period.id, item_id: delivered_item.id, employee_id: delivered_employee.id },
         multirate: { period_id: multirate_period.id, item_id: multirate_item.id, employee_id: multirate_employee.id, loan_id: multirate_loan.id },
         unavailable: { period_id: unavailable_period.id, item_id: unavailable_item.id, employee_id: unavailable_employee.id, loan_id: unavailable_loan.id },
+        combined: { period_id: combined_period.id, item_id: combined_item.id, employee_id: combined_employee.id, loan_id: combined_loan.id },
+        skipped: { period_id: skipped_period.id, item_id: skipped_item.id, employee_id: skipped_employee.id, loan_id: skipped_loan.id },
         unselected_employee_id: companion.id
       }
     end

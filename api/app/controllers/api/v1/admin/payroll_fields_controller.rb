@@ -4,7 +4,9 @@ module Api
   module V1
     module Admin
       class PayrollFieldsController < BaseController
+        include RecurringPayItemSetupMutation
         before_action :set_payroll_field, only: [ :show, :update, :destroy ]
+        around_action :with_recurring_pay_item_setup_invalidation, only: [ :create, :update, :destroy ]
 
         def index
           fields = PayrollFieldDefinition.where(company_id: current_company_id)
@@ -16,7 +18,7 @@ module Api
           else
             fields = fields.client_wide
           end
-          fields = fields.ordered
+          fields = fields.includes(:employee_payroll_fields).ordered
           fields = fields.where(active: ActiveModel::Type::Boolean.new.cast(params[:active])) if params.key?(:active)
           render json: { payroll_fields: fields.map { |field| payroll_field_json(field) } }
         end
@@ -71,27 +73,7 @@ module Api
         end
 
         def payroll_field_json(field)
-          {
-            id: field.id,
-            company_id: field.company_id,
-            owner_employee_id: field.owner_employee_id,
-            name: field.name,
-            description: field.description,
-            kind: field.kind,
-            tax_treatment: field.tax_treatment,
-            category: field.category,
-            reporting_group: field.reporting_group,
-            amount_type: field.amount_type,
-            default_amount: field.default_amount&.to_f,
-            default_percentage: field.default_percentage&.to_f,
-            show_in_payroll_grid: field.show_in_payroll_grid,
-            active: field.active,
-            sort_order: field.sort_order,
-            payee_name: field.payee_name,
-            reference_number: field.reference_number,
-            created_at: field.created_at,
-            updated_at: field.updated_at
-          }
+          PayrollFieldSerializer.call(field)
         end
       end
     end

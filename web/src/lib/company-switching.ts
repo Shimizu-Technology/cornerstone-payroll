@@ -7,6 +7,12 @@ export interface CompanySwitchRedirect {
 }
 
 export function getCompanySwitchRedirect(pathname: string, nextCompanyId?: number, search = ''): CompanySwitchRedirect | null {
+  if (pathname === '/payroll-fields' || matchPath('/companies/:companyId/payroll-fields', pathname)) {
+    return {
+      notice: 'Switched clients. Showing reusable payroll fields for the selected client.',
+      to: nextCompanyId ? `/companies/${nextCompanyId}/payroll-fields` : '/payroll-fields',
+    };
+  }
   const canonicalPayRunList = matchPath('/companies/:companyId/pay-runs', pathname);
   const legacyPayRunList = pathname === '/pay-periods';
   if (canonicalPayRunList || legacyPayRunList || matchPath('/companies/:companyId/pay-runs/*', pathname) || matchPath('/pay-periods/:id', pathname)) {

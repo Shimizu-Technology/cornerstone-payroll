@@ -113,6 +113,57 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     expect(item.payroll_item_deductions.map(&:amount)).to eq([ 300.to_d ])
   end
 
+  it "allows an explicit skipped loan alongside a separate standalone deduction" do
+    item.loan_deduction = 40
+    NamedPayrollLoanInput.apply!(payroll_item: item, inputs: { loan.id.to_s => { mode: "override", amount: 0 } })
+    item.calculate!
+    expect(item.loan_payment).to eq(40.to_d)
+    expect(item.net_pay).to eq(1353.15.to_d)
+    period.update!(status: "approved")
+    PayPeriodLifecycleService.new(pay_period: period, actor: actor).commit!
+    expect(loan.reload.current_balance).to eq(3259.97.to_d)
+    expect(loan.loan_transactions.payments).to be_empty
+  end
+
+  [ :assignment, :definition ].each do |source|
+    it "blocks a changed #{source} loan default before posting, then accepts recalculation" do
+      employee.employee_deductions.destroy_all
+      loan.update!(deduction_type: nil, payment_amount: nil)
+      field = create(:payroll_field_definition, company: company, kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", default_amount: 300)
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, employee_loan: loan, amount: source == :assignment ? 300 : nil)
+      period.update!(includes_recurring_items: true)
+      item.calculate!
+      expect(item.loan_payment).to eq(300.to_d)
+      period.update!(status: "approved")
+      source == :assignment ? assignment.update!(amount: 200) : field.update!(default_amount: 200)
+      expect { PayPeriodLifecycleService.new(pay_period: period, actor: actor).commit! }.to raise_error(ArgumentError, /repayment schedule changed/)
+      expect(period.reload.status).to eq("approved")
+      expect(loan.reload.current_balance).to eq(3259.97.to_d)
+      expect(loan.loan_transactions.payments).to be_empty
+      expect(period.non_employee_checks).to be_empty
+      item.reload.calculate!
+      expect(item.loan_payment).to eq(200.to_d)
+      PayPeriodLifecycleService.new(pay_period: period, actor: actor).commit!
+      expect(loan.reload.current_balance).to eq(3059.97.to_d)
+      expect(loan.loan_transactions.payments.count).to eq(1)
+    end
+  end
+
+  it "requires recalculation of an older default snapshot without an authoritative ledger amount" do
+    employee.employee_deductions.destroy_all
+    loan.update!(deduction_type: nil, payment_amount: nil)
+    field = create(:payroll_field_definition, company: company, kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", default_amount: 300)
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, employee_loan: loan, amount: 300)
+    period.update!(includes_recurring_items: true)
+    item.calculate!
+    deduction = item.payroll_item_deductions.first
+    deduction.update!(loan_schedule_snapshot: deduction.loan_schedule_snapshot.except("scheduled_request"))
+    period.update!(status: "approved")
+    expect { PayPeriodLifecycleService.new(pay_period: period, actor: actor).commit! }.to raise_error(ArgumentError, /repayment schedule changed/)
+    expect(loan.reload.current_balance).to eq(3259.97.to_d)
+    expect(loan.loan_transactions.payments).to be_empty
+  end
+
   it "retires both checks and reverses accounting atomically, then reopens with fresh IDs and preserved scope" do
     commit_original
     original_check = period.non_employee_checks.first
