@@ -200,6 +200,13 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await percentageDialog.getByRole('button', { name: 'Save deduction', exact: true }).click();
     await expect(percentageDialog).toHaveCount(0);
     expect((await assignments(mosaApi, fixture.employees.inherited)).find(row => row.id === fixture.assignments.percentage)!.percentage).toBeNull();
+    await page.getByTestId(`pay-item-${fixture.assignments.manual}`).getByRole('button', { name: 'Edit', exact: true }).click();
+    const manualDialog = page.getByRole('dialog', { name: 'Edit addition', exact: true });
+    await manualDialog.getByLabel(/^First payday/).fill('2026-10-01');
+    await manualDialog.locator('summary').filter({ hasText: 'More options' }).click();
+    await manualDialog.getByLabel(/^Notes/).fill('Synthetic manual field keeps its previously saved amount.');
+    await saveAddition(page, manualDialog);
+    expect((await assignments(mosaApi, fixture.employees.inherited)).find(row => row.id === fixture.assignments.manual)!.amount).toBe(35);
   });
 
   test('regular payroll applies scoped additions once, honors dates, and retains the legacy chief allowance', async ({ page }) => {
