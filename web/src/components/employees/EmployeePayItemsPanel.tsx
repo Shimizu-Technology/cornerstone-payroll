@@ -258,7 +258,7 @@ export function EmployeePayItemsPanel({ employeeId, companyId, employeeName, com
               <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{field.name}</p><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-600"><span>{field.owner_employee_id ? 'Employee-specific' : 'Client-wide'}</span><span>{status}</span><span>{field.tax_treatment.replace(/_/g, ' ')}</span></div></div>
                 <p className="font-semibold tabular-nums text-neutral-950">{row.employee_loan_id ? 'Managed in Loans' : value === null ? 'Enter each payroll' : field.amount_type === 'percentage' ? `${value}%` : formatCurrency(value)}</p>
               </div>
-              {inherited && !row.employee_loan_id && field.amount_type !== 'manual' && <p className="mt-2 text-xs text-neutral-600">Uses client default</p>}
+              {inherited && !row.employee_loan_id && field.amount_type !== 'manual' && <p className="mt-2 text-xs text-neutral-600">{field.owner_employee_id ? 'Uses item default' : 'Uses client default'}</p>}
               <p className="mt-2 text-xs text-neutral-600">{row.start_date ? `From ${row.start_date}` : 'No start-date restriction'} · {row.end_date ? `through ${row.end_date}, inclusive` : 'until stopped'}</p>
               {row.notes && <p className="mt-2 break-words text-xs text-neutral-600">{row.notes}</p>}
               <div className="mt-3 flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} disabled={disabled || saving || busyRow !== null}>Edit</Button>
