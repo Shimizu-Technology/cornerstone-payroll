@@ -486,8 +486,8 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await page.getByRole('button', { name: 'Save changes', exact: true }).click();
     // Fields used by nobody can save without an impact confirmation.
     const confirmation = page.getByRole('dialog', { name: 'Review shared field changes', exact: true });
-    if (await confirmation.isVisible()) await confirmation.getByRole('button', { name: 'Save changes', exact: true }).click();
     await expect(row).toContainText('Library reimbursement QA');
+    await expect(confirmation).toHaveCount(0);
     await row.getByRole('button', { name: 'Archive', exact: true }).click();
     const archive = page.getByRole('dialog', { name: 'Review shared field changes', exact: true });
     await archive.getByRole('button', { name: 'Archive field', exact: true }).click();
