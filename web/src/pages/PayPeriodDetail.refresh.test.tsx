@@ -1208,6 +1208,17 @@ it('blocks approval when a standalone deduction has replaced the due named repay
   expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it('keeps a missing linked repayment warning after unrelated edits to a saved positive override', async () => {
+  const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40, 0, 300);
+  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
+  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '200' } });
+  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
 it('saves both named and standalone amounts through worksheet recalculation', async () => {
   await renderLoanWorksheet('calculated', undefined, 340, undefined, 40, 300, 300);
   fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
