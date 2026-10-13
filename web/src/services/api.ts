@@ -6204,7 +6204,7 @@ export const expensesApi = {
 // Auth
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
-  createCableTicket: () => api.post<{ ticket: string; expires_in: number }>('/cable_ticket'),
+  createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId }),
   login: (token: string) => {
     api.setAuthToken(token);
     return api.get<{ user: AuthApiUser }>('/auth/me');
