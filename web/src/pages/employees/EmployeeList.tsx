@@ -327,7 +327,7 @@ export function EmployeeList() {
             />
           </div>
           
-          <div className="grid min-w-0 grid-cols-1 gap-3 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
             <Select
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
