@@ -1389,7 +1389,9 @@ export function PayPeriodDetail({
     const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
     const mode = draft?.mode ?? option.mode;
     const requestedAmount = draft ? draft.amount : option.requested_amount;
-    const hasStagedNamedRepayment = hasStagedWorksheetChanges && draft?.mode === 'override'
+    const draftDiffers = draft && (draft.mode !== option.mode
+      || Math.abs(toNumber(draft.amount) - toNumber(option.requested_amount)) > 0.005);
+    const hasStagedNamedRepayment = draftDiffers && draft?.mode === 'override'
       && draft.amount != null && draft.amount > 0;
     return option.eligible
       && toNumber(loansMap[String(option.employee_id)]) > 0

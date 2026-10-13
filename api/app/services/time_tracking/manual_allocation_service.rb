@@ -116,7 +116,11 @@ module TimeTracking
       PaymentCancellationBridge.with_item_lock(allocation.payroll_item_id) do
         validate_sync_source!(allocation.reload)
         if allocation.payment_resolution_pending?
-          PaymentAttestationResolutionService.new(pay_period: pay_period, source: source, actor: actor).sync!(allocation, raise_on_failure: true)
+          begin
+            PaymentAttestationResolutionService.new(pay_period: pay_period, source: source, actor: actor).sync!(allocation, raise_on_failure: true)
+          rescue PaymentAttestationResolutionService::Error => e
+            raise TimeTracking::Client::Error.new(e.message, response_status: 422)
+          end
           return allocation
         end
         4.times do

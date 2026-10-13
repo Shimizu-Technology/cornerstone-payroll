@@ -82,6 +82,8 @@ module Api
         end
 
         def retry_payment_resolution
+          return render json: { error: "Not found" }, status: :not_found unless @source
+
           allocation = TimeTrackingManualAllocation.resolution_history_for_period(@pay_period).find_by!(id: params[:manual_allocation_id],
             company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
           payment_resolution_service.sync!(allocation)

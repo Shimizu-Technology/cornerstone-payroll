@@ -142,6 +142,19 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     end
   end
 
+  context "without a connected time source" do
+    let!(:calendar_period) { nil }
+
+    it "returns a controlled not-found response when retrying a payment resolution" do
+      expect(client).not_to receive(:resolve_payroll_payment_attestation)
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/payment_resolutions/123/retry"
+      end.not_to change(TimeTrackingManualAllocation, :count)
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body).to eq("error" => "Not found")
+    end
+  end
+
   def period_payload
     {
       "payroll_period" => {
