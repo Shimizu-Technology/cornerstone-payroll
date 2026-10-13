@@ -534,4 +534,75 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     expect(entries[0].source).toBe('employee_default');
     expect(await period(aireApi, fixture.periods.chief_history)).toEqual(chiefHistory);
   });
+
+  test('saving the profile disables every pay-item mutation until the profile request finishes', async ({ page }) => {
+    await openEmployee(page, fixture.companies.aire, fixture.employees.recipient);
+    let started!: () => void;
+    let release!: () => void;
+    const began = new Promise<void>(resolveStarted => { started = resolveStarted; });
+    const released = new Promise<void>(resolveRelease => { release = resolveRelease; });
+    const path = `/api/v1/admin/employees/${fixture.employees.recipient}`;
+    let itemMutations = 0;
+    page.on('request', request => {
+      if (new URL(request.url()).pathname.startsWith(`${path}/payroll_fields`) && ['POST', 'PATCH', 'DELETE'].includes(request.method())) itemMutations += 1;
+    });
+    await page.route(`**${path}`, async route => {
+      if (route.request().method() !== 'PATCH') { await route.continue(); return; }
+      const response = await route.fetch();
+      started();
+      await released;
+      await route.fulfill({ response });
+    });
+    const before = await assignments(aireApi, fixture.employees.recipient);
+    await page.getByRole('button', { name: 'Update Contractor', exact: true }).click();
+    await began;
+    for (const action of ['Add addition', 'Add deduction', 'Add employer contribution']) {
+      await expect(page.getByRole('button', { name: action, exact: true })).toBeDisabled();
+    }
+    for (const assignment of before) {
+      const row = page.getByTestId(`pay-item-${assignment.id}`);
+      await expect(row.getByRole('button', { name: 'Edit', exact: true })).toBeDisabled();
+      await expect(row.getByRole('button', { name: assignment.active ? 'Stop' : 'Reactivate', exact: true })).toBeDisabled();
+    }
+    expect(itemMutations).toBe(0);
+    const delivered = page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'PATCH');
+    release();
+    expect((await delivered).ok()).toBeTruthy();
+    await expect(page).not.toHaveURL(new RegExp(`/employees/${fixture.employees.recipient}/edit`));
+    expect(itemMutations).toBe(0);
+    expect(await assignments(aireApi, fixture.employees.recipient)).toEqual(before);
+  });
+
+  test('unfinished library drafts recover after reload and stay isolated when switching clients', async ({ page }) => {
+    page.on('dialog', dialog => dialog.accept());
+    const library = (companyId: number) => `/companies/${companyId}/payroll-fields`;
+    await page.goto(library(fixture.companies.mosa));
+    await expect(page.getByTestId(`shared-field-${fixture.fields.fixed}`)).toBeVisible();
+    await page.getByLabel('Name', { exact: true }).fill('Unfinished hospitality field QA');
+    await page.getByLabel('Type', { exact: true }).selectOption('addition');
+    await page.getByLabel('Default amount', { exact: true }).fill('13');
+    await page.reload();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Unfinished hospitality field QA');
+    await expect(page.getByLabel('Default amount', { exact: true })).toHaveValue('13');
+    await expect(page.getByText('Recovered your unfinished client-wide field for Synthetic Hospitality QA.', { exact: true })).toBeVisible();
+    await page.getByTestId(`shared-field-${fixture.fields.fixed}`).getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText(/Save or discard your current field changes/);
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Unfinished hospitality field QA');
+    await page.goto(library(fixture.companies.aire));
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
+    await page.getByLabel('Name', { exact: true }).fill('Unfinished aviation field QA');
+    await page.goto(library(fixture.companies.mosa));
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Unfinished hospitality field QA');
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
+    await page.reload();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
+    await page.goto(library(fixture.companies.aire));
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Unfinished aviation field QA');
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    for (const api of [aireApi, mosaApi]) {
+      const response = await api.get('admin/payroll_fields');
+      expect(((await response.json()).payroll_fields as Definition[]).some(field => field.name.startsWith('Unfinished '))).toBe(false);
+    }
+  });
 });
