@@ -303,14 +303,28 @@ RSpec.describe "Recurring setup calculation currentness", type: :request do
   it "invalidates an approved imported run without changing its frozen source portions or saved money" do
     period, item, entry, package = calculated_period(status: "approved")
     source = create(:time_tracking_source, company: company, source_type: "aire_services")
-    import = create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source, status: "applied")
+    uuid = SecureRandom.uuid
+    batch_id = "AIRE-PAY-CURRENTNESS-#{SecureRandom.uuid}"
+    line = { "source_user_uuid" => uuid, "source_time_entry_id" => "41", "line_key" => "operations:41",
+      "source_kind" => "current", "original_work_date" => period.start_date.iso8601,
+      "total_hours" => 4, "regular_hours" => 4, "overtime_hours" => 0 }
+    payload = { "schema_version" => "2.0", "batch_id" => batch_id,
+      "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, "adjustments" => [ line ] } ] }
+    checksum = TimeTracking::CanonicalPayload.checksum(payload)
+    import = create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source,
+      status: "applied", external_batch_id: batch_id, external_batch_checksum: checksum,
+      source_payload_hash: checksum, raw_payload: payload)
     allocation = TimeTrackingEntryAllocation.create!(company: company, time_tracking_source: source,
       time_tracking_import: import, pay_period: period, payroll_item: item, employee: employee,
-      source_user_id: "91", source_user_uuid: SecureRandom.uuid, source_time_entry_id: "41",
+      source_user_id: "91", source_user_uuid: uuid, source_time_entry_id: "41",
       line_key: "operations:41", source_kind: "current", original_work_date: period.start_date,
-      total_hours: 80, regular_hours: 80, overtime_hours: 0)
+      total_hours: 4, regular_hours: 4, overtime_hours: 0)
+    batch_ack = AirePayrollAcknowledgement.record!(time_tracking_import: import, status: "imported", occurred_at: Time.current)
+    entry_ack = AirePayrollEntryAcknowledgement.record_for_import!(time_tracking_import: import, status: "imported", occurred_at: Time.current).sole
+    batch_ack.mark_delivered!(at: Time.current)
+    entry_ack.mark_delivered!(at: Time.current)
     frozen_rows = [ import.attributes, allocation.attributes, item.attributes, entry.attributes ]
-    old_receipts = [ AirePayrollAcknowledgement.count, AirePayrollEntryAcknowledgement.count ]
+    old_receipts = [ batch_ack.reload.attributes, entry_ack.reload.attributes ]
     expect(TimeTracking::Client).not_to receive(:new)
 
     patch "#{path}/#{assignment.id}/pay_item", params: { employee_payroll_field: { amount: 300 } }, as: :json
@@ -319,7 +333,8 @@ RSpec.describe "Recurring setup calculation currentness", type: :request do
     expect(period.reload).to be_draft
     expect(package.reload.status).to eq("superseded")
     expect([ import.reload.attributes, allocation.reload.attributes, item.reload.attributes, entry.reload.attributes ]).to eq(frozen_rows)
-    expect([ AirePayrollAcknowledgement.count, AirePayrollEntryAcknowledgement.count ]).to eq(old_receipts)
+    expect([ batch_ack.reload.attributes, entry_ack.reload.attributes ]).to eq(old_receipts)
+    expect([ AirePayrollAcknowledgement.count, AirePayrollEntryAcknowledgement.count ]).to eq([ 1, 1 ])
     expect(allocation).to be_readonly
   end
 
