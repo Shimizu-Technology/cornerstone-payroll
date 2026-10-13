@@ -61,7 +61,26 @@ RSpec.describe AirePayrollCalendar::Presenter do
     pay_period.company = company
     state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
     expect(state).to include(source_id: source.id, eligible: true, can_publish: true)
+    expect(state.fetch(:source_capabilities)).to include("payroll_cockpit")
     expect(state[:cutoff_at]).to eq("2026-10-22T17:00:00+10:00")
+  end
+
+  it "retains the linked source's batch capabilities instead of the current active source's workspace features" do
+    capabilities = %w[time_summary_v1 payroll_calendar_v2 finalized_batch_v2 exact_line_receipts_v2]
+    limited_source = create(:time_tracking_source, company: company, name: "Independent batches", active: false,
+      source_type: "custom", expected_source_instance_id: SecureRandom.uuid,
+      remote_source_identifier: "independent_batches", source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: capabilities,
+      source_policy_constraints: { "time_zones" => [ "Pacific/Guam" ], "workweek_starts" => [ "sunday" ],
+        "cutoff_rules" => [ "after_previous_regular_payday" ], "frequencies" => [ "semimonthly" ] })
+    create(:aire_payroll_calendar_period, company: company, pay_period: pay_period, time_tracking_source: limited_source)
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(source_id: limited_source.id, source_capabilities: capabilities)
+    expect(state.fetch(:source_capabilities)).not_to include("payroll_cockpit")
+    expect(source.connector.capabilities).to include("payroll_cockpit")
   end
 
   it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
