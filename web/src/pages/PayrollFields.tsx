@@ -66,8 +66,11 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
   const [draft, setDraftState] = useState<Partial<PayrollFieldDefinition>>(defaultField);
   const [dirty, setDirty] = useState(false);
   const [recovered, setRecovered] = useState(false);
+  const [deferredFieldId, setDeferredFieldId] = useState<number | null>(null);
   const restoredRef = useRef(false);
-  const setDraft = (update: Partial<PayrollFieldDefinition> | ((current: Partial<PayrollFieldDefinition>) => Partial<PayrollFieldDefinition>)) => { setDraftState(update); setDirty(true); };
+  const dirtyRef = useRef(false);
+  const editingRef = useRef<number | null>(null);
+  const setDraft = (update: Partial<PayrollFieldDefinition> | ((current: Partial<PayrollFieldDefinition>) => Partial<PayrollFieldDefinition>)) => { dirtyRef.current = true; setDraftState(update); setDirty(true); };
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,15 +99,30 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
       if (!restoredRef.current) {
         restoredRef.current = true;
         try {
-          const stored = JSON.parse(sessionStorage.getItem(draftKey) || 'null') as { draft?: Partial<PayrollFieldDefinition>; editingId?: number | null } | null;
-          if (stored?.draft && typeof stored.draft.name === 'string' && ['addition', 'deduction', 'employer_contribution'].includes(stored.draft.kind || '') && (!stored.editingId || res.payroll_fields.some((field) => field.id === stored.editingId))) {
-            setDraftState(stored.draft); setEditingId(stored.editingId ?? null); setDirty(true); setRecovered(true); return;
+          const raw = sessionStorage.getItem(draftKey);
+          const stored = raw ? JSON.parse(raw) as { draft?: Partial<PayrollFieldDefinition>; editingId?: number | null } | null : null;
+          const validId = stored?.editingId == null || (Number.isSafeInteger(stored.editingId) && stored.editingId > 0 && res.payroll_fields.some((field) => field.id === stored.editingId));
+          if (stored?.draft && typeof stored.draft.name === 'string' && kindOptions.some((kind) => kind.value === stored.draft?.kind)
+            && categoryOptions.includes(stored.draft.category as PayrollFieldCategory) && amountTypeOptions.includes(stored.draft.amount_type as PayrollFieldAmountType)
+            && treatmentOptionsForKind(stored.draft.kind!).some((option) => option.value === stored.draft?.tax_treatment) && validId) {
+            dirtyRef.current = true; editingRef.current = stored.editingId ?? null;
+            setDraftState(stored.draft); setEditingId(stored.editingId ?? null); setDirty(true); setRecovered(true);
+            if (selectedFieldId && selectedFieldId !== editingRef.current) setDeferredFieldId(selectedFieldId);
+            else if (selectedFieldId) selectedRef.current = selectedFieldId;
+            return;
           }
-        } catch { /* Recoverable storage can be unavailable. */ }
+          if (raw !== null) sessionStorage.removeItem(draftKey);
+        } catch {
+          try { sessionStorage.removeItem(draftKey); } catch { /* Storage can be unavailable. */ }
+        }
       }
       if (selectedFieldId && selectedRef.current !== selectedFieldId) {
         const field = res.payroll_fields.find((candidate) => candidate.id === selectedFieldId);
-        if (field) { selectedRef.current = selectedFieldId; setEditingId(field.id); setDraftState(field); }
+        if (dirtyRef.current && editingRef.current !== selectedFieldId) setDeferredFieldId(selectedFieldId);
+        else if (field) { selectedRef.current = selectedFieldId; editingRef.current = field.id; setEditingId(field.id); setDraftState(field); }
+        else { selectedRef.current = selectedFieldId; setError('The requested client-wide field is no longer available. Choose a field below.'); }
+      } else if (!selectedFieldId) {
+        setDeferredFieldId(null);
       }
     } catch (err) {
       if (mountedRef.current && requestRef.current === request) setError(err instanceof Error ? err.message : 'Failed to load payroll fields');
@@ -133,9 +151,11 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
     }));
   };
 
-  const resetDraft = () => {
+  const resetDraft = (reloadDeferred = true) => {
+    dirtyRef.current = false; editingRef.current = null;
     setDraftState(defaultField);
     setEditingId(null); setDirty(false); setRecovered(false);
+    if (deferredFieldId) { selectedRef.current = null; setDeferredFieldId(null); if (reloadDeferred) void loadFields(); }
     try { sessionStorage.removeItem(draftKey); } catch { /* Storage can be unavailable. */ }
   };
 
@@ -147,7 +167,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
       if (fieldId) await payrollFieldsApi.update(fieldId, payload, companyId);
       else await payrollFieldsApi.create(payload, companyId);
       if (!mountedRef.current) return;
-      resetDraft(); setImpact(null);
+      resetDraft(false); setImpact(null);
       setSuccess(fieldId ? 'Shared field saved. Recalculate affected unfinished payrolls before finalizing.' : 'Client-wide field created. Assign it on each person’s profile to include it in their pay.');
       await loadFields();
     } catch (err) {
@@ -187,6 +207,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
 
   const editField = (field: PayrollFieldDefinition) => {
     if (dirty) { setError('Save or discard your current field changes before editing another field.'); return; }
+    editingRef.current = field.id;
     setEditingId(field.id);
     setDraftState(field);
     setSuccess(null);
@@ -204,7 +225,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
       else await payrollFieldsApi.update(field.id, { active: true }, companyId);
       if (!mountedRef.current) return;
       if (editingId === field.id) {
-        resetDraft();
+        resetDraft(false);
       }
       await loadFields();
       setImpact(null);
@@ -228,6 +249,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
         {recovered && <ActionFeedback tone="info" message={`Recovered your unfinished client-wide field for ${companyName}.`} />}
+        {deferredFieldId && <p role="status" className="rounded-xl border border-primary-100 bg-primary-50 p-4 text-sm text-primary-950">Your requested field, {fields.find((field) => field.id === deferredFieldId)?.name || `#${deferredFieldId}`}, was not opened because you have unfinished changes. Save or discard this draft to open it.</p>}
         <p className="rounded-xl border border-primary-100 bg-primary-50 p-4 text-sm text-primary-950">Client-wide means available to assign. Creating a field here does not add it to everyone’s pay. <Link className="font-semibold underline" to={`/companies/${companyId}/employees`}>Open a person’s profile</Link> to assign it or create an employee-specific item.</p>
 
         <Card>
@@ -303,7 +325,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
             <p className="text-xs text-neutral-600">Hiding a payroll column does not stop an item from calculating. Archive the field or stop a person’s assignment to suspend its automatic use.</p>
             <div className="grid gap-2 sm:flex [&>button]:w-full sm:[&>button]:w-auto">
               <Button onClick={() => void saveField()} disabled={saving || loading}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Create field'}</Button>
-              {(editingId || dirty) && <Button variant="outline" onClick={resetDraft} disabled={saving}>{dirty ? 'Discard changes' : 'Cancel'}</Button>}
+              {(editingId || dirty) && <Button variant="outline" onClick={() => resetDraft()} disabled={saving}>{dirty ? 'Discard changes' : 'Cancel'}</Button>}
             </div>
           </CardContent>
         </Card>

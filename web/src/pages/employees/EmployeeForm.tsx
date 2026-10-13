@@ -597,7 +597,7 @@ export function EmployeeForm() {
         notes: quickPayrollField.notes.trim(),
       };
       await (legacyPayItemSource
-        ? await employeePayrollFieldsApi.convertLegacy(Number(id), {
+        ? employeePayrollFieldsApi.convertLegacy(Number(id), {
           kind: legacyPayItemSource.kind,
           label: legacyPayItemSource.row.label,
           amount: legacyPayItemSource.row.amount,
@@ -606,7 +606,7 @@ export function EmployeeForm() {
             notes: legacyPayItemSource.row.notes,
           } : {}),
         }, payload, assignment, requestedCompanyId)
-        : await employeePayrollFieldsApi.createPersonal(Number(id), payload, assignment, requestedCompanyId));
+        : employeePayrollFieldsApi.createPersonal(Number(id), payload, assignment, requestedCompanyId));
       if (!isCurrentRequest()) return;
       setPayItemRefreshVersion((version) => version + 1);
       if (legacyPayItemSource?.kind === 'adjustment') {
