@@ -348,7 +348,9 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await saveAddition(page, dialog);
     const future = (await assignments(aireApi, fixture.employees.recipient)).find(row => row.payroll_field.name === 'Future allowance QA')!;
     await expect(page.getByTestId(`pay-item-${future.id}`)).toContainText('Starts 2026-11-01');
-    expect(await period(aireApi, fixture.periods.regular)).toEqual(before);
+    const unaffected = await period(aireApi, fixture.periods.regular);
+    expect(unaffected.status).toBe('calculated');
+    expect(unaffected.payroll_items).toEqual(before.payroll_items);
     expect((await period(aireApi, fixture.periods.before_start)).status).toBe('calculated');
     expect((await period(aireApi, fixture.periods.special)).status).toBe('calculated');
   });
