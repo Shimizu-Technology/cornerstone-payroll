@@ -362,6 +362,9 @@ export function AirePayrollCockpit({
   onSourceChanged,
   onReviewFinalizedBatch = () => undefined,
 }: Props) {
+  // Preserve older calendar responses while honoring the selected source's
+  // verified capabilities whenever they are supplied.
+  const supportsCockpit = calendar.source_capabilities?.includes('payroll_cockpit') ?? true;
   const location = useLocation();
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
@@ -429,7 +432,7 @@ export function AirePayrollCockpit({
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
     const published = calendar.publication?.delivery_status === 'delivered' || Boolean(finalizedBatchState);
-    if (!calendar.external_pay_period_id || !published) return;
+    if (!supportsCockpit || !calendar.external_pay_period_id || !published) return;
     setLoading(true);
     setRefreshError(null);
     try {
@@ -450,7 +453,7 @@ export function AirePayrollCockpit({
     } finally {
       if (generation === requestGeneration.current) setLoading(false);
     }
-  }, [calendar.external_pay_period_id, finalizedBatchState, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
+  }, [supportsCockpit, calendar.external_pay_period_id, finalizedBatchState, calendar.publication?.delivery_status, employeePage, exceptionPage, leavePage, payPeriodId, settlementPage, timePage]);
 
   useEffect(() => {
     void load();
@@ -738,7 +741,7 @@ export function AirePayrollCockpit({
           aireRecord={aireRecord}
           onReview={onReviewFinalizedBatch}
         />
-      ) : (
+      ) : supportsCockpit ? (
         <AireManualHoursReview
           payPeriodId={payPeriodId}
           payPeriodStatus={payPeriodStatus}
@@ -746,9 +749,18 @@ export function AirePayrollCockpit({
           aireRecordLinked={Boolean(aireRecord)}
           refreshToken={refreshToken}
         />
+      ) : (
+        <Card>
+          <CardContent className="space-y-2 py-6">
+            <h3 className="font-display text-lg font-bold text-neutral-950">Payroll uses verified time batches</h3>
+            <p className="text-sm leading-6 text-neutral-700">
+              {calendar.source_name} provides cutoff batches. Live timecard review is not available in Cornerstone for this connection. When a verified batch arrives, review and add its hours here.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
-      {calendar.external_pay_period_id && cockpitPublished && (
+      {supportsCockpit && calendar.external_pay_period_id && cockpitPublished && (
         <Card className="overflow-hidden">
           <CardContent className="p-0">
             <div className="border-b border-neutral-200 bg-neutral-950 px-5 py-5 text-white sm:px-6">
