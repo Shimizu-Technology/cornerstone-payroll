@@ -292,11 +292,30 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AirePayrollCockpit', () => {
+  it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
+    render(<AirePayrollCockpit payPeriodId={17} calendar={{
+      ...calendar,
+      source_name: 'Neutral Weekly Time',
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
+      publication: published ? calendar.publication : null,
+    }} onRefresh={vi.fn()} />);
+
+    expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
+    expect(screen.getByText(/Neutral Weekly Time provides cutoff batches/)).toBeTruthy();
+    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    expect(screen.queryByText('Time tracking payroll workspace')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
+  });
+
   it('replaces the live preview with the verified batch action', async () => {
     const user = userEvent.setup();
     const onReviewFinalizedBatch = vi.fn();
     const verifiedCalendar: AirePayrollCalendarState = {
       ...calendar,
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
       cutoff_state: 'batch_verified',
       finalized_batch: {
         event_id: 'event-17',
@@ -330,6 +349,9 @@ describe('AirePayrollCockpit', () => {
     await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
     expect(apiMocks.manualReview).not.toHaveBeenCalled();
+    for (const api of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
   });
 
   it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {

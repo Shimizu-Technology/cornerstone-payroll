@@ -740,6 +740,7 @@ export interface AirePayrollCalendarState {
   enabled: boolean;
   source_id: number;
   source_name: string;
+  source_capabilities?: string[];
   eligible: boolean;
   eligibility_error?: string | null;
   eligibility_code?:
