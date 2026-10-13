@@ -1414,6 +1414,7 @@ export function PayPeriodDetail({
   );
 
   const recurringTaxableAdditions = (employee: Employee) => (
+    payPeriod.includes_recurring_items === false ? 0 :
     (employee.default_custom_earnings || []).reduce((total, earning) => total + toNumber(earning.amount), 0)
     + (employee.default_payroll_adjustments || []).reduce((total, adjustment) => (
       adjustment.active !== false && adjustment.treatment === 'taxable_addition' ? total + toNumber(adjustment.amount) : total
