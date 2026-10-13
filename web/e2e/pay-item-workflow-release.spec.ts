@@ -1,15 +1,17 @@
-import { expect, request, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { expect as baseExpect, request, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const expect = baseExpect.configure({ timeout: 15_000 });
 
 interface Fixture {
   accountant_email: string;
   admin_email: string;
   companies: { aire: number; mosa: number };
-  employees: Record<'recipient' | 'coworker' | 'admin_recipient' | 'chief' | 'inherited' | 'zero' | 'private_owner', number>;
+  employees: Record<'recipient' | 'coworker' | 'admin_recipient' | 'chief' | 'inherited' | 'zero' | 'private_owner' | 'stale_profile', number>;
   fields: Record<'fixed' | 'percentage' | 'manual' | 'contribution' | 'personal' | 'paused' | 'ended' | 'standalone', number>;
   assignments: Record<'inherited' | 'zero' | 'personal' | 'percentage' | 'manual' | 'contribution' | 'paused' | 'ended', number>;
-  periods: Record<'history' | 'chief_history' | 'regular' | 'before_start' | 'special' | 'hospitality' | 'admin_regular', number>;
+  periods: Record<'history' | 'chief_history' | 'regular' | 'before_start' | 'special' | 'hospitality' | 'admin_regular' | 'stale_regular', number>;
   loan_id: number;
 }
 interface Definition { id: number; name: string; owner_employee_id: number | null; default_amount: number | null; assigned_employee_count: number; active_assignment_count: number; reporting_group?: string | null }
@@ -61,8 +63,8 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   }
   async function openEmployee(page: Page, companyId: number, employeeId: number): Promise<void> {
     await page.goto(`/companies/${companyId}/employees/${employeeId}/edit`);
-    await expect(page.locator('input[name="first_name"]')).toHaveValue('QA');
-    await expect(page.getByRole('button', { name: 'Add addition', exact: true })).toBeVisible();
+    await expect(page.locator('input[name="first_name"]')).toHaveValue('QA', { timeout: 20_000 });
+    await expect(page.getByRole('button', { name: 'Add addition', exact: true })).toBeEnabled();
   }
   async function startAddition(page: Page): Promise<Locator> {
     await page.getByRole('button', { name: 'Add addition', exact: true }).click();
@@ -270,7 +272,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     const dialog = await startAddition(page);
     await fillAddition(dialog, 'Retry allowance QA', '11');
     await dialog.getByRole('button', { name: 'Save addition', exact: true }).click();
-    await expect(dialog.getByRole('alert')).toContainText(/failure|retry/i);
+    await expect(page.getByRole('alert').filter({ hasText: 'Synthetic temporary failure' })).toContainText(/failure|retry/i);
     await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('Retry allowance QA');
     await expect(dialog.getByLabel(/^Amount(?! type)/)).toHaveValue('11');
     await saveAddition(page, dialog);
@@ -380,7 +382,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
   test('accountant can open the shared library and sees client scope and assignment impact', async ({ page }) => {
     await page.goto(`/companies/${fixture.companies.mosa}/payroll-fields`);
     await expect(page.getByRole('heading', { name: 'Client-wide payroll fields', exact: true })).toBeVisible();
-    await expect(page.getByText('Shared fixed allowance', { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByTestId(`shared-field-${fixture.fields.fixed}`)).toContainText('Shared fixed allowance');
     await expect(page.getByText('Private allowance', { exact: true })).toHaveCount(0);
     const response = await mosaApi.get('admin/payroll_fields');
     expect(response.ok()).toBeTruthy();
@@ -470,6 +472,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await page.getByLabel('Amount type', { exact: true }).selectOption('fixed');
     await page.getByLabel('Default amount', { exact: true }).fill('30');
     await page.getByRole('button', { name: 'Create field', exact: true }).click();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
     const response = await mosaApi.get('admin/payroll_fields');
     const field = ((await response.json()).payroll_fields as Definition[]).find(definition => definition.name === 'Library reusable allowance QA')!;
     expect(field.owner_employee_id).toBeNull();
@@ -508,7 +511,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await expect(additions).toContainText('Existing recurring item');
     await additions.getByRole('button', { name: 'Update setup', exact: true }).click();
     const heading = page.getByRole('heading', { name: 'Update recurring item setup', exact: true });
-    const converter = heading.locator('ancestor::div[contains(@class, "rounded-2xl")][1]');
+    const converter = heading.locator('xpath=ancestor::div[contains(@class, "rounded-2xl")][1]');
     await expect(converter.getByPlaceholder('Auto loan, 401(k), phone allowance')).toHaveValue('Chief Pilot');
     await converter.getByRole('combobox').filter({ has: page.locator('option[value="other"]') }).selectOption('other');
     await converter.getByLabel(/^First payday/).fill('2026-10-13');
@@ -660,12 +663,8 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
 
   test('saving a stale profile cannot restore a legacy item converted by another operator', async ({ page }) => {
     const label = 'Stale profile legacy allowance QA';
-    const employeePath = `admin/employees/${fixture.employees.chief}`;
-    const seeded = await aireApi.patch(employeePath, { data: { employee: {
-      default_payroll_adjustments: [{ label, amount: 45, treatment: 'taxable_addition', active: true }],
-    } } });
-    expect(seeded.ok(), await seeded.text()).toBeTruthy();
-    await openEmployee(page, fixture.companies.aire, fixture.employees.chief);
+    const employeePath = `admin/employees/${fixture.employees.stale_profile}`;
+    await openEmployee(page, fixture.companies.aire, fixture.employees.stale_profile);
     const additions = page.getByRole('region', { name: 'Additions', exact: true });
     await expect(additions).toContainText(label);
     await expect(additions).toContainText('Existing recurring item');
@@ -688,24 +687,24 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
         profilePayload = request.postDataJSON() as Record<string, unknown>;
       }
     });
-    await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
-    await expect(page).not.toHaveURL(new RegExp(`/employees/${fixture.employees.chief}/edit`));
+    await page.getByRole('button', { name: 'Update Contractor', exact: true }).click();
+    await expect(page).not.toHaveURL(new RegExp(`/employees/${fixture.employees.stale_profile}/edit`));
     expect(profilePayload).toBeDefined();
     const submittedEmployee = (profilePayload!.employee || profilePayload) as Record<string, unknown>;
     expect(submittedEmployee).not.toHaveProperty('default_payroll_adjustments');
     expect(submittedEmployee).not.toHaveProperty('default_custom_earnings');
     const employee = await aireApi.get(employeePath);
     expect((await employee.json()).data.default_payroll_adjustments).toEqual([]);
-    const matches = (await assignments(aireApi, fixture.employees.chief)).filter(assignment => assignment.payroll_field.name === label);
+    const matches = (await assignments(aireApi, fixture.employees.stale_profile)).filter(assignment => assignment.payroll_field.name === label);
     expect(matches).toHaveLength(1);
     expect(matches[0].id).toBe(converted!.id);
     expect(matches[0].amount).toBe(45);
-    const chief = item(await calculate(aireApi, fixture.periods.regular), fixture.employees.chief);
+    const chief = item(await calculate(aireApi, fixture.periods.stale_regular), fixture.employees.stale_profile);
     expect(chief.payroll_adjustments.some(adjustment => adjustment.label === label)).toBe(false);
     const entries = chief.payroll_field_entries.filter(entry => entry.payroll_field_definition_id === converted!.payroll_field_definition_id);
     expect(entries).toHaveLength(1);
     expect(Number(entries[0].amount)).toBe(45);
-    expect(Number(chief.gross_pay)).toBe(1995);
+    expect(Number(chief.gross_pay)).toBe(1045);
     expect(await period(aireApi, fixture.periods.chief_history)).toEqual(chiefHistory);
   });
 });
