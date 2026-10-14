@@ -14,3 +14,17 @@ describe('effective company write access', () => {
     expect(canWriteCompany({ ...sandbox, workspace_can_write: true, [key]: key.endsWith('_at') ? '2026-10-14T00:00:00Z' : true })).toBe(false);
   });
 });
+
+describe('capability-specific workspace writes', () => {
+  it('does not turn payroll operator permission into configuration administration', () => {
+    const operator = { ...sandbox, workspace_can_write: true, workspace_write_permissions: { payroll_operations: true, manage_client_configuration: false, manage_payroll_fields: true } };
+    expect(canWriteCompany(operator)).toBe(true);
+    expect(canWriteCompany(operator, 'manage_client_configuration')).toBe(false);
+    expect(canWriteCompany(operator, 'manage_payroll_fields')).toBe(true);
+    expect(canWriteCompany({ ...operator, workspace_write_permissions: { ...operator.workspace_write_permissions, manage_client_configuration: true } }, 'manage_client_configuration')).toBe(true);
+  });
+  it('fails closed for missing non-payroll permissions in known workspaces while preserving ordinary compatibility', () => {
+    expect(canWriteCompany({ ...sandbox, workspace_can_write: true }, 'manage_client_configuration')).toBe(false);
+    expect(canWriteCompany(live, 'manage_client_configuration')).toBe(true);
+  });
+});

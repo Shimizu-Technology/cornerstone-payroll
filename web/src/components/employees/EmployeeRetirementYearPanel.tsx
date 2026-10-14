@@ -40,7 +40,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
   const { hasCapability } = useAuth();
   const { notify } = useFeedback();
   const { activeCompany } = useCompany();
-  const canManage = canWriteCompany(activeCompany) && hasCapability('manage_client_configuration');
+  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasCapability('manage_client_configuration');
   const [year, setYear] = useState(() => initialYear != null && Number.isInteger(initialYear) && initialYear >= 2000 && initialYear <= 2200 ? initialYear : new Date().getFullYear());
   const [records, setRecords] = useState<EmployeeRetirementYearInput[]>([]);
   const [historicalSources, setHistoricalSources] = useState<HistoricalRetirementSource[]>([]);
@@ -195,7 +195,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
             <details className="rounded-xl border border-neutral-200 p-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Additional recorded balances</summary><div className="mt-4 grid gap-3 sm:grid-cols-3"><Value label="Eligible compensation" value={formatCurrency(Number(current.eligible_compensation_before_system))} /><Value label="Employer additions" value={formatCurrency(Number(current.employer_additions_before_system))} /><Value label="Non-Roth after-tax" value={formatCurrency(Number(current.non_roth_after_tax_before_system))} /></div><p className="mt-3 text-sm text-neutral-600">Opening balance verification: {current.opening_balances_verified ? 'Confirmed' : 'Not recorded'}.</p></details>
             <p className="break-words text-sm leading-6 text-neutral-600">Evidence: {current.source_reference}<br />Review note: {current.reason}{current.created_at && <><br />Recorded {formatGuamDateTime(current.created_at)}{current.created_by_name ? ` by ${current.created_by_name}` : ''}</>}</p></>}
           {!error && canManage && (!historicalSource || historicalReviewed) && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record a new review' : 'Review yearly records'}</Button>}
-        </> : <fieldset disabled={saving || !canManage} className="space-y-5">
+        </> : <><fieldset disabled={saving || !canManage} className="space-y-5">
           <div><p className="text-sm font-semibold text-neutral-900">Prior-year employer wages for catch-up</p><p className="mt-1 text-sm leading-6 text-neutral-600">Verify these wages before catch-up payroll from 2026 onward. If they exceed the applicable IRS threshold, catch-up must satisfy the Roth requirement. Ordinary Traditional contributions remain permitted.</p></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={`${year - 1} wages from this employer`}><Select value={draft.prior_year_wage_status} onChange={(event) => {
@@ -222,8 +222,9 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
             <label className="mt-4 flex gap-3 text-sm leading-6 text-neutral-700"><input className="mt-1 h-4 w-4 shrink-0 accent-primary-700" type="checkbox" checked={draft.opening_balances_verified} onChange={(event) => set('opening_balances_verified', event.target.checked)} />I verified these opening balances and checked that they do not overlap saved payroll or imported match amounts.</label>
           </details>
           <div className="grid gap-4 sm:grid-cols-2"><Field label="Evidence reference"><Input value={draft.source_reference} onChange={(event) => set('source_reference', event.target.value)} placeholder="Document or administrator review reference" /></Field><Field label="Review note"><Input value={draft.reason} onChange={(event) => set('reason', event.target.value)} placeholder="What was verified or corrected" /></Field></div>
-          <div className="flex flex-wrap justify-end gap-3"><Button variant="outline" disabled={saving} onClick={() => { setEditing(false); setError(null); }}>Cancel</Button><Button disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save verified records'}</Button></div>
-        </fieldset>}
+        </fieldset>
+          <div className="flex flex-wrap justify-end gap-3"><Button variant="outline" disabled={saving} onClick={() => { setEditing(false); setError(null); }}>Cancel</Button><Button disabled={saving || !canManage} onClick={() => void save()}>{saving ? 'Saving…' : 'Save verified records'}</Button></div>
+        </>}
         {!editing && records.filter((record) => Number(record.tax_year) === year).length > 1 && <details className="border-t border-neutral-200 pt-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Previous evidence reviews</summary><ul className="mt-3 space-y-3 text-sm leading-6 text-neutral-600">{records.filter((record) => Number(record.tax_year) === year && record.id !== current?.id).map((record) => <li key={record.id} className="break-words rounded-xl bg-neutral-50 p-3">{record.reason} · {record.source_reference}{record.created_at && <span className="block text-xs">{formatGuamDateTime(record.created_at)}</span>}</li>)}</ul></details>}
       </>}
     </CardContent>

@@ -44,6 +44,23 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response.parsed_body.dig("payroll_item", "payment_delivery_method")).to eq("direct_deposit")
     end
 
+    %w[prepared printed delivered].each do |state|
+      it "returns authoritative fresh #{state} check status without changing saved evidence" do
+        pay_period.update!(status: "committed")
+        payroll_item.update!(payment_delivery_method: "paper_check", check_number: "8101", gross_pay: 1200, net_pay: 960)
+        payroll_item.mark_package_prepared!(user: admin_user)
+        payroll_item.update!(check_printed_at: Time.current, check_print_count: 1) if state.in?(%w[printed delivered])
+        if state == "delivered"
+          CheckEvent.create!(payroll_item: payroll_item, user: admin_user, event_type: "delivered", check_number: "8101", effective_on: PayrollBusinessClock.today - 1.day, evidence_type: "hand_delivery")
+        end
+        before = [ payroll_item.reload.attributes, CheckEvent.count, CheckPrintRun.count, AirePayrollEntryAcknowledgement.count ]
+        get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("payroll_item", "check_status")).to eq(state)
+        expect([ payroll_item.reload.attributes, CheckEvent.count, CheckPrintRun.count, AirePayrollEntryAcknowledgement.count ]).to eq(before)
+      end
+    end
+
     it "returns persisted bank confirmation evidence on the exact scoped detail without mutating payment history" do
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65)

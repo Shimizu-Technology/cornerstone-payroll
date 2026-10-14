@@ -13,7 +13,7 @@ import type { Employee } from '@/types';
 export function EmployeeIntakePanel({ companyId, employee, onUpdated }: { companyId: number; employee: Employee; onUpdated: (employee: Employee) => void }) {
   const { hasCapability } = useAuth();
   const { activeCompany } = useCompany();
-  const canReview = canWriteCompany(activeCompany) && (hasCapability?.('manage_client_configuration') ?? false);
+  const canReview = canWriteCompany(activeCompany, 'manage_client_configuration') && (hasCapability?.('manage_client_configuration') ?? false);
   const [dueOn, setDueOn] = useState(employee.intake_readiness?.exception?.follow_up_due_on || '');
   const [eligibleFrom, setEligibleFrom] = useState(employee.intake_readiness?.exception?.payroll_eligible_from || employee.hire_date || '');
   const [reason, setReason] = useState('');

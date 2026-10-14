@@ -105,7 +105,9 @@ module Api
             user: current_user,
             company: current_company,
             request_method: request.request_method,
-            capability: capability
+            capability: capability,
+            controller_path: controller_path,
+            action_name: action_name
           )
 
           render json: {

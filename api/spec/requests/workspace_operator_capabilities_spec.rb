@@ -26,6 +26,25 @@ RSpec.describe "Effective workspace operator capabilities", type: :request do
     expect(response.parsed_body.fetch("companies").find { |row| row["id"] == workspace.id }.fetch("workspace_can_write")).to be(true)
   end
 
+  it "intersects a manager's global configuration role with the assigned workspace capability" do
+    user.update!(role: "manager")
+    assignment = create(:company_assignment, company: workspace, user: user, workspace_access_level: "operator")
+    expect(StaffRolePolicy.allowed?(user, :manage_client_configuration)).to be(true)
+    get "/api/v1/companies"
+    row = response.parsed_body.fetch("companies").find { |entry| entry["id"] == workspace.id }
+    expect(row.fetch("workspace_can_write")).to be(true)
+    expect(row.fetch("workspace_write_permissions")).to include("payroll_operations" => true, "manage_client_configuration" => false, "manage_payroll_fields" => true, "manage_organization" => false)
+
+    assignment.update!(workspace_access_level: "workspace_admin")
+    get "/api/v1/companies"
+    row = response.parsed_body.fetch("companies").find { |entry| entry["id"] == workspace.id }
+    expect(row.fetch("workspace_write_permissions")).to include("manage_client_configuration" => true, "manage_organization" => false)
+    user.update!(role: "accountant")
+    get "/api/v1/companies"
+    row = response.parsed_body.fetch("companies").find { |entry| entry["id"] == workspace.id }
+    expect(row.fetch("workspace_write_permissions")).to include("payroll_operations" => true, "manage_client_configuration" => false)
+  end
+
   it "keeps expired or sealed workspaces read-only despite operator access" do
     create(:company_assignment, company: workspace, user: user, workspace_access_level: "operator")
     travel_to(workspace.test_workspace_expires_at + 1.second) do
