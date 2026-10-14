@@ -2501,16 +2501,20 @@ export function QuarterlyCompliancePacketPanel() {
     }
   }
 
+  const form941Available = report?.meta.year === year && report.official_form_template?.available === true;
+  const templateMessage = report?.official_form_template?.message || (!form941Available
+    ? 'View the packet to check official Form 941 PDF availability. If availability remains unknown, reload the report.'
+    : null);
   const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
   const exportFormats: ReportDownloadFormat[] = [
-    {
+    ...(form941Available ? [{
       key: 'pdf',
       label: 'Preview draft PDF packet',
       description: 'Summary and draft forms marked not filed; not proof of submission.',
-      kind: 'pdf',
+      kind: 'pdf' as const,
       loading: exportingPdf,
       onSelect: downloadPdf,
-    },
+    }] : []),
     {
       key: 'xlsx',
       label: 'Reconciliation workbook (.xlsx)',
@@ -2572,6 +2576,7 @@ export function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
+          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>
             {bridgeRecoveryPath && <div className="mt-2">
               <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
@@ -2725,6 +2730,7 @@ export function QuarterlyCompliancePacketPanel() {
                 <Button
                   variant="outline"
                   onClick={() => setReviewFormType('form_941')}
+                  disabled={!form941Available}
                 >
                   Review 941
                 </Button>
@@ -3154,7 +3160,7 @@ function QuarterlyOfficialFormModal({
 
 // ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
-function Form941GuPanel() {
+export function Form941GuPanel() {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
@@ -3207,8 +3213,12 @@ function Form941GuPanel() {
     }
   }
 
+  const form941Available = report?.meta.year === year && report.official_form_template?.available === true;
+  const templateMessage = report?.official_form_template?.message || (!form941Available
+    ? 'View the worksheet to check official Form 941 PDF availability. If availability remains unknown, reload the report.'
+    : null);
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'Preview draft Form 941', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    ...(form941Available ? [{ key: 'pdf', label: 'Preview draft Form 941', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf' as const, loading: exportingPdf, onSelect: downloadPdf }] : []),
     { key: 'xlsx', label: '941 worksheet (.xlsx)', description: 'Supporting calculations and liability schedules.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
   ];
 
@@ -3259,6 +3269,7 @@ function Form941GuPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
+          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>

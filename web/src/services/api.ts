@@ -2684,7 +2684,14 @@ export interface AnnualPayrollSummaryReport {
   };
 }
 
+export interface OfficialFormTemplateStatus {
+  available: boolean;
+  supported_tax_years: number[];
+  message: string | null;
+}
+
 export interface Form941GuReport {
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_id: number;
@@ -2781,6 +2788,7 @@ export interface Form941GuReport {
 }
 
 export interface QuarterlyCompliancePacketReport {
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_name: string;

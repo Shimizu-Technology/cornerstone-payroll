@@ -40,6 +40,14 @@ RSpec.describe QuarterlyComplianceOfficialForms::Form941 do
     }
   end
 
+  it "rejects unsupported and missing report years even when edited fields claim 2026" do
+    [ 2025, 2027, nil ].each do |year|
+      report[:meta][:year] = year
+      expect { described_class.new(report: report, fields: { year: 2026 }) }
+        .to raise_error(OfficialPdfOverlay::TemplateUnavailableError, /only for tax year 2026/)
+    end
+  end
+
   it "places every supported tax total in its labeled March2026 template fields without filling neighboring lines" do
     fields = template_fields(1)
     page = PDF::Reader.new(StringIO.new(described_class.new(report: report).generate)).pages.first
