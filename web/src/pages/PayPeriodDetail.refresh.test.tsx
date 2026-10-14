@@ -836,7 +836,7 @@ it('refreshes accounting correction metadata and every source panel while preser
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 888, replace_request: true });
 });
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }, standaloneAmount = 0, namedAmount = 0, namedRequest?: number) {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }, standaloneAmount = 0, namedAmount = 0, namedRequest?: number, worksheetExtras: Record<string, unknown> = {}) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: rates?.profile ?? 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
@@ -845,7 +845,7 @@ async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' =
   const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: namedAmount, eligible: true, mode: namedRequest === undefined ? 'default' : 'override', requested_amount: namedRequest }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
-  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options, ...worksheetExtras } });
   apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'calculated' } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   apiMocks.comparison.mockResolvedValue(comparisonResponse);
@@ -1443,4 +1443,56 @@ it('accepts a newer successful canonical read when the saved-import reload is su
   expect(screen.getByText('Fresh canonical imported payroll')).toBeTruthy();
   expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
   expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+});
+
+it('requires the saved-import worksheet before clearing the hold and preserves saved field, loan and retirement context', async () => {
+  const field = { id: 8, company_id: 7, name: 'Retained allowance', kind: 'addition', tax_treatment: 'taxable_addition', category: 'allowance', amount_type: 'fixed', default_amount: 75, active: true, show_in_payroll_grid: true, sort_order: 0 };
+  const extras = { fields: [field], assignments: [{ employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', assigned_amount: 75, default_amount: 75, suggested_amount: 75, requested_amount: 75, editable: true, overridden: true }],
+    retained_manual_entries: [{ employee_id: 30, field_id: 9, label: 'Retained 401(k)', requested_amount: 50, applied_amount: 50, source: 'manual' }] };
+  const card = await renderLoanWorksheet('calculated', undefined, 300, undefined, 0, 300, 300, extras);
+  const fieldInput = within(card!).getByLabelText('Retained allowance') as HTMLInputElement;
+  fireEvent.change(fieldInput, { target: { value: '88' } });
+  fireEvent.blur(fieldInput);
+  const loanInput = within(card!).getByLabelText('Employee Loan repayment amount') as HTMLInputElement;
+  fireEvent.change(loanInput, { target: { value: '125' } });
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  apiMocks.payrollFieldInputs.mockRejectedValueOnce(new Error('Worksheet unavailable'));
+  await act(async () => { expect(await callback()).toBe(false); });
+  expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getAllByText('Retained allowance').length).toBeGreaterThan(0);
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('88.00');
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('125.00');
+  expect(within(screen.getByRole('region', { name: 'Retained manual retirement entries' })).getByText(/Retained 401\(k\).*requested \$50.00, applied \$50.00/)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await waitFor(() => expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull());
+  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('75.00');
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('keeps the saved-import hold when a newer superseding read fails its required worksheet', async () => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  apiMocks.payrollFieldInputs.mockResolvedValueOnce({ payroll_field_inputs: { fields: [], assignments: [] } })
+    .mockRejectedValueOnce(new Error('Newer required worksheet unavailable'));
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  let pending!: Promise<boolean>;
+  act(() => { pending = callback(); });
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Incomplete newer read' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Saved payroll worksheet could not load: Newer required worksheet unavailable');
+  await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(false); });
+  expect(screen.queryByText('Incomplete newer read')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await screen.findByText('Incomplete newer read');
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
