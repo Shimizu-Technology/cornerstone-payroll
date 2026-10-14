@@ -4,15 +4,24 @@
 # historical calculator context. Current setup must not reinterpret those inputs.
 class PayrollCorrectionPayBasisGuard
   MESSAGE = "The employee's pay basis differs from this correction's retained source payroll. Review the linked original payroll and pay setup before recalculating; current salary or fee pay cannot reinterpret retained correction earnings."
+  IDENTITY_ATTRIBUTES = %w[employee_id company_id pay_period_id financial_correction_origin_item_id correction_for_payroll_item_id timekeeping_source].freeze
 
-  def self.validate!(item)
+  def self.hold_reason(item)
+    validate!(item)
+    nil
+  rescue ArgumentError => e
+    { reason: e.message }
+  end
+
+  def self.validate!(item, proposed_attributes: {})
+    validate_identity!(item, proposed_attributes)
     return true unless item.timekeeping_source == "correction_reference"
 
     source = item.financial_correction_origin_item || item.correction_for_payroll_item
     period = item.pay_period.source_pay_period || item.pay_period.corrects_pay_period
     # Simulation references without a declared source remain a separate path.
-    return true unless source || period
-    source ||= period.payroll_items.find_by(employee_id: item.employee_id, company_id: item.company_id)
+    return true unless source || period || item.pay_period.correction_run?
+    source ||= period&.payroll_items&.find_by(employee_id: item.employee_id, company_id: item.company_id)
     unless source && source.company_id == item.company_id && source.employee_id == item.employee_id &&
       (!period || period.company_id == item.company_id)
       raise ArgumentError, "This correction's original employee payroll is unavailable. Review its linked source payroll before recalculating."
@@ -37,6 +46,21 @@ class PayrollCorrectionPayBasisGuard
     end
     validate_w2_frequency!(source, context, current[3]) if basis.in?(%w[hourly salary])
     true
+  end
+
+  def self.validate_identity!(item, proposed_attributes)
+    return unless item.persisted? && item.timekeeping_source_in_database == "correction_reference"
+    original_period = PayPeriod.find_by(id: item.pay_period_id_in_database, company_id: item.company_id_in_database)
+    return unless item.financial_correction_origin_item_id_in_database || item.correction_for_payroll_item_id_in_database ||
+      original_period&.source_pay_period_id || original_period&.corrects_pay_period_id || original_period&.correction_run?
+
+    proposed = proposed_attributes.stringify_keys
+    changed = IDENTITY_ATTRIBUTES.any? do |attribute|
+      value = proposed.key?(attribute) ? item.class.type_for_attribute(attribute).cast(proposed[attribute]) : item.public_send(attribute)
+      value != item.attribute_in_database(attribute)
+    end
+    return unless changed
+    raise ArgumentError, "This correction retains its original employee, company, pay period and source lineage. Create a separate payroll row or reviewed correction instead of reassigning this retained correction."
   end
 
   def self.validate_w2_frequency!(source, context, current_frequency)

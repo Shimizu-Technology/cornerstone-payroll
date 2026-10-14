@@ -51,4 +51,14 @@ RSpec.describe DatabaseIntegrity do
     described_class.install!
     expect(described_class.verify!).to eq(true)
   end
+
+  it "rejects replica-only firing and restores protection for ordinary origin writes" do
+    connection = ApplicationRecord.connection
+    connection.execute("ALTER TABLE payroll_filing_events ENABLE REPLICA TRIGGER payroll_filing_events_append_only")
+    expect { described_class.verify! }.to raise_error(/guards missing:.*payroll_filing_events_append_only/)
+    described_class.install!
+    mode = connection.select_value("SELECT tgenabled FROM pg_trigger WHERE tgname = 'payroll_filing_events_append_only' AND tgrelid = 'payroll_filing_events'::regclass")
+    expect(mode).to eq("O")
+    expect(described_class.verify!).to eq(true)
+  end
 end

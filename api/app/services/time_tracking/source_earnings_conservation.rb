@@ -60,16 +60,36 @@ module TimeTracking
         item.wage_rate_hours.sum { |entry| decimal(entry["overtime_hours"]) } == rows.sum(&:overtime_hours)
 
       if calculated
-        %w[regular overtime].each do |kind|
-          multiplier = kind == "overtime" ? BigDecimal("1.5") : 1.to_d
-          expected_amount = buckets.sum { |entry| (decimal(entry["#{kind}_hours"]) * decimal(entry["rate"]) * multiplier).round(2) }
-          actual_amount = item.payroll_item_earnings.where(category: kind).sum(:amount)
-          raise ArgumentError, MESSAGE unless actual_amount == expected_amount
+        expected_earnings = buckets.flat_map do |entry|
+          %w[regular overtime].filter_map do |kind|
+            hours = decimal(entry["#{kind}_hours"])
+            rate = decimal(entry["rate"]) * (kind == "overtime" ? BigDecimal("1.5") : 1.to_d)
+            amount = hours * rate
+            next if amount.zero?
+            label = kind == "overtime" ? "#{entry['label']} OT" : entry["label"]
+            if amount.positive?
+              [ kind, label, hours, rate, amount.round(2) ]
+            else
+              [ "other", "#{label} correction reversal", nil, nil, amount.round(2) ]
+            end
+          end
         end
+        reversal_labels = expected_earnings.select { |entry| entry.first == "other" }.map { |entry| entry[1] }
+        actual_earnings = item.payroll_item_earnings.reload.select do |earning|
+          earning.category.in?(%w[regular overtime]) || (earning.category == "other" && reversal_labels.include?(earning.label))
+        end.map { |earning| [ earning.category, earning.label, earning.hours, earning.rate, earning.amount ] }
+        raise ArgumentError, MESSAGE unless canonical_earnings(actual_earnings) == canonical_earnings(expected_earnings)
       end
       true
     rescue KeyError, TypeError, PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error
       raise ArgumentError, MESSAGE
+    end
+
+    def self.canonical_earnings(entries)
+      normalized_decimal = ->(value) { decimal(value).zero? ? "0.0" : decimal(value).to_s("F") }
+      entries.map do |category, label, hours, rate, amount|
+        [ category, label, hours && normalized_decimal.call(hours), rate && normalized_decimal.call(rate), normalized_decimal.call(amount) ]
+      end.sort_by(&:to_json)
     end
 
     def self.frozen_line_matches?(row, item)

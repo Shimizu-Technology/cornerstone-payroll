@@ -687,7 +687,7 @@ class PayrollItem < ApplicationRecord
       salary_override bonus reported_tips tips_paid_out service_charge_wages non_taxable_pay custom_columns_data
       gross_pay withholding_tax withholding_tax_adjustment withholding_tax_override additional_withholding
       additional_withholding_override custom_earnings custom_deductions payroll_adjustments loan_deduction]
-    return if (changed_attribute_names_to_save & inputs).empty?
+    return if (changed_attribute_names_to_save & (inputs + PayrollCorrectionPayBasisGuard::IDENTITY_ATTRIBUTES)).empty?
 
     PayrollCorrectionPayBasisGuard.validate!(self)
   rescue ArgumentError => e
@@ -698,7 +698,7 @@ class PayrollItem < ApplicationRecord
     # Old committed imports may lack complete source/capture proof. Operational
     # payment evidence must remain usable without recalculating that history.
     # Financial input edits and every editable/finalization path still validate.
-    input_fields = %w[hours_worked overtime_hours pay_rate employment_type custom_columns_data gross_pay]
+    input_fields = %w[hours_worked overtime_hours pay_rate employment_type custom_columns_data gross_pay employee_id company_id pay_period_id]
     return if pay_period&.committed? && (changed_attribute_names_to_save & input_fields).empty?
 
     TimeTracking::SourceEarningsConservation.validate!(self)

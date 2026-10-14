@@ -129,6 +129,69 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     expect(item.update(check_print_count: 1)).to eq(true)
   end
 
+  it "rejects employee-only PATCH retargeting without any financial, period, audit or YTD effects" do
+    other = create(:employee, company: company, pay_rate: 25, pay_frequency: "biweekly")
+    original = [ frozen_financial_state, period.reload.attributes, AuditLog.count,
+      EmployeeYtdTotal.order(:id).map(&:attributes), CompanyYtdTotal.order(:id).map(&:attributes) ]
+    patch "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}", headers: headers,
+      params: { payroll_item: { employee_id: other.id } }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to include(include("retains its original employee"))
+    expect([ frozen_financial_state, period.reload.attributes, AuditLog.count,
+      EmployeeYtdTotal.order(:id).map(&:attributes), CompanyYtdTotal.order(:id).map(&:attributes) ]).to eq(original)
+  end
+
+  it "refuses direct identity, ordinary-period, source-pointer and marker changes on a retained correction" do
+    other = create(:employee, company: company)
+    ordinary = create(:pay_period, company: company)
+    source = create(:payroll_item, company: company, employee: employee, pay_period: ordinary)
+    other_company = create(:company)
+    original = frozen_financial_state
+    [ { employee_id: other.id }, { company_id: other_company.id }, { pay_period_id: ordinary.id },
+      { financial_correction_origin_item_id: source.id }, { correction_for_payroll_item_id: source_item.id },
+      { timekeeping_source: "manual" } ].each do |attributes|
+      expect(item.update(attributes)).to eq(false), attributes.inspect
+      expect(item.errors.full_messages).to include(include("retains its original employee"))
+      expect(frozen_financial_state).to eq(original)
+    end
+  end
+
+  it "keeps ordinary draft employee reassignment on its existing path" do
+    other = create(:employee, company: company, pay_rate: 25)
+    ordinary = create(:pay_period, company: company)
+    ordinary_item = create(:payroll_item, company: company, employee: employee, pay_period: ordinary, pay_rate: 25)
+    patch "/api/v1/admin/pay_periods/#{ordinary.id}/payroll_items/#{ordinary_item.id}", headers: headers,
+      params: { payroll_item: { employee_id: other.id } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(ordinary_item.reload.employee_id).to eq(other.id)
+  end
+
+  it "serializes the same readonly hold reason in period and item responses without changing saved financial rows" do
+    change_to_salary!
+    original = frozen_financial_state
+    expect(TimeTracking::Client).not_to receive(:new)
+    hold = PayrollCorrectionPayBasisGuard.hold_reason(item)
+    expect(hold).to include(reason: include("pay basis differs"))
+    get "/api/v1/admin/pay_periods/#{period.id}", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("pay_period").fetch("payroll_items").sole.fetch("correction_pay_basis_hold"))
+      .to eq("reason" => hold[:reason])
+    get "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("payroll_item").fetch("correction_pay_basis_hold")).to eq("reason" => hold[:reason])
+    expect(frozen_financial_state).to eq(original)
+  end
+
+  it "returns no hold for a compatible retained correction or an ordinary row" do
+    original = frozen_financial_state
+    expect(PayrollCorrectionPayBasisGuard.hold_reason(item)).to be_nil
+    expect(PayrollCorrectionPayBasisGuard.hold_reason(source_item)).to be_nil
+    get "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}", headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("payroll_item").fetch("correction_pay_basis_hold")).to be_nil
+    expect(frozen_financial_state).to eq(original)
+  end
+
   context "a retained hourly contractor" do
     let!(:employee) { create(:employee, :contractor, company: company, contractor_pay_type: "hourly", pay_rate: 25) }
     let!(:source_item) do
