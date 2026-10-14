@@ -321,6 +321,7 @@ RSpec.describe "Concurrent correction Source catch-up", :postgres_concurrency do
   # A disposable namespace in the already owned test DB keeps append-only evidence
   # intact and avoids deleting its immutable rows for concurrency-test cleanup.
   around do |example|
+    @correction_workers = []
     connection = ApplicationRecord.connection
     original_search_path = connection.schema_search_path
     schema = "financial_correction_race_#{SecureRandom.hex(8)}"
@@ -330,9 +331,33 @@ RSpec.describe "Concurrent correction Source catch-up", :postgres_concurrency do
     load Rails.root.join("db/schema.rb")
     example.run
   ensure
+    # A timed join can leave a transaction alive. DDL cleanup must never race it:
+    # retain the namespace if bounded cleanup still cannot finish the workers.
+    cleanup = join_correction_workers(timeout: 60)
     connection.schema_search_path = original_search_path
     connection.schema_cache.clear!
+    if cleanup[:unfinished].any?
+      raise Timeout::Error, "Correction workers did not stop; retained schema #{schema}. #{correction_worker_details(cleanup[:unfinished])}"
+    end
     connection.execute("DROP SCHEMA IF EXISTS #{schema} CASCADE") if schema
+  end
+
+  def join_correction_workers(timeout:)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    errors = []
+    @correction_workers.each do |worker|
+      remaining = [ deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0 ].max
+      worker.join(remaining)
+    rescue StandardError => e
+      # Joining an errored worker raises. Still join every other worker before
+      # cleanup; the example re-raises the worker's actual failure below.
+      errors << e
+    end
+    { unfinished: @correction_workers.select(&:alive?), errors: errors }
+  end
+
+  def correction_worker_details(workers)
+    workers.map { |worker| "backend=#{worker[:backend_pid] || 'not connected'} status=#{worker.status} #{Array(worker.backtrace).first(3).join(' | ')}" }.join("; ")
   end
 
   it "records one durable actual-target intent when two operators confirm the same reviewed legacy correction" do
@@ -354,29 +379,36 @@ RSpec.describe "Concurrent correction Source catch-up", :postgres_concurrency do
     schema = ApplicationRecord.connection.schema_search_path
     ready = Queue.new
     start = Queue.new
-    threads = 2.times.map do
-      Thread.new do
+    2.times do
+      @correction_workers << Thread.new do
         ApplicationRecord.connection_pool.with_connection do |connection|
           previous = connection.schema_search_path
+          previous_timeout = connection.select_value("SHOW statement_timeout")
           connection.schema_search_path = schema
+          # Genuine SQL waits remain bounded and surface as worker failures,
+          # rather than leaving a transaction alive during schema teardown.
+          connection.execute("SET statement_timeout TO '60s'")
+          Thread.current[:backend_pid] = connection.select_value("SELECT pg_backend_pid()")
           ready << true
           start.pop
           TimeTracking::FinancialCorrectionService.new(pay_period: PayPeriod.find(period.id), actor: User.find(actor.id)).confirm!(expected_digest: digest)
         ensure
           connection.schema_search_path = previous
+          connection.execute("SET statement_timeout TO #{connection.quote(previous_timeout)}") if previous_timeout
         end
       end
     end
     require "timeout"
-    Timeout.timeout(5) { 2.times { ready.pop } }
+    Timeout.timeout(30) { 2.times { ready.pop } }
     2.times { start << true }
-    threads.each { |thread| expect(thread.join(10)).not_to be_nil }
-    expect(threads.map(&:value).map { |result| result.fetch(:status) }).to eq(%w[pending pending])
+    completed = join_correction_workers(timeout: 120)
+    raise completed[:errors].first if completed[:errors].any?
+    expect(completed[:unfinished]).to be_empty, "Concurrent confirmation timed out. #{correction_worker_details(completed[:unfinished])}"
+    expect(@correction_workers.map(&:value).map { |result| result.fetch(:status) }).to eq(%w[pending pending])
     expect(item.time_tracking_financial_correction_links.count).to eq(1)
     expect(item.aire_payroll_entry_acknowledgements.where(status: "committed").count).to eq(1)
     expect([ item.reload.attributes, period.payroll_liability_postings.map(&:attributes), EmployeeYtdTotal.find_by!(employee: employee, year: 2026).attributes ]).to eq(before)
   ensure
     2.times { start << true } if start
-    threads&.each { |thread| thread.join(10) }
   end
 end
