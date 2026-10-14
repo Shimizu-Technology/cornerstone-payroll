@@ -46,6 +46,28 @@ function mountSaved(item = savedItem) {
   render(<PayrollItemEditModal open onOpenChange={onOpenChange} payPeriodId={3} item={item} onSaved={onSaved} />);
   return { onSaved, onOpenChange };
 }
+
+it('counts retained same-rate earning entries without claiming different pay rates or changing source hours on cancel', async () => {
+  const user = userEvent.setup();
+  const buckets = [
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: 25, regular_hours: 4, overtime_hours: 0, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, active: true },
+  ];
+  const original = JSON.stringify(buckets);
+  const { onOpenChange } = mountSaved({ ...savedItem, hours_worked: 6, gross_pay: 150, net_pay: 138.52,
+    custom_deductions: [], wage_rate_hours: buckets } as PayrollItem);
+  expect(screen.getByText(/2 earning entries/)).toBeTruthy();
+  expect(screen.queryByText(/2 pay rates/)).toBeNull();
+  expect(screen.getAllByText('$25.00/hr')).toHaveLength(2);
+  const retainedInputs = screen.getAllByRole('textbox').filter(input => ['4', '2'].includes((input as HTMLInputElement).value));
+  expect(retainedInputs).toHaveLength(2);
+  expect(retainedInputs.every(input => (input as HTMLInputElement).disabled)).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+  expect(mocks.update).not.toHaveBeenCalled();
+  expect(mocks.recalculate).not.toHaveBeenCalled();
+  expect(JSON.stringify(buckets)).toBe(original);
+});
 it('displays the saved deduction and explicitly clears its last row before normal recalculation', async () => {
   const user = userEvent.setup();
   const { onSaved } = mountSaved();

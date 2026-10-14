@@ -332,9 +332,9 @@ export function ReplaceCheckModal({
             <h3 className="text-sm font-semibold text-gray-900">Corrected values</h3>
             {isMultiRate ? (
               <p className="text-xs text-gray-500">
-                This employee is paid at multiple rates. Enter the correct
-                hours for each rate bucket — gross is recomputed from these
-                buckets, then taxes are recomputed from the corrected gross.
+                Enter the corrected hours for each earning entry below.
+                Gross is recalculated using each entry's saved rate, then
+                taxes are recalculated from the corrected gross.
               </p>
             ) : (
               <p className="text-xs text-gray-500">

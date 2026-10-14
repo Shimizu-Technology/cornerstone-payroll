@@ -412,7 +412,7 @@ export function PayrollItemEditModal({
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
           <DialogDescription>
-            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} pay rates` : `Rate: ${formatCurrency(Number(item.pay_rate))}`}
+            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} earning entries` : `Rate: ${formatCurrency(Number(item.pay_rate))}`}
           </DialogDescription>
         </DialogHeader>
 
