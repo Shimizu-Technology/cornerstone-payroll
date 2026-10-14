@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
+import { capturedSourceContext, capturedSourceHoursLocked, worksheetHoursInvalid } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
@@ -138,8 +139,9 @@ function formatSignedNumber(value: number) {
   return '0';
 }
 
-function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
+function templateWageRates(employee: Employee | undefined, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
+  if (payrollItem?.correction_pay_basis_hold && !existing?.length) return [];
   if ((payrollItem?.timekeeping_source === 'correction_reference' || payrollItem?.import_source?.startsWith('time_tracking:')) && existing?.length) {
     return existing.map(entry => ({
       ...entry,
@@ -152,7 +154,7 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
       active: entry.active ?? true,
     }));
   }
-  const configuredRates = employee.wage_rates || [];
+  const configuredRates = employee?.wage_rates || [];
   if (configuredRates.length > 0) {
     const existingById = new Map(
       (existing || []).flatMap((entry) => (
@@ -217,12 +219,14 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
   payrollItems.forEach((item) => {
     const employee = employeeMap.get(item.employee_id);
     const noHours = employee?.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly';
-    const wageRates = employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
+    const wageRates = (capturedSourceHoursLocked(item) || item.correction_pay_basis_hold)
+      ? templateWageRates(employee, item)
+      : employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
       ? templateWageRates(employee, item)
       : [];
     hours[String(item.employee_id)] = {
-      regular: noHours ? 0 : (item.hours_worked || 0),
-      overtime: noHours ? 0 : (item.overtime_hours || 0),
+      regular: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.hours_worked || 0),
+      overtime: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.overtime_hours || 0),
       wage_rates: wageRates.length > 0 ? wageRates : undefined,
     };
   });
@@ -666,6 +670,7 @@ export function PayPeriodDetail({
   }, [payPeriod, loadSupplementals]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => ({
       ...prev,
@@ -688,6 +693,7 @@ export function PayPeriodDetail({
     field: 'regular_hours' | 'overtime_hours',
     value: number
   ) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => {
       const current = prev[String(employeeId)];
@@ -799,22 +805,14 @@ export function PayPeriodDetail({
       setCalculationNotice(null);
       setWorksheetRefreshWarning(null);
 
-      const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
-        const rateEntryInvalid = (entry.wage_rates || []).some((rate) => (
-          toNumber(rate.regular_hours) < 0 ||
-          toNumber(rate.overtime_hours) < 0 ||
-          toNumber(rate.regular_hours) > MAX_HOURS_PER_PERIOD ||
-          toNumber(rate.overtime_hours) > MAX_HOURS_PER_PERIOD
-        ));
-
-        return (
-          entry.regular < 0 ||
-          entry.overtime < 0 ||
-          entry.regular > MAX_HOURS_PER_PERIOD ||
-          entry.overtime > MAX_HOURS_PER_PERIOD ||
-          rateEntryInvalid
-        );
-      });
+      const heldItem = payrollItems.find(item => !item.voided && item.correction_pay_basis_hold);
+      if (heldItem) {
+        setError(heldItem.correction_pay_basis_hold!.reason);
+        return;
+      }
+      const invalidHours = Object.entries(hoursMap).find(([employeeId, entry]) => worksheetHoursInvalid(
+        entry, payrollItems.find(item => item.employee_id === Number(employeeId)), MAX_HOURS_PER_PERIOD,
+      ));
       if (invalidHours) {
         setError(`Hours must be between 0 and ${MAX_HOURS_PER_PERIOD} per period`);
         return;
@@ -1049,6 +1047,8 @@ export function PayPeriodDetail({
 
   const handleApprove = async () => {
     if (!payPeriod) return;
+    const heldItem = payrollItems.find(item => !item.voided && item.correction_pay_basis_hold);
+    if (heldItem) { setError(heldItem.correction_pay_basis_hold!.reason); return; }
     try {
       setProcessing(true);
       setError(null);
@@ -1301,6 +1301,8 @@ export function PayPeriodDetail({
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const hasCorrectionPayBasisHold = reportablePayrollItems.some(item => item.correction_pay_basis_hold);
+  const correctionCalculationHeld = !isCommitted && hasCorrectionPayBasisHold;
   const hasLinkedAireRecord = linkedAireRecords.length > 0;
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
@@ -1738,20 +1740,21 @@ export function PayPeriodDetail({
       )}
       {isDraft && (
         <>
-          <Button onClick={handleRunPayroll} disabled={processing}>
+          <Button onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
       )}
       {isCalculated && (
         <>
-          <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
+          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
             Recalculate
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={calculationFailures.length > 0
+            disabled={processing || correctionCalculationHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval'
+              : calculationFailures.length > 0
               ? 'Resolve the employee calculation errors and calculate again before approval'
               : payrollItems.length === 0
               ? 'Enter pay for at least one employee before approval'
@@ -1772,7 +1775,7 @@ export function PayPeriodDetail({
           </Button>
           {payPeriod.parallel_run
             ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
-            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
+            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing || correctionCalculationHeld}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>
@@ -1810,7 +1813,7 @@ export function PayPeriodDetail({
             if (hoursSortBy === 'gross') {
               const estimateGross = (employee: Employee) => {
                 const calculatedItem = payrollItemByEmployeeId.get(employee.id);
-                if (isCalculated && calculatedItem) return toNumber(calculatedItem.gross_pay);
+                if ((isCalculated || calculatedItem?.correction_pay_basis_hold) && calculatedItem) return toNumber(calculatedItem.gross_pay);
 
                 const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
                 const rate = toNumber(calculatedItem?.timekeeping_source === 'correction_reference' ? calculatedItem.pay_rate : employee.pay_rate);
@@ -2256,6 +2259,7 @@ export function PayPeriodDetail({
           </section>
         )}
 
+        {hasCorrectionPayBasisHold && <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Saved payroll amounts are retained. Review the source evidence and pay setup for held correction records before recalculating or approving. These totals are saved amounts, not a new-pay forecast.</div>}
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
@@ -2267,25 +2271,25 @@ export function PayPeriodDetail({
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved gross pay' : 'Gross Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Deductions</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved deductions' : 'Total Deductions'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved net pay' : 'Net Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
               </CardContent>
             </Card>
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">DRT Deposit</p>
+                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved DRT deposit' : 'DRT Deposit'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
               </CardContent>
             </Card>
@@ -2462,7 +2466,7 @@ export function PayPeriodDetail({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing}>
+                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
                     Recalculate with {additionalEmployeeIds.size} added
                   </Button>
                 )}
@@ -2613,10 +2617,11 @@ export function PayPeriodDetail({
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
                 const savedItem = payrollItemByEmployeeId.get(emp.id);
-                const sourceHoursLocked = Boolean(savedItem?.wage_rate_hours?.some(entry => entry.source_bucket_key));
+                const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                const correctionHold = savedItem?.correction_pay_basis_hold;
                 const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
-                const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
+                const rateLabel = savedItem?.correction_pay_basis_hold ? 'Retained pay basis · review required' : isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
                   ? `${formatCurrency(payRate / periodsPerYear)}/period`
                   : `${formatCurrency(payRate)}${hasHours ? '/hr' : '/period'}`;
                 return <section key={emp.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll entry for ${name}`}>
@@ -2624,12 +2629,14 @@ export function PayPeriodDetail({
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
+                  {correctionHold && <div role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold">Retained saved gross {formatCurrency(toNumber(savedItem?.gross_pay))}</p><p className="mt-1">{correctionHold.reason}</p></div>}
+                  {!hasMultiRate && activeRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
                   {sourceHoursLocked && <p className="text-xs text-neutral-600">Imported hours and earning rates are retained. Use source review and the correction workflow to change work.</p>}
                   {additionalEmployeeIds.has(emp.id) && <p className="text-xs font-medium text-blue-700">New to this payroll</p>}
                   {isFlatContractor && payPeriod.run_purpose === 'off_cycle_tips' && <p className="text-xs font-medium text-primary-700">Flat fee excluded from this tips-only run</p>}
-                  {isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
+                  {correctionHold ? <p className="text-xs text-amber-800">Review retained source evidence and pay setup before entering new pay.</p> : isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
                     <NumericInput className="mt-1 min-h-11 w-full" value={salaryOverrideMap[String(emp.id)] || null} onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} aria-label={`Pay this period for ${name}`} />
-                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
+                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p>{capturedSourceContext(rate) && <p className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>}<div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
                   <label className="block text-xs font-medium text-neutral-600">Bonus this payroll
                     <NumericInput className="mt-1 min-h-11 w-full" aria-label={`Bonus this payroll for ${name}`} value={bonusMap[String(emp.id)] ?? 0} onValueChange={(value) => { const amount = value ?? 0; if (amount === (bonusMap[String(emp.id)] ?? 0)) return; setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount })); setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount })); }} min={0} max={99999999.99} fixedDecimalsOnBlur={2} />
                   </label>
@@ -2690,7 +2697,8 @@ export function PayPeriodDetail({
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                       const savedItem = payrollItemByEmployeeId.get(emp.id);
-                      const sourceHoursLocked = Boolean(savedItem?.wage_rate_hours?.some(entry => entry.source_bucket_key));
+                      const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                      const correctionHold = savedItem?.correction_pay_basis_hold;
                       const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
@@ -2726,7 +2734,7 @@ export function PayPeriodDetail({
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
                       const grossBeforeFields = baseEstGross + reportedTipGross + toNumber(bonusMap[String(emp.id)]) + recurringTaxableAdditions(emp);
                       const calculatedItem = payrollItemByEmployeeId.get(emp.id);
-                      const estGross = isCalculated && calculatedItem
+                      const estGross = (isCalculated || correctionHold) && calculatedItem
                         ? toNumber(calculatedItem.gross_pay)
                         : grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
                       return (
@@ -2750,6 +2758,7 @@ export function PayPeriodDetail({
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
                             </div>
+                            {correctionHold && <p className="mt-2 text-xs text-amber-800">{correctionHold.reason}</p>}
                             {sourceHoursLocked && <p className="mt-2 text-xs text-neutral-600">Imported work retained. Use source review and corrections to change hours.</p>}
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
@@ -2758,7 +2767,9 @@ export function PayPeriodDetail({
                           </div>
                         </TableCell>
                         <TableCell className={`text-gray-700 ${rowTone}`}>
-                          {isVariableSalary ? (
+                          {correctionHold ? (
+                            <span className="text-xs font-medium text-amber-800">Retained pay basis · review required</span>
+                          ) : isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
                           ) : isPerPeriodSalary ? (
                             `${formatCurrency(payRate)}/period`
@@ -2771,15 +2782,17 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-1 text-left">
                               {activeWageRates.map(({ rate }) => (
-                                <div key={`${emp.id}-${rate.label}`} className="text-xs">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}`} className="text-xs">
                                   <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                   <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
+                                  {capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}
                                 </div>
                               ))}
                             </div>
                           ) : (
                             `${formatCurrency(payRate)}/hr`
                           )}
+                          {!hasMultiRate && activeWageRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
                         </TableCell>
                         <TableCell className={`text-center align-top ${rowTone}`} colSpan={isVariableSalary ? 2 : 1}>
                           {isVariableSalary ? (
@@ -2787,6 +2800,7 @@ export function PayPeriodDetail({
                               <span className="text-xs text-gray-500">Pay this period: $</span>
                               <NumericInput
                                 value={salaryOverride || null}
+                                disabled={Boolean(correctionHold)}
                                 aria-label={`Pay this period for ${emp.first_name} ${emp.last_name}`}
                                 onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)}
                                 placeholder="0.00"
@@ -2798,15 +2812,16 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
-                                    disabled={sourceHoursLocked}
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
                                     value={toNumber(rate.regular_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2823,7 +2838,7 @@ export function PayPeriodDetail({
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType || sourceHoursLocked}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -2832,15 +2847,16 @@ export function PayPeriodDetail({
                           {hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
-                                    disabled={sourceHoursLocked}
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
                                     value={toNumber(rate.overtime_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2857,7 +2873,7 @@ export function PayPeriodDetail({
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType || sourceHoursLocked}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -3026,7 +3042,7 @@ export function PayPeriodDetail({
                         <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
                           <p className="mt-1 text-[11px] font-normal text-gray-500">
-                            {isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
+                            {correctionHold ? 'Retained saved gross · pay setup review required' : isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
                           </p>
                         </TableCell>
                       </TableRow>
@@ -3136,6 +3152,8 @@ export function PayPeriodDetail({
                     <div><dt className="text-xs text-neutral-500">Total deductions</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.total_deductions))}</dd></div>
                     <div className="col-span-2 border-t border-neutral-100 pt-2"><dt className="text-xs text-neutral-500">Net pay</dt><dd className="text-lg font-bold tabular-nums text-green-700">{formatCurrency(toNumber(item.net_pay))}</dd></div>
                   </dl>
+                  {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {toNumber(rate.regular_hours)} REG / {toNumber(rate.overtime_hours)} OT{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
+                  {item.correction_pay_basis_hold && <p className="text-xs text-amber-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
                   {item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}
                   <div className="grid grid-cols-2 gap-2">
                     <Link className="inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700" to={payrollItemPath(companyId, payPeriod.id, item.id, { returnTo: currentPath })}>View details</Link>
@@ -3330,7 +3348,7 @@ export function PayPeriodDetail({
                                 {itemWageRates.map((rate) => {
                                   const totalHours = toNumber(rate.regular_hours) + toNumber(rate.overtime_hours);
                                   return (
-                                    <div key={`${item.id}-${rate.label}-hours`} className="text-xs">
+                                    <div key={`${item.id}-${rate.source_bucket_key || rate.label}-hours`} className="text-xs">
                                       <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                       <span className="text-gray-600">{totalHours}</span>
                                       {toNumber(rate.overtime_hours) > 0 && (
@@ -3351,6 +3369,7 @@ export function PayPeriodDetail({
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
                             {(() => {
+                              if (item.correction_pay_basis_hold) return <span className="text-xs text-amber-800">Retained pay basis · {item.correction_pay_basis_hold.reason}</span>;
                               if (isSalary) {
                                 if (!payPeriod.includes_base_salary) return <span className="font-medium text-primary-700">Excluded from this run</span>;
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
@@ -3374,7 +3393,7 @@ export function PayPeriodDetail({
                                 return (
                                   <div className="space-y-1 text-left inline-block">
                                     {itemWageRates.map((rate) => (
-                                      <div key={`${item.id}-${rate.label}-rate`} className="text-xs">
+                                      <div key={`${item.id}-${rate.source_bucket_key || rate.label}-rate`} className="text-xs">
                                         <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                         <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                       </div>
