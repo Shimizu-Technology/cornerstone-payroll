@@ -905,7 +905,7 @@ export function PayPeriods() {
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Processed</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-slate-200 bg-gray-50 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -990,8 +990,8 @@ export function PayPeriods() {
                           <span className="text-sm text-gray-400">Not processed</span>
                         )}
                       </TableCell>
-                      <TableCell className={`text-right ${rowTone}`}>
-                        <div className="flex items-center justify-end gap-3">
+                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-slate-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
+                        <div className="flex max-w-[232px] flex-wrap items-center justify-end gap-2 [&_button]:min-h-11">
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"

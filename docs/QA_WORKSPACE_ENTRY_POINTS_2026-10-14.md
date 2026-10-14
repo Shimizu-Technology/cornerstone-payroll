@@ -4,6 +4,8 @@ An accountant assigned as a reviewer could see the read-only workspace banner bu
 
 Dashboard and PayPeriods now use the same effective company-write permission as the record workspaces. Reviewer, expired, archived, sealed, and backup workspaces offer review destinations. An opened create/edit draft stays in memory during temporary access loss; its dialog and submit action return only when write access returns. Handlers also check the current permission before requesting a mutation.
 
+The original F07 finding also called for reachable desktop list actions at 1280 pixels. The Actions column now stays at the right edge of its scrolling table, wraps within a bounded width, and gives its buttons a 44-pixel minimum height. The pay-period identity remains pinned at the left. The existing mobile card layout is retained. Actual desktop acceptance of this additional layout change remains pending.
+
 The check workspace had the opposite problem: it described the VOID rehearsal PDF but hid its read-only preview from reviewers. Calculated and approved rehearsal runs now allow that preview when a positive-net paper check is available. Official printing, processing, and payment-method changes retain their existing write guards. Previewing never assigns a number, marks a check printed, or issues a payment.
 
 ## Validation so far
