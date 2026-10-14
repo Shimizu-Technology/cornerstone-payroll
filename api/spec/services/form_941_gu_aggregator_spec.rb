@@ -260,7 +260,7 @@ RSpec.describe Form941GuAggregator do
     end
 
     it "documents line 7 sign semantics for operator review" do
-      expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 fractions-of-cents uses (monthly Schedule B total - line 6)") }).to be(true)
+      expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 compares recorded employee SS and Medicare withholding") }).to be(true)
     end
 
     it "uses committed taxable bases instead of reconstructing them from gross pay" do
@@ -579,7 +579,7 @@ RSpec.describe Form941GuAggregator do
   end
 
   describe "fractions-of-cents adjustment" do
-    it "uses line 7 to reconcile monthly liability rounding to quarter totals" do
+    it "uses employee withholding, rather than monthly combined multiplication, for line 7" do
       company = create(:company, name: "Rounding Test Co")
       department = create(:department, company: company)
       employee = create(:employee, company: company, department: department)
@@ -631,8 +631,9 @@ RSpec.describe Form941GuAggregator do
       expect(report[:lines][:line5c_medicare_combined_tax]).to eq(29.0)
       expect(line6).to eq(29.0)
       expect(monthly_total).to eq(29.01)
-      expect(report[:lines][:line7_adj_fractions_cents]).to eq((monthly_total - line6).round(2))
-      expect(report[:lines][:line10_total_taxes_after_adj]).to eq(monthly_total)
+      expect(report[:lines][:line7_adj_fractions_cents]).to eq(-0.01)
+      expect(report[:lines][:line10_total_taxes_after_adj]).to eq(28.99)
+      expect(report[:withholding_reconciliation][:recorded_liability_residual]).to eq(-0.01)
       expect(report[:lines][:line10_total_taxes_after_adj]).to eq((line6 + report[:lines][:line7_adj_fractions_cents]).round(2))
     end
   end
@@ -667,18 +668,46 @@ RSpec.describe Form941GuAggregator do
     end
   end
 
-  describe "#fractions_of_cents_adjustment" do
-    it "returns nil when the monthly and quarterly totals match" do
-      expect(aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.0)).to be_nil
+  describe "employee cents rounding oracles" do
+    def rounding_report(amount:, count:)
+      company = create(:company)
+      employee = create(:employee, company: company, department: create(:department, company: company))
+      period = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 14), pay_date: Date.new(2026, 4, 15))
+      count.times do |index|
+        wage = amount.to_d
+        worker = index.zero? ? employee : create(:employee, company: company, department: employee.department)
+        create(:payroll_item, company: company, employee: worker, pay_period: period,
+          gross_pay: wage, reported_tips: 0, withholding_tax: 0,
+          social_security_taxable_wages: wage, social_security_taxable_tips: 0,
+          medicare_taxable_wages: wage, additional_medicare_taxable_wages: 0,
+          social_security_tax: (wage * "0.062".to_d).round(2), employer_social_security_tax: (wage * "0.062".to_d).round(2),
+          medicare_tax: (wage * "0.0145".to_d).round(2), employer_medicare_tax: (wage * "0.0145".to_d).round(2))
+      end
+      described_class.new(company, 2026, 2).generate
     end
 
-    it "logs a warning when the adjustment exceeds the expected threshold" do
-      allow(Rails.logger).to receive(:warn)
+    it "uses only the employee +1 cent for two $50 checks in the same month" do
+      report = rounding_report(amount: 50, count: 2)
+      expect(report[:lines]).to include(line6_total_taxes_before_adj: 15.30, line7_adj_fractions_cents: 0.01, line10_total_taxes_after_adj: 15.31)
+      expect(report[:withholding_reconciliation]).to include(recorded_employee_total: 7.66, expected_employee_total: 7.65, recorded_total_liability: 15.32, recorded_liability_residual: 0.01, requires_review: true)
+    end
 
-      adjustment = aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.25)
+    it "supports a negative employee adjustment without forcing the employer ledger to match" do
+      report = rounding_report(amount: 5, count: 4)
+      expect(report[:lines]).to include(line6_total_taxes_before_adj: 3.06, line7_adj_fractions_cents: -0.01, line10_total_taxes_after_adj: 3.05)
+      expect(report[:withholding_reconciliation][:recorded_liability_residual]).to eq(-0.01)
+    end
 
-      expect(adjustment).to eq(0.25)
-      expect(Rails.logger).to have_received(:warn).with(include("Large fractions-of-cents adjustment=0.25"))
+    it "does not classify a materially missing employee tax as rounding" do
+      report = aggregator.send(:withholding_reconciliation, records: [], ss_base: 1000, medicare_base: 1000, additional_base: 0, line6: 153)
+      expect(report).to include(line7_suggestion: nil, employee_difference: -76.50, requires_review: true)
+    end
+
+    it "counts modern stored Additional Medicare once" do
+      item = build(:payroll_item, social_security_tax: 0, employer_social_security_tax: 0,
+        medicare_tax: 23.50, employer_medicare_tax: 14.50, additional_medicare_tax: 9)
+      result = aggregator.send(:withholding_reconciliation, records: [ item ], ss_base: 0, medicare_base: 1000, additional_base: 1000, line6: 38)
+      expect(result).to include(expected_employee_total: 23.50, recorded_employee_total: 23.50, line7_suggestion: nil, recorded_total_liability: 38.0, requires_review: false)
     end
   end
 

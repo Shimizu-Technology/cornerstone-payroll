@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_13_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_14_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3850,6 +3850,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_13_020000) do
     t.datetime "updated_at", null: false
     t.integer "warning_count", default: 0, null: false
     t.integer "year", null: false
+    t.string "preflight_fingerprint"
+    t.string "ready_fingerprint"
+    t.jsonb "attestation_history", default: [], null: false
     t.index [ "company_id", "year" ], name: "index_w2_filing_readinesses_on_company_id_and_year", unique: true
     t.index [ "company_id" ], name: "index_w2_filing_readinesses_on_company_id"
     t.index [ "marked_ready_by_id" ], name: "index_w2_filing_readinesses_on_marked_ready_by_id"

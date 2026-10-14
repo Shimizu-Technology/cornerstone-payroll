@@ -174,6 +174,13 @@ class PayrollFilingEvidenceRecorder
     readiness = W2FilingReadiness.find_by(company_id: company.id, year: tax_year)
     raise Error, "Run W-2GU preflight and mark the wage filing ready first" unless readiness&.status == "filing_ready"
 
+    fingerprint = W2FilingInputsFingerprint.new(company: company.reload, year: tax_year).call
+    unless readiness.current?(fingerprint)
+      raise Error, "W-2GU readiness is stale. Run preflight, review the current report and mark it ready again."
+    end
+    preflight = W2GuPreflightValidator.new(company: company, year: tax_year).run
+    raise Error, "Resolve current W-2GU preflight findings before recording submission" if preflight[:blocking_count].positive?
+
     gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: tax_year)
     raise Error, gate[:blockers].first[:message] unless gate.dig(:capabilities, :all_filing_ready_exports_allowed)
   end

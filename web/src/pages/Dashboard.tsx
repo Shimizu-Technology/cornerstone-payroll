@@ -390,7 +390,7 @@ export function Dashboard(): ReactElement {
                   <p className="text-lg font-medium text-neutral-900">{formatCurrency(stats.ytd_totals.gross_pay)}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-neutral-500">Withholding Tax</p>
+                  <p className="text-sm text-neutral-500">Total Withholding Tax</p>
                   <p className="text-lg font-medium text-danger-600">{formatCurrency(stats.ytd_totals.withholding_tax)}</p>
                 </div>
                 <div>
