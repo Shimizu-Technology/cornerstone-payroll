@@ -10,6 +10,7 @@ module TimeTracking
     def review
       payload = @client.payroll_cockpit_manual_review(start_date: @pay_period.start_date.iso8601,
         end_date: @pay_period.end_date.iso8601, external_pay_period_id: @pay_period.id)
+      prime_period_attestations! if @source.supports?(:payment_attestation_resolution_v1)
       candidates = payload.fetch("employees", []).flat_map do |employee|
         mapping = mappings[employee["source_user_uuid"] || employee["payroll_integration_id"]]
         next [] unless mapping
@@ -61,6 +62,26 @@ module TimeTracking
     end
 
     private
+
+    # The verified resolution contract supports a period-scoped list without an
+    # employee filter. Include held-only workers as well as ordinary candidates;
+    # reading only the manual review's positive rows would hide those holds.
+    def prime_period_attestations!
+      return if @period_attestations_loaded
+      @attestations = mappings.keys.index_with { [] }
+      1.upto(10) do |page|
+        payload = @client.payroll_payment_attestations(page: page,
+          start_date: @pay_period.start_date.iso8601, end_date: @pay_period.end_date.iso8601)
+        payload.fetch("payment_attestations").each do |row|
+          next unless mappings.key?(row["source_user_uuid"]) && in_period?(row["work_date"])
+          @attestations.fetch(row["source_user_uuid"]) << row
+        end
+        total_pages = Integer(payload.fetch("pagination").fetch("total_pages"))
+        break if page >= total_pages
+        conflict!("Payment evidence history is too large for this view; review it with your administrator") if page == 10
+      end
+      @period_attestations_loaded = true
+    end
 
     def mappings
       @mappings ||= @source.time_tracking_employee_mappings.includes(:employee)
