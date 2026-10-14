@@ -22,6 +22,17 @@ module TimeTracking
       # history and enforce exact frozen hours; do not manufacture rate evidence.
       return true if captured.empty?
       raise ArgumentError, MESSAGE unless captured.size == rows.size
+      captured.map(&:time_tracking_import).uniq(&:id).each do |import|
+        raw = import.raw_payload
+        source = import.time_tracking_source
+        PayrollBatchPayloadValidator.new(payload: raw, start_date: import.start_date, end_date: import.end_date,
+          expected_source: source.connector.source_identifier).validate!
+        ConnectionIdentity.validate!(source: source, payload: raw)
+        raise ArgumentError, MESSAGE unless raw["batch_id"] == import.external_batch_id &&
+          raw.dig("export", "checksum") == import.external_batch_checksum &&
+          CanonicalPayload.checksum(raw.except("export")) == import.external_batch_checksum &&
+          import.source_payload_hash == import.external_batch_checksum
+      end
 
       expected = captured.group_by { |row| row.earning_snapshot.fetch("source_bucket_key") }
       buckets = item.wage_rate_hours.select { |entry| entry["source_bucket_key"].present? }
@@ -49,7 +60,7 @@ module TimeTracking
         end
       end
       true
-    rescue KeyError, TypeError
+    rescue KeyError, TypeError, PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error
       raise ArgumentError, MESSAGE
     end
 

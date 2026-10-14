@@ -99,4 +99,13 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     item.calculate!
     expect(item.reload.gross_pay).to eq(90)
   end
+
+  it "rejects changed frozen batch provenance even when the employee's hours still match" do
+    item = apply!
+    raw = next_import.raw_payload.deep_dup
+    raw["cutoff_at"] = (Time.iso8601(raw["cutoff_at"]) + 1.minute).iso8601
+    next_import.update_columns(raw_payload: raw)
+    expect { item.calculate! }.to raise_error(ArgumentError, /Imported source hours/)
+    expect(item.reload.gross_pay).to eq(0)
+  end
 end
