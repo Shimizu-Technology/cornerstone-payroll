@@ -12,10 +12,13 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     create(:pay_period, :voided, company: company, start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-10-30")
   end
   let!(:source_item) do
-    create(:payroll_item, company: company, employee: employee, pay_period: source_period,
+    original = create(:payroll_item, company: company, employee: employee, pay_period: source_period,
       employment_type: "hourly", pay_rate: 25, hours_worked: 4, gross_pay: 100,
       wage_rate_hours: [ { "employee_wage_rate_id" => rate.id, "label" => rate.label, "rate" => 25,
         "regular_hours" => 4, "overtime_hours" => 0, "is_primary" => true, "active" => true } ])
+    PayrollCalculator.for(employee, original).calculate
+    original.save!
+    original
   end
   let!(:period) do
     PayPeriodCorrectionService.create_correction_run!(source_pay_period: source_period, actor: actor,
@@ -108,6 +111,24 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
     expect(source_item.reload.attributes).to eq(original_source)
   end
 
+  it "holds changed hourly frequency before recalculation even though retained gross would stay the same" do
+    original = frozen_financial_state
+    expect(source_item.gross_pay).to eq(100)
+    employee.update!(pay_frequency: "semimonthly")
+    post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to include(include("pay frequency differs"))
+    expect(frozen_financial_state).to eq(original)
+  end
+
+  it "holds missing legacy hourly frequency without guessing from matching current defaults" do
+    source_item.update_columns(calculation_context_snapshot: {})
+    original = frozen_financial_state
+    expect { item.calculate! }.to raise_error(ArgumentError, /original hourly pay frequency is missing/)
+    expect(frozen_financial_state).to eq(original)
+    expect(item.update(check_print_count: 1)).to eq(true)
+  end
+
   context "a retained hourly contractor" do
     let!(:employee) { create(:employee, :contractor, company: company, contractor_pay_type: "hourly", pay_rate: 25) }
     let!(:source_item) do
@@ -146,9 +167,17 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
 
   context "a retained annual salary" do
     let!(:employee) { create(:employee, :salary, company: company, salary_type: "annual", pay_rate: 52_000, pay_frequency: "biweekly") }
+    let(:retain_timekeeping_context) { false }
     let!(:source_item) do
       original = create(:payroll_item, :salary, company: company, employee: employee, pay_period: source_period,
         pay_rate: 52_000, hours_worked: 0)
+      if retain_timekeeping_context
+        CompanyWorkweek.create!(company: company, effective_on: "2020-01-01", starts_on_weekday: 0,
+          starts_at_minutes: 0, timezone: "Pacific/Guam", confirmation_status: "confirmed", confirmed_by: actor,
+          confirmed_at: Time.current, notes: "Confirmed salary schedule fixture")
+        create(:employee_work_profile, employee: employee, effective_on: "2020-01-01")
+        PayrollTimeAllocationService.call!(payroll_item: original)
+      end
       PayrollCalculator.for(employee, original).calculate
       original.save!
       original
@@ -175,6 +204,76 @@ RSpec.describe "Retained manual correction pay basis", type: :request do
       expect { item.calculate! }.to raise_error(ArgumentError, /original salary pay basis is missing/)
       expect(frozen_financial_state).to eq(original)
       expect(item.update(check_print_count: 1)).to eq(true)
+    end
+
+    it "rejects biweekly to semimonthly frequency before worksheet or item input effects" do
+      original = frozen_financial_state
+      expect(source_item.gross_pay).to eq(2000)
+      employee.update!(pay_frequency: "semimonthly")
+      expect_any_instance_of(PayrollFieldInputApplier).not_to receive(:apply!)
+      expect(NamedPayrollLoanInput).not_to receive(:apply!)
+      post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", headers: headers,
+        params: { employee_ids: [ employee.id ], salary_overrides: { employee.id.to_s => 2166.67 },
+          payroll_field_inputs: { employee.id.to_s => { "999" => { mode: "override", amount: 10 } } },
+          named_loan_payments: { employee.id.to_s => { "999" => { mode: "override", amount: 20 } } } }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "success")).to be_empty
+      expect(response.parsed_body.dig("results", "errors")).to contain_exactly(include("error" => include("pay frequency differs")))
+      expect(frozen_financial_state).to eq(original)
+      post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(frozen_financial_state).to eq(original)
+      expect { item.calculate! }.to raise_error(ArgumentError, /pay frequency differs/)
+      expect(frozen_financial_state).to eq(original)
+    end
+
+    it "holds missing original frequency despite today's matching employee and company defaults" do
+      snapshot = source_item.calculation_context_snapshot.deep_dup
+      snapshot.fetch("employee").delete("pay_frequency")
+      source_item.update_columns(calculation_context_snapshot: snapshot)
+      original = frozen_financial_state
+      expect(company.pay_frequency).to eq("biweekly")
+      expect { item.calculate! }.to raise_error(ArgumentError, /original salary pay frequency is missing/)
+      expect(frozen_financial_state).to eq(original)
+      expect(item.update(check_print_count: 1)).to eq(true)
+    end
+
+    context "a retained salary timekeeping schedule" do
+      let(:retain_timekeeping_context) { true }
+
+      it "uses the actual original employee frequency from its normal-engine schedule snapshot" do
+        expect(source_item.timekeeping_context_snapshot).to include("pay_basis" => "salary", "pay_frequency" => "biweekly")
+        snapshot = source_item.calculation_context_snapshot.deep_dup
+        snapshot.fetch("employee").delete("pay_frequency")
+        source_item.update_columns(calculation_context_snapshot: snapshot)
+        post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
+        expect(response).to have_http_status(:ok), response.body
+        expect(item.reload.pay_rate).to eq(52_000)
+        expect(item.gross_pay).to eq(2000)
+      end
+
+      it "holds conflicting recorded frequency rather than choosing the convenient snapshot" do
+        snapshot = source_item.calculation_context_snapshot.deep_dup
+        snapshot.fetch("employee")["pay_frequency"] = "semimonthly"
+        source_item.update_columns(calculation_context_snapshot: snapshot)
+        original = frozen_financial_state
+        expect { item.calculate! }.to raise_error(ArgumentError, /frequency is missing, unverified or inconsistent/)
+        expect(frozen_financial_state).to eq(original)
+      end
+    end
+
+    context "a retained legacy tax schedule" do
+      let!(:tax_configuration) { create(:tax_table, tax_year: 2026, pay_frequency: "biweekly", filing_status: "single") }
+
+      it "uses its original legacy-engine tax frequency without inferring from current setup" do
+        expect(source_item.tax_rule_snapshot).to include("engine" => "legacy_tax_table", "pay_frequency" => "biweekly")
+        snapshot = source_item.calculation_context_snapshot.deep_dup
+        snapshot.fetch("employee").delete("pay_frequency")
+        source_item.update_columns(calculation_context_snapshot: snapshot)
+        post "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}/recalculate", headers: headers
+        expect(response).to have_http_status(:ok), response.body
+        expect(item.reload.gross_pay).to eq(2000)
+      end
     end
   end
 

@@ -20,7 +20,7 @@ class PayrollCorrectionPayBasisGuard
 
     basis = source.employment_type
     current = Employee.where(id: item.employee_id, company_id: item.company_id)
-      .pick(:employment_type, :contractor_pay_type, :salary_type)
+      .pick(:employment_type, :contractor_pay_type, :salary_type, :pay_frequency)
     raise ArgumentError, MESSAGE unless current && basis == item.employment_type && basis == current.first
     context = source.calculation_context_snapshot.to_h.fetch("employee", {}).to_h
     if context["employment_type"].present? && context["employment_type"] != basis
@@ -35,6 +35,27 @@ class PayrollCorrectionPayBasisGuard
     if subtype && context[subtype].present? && context[subtype] != current_subtype
       raise ArgumentError, MESSAGE
     end
+    validate_w2_frequency!(source, context, current[3]) if basis.in?(%w[hourly salary])
     true
+  end
+
+  def self.validate_w2_frequency!(source, context, current_frequency)
+    timekeeping = source.timekeeping_context_snapshot.to_h
+    tax = source.tax_rule_snapshot.to_h
+    frequencies = [ context["pay_frequency"] ]
+    if timekeeping["pay_basis"] == source.employment_type &&
+      (source.hourly? || timekeeping["salary_type"] == context["salary_type"])
+      frequencies << timekeeping["pay_frequency"]
+    end
+    frequencies << tax["pay_frequency"] if tax["engine"] == "legacy_tax_table"
+    frequencies = frequencies.compact_blank.uniq
+    # A company schedule cannot establish the original employee frequency:
+    # employee overrides are supported, and schedule records are mutable.
+    unless frequencies.one? && frequencies.first.in?(CompanyPaySchedule::FREQUENCIES)
+      raise ArgumentError, "This correction's original #{source.employment_type} pay frequency is missing, unverified or inconsistent. Review retained original payroll evidence and pay setup before recalculating; today's employee or company frequency cannot establish it."
+    end
+    unless frequencies.first == current_frequency
+      raise ArgumentError, "The employee's pay frequency differs from this correction's retained original #{source.employment_type} frequency. Review the linked original payroll and pay setup before recalculating; changing frequency changes withholding and can change period salary."
+    end
   end
 end
