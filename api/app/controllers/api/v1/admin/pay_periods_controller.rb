@@ -1419,7 +1419,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
-            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item),
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
             bonus_source: item.bonus_source,
