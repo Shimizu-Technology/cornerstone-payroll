@@ -28,6 +28,7 @@ class PayPeriodLifecycleService
       validate_employee_document_readiness!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -76,6 +77,7 @@ class PayPeriodLifecycleService
       validate_employee_document_readiness!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       committed_items = pay_period.payroll_items.includes(
         :employee,
         payroll_item_deductions: :deduction_type,
@@ -114,6 +116,14 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_source_earnings!
+    pay_period.payroll_items.not_voided.each do |item|
+      TimeTracking::SourceEarningsConservation.validate!(item, calculated: true)
+    end
+  rescue ArgumentError => e
+    raise InvalidTransitionError, e.message
+  end
 
   def validate_payroll_participation!
     items = pay_period.payroll_items.not_voided.includes(:employee).to_a

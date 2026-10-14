@@ -214,8 +214,10 @@ module Api
             :qualified_overtime_compensation,
             :check_date, :check_memo,
             wage_rate_hours: [
+              :source_bucket_key,
               :employee_wage_rate_id, :label, :rate, :regular_hours,
-              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
+              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active,
+              { source_lines: [ :source_time_entry_id, :line_key, :source_time_entry_version, :source_kind, :original_work_date, :total_hours, :regular_hours, :overtime_hours ] }
             ],
             custom_earnings: [ :label, :amount ],
             custom_deductions: [ :label, :amount ],

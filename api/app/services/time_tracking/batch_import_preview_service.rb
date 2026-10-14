@@ -191,7 +191,8 @@ module TimeTracking
           overtime_hours: 0.to_d,
           source_kinds: Set.new,
           source_time_entry_ids: Set.new,
-          original_work_dates: Set.new
+          original_work_dates: Set.new,
+          source_lines: []
         }
         bucket[:total_hours] += decimal(adjustment.fetch("total_hours"))
         bucket[:regular_hours] += decimal(adjustment.fetch("regular_hours"))
@@ -199,6 +200,8 @@ module TimeTracking
         bucket[:source_kinds] << adjustment.fetch("source_kind")
         bucket[:source_time_entry_ids] << adjustment.fetch("source_time_entry_id")
         bucket[:original_work_dates] << adjustment.fetch("original_work_date")
+        bucket[:source_lines] << adjustment.slice("source_time_entry_id", "line_key", "source_time_entry_version",
+          "source_kind", "original_work_date", "total_hours", "regular_hours", "overtime_hours")
       end
 
       buckets.values.map do |bucket|

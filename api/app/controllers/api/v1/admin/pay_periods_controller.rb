@@ -421,6 +421,10 @@ module Api
                 end
               end
 
+              # Reject altered frozen inputs before field/loan draft writes can
+              # persist; the calculator and finalization recheck independently.
+              TimeTracking::SourceEarningsConservation.validate!(payroll_item)
+
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
                 override_val = BigDecimal(params[:salary_overrides][employee_id.to_s].to_s)

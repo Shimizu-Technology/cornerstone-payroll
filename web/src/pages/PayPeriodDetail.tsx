@@ -140,7 +140,7 @@ function formatSignedNumber(value: number) {
 
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
-  if (payrollItem?.timekeeping_source === 'correction_reference' && existing?.length) {
+  if ((payrollItem?.timekeeping_source === 'correction_reference' || payrollItem?.import_source?.startsWith('time_tracking:')) && existing?.length) {
     return existing.map(entry => ({
       ...entry,
       rate: toNumber(entry.rate),
@@ -503,7 +503,7 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<void> => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<boolean> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -535,7 +535,7 @@ export function PayPeriodDetail({
         }),
       ]);
 
-      if (!isCurrentRequest()) return;
+      if (!isCurrentRequest()) return false;
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
@@ -549,10 +549,12 @@ export function PayPeriodDetail({
         if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
       loadedPeriodIdRef.current = periodId;
+      return true;
     } catch (err) {
       if (isCurrentRequest()) {
         setError(err instanceof Error ? err.message : 'Failed to load pay period');
       }
+      return false;
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
@@ -854,7 +856,7 @@ export function PayPeriodDetail({
       Object.entries(hoursMap).forEach(([empId, entry]) => {
         if (!selectedEmployeeIds.has(Number(empId))) return;
         const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
-          && item.timekeeping_source === 'correction_reference');
+          && (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')));
         hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
           && (entry.wage_rates.length > 1 || preservesSourceRates)
           ? {
@@ -1005,8 +1007,14 @@ export function PayPeriodDetail({
       const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
       if (!isCurrentRoute()) return;
       setRefreshSetupOpen(false);
-      await loadPayPeriod(scope.payRunId, true);
+      const reloaded = await loadPayPeriod(scope.payRunId, true);
       if (!isCurrentRoute()) return;
+      if (!reloaded) {
+        setPayPeriod(null);
+        setPayrollItems([]);
+        setError('Setup changed, but the updated payroll could not load. Your inputs are retained. Try again before reviewing or committing payroll.');
+        return;
+      }
       setCalculationFailures(response.results.errors);
       const failureCount = response.results.errors.length;
       if (failureCount > 0) {
@@ -1856,7 +1864,7 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={() => loadPayPeriod(payPeriod.id, true)} />
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => { await loadPayPeriod(payPeriod.id, true); }} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -2605,7 +2613,8 @@ export function PayPeriodDetail({
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
                 const savedItem = payrollItemByEmployeeId.get(emp.id);
-                const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
+                const sourceHoursLocked = Boolean(savedItem?.wage_rate_hours?.some(entry => entry.source_bucket_key));
+                const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                 const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
                   ? `${formatCurrency(payRate / periodsPerYear)}/period`
@@ -2615,11 +2624,12 @@ export function PayPeriodDetail({
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
+                  {sourceHoursLocked && <p className="text-xs text-neutral-600">Imported hours and earning rates are retained. Use source review and the correction workflow to change work.</p>}
                   {additionalEmployeeIds.has(emp.id) && <p className="text-xs font-medium text-blue-700">New to this payroll</p>}
                   {isFlatContractor && payPeriod.run_purpose === 'off_cycle_tips' && <p className="text-xs font-medium text-primary-700">Flat fee excluded from this tips-only run</p>}
                   {isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
                     <NumericInput className="mt-1 min-h-11 w-full" value={salaryOverrideMap[String(emp.id)] || null} onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} aria-label={`Pay this period for ${name}`} />
-                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
+                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
                   <label className="block text-xs font-medium text-neutral-600">Bonus this payroll
                     <NumericInput className="mt-1 min-h-11 w-full" aria-label={`Bonus this payroll for ${name}`} value={bonusMap[String(emp.id)] ?? 0} onValueChange={(value) => { const amount = value ?? 0; if (amount === (bonusMap[String(emp.id)] ?? 0)) return; setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount })); setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount })); }} min={0} max={99999999.99} fixedDecimalsOnBlur={2} />
                   </label>
@@ -2680,7 +2690,8 @@ export function PayPeriodDetail({
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                       const savedItem = payrollItemByEmployeeId.get(emp.id);
-                      const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
+                      const sourceHoursLocked = Boolean(savedItem?.wage_rate_hours?.some(entry => entry.source_bucket_key));
+                      const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                       const activeWageRates = (hours.wage_rates || []).map((rate, index) => ({ rate, index })).filter(({ rate }) => rate.active !== false);
@@ -2739,6 +2750,7 @@ export function PayPeriodDetail({
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
                             </div>
+                            {sourceHoursLocked && <p className="mt-2 text-xs text-neutral-600">Imported work retained. Use source review and corrections to change hours.</p>}
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
                               {emp.department?.name ? ` · ${emp.department.name}` : ''}
@@ -2794,6 +2806,7 @@ export function PayPeriodDetail({
                                     {rate.label}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked}
                                     value={toNumber(rate.regular_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2810,7 +2823,7 @@ export function PayPeriodDetail({
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked}
                             />
                           )}
                         </TableCell>
@@ -2827,6 +2840,7 @@ export function PayPeriodDetail({
                                     {rate.label}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked}
                                     value={toNumber(rate.overtime_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2843,7 +2857,7 @@ export function PayPeriodDetail({
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked}
                             />
                           )}
                         </TableCell>
@@ -3814,7 +3828,7 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
+              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={async () => { await loadPayPeriod(payPeriod.id, true); }} />
             </div>
           </Card>
         )}
