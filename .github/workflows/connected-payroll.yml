@@ -41,7 +41,9 @@ jobs:
         with:
           ruby-version: "3.3.7"
       - name: Check certification clock startup and guards
-        run: ruby scripts/local_certification/test_clock.rb
+        run: |
+          ruby scripts/local_certification/test_clock.rb
+          ruby scripts/local_certification/test_finalized_wage_mapping.rb
       - name: Check shell syntax and exact-pair gate behavior
         run: |
           bash -n ops/staging-v2/*.sh scripts/certify_aire_payroll_integration.sh scripts/local_certification/runtime.sh
