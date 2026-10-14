@@ -50,8 +50,8 @@ function mountSaved(item = savedItem) {
 it('counts retained same-rate earning entries without claiming different pay rates or changing source hours on cancel', async () => {
   const user = userEvent.setup();
   const buckets = [
-    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: 25, regular_hours: 4, overtime_hours: 0, active: true },
-    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: 25, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true },
   ];
   const original = JSON.stringify(buckets);
   const { onOpenChange } = mountSaved({ ...savedItem, hours_worked: 6, gross_pay: 150, net_pay: 138.52,
