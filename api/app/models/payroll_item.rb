@@ -60,6 +60,7 @@ class PayrollItem < ApplicationRecord
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validate :retained_correction_pay_basis_reconciles, on: :update
   # Hours / wage validations only apply to non-correction rows. A correction
   # row stores deltas (corrected_value - original_value), which can legitimately
   # be negative when the correction reduces hours/wages.
@@ -609,6 +610,7 @@ class PayrollItem < ApplicationRecord
   # Calculate and store all values
   def calculate!
     ApplicationRecord.transaction do
+      PayrollCorrectionPayBasisGuard.validate!(self)
       # Validate a clean copy of the persisted period. Calculating an item built
       # through `pay_period.payroll_items` leaves that unsaved item in the
       # association target; validating the in-memory parent would recursively
@@ -679,6 +681,18 @@ class PayrollItem < ApplicationRecord
   end
 
   private
+
+  def retained_correction_pay_basis_reconciles
+    inputs = %w[employment_type pay_rate hours_worked overtime_hours holiday_hours pto_hours scheduled_hours
+      salary_override bonus reported_tips tips_paid_out service_charge_wages non_taxable_pay custom_columns_data
+      gross_pay withholding_tax withholding_tax_adjustment withholding_tax_override additional_withholding
+      additional_withholding_override custom_earnings custom_deductions payroll_adjustments loan_deduction]
+    return if (changed_attribute_names_to_save & inputs).empty?
+
+    PayrollCorrectionPayBasisGuard.validate!(self)
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
 
   def imported_source_inputs_reconcile
     # Old committed imports may lack complete source/capture proof. Operational

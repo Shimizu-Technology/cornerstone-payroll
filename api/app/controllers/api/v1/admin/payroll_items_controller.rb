@@ -104,6 +104,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
@@ -158,6 +159,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.employment_type = @payroll_item.employee.employment_type
@@ -437,6 +439,7 @@ module Api
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
+          return if payroll_item.timekeeping_source == "correction_reference"
           return if payroll_item.wage_rate_hours.present?
 
           payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate

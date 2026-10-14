@@ -388,6 +388,7 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              PayrollCorrectionPayBasisGuard.validate!(payroll_item)
               # Draft/calculated rows must reflect the employee classification used by
               # the calculator. Otherwise a contractor-to-W-2 change can calculate
               # FICA while retaining a contractor snapshot that reporting excludes.
@@ -1596,6 +1597,7 @@ module Api
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
+          return if payroll_item.timekeeping_source == "correction_reference"
           return if payroll_item.wage_rate_hours.present?
 
           payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
