@@ -119,7 +119,7 @@ describe('TimeTrackingImportModal guided time tracking review', () => {
         onClose={vi.fn()}
         payPeriod={payPeriod}
         employees={[]}
-        onImportComplete={vi.fn()}
+        onImportComplete={vi.fn().mockResolvedValue(true)}
         initialSourceId={source.id}
         autoPreview
       />
@@ -144,7 +144,7 @@ describe('TimeTrackingImportModal guided time tracking review', () => {
         onClose={vi.fn()}
         payPeriod={payPeriod}
         employees={[]}
-        onImportComplete={vi.fn()}
+        onImportComplete={vi.fn().mockResolvedValue(true)}
       />
     );
 
@@ -187,7 +187,7 @@ async function review(overrides: Partial<TimeTrackingImportData['processed_paylo
   };
   apiMocks.preview.mockResolvedValue({ import: data });
   apiMocks.preview.mockClear();
-  const onImportComplete = vi.fn();
+  const onImportComplete = vi.fn().mockResolvedValue(true);
   render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={period} employees={reviewEmployees} onImportComplete={onImportComplete} initialSourceId={source.id} autoPreview />);
   await screen.findByText('Test Direct', { selector: 'h3' });
   return { data, onImportComplete };
@@ -310,6 +310,35 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(apiMocks.apply.mock.calls[0][1].acknowledge_negative_adjustments).toBe(true);
   });
 
+  it.each(['false', 'reject'])('retains the saved import after a %s canonical reload and retries only the reload', async failure => {
+    const { data, onImportComplete } = await review();
+    if (failure === 'false') onImportComplete.mockResolvedValueOnce(false);
+    else onImportComplete.mockRejectedValueOnce(new Error('Canonical read unavailable'));
+    apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }));
+    expect(await screen.findByText('The import was saved, but payroll could not refresh.')).toBeTruthy();
+    expect(screen.getByText('Time tracking hours added to payroll')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add time tracking Hours to Payroll' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+    await waitFor(() => expect(screen.queryByText('The import was saved, but payroll could not refresh.')).toBeNull());
+    expect(onImportComplete).toHaveBeenCalledTimes(2);
+    expect(apiMocks.apply).toHaveBeenCalledOnce();
+    expect(screen.getByText('Time tracking hours added to payroll')).toBeTruthy();
+  });
+
+  it('awaits the saved-import reload and retains its failure without reapplying', async () => {
+    const { data, onImportComplete } = await review();
+    let finish!: (value: boolean) => void;
+    onImportComplete.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
+    await userEvent.click(screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }));
+    expect(await screen.findByText('Loading the saved payroll before review…')).toBeTruthy();
+    expect(screen.queryByText(/Run payroll to calculate taxes/)).toBeNull();
+    await act(async () => finish(false));
+    expect(await screen.findByText('The import was saved, but payroll could not refresh.')).toBeTruthy();
+    expect(apiMocks.apply).toHaveBeenCalledOnce();
+  });
+
   it('continues to block missing employee and earning mappings', async () => {
     await review({ rows: [{ ...row, employee_id: null }] });
     const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' });
@@ -364,7 +393,7 @@ it('requires explicit accounting review and acknowledgment before resolving a ne
   apiMocks.preview.mockResolvedValue({ import: { id: 99, status: 'previewed', correction_lines: [line], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } } });
   apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, preview_token: 'signed-proof', source_change: line, employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, frozen_origin_pay_period_id: 8, frozen_origin_payroll_item_id: 9, financial_successor_link_ids: [3], original_check_number: '30000', pay_date: '2026-11-15', original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 }, deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
   apiMocks.correctionConfirm.mockResolvedValue({ disposition_id: 1, import: { id: 99, status: 'previewed', correction_lines: [line], correction_dispositions: [{ ...line, id: 1, corrective_pay_period_id: 100, corrective_payroll_item_id: 101, original_pay_period_id: 10, original_payroll_item_id: 11, frozen_origin_pay_period_id: 8, frozen_origin_payroll_item_id: 9, accounting_only: true }], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
-  render(<TimeTrackingImportModal open onClose={() => {}} payPeriod={payPeriod} employees={[]} onImportComplete={() => {}} autoPreview />);
+  render(<TimeTrackingImportModal open onClose={() => {}} payPeriod={payPeriod} employees={[]} onImportComplete={async () => true} autoPreview />);
   await user.click(await screen.findByRole('button', { name: 'Review correction' }));
   expect(await screen.findByText(/paid check 30000/)).toBeTruthy();
   expect(screen.getByText(/The hours were originally recorded in payroll #8, item #9/)).toBeTruthy();
@@ -421,7 +450,7 @@ describe('correction request scopes', () => {
     apiMocks.preview.mockResolvedValue({ import: importFor(99) });
     apiMocks.correctionPreview.mockResolvedValue({ correction: detail('Original person') });
     apiMocks.correctionConfirm.mockReturnValueOnce(pending.promise);
-    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn().mockResolvedValue(true)} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
     await user.click(await screen.findByRole('button', { name: 'Review correction' }));
     await acknowledge(user);
     await user.click(screen.getByRole('button', { name: 'Confirm accounting correction' }));
@@ -440,7 +469,7 @@ describe('correction request scopes', () => {
     const pending = deferred<{ correction: ReturnType<typeof detail> }>();
     apiMocks.preview.mockResolvedValue({ import: importFor(99) });
     apiMocks.correctionPreview.mockReturnValueOnce(pending.promise);
-    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} autoPreview />);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn().mockResolvedValue(true)} autoPreview />);
     await user.click(await screen.findByRole('button', { name: 'Review correction' }));
     await attemptBackAndRefetch(user);
     await act(async () => pending.resolve({ correction: detail('Original person') }));
@@ -456,7 +485,7 @@ describe('correction request scopes', () => {
     const onCorrectionRecorded = vi.fn();
     apiMocks.preview.mockResolvedValue({ import: importFor(99) });
     apiMocks.correctionPreview.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
-    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), onCorrectionRecorded, autoPreview: true };
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn().mockResolvedValue(true), onCorrectionRecorded, autoPreview: true };
     const view = render(<TimeTrackingImportModal {...props} />);
     await user.click(await screen.findByRole('button', { name: 'Review correction' }));
     let nextProps = props;
@@ -488,7 +517,7 @@ describe('correction request scopes', () => {
     const old = deferred<ReturnType<typeof committed>>();
     const current = deferred<ReturnType<typeof committed>>();
     const onCorrectionRecorded = vi.fn();
-    const onImportComplete = vi.fn();
+    const onImportComplete = vi.fn().mockResolvedValue(true);
     apiMocks.preview.mockResolvedValue({ import: importFor(99) });
     apiMocks.correctionPreview.mockResolvedValue({ correction: detail('Old person A') });
     apiMocks.correctionConfirm.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
@@ -531,7 +560,7 @@ describe('correction request scopes', () => {
     const old = deferred<{ correction: ReturnType<typeof detail> }>();
     apiMocks.preview.mockResolvedValue({ import: importFor(99) });
     apiMocks.correctionPreview.mockReturnValue(old.promise);
-    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), autoPreview: true };
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn().mockResolvedValue(true), autoPreview: true };
     const view = render(<TimeTrackingImportModal {...props} />);
     await user.click(await screen.findByRole('button', { name: 'Review correction' }));
     view.rerender(<TimeTrackingImportModal {...props} open={false} />);
@@ -563,7 +592,7 @@ describe('accounting posting and source delivery are separate', () => {
       employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-10-31',
       original: { gross_pay: 100, net_pay: 92.35 }, corrected: { gross_pay: 75, net_pay: 69.26 },
       deltas: { gross_pay: -25, net_pay: -23.09, social_security_tax: -1.55, medicare_tax: -0.36, withholding_tax: 0 }, accounting_only: true } });
-    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} autoPreview />);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn().mockResolvedValue(true)} autoPreview />);
     await user.click(await screen.findByRole('button', { name: 'Review correction' }));
     await user.type(screen.getByRole('textbox', { name: 'Reason' }), 'Old unconfirmed review');
     await user.click(screen.getByRole('checkbox', { name: /I reviewed the signed adjustment/ }));
@@ -578,7 +607,7 @@ describe('accounting posting and source delivery are separate', () => {
   it('shows proof drift as needs review rather than resolving an old confirmed receipt', async () => {
     apiMocks.preview.mockResolvedValue({ import: { ...importData('confirmed'), correction_dispositions: [{ ...disposition('confirmed'),
       verification_status: 'needs_review', verification_error: 'Source installation changed', source_receipt: { ...receipt('confirmed'), can_retry: false } }] } });
-    render(<TimeTrackingImportModal open payPeriod={payPeriod} employees={[]} onClose={vi.fn()} onImportComplete={vi.fn()} autoPreview />);
+    render(<TimeTrackingImportModal open payPeriod={payPeriod} employees={[]} onClose={vi.fn()} onImportComplete={vi.fn().mockResolvedValue(true)} autoPreview />);
     await screen.findByText('Source installation changed');
     expect(screen.queryByText(/Source confirmation verified/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Retry source confirmation' })).toBeNull();
@@ -588,7 +617,7 @@ describe('accounting posting and source delivery are separate', () => {
   it('shows an already posted accounting correction pending/error/verified, and retries only its receipt', async () => {
     const user = userEvent.setup();
     const onCorrectionRecorded = vi.fn();
-    const onImportComplete = vi.fn();
+    const onImportComplete = vi.fn().mockResolvedValue(true);
     apiMocks.preview.mockResolvedValue({ import: { ...importData('pending'), correction_dispositions: [], processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 1 } } });
     apiMocks.correctionPreview.mockResolvedValue({ correction: { ...line, source_change: line, preview_token: 'verified-original-proof',
       employee_name: 'Pilot One', original_pay_period_id: 10, original_payroll_item_id: 11, original_check_number: '30000', pay_date: '2026-10-31',
@@ -629,7 +658,7 @@ describe('accounting posting and source delivery are separate', () => {
     const onCorrectionRecorded = vi.fn();
     apiMocks.preview.mockResolvedValue({ import: importData('pending') });
     apiMocks.correctionDelivery.mockReturnValueOnce(pending);
-    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn().mockResolvedValue(true)} onCorrectionRecorded={onCorrectionRecorded} autoPreview />);
     await user.click(await screen.findByRole('button', { name: 'Refresh source confirmation' }));
     await user.click(screen.getByRole('button', { name: 'Back' }));
     const fetch = screen.queryByRole('button', { name: /Retrieve Finalized Batch|Fetch Hours/ });
@@ -645,7 +674,7 @@ describe('accounting posting and source delivery are separate', () => {
     const user = userEvent.setup();
     const second = { ...employee, id: 8, first_name: 'Other' };
     apiMocks.preview.mockResolvedValue({ import: { ...importData('error'), processed_payload: { rows: [{ ...row, categories: [] }], ready: true, validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
-    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[employee, second]} onImportComplete={vi.fn()} autoPreview />);
+    render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[employee, second]} onImportComplete={vi.fn().mockResolvedValue(true)} autoPreview />);
     const selection = await screen.findByRole('combobox', { name: /^Payroll employee/ });
     await user.selectOptions(selection, '8');
     apiMocks.correctionDelivery.mockResolvedValue({ disposition: disposition('confirmed') });
@@ -666,7 +695,7 @@ describe('accounting posting and source delivery are separate', () => {
     apiMocks.preview.mockResolvedValue({ import: importData('pending') });
     apiMocks.correctionDelivery.mockReturnValue(pending);
     const onCorrectionRecorded = vi.fn();
-    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn(), onCorrectionRecorded, autoPreview: true };
+    const props = { open: true, onClose: vi.fn(), payPeriod, employees: [], onImportComplete: vi.fn().mockResolvedValue(true), onCorrectionRecorded, autoPreview: true };
     const view = render(<TimeTrackingImportModal {...props} />);
     await user.click(await screen.findByRole('button', { name: 'Refresh source confirmation' }));
     apiMocks.preview.mockResolvedValue({ import: importData('pending', 199, 2) });
@@ -689,7 +718,7 @@ it.each(['different active company', 'invalid period id', 'invalid item id'] as 
     correction_dispositions: [{ id: 1, corrective_pay_period_id: scenario === 'invalid period id' ? -1 : 100,
       corrective_payroll_item_id: scenario === 'invalid item id' ? 0 : 101, total_hours: -1 }],
     processed_payload: { rows: [], validation_version: 'payroll_batch_v2', negative_adjustment_count: 0 } } });
-  render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn()} initialSourceId={source.id} autoPreview />);
+  render(<TimeTrackingImportModal open onClose={vi.fn()} payPeriod={payPeriod} employees={[]} onImportComplete={vi.fn().mockResolvedValue(true)} initialSourceId={source.id} autoPreview />);
   await screen.findByRole('region', { name: 'Accounting correction delivery' });
   expect(screen.queryByRole('link', { name: 'View correction' })).toBeNull();
 });

@@ -382,6 +382,8 @@ export function PayPeriodDetail({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [savedImportReloadRequired, setSavedImportReloadRequired] = useState(false);
+  const savedImportReloadRequiredRef = useRef(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
   const commitRouteGenerationRef = useRef(0);
@@ -509,6 +511,7 @@ export function PayPeriodDetail({
 
   const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
+    const retainInputs = preserveInputs && !savedImportReloadRequiredRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
     try {
@@ -543,9 +546,9 @@ export function PayPeriodDetail({
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
-      if (!preserveInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
+      if (!retainInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
-      if (!preserveInputs) {
+      if (!retainInputs) {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
         // Canonical reloads after import, commit, or saved check changes must
@@ -553,6 +556,8 @@ export function PayPeriodDetail({
         if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
       loadedPeriodIdRef.current = periodId;
+      savedImportReloadRequiredRef.current = false;
+      setSavedImportReloadRequired(false);
       return 'loaded';
     } catch (err) {
       if (!isCurrentRequest()) return 'superseded';
@@ -580,6 +585,8 @@ export function PayPeriodDetail({
     setCalculationFailures([]);
     setCalculationNotice(null);
     setWorksheetRefreshWarning(null);
+    savedImportReloadRequiredRef.current = false;
+    setSavedImportReloadRequired(false);
     setTimeTrackingImportOpen(false);
     setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
@@ -796,7 +803,7 @@ export function PayPeriodDetail({
   };
 
   const handleRunPayroll = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
     try {
       setProcessing(true);
       setError(null);
@@ -991,7 +998,7 @@ export function PayPeriodDetail({
   };
 
   const handleRefreshSetup = async () => {
-    if (!payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
     const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
@@ -1046,7 +1053,7 @@ export function PayPeriodDetail({
   };
 
   const handleApprove = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
     const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
     if (heldItem) { setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason); return; }
     try {
@@ -1126,7 +1133,7 @@ export function PayPeriodDetail({
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
   const handleCommit = async (confirmedPeriodId: number) => {
-    if (!payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
@@ -1203,6 +1210,22 @@ export function PayPeriodDetail({
     } finally {
       setPayDateCorrectionSubmitting(false);
     }
+  };
+
+  const reloadSavedSourceImport = async (): Promise<boolean> => {
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    if (!isCurrentRoute() || !payPeriod || payPeriod.id !== payRunId) return false;
+    savedImportReloadRequiredRef.current = true;
+    setSavedImportReloadRequired(true);
+    setCalculationNotice(null);
+    const result = await loadPayPeriod(scope.payRunId, true);
+    if (!isCurrentRoute()) return false;
+    if (result === 'failed') {
+      setError('Source hours were saved, but the current payroll could not load. Reload saved payroll before calculating, approving or committing; do not import the hours again.');
+    }
+    return result === 'loaded' || (result === 'superseded' && !savedImportReloadRequiredRef.current);
   };
 
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
@@ -1287,7 +1310,7 @@ export function PayPeriodDetail({
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const canEditPayPeriod = !isCommitted && !isVoided;
+  const canEditPayPeriod = !isCommitted && !isVoided && !savedImportReloadRequired;
   const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
   const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
@@ -1303,6 +1326,7 @@ export function PayPeriodDetail({
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
   const hasCorrectionPayBasisHold = reportablePayrollItems.some(item => worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
   const correctionCalculationHeld = !isCommitted && hasCorrectionPayBasisHold;
+  const financialActionsHeld = correctionCalculationHeld || savedImportReloadRequired;
   const hasLinkedAireRecord = linkedAireRecords.length > 0;
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
@@ -1725,7 +1749,7 @@ export function PayPeriodDetail({
         <div>
           <Button
             variant="outline"
-            disabled={processing || hasStagedWorksheetChanges}
+            disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges}
             title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}
             onClick={() => {
               setRefreshRecurring(payPeriod.includes_recurring_items);
@@ -1740,20 +1764,20 @@ export function PayPeriodDetail({
       )}
       {isDraft && (
         <>
-          <Button onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
+          <Button onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
       )}
       {isCalculated && (
         <>
-          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
+          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             Recalculate
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || correctionCalculationHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval'
+            disabled={processing || financialActionsHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={savedImportReloadRequired ? 'Reload the saved source import before approval' : correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval'
               : calculationFailures.length > 0
               ? 'Resolve the employee calculation errors and calculate again before approval'
               : payrollItems.length === 0
@@ -1775,7 +1799,7 @@ export function PayPeriodDetail({
           </Button>
           {payPeriod.parallel_run
             ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
-            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing || correctionCalculationHeld}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
+            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing || financialActionsHeld}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>
@@ -1916,6 +1940,10 @@ export function PayPeriodDetail({
         }}>Review affected employees</Button>}
       </ActionFeedback>}
       {calculationNotice && <ActionFeedback tone="success" message={calculationNotice} />}
+      {savedImportReloadRequired && <ActionFeedback tone="warning" message="Saved source hours need a current payroll reload before processing.">
+        <p>Saved source hours need a current payroll reload before processing. The last saved payroll remains visible for context.</p>
+        <Button className="mt-3 min-h-11" variant="outline" disabled={processing || timeTrackingImportOpen} onClick={() => void reloadSavedSourceImport()}>Reload saved payroll</Button>
+      </ActionFeedback>}
       {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
       {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
         ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
@@ -2468,7 +2496,7 @@ export function PayPeriodDetail({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing || correctionCalculationHeld}>
+                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
                     Recalculate with {additionalEmployeeIds.size} added
                   </Button>
                 )}
@@ -3965,7 +3993,7 @@ export function PayPeriodDetail({
         }}
         payPeriod={payPeriod}
         employees={employees}
-        onImportComplete={async () => (await loadPayPeriod(payPeriod.id, true)) === 'loaded'}
+        onImportComplete={reloadSavedSourceImport}
         onCorrectionRecorded={() => {
           invalidateAireSource();
           void loadPayPeriod(payPeriod.id, true, true);

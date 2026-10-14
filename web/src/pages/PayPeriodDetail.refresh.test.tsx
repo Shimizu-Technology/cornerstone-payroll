@@ -54,7 +54,7 @@ vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecks
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', () => ({ PayrollFinalRecordPanel: () => null }));
 vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
-  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => void; onCorrectionRecorded?: () => void }) => {
+  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => Promise<boolean>; onCorrectionRecorded?: () => void }) => {
     componentMocks.timeTrackingImport(props);
     return props.open ? (
       <div
@@ -1406,4 +1406,41 @@ it('rejects the saved-payment callback when the current canonical reload fails',
   const callback = componentMocks.paymentMethodSaved.mock.calls.at(-1)![0] as () => Promise<void>;
   await act(async () => { await expect(callback()).rejects.toThrow('Saved payment method could not refresh.'); });
   expect(await screen.findByText('Saved method read failed')).toBeTruthy();
+});
+
+it('retains saved-import context, blocks stale approval/commit and retries canonical payroll without reapplying', async () => {
+  const original = await renderRefreshNavigation();
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  apiMocks.get.mockRejectedValueOnce(new Error('Saved source payroll read unavailable'));
+  await act(async () => { expect(await callback()).toBe(false); });
+  expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Canonical saved source hours' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await screen.findByText('Canonical saved source hours');
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+  expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('accepts a newer successful canonical read when the saved-import reload is superseded', async () => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  let pending!: Promise<boolean>;
+  act(() => { pending = callback(); });
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Fresh canonical imported payroll' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Fresh canonical imported payroll');
+  await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(true); });
+  expect(screen.getByText('Fresh canonical imported payroll')).toBeTruthy();
+  expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
 });
