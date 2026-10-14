@@ -76,7 +76,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(capabilities).not_to include("manage_client_configuration", "manage_organization")
     end
 
-    it "ignores an active company header outside the current user's organization" do
+    it "retains identity without substituting an active client for an inaccessible header" do
       organization = create(:organization)
       company = create(:company, organization: organization)
       foreign_company = create(:company)
@@ -96,7 +96,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(response.parsed_body.fetch("user")).to include(
         "organization_id" => organization.id,
         "organization_name" => organization.name,
-        "company_id" => company.id,
+        "company_id" => nil,
         "home_company_id" => company.id
       )
     end
