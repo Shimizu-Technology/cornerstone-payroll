@@ -26,6 +26,18 @@ module DatabaseIntegrity
     missing = expected - actual
     raise "Payroll database integrity guards missing: #{missing.map(&:first).join(', ')}" if missing.any?
     sql = File.read(PATH)
+    namespace = connection.select_value("SELECT current_schema()")
+    expected_triggers = sql.scan(/CREATE TRIGGER\s+(\w+)(.*?);/m).to_h do |name, definition|
+      [ name, normalize_trigger("CREATE TRIGGER #{name}#{definition}", namespace) ]
+    end
+    installed_triggers = connection.select_rows(<<~SQL).to_h
+      SELECT t.tgname, pg_get_triggerdef(t.oid) FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND NOT t.tgisinternal
+    SQL
+    changed = expected_triggers.reject { |name, definition| normalize_trigger(installed_triggers.fetch(name), namespace) == definition }.keys
+    raise "Payroll database integrity trigger definitions differ: #{changed.join(', ')}" if changed.any?
     declarations = sql.scan(/CREATE OR REPLACE FUNCTION\s+(\w+)/).flatten
     definitions = sql.scan(/CREATE OR REPLACE FUNCTION\s+(\w+)\([^)]*\)(.*?)(\$[a-zA-Z0-9_]*\$)(.*?)\3(.*?);/m)
     unless definitions.map(&:first) == declarations
@@ -45,6 +57,15 @@ module DatabaseIntegrity
     altered = expected_functions.reject { |name, definition| functions[name] == definition }.keys
     raise "Payroll database integrity functions differ: #{altered.join(', ')}" if altered.any?
     true
+  end
+
+  def self.normalize_trigger(definition, namespace)
+    # PostgreSQL qualifies table names and canonicalizes event order. Preserve
+    # every other clause, including UPDATE columns, row/statement scope,
+    # predicate and invoked function, so a rewired named guard cannot pass.
+    definition.gsub(/(?:#{Regexp.escape(namespace)}|#{Regexp.escape(%("#{namespace}"))})\./, "")
+      .gsub(/\s+/, " ").strip.sub(/;\z/, "")
+      .sub(/\b(BEFORE|AFTER|INSTEAD OF) (.*?) ON /) { "#{$1} #{$2.split(' OR ').sort.join(' OR ')} ON " }
   end
 
   module SchemaDefinition
