@@ -104,9 +104,9 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
-          PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           attrs = payroll_item_params
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
@@ -349,6 +349,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             total_hours: item.total_hours,
             bonus: item.bonus,

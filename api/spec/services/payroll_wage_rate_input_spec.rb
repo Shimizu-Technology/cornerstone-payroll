@@ -76,18 +76,22 @@ RSpec.describe PayrollWageRateInput do
   end
 
   it "preserves ordinary legacy input" do
-    item.update!(timekeeping_source: "manual")
-    expect(normalize(submitted.merge("label" => "New", "rate" => 99))).to eq(submitted.merge("label" => "New", "rate" => 99))
+    ordinary = create(:payroll_item, company: company, employee: employee,
+      pay_period: create(:pay_period, company: company), timekeeping_source: "manual")
+    input = submitted.merge("label" => "New", "rate" => 99)
+    expect(described_class.normalize(payroll_item: ordinary, entries: [ input ]).sole).to eq(input)
   end
 
   it "preserves supplemental correction references without a full correction-run source" do
     supplemental = create(:pay_period, company: company, cycle: "supplemental", corrects_pay_period: original)
-    item.update!(pay_period: supplemental, correction_for_payroll_item: source_item)
-    expect(normalize).to eq(submitted)
+    reference = create(:payroll_item, company: company, employee: employee, pay_period: supplemental,
+      correction_for_payroll_item: source_item, timekeeping_source: "correction_reference")
+    expect(described_class.normalize(payroll_item: reference, entries: [ submitted ]).sole).to eq(submitted)
   end
 
   it "preserves historical simulation references without a declared correction source" do
-    item.update!(pay_period: create(:pay_period, company: company))
-    expect(normalize).to eq(submitted)
+    simulation = create(:payroll_item, company: company, employee: employee,
+      pay_period: create(:pay_period, company: company), timekeeping_source: "correction_reference")
+    expect(described_class.normalize(payroll_item: simulation, entries: [ submitted ]).sole).to eq(submitted)
   end
 end

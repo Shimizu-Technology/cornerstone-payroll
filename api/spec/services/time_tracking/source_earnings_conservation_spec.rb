@@ -15,16 +15,18 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     ])
   end
 
-  def apply!(same_rate: false, mapping_change: nil)
+  def apply!(same_rate: false, mapping_change: nil, source_kinds: %w[carryover current], signed_acknowledgement: false)
     category = next_import.raw_payload["employees"].first["adjustments"].first
-    mappings = %w[carryover current].map do |kind|
+    mappings = source_kinds.map do |kind|
       { source_category_id: category["source_category_id"], source_category_key: category.dig("category", "key"),
         source_category_name: category.dig("category", "name"), source_kind: kind,
         employee_wage_rate_id: kind == "carryover" && !same_rate ? carry_rate.id : rate.id }
     end
     mappings.first.merge!(mapping_change) if mapping_change
     result = TimeTracking::ApplyImportService.new(import: next_import,
-      mappings: [ { source_user_id: "42", employee_id: employee.id, wage_rate_mappings: mappings } ], applied_by: actor).call
+      mappings: [ { source_user_id: "42", employee_id: employee.id, wage_rate_mappings: mappings } ], applied_by: actor,
+      acknowledge_negative_adjustments: signed_acknowledgement,
+      negative_adjustment_note: signed_acknowledgement ? "Reviewed the signed source hours correction." : nil).call
     expect(result[:errors]).to eq([])
     next_period.payroll_items.find_by!(employee: employee)
   end
@@ -162,6 +164,84 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       expect(item.loan_transactions).to be_empty
       expect(item.named_loan_payments).to be_empty
       expect(next_period.reload.status).to eq("draft")
+    end
+  end
+
+  context "distinct signed source buckets" do
+    let(:signed_correction_hours) { -1 }
+    let(:next_import) do
+      make_import(next_period, 5, "current", "NEXT", daily_lines: [
+        { source_time_entry_id: "104", line_key: "current-line", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 6, regular_hours: 6, overtime_hours: 0 },
+        { source_time_entry_id: "501", line_key: "signed-correction", source_kind: "correction", source_time_entry_version: 1,
+          original_work_date: "2026-10-10", original_week_start: "2026-10-04", total_hours: signed_correction_hours,
+          regular_hours: signed_correction_hours, overtime_hours: 0 }
+      ])
+    end
+
+    def signed_item
+      apply!(same_rate: true, source_kinds: %w[current correction], signed_acknowledgement: true)
+    end
+
+    it "conserves current plus signed correction through calculation, approval and commitment" do
+      item = signed_item
+      item.calculate!
+      expect(item.reload.hours_worked).to eq(5)
+      expect(item.gross_pay).to eq(125)
+      expect(item.wage_rate_hours.map { |entry| entry["source_bucket_key"] }.uniq.size).to eq(2)
+      expect(item.payroll_item_earnings.map { |earning| [ earning.category, earning.amount ] }).to contain_exactly(
+        [ "regular", 150.to_d ], [ "other", -25.to_d ]
+      )
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(next_period.reload.status).to eq("committed")
+      expect(item.reload.gross_pay).to eq(125)
+      expect(item.time_tracking_entry_allocations.sum(:regular_hours)).to eq(5)
+      original = item.reload.attributes
+      allocations = item.time_tracking_entry_allocations.order(:id).map(&:attributes)
+      other = create(:employee, company: company)
+      expect(item.update(employee_id: other.id)).to eq(false)
+      expect(item.reload.attributes).to eq(original)
+      expect(item.time_tracking_entry_allocations.reload.order(:id).map(&:attributes)).to eq(allocations)
+    end
+
+    context "a reversal that rounds to zero cents" do
+      let(:signed_correction_hours) { -0.01 }
+
+      it "conserves the native zero-cent reversal without treating negative zero as changed money" do
+        carry_rate.update!(rate: 0.01)
+        item = apply!(source_kinds: %w[correction current], mapping_change: { employee_wage_rate_id: carry_rate.id },
+          signed_acknowledgement: true)
+        item.calculate!
+        expect(item.reload.hours_worked).to eq(5.99)
+        expect(item.gross_pay).to eq(150)
+        expect(item.payroll_item_earnings.find_by!(category: "other").amount).to eq(0)
+        expect(described_class.validate!(item, calculated: true)).to eq(true)
+      end
+    end
+
+    %w[regular other].each do |category|
+      it "rolls back a changed #{category} signed earning during calculation and rejects it before approval" do
+        item = signed_item
+        item.calculate!
+        original = item.reload.attributes
+        earnings = item.payroll_item_earnings.reload.order(:id).map(&:attributes)
+        allow_any_instance_of(HourlyPayrollCalculator).to receive(:calculate).and_wrap_original do |method|
+          method.call
+          item.payroll_item_earnings.detect { |earning| earning.category == category }.amount += 1
+        end
+        expect { item.calculate! }.to raise_error(ArgumentError, /Imported source hours/)
+        expect(item.reload.attributes).to eq(original)
+        expect(item.payroll_item_earnings.reload.order(:id).map(&:attributes)).to eq(earnings)
+        item.payroll_item_earnings.find_by!(category: category).update!(amount: category == "regular" ? 151 : -24)
+        next_period.update!(status: "calculated")
+        expect { PayPeriodLifecycleService.new(pay_period: next_period, actor: actor).approve! }
+          .to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Imported source hours/)
+        expect(next_period.reload.status).to eq("calculated")
+        expect(item.reload.check_number).to be_nil
+      end
     end
   end
 end

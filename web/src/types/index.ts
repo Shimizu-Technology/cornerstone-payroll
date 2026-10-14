@@ -1483,6 +1483,7 @@ export interface PayrollItem {
   pto_hours?: number;
   total_hours?: number;
   timekeeping_source?: 'schedule' | 'import' | 'manual' | 'correction_reference' | 'production_backfill' | null;
+  correction_pay_basis_hold?: { reason: string } | null;
   timekeeping_context_snapshot?: Record<string, unknown>;
   // Additional earnings
   reported_tips?: number;

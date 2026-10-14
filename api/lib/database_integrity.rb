@@ -21,7 +21,7 @@ module DatabaseIntegrity
       SELECT t.tgname, c.relname FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgenabled <> 'D'
+      WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
     SQL
     missing = expected - actual
     raise "Payroll database integrity guards missing: #{missing.map(&:first).join(', ')}" if missing.any?
