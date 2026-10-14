@@ -17,7 +17,7 @@ interface Props {
   onClose: () => void;
   payPeriod: PayPeriod;
   employees: Employee[];
-  onImportComplete: () => void;
+  onImportComplete: () => Promise<boolean>;
   onCorrectionRecorded?: () => void;
   initialSourceId?: number;
   autoPreview?: boolean;
@@ -133,6 +133,7 @@ export function TimeTrackingImportModal({
   const [appliedCount, setAppliedCount] = useState(0);
   const [roundingExceptionCount, setRoundingExceptionCount] = useState(0);
   const [appliedThisSession, setAppliedThisSession] = useState(false);
+  const [savedImportRefreshFailed, setSavedImportRefreshFailed] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -151,6 +152,7 @@ export function TimeTrackingImportModal({
     setCorrection(null);
     setPreview(null);
     setStep('select');
+    setSavedImportRefreshFailed(false);
     setCorrectionReason('');
     setCorrectionAcknowledged(false);
     setCorrectionBusy(false);
@@ -250,6 +252,7 @@ export function TimeTrackingImportModal({
     setAppliedCount(0);
     setRoundingExceptionCount(0);
     setAppliedThisSession(false);
+    setSavedImportRefreshFailed(false);
     autoPreviewAttemptedRef.current = false;
     setSources([]);
     setSourceId('');
@@ -504,6 +507,18 @@ export function TimeTrackingImportModal({
     } finally { if (isCurrentRequest()) setCorrectionBusy(false); }
   };
 
+  const reloadSavedImport = async (isCurrentRequest = beginScopedRequest()) => {
+    setLoading(true);
+    try {
+      const loaded = await onImportComplete();
+      if (isCurrentRequest()) setSavedImportRefreshFailed(!loaded);
+    } catch {
+      if (isCurrentRequest()) setSavedImportRefreshFailed(true);
+    } finally {
+      if (isCurrentRequest()) setLoading(false);
+    }
+  };
+
   const handleApply = async () => {
     if (loading || correctionBusy || !preview) return;
     const isCurrentRequest = beginScopedRequest();
@@ -556,7 +571,7 @@ export function TimeTrackingImportModal({
       setAppliedThisSession(true);
       setPreview(res.import);
       setStep('done');
-      onImportComplete();
+      await reloadSavedImport(isCurrentRequest);
     } catch (err) {
       if (!isCurrentRequest()) return;
       const message = err instanceof Error ? err.message : 'Failed to apply time tracking import';
@@ -1100,7 +1115,7 @@ export function TimeTrackingImportModal({
                 {!appliedThisSession && alreadyApplied ? 'These time tracking hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Time tracking hours added to payroll' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
-                {!appliedThisSession && alreadyApplied
+                {loading ? 'Loading the saved payroll before review…' : savedImportRefreshFailed ? 'The source import is saved. Payroll review is waiting for a current screen reload.' : !appliedThisSession && alreadyApplied
                   ? `Cornerstone recorded this batch on ${formatTimestamp(preview?.applied_at)}. Its hours were not imported again.`
                   : isHistoricalReconciliation
                   ? `${appliedCount} employee record${appliedCount === 1 ? '' : 's'} reconciled. No payroll amounts were changed.${roundingExceptionCount > 0 ? ` ${roundingExceptionCount} documented legacy rounding exception${roundingExceptionCount === 1 ? ' was' : 's were'} recorded.` : ''}`
@@ -1110,6 +1125,13 @@ export function TimeTrackingImportModal({
                     : 'No employee rows were applied. This can be valid when every ordinary import row was skipped.'
                   : `${appliedCount} employee row${appliedCount === 1 ? '' : 's'} applied. Run payroll to calculate taxes and deductions.`}
               </p>
+              {savedImportRefreshFailed && (
+                <div role="alert" className="mx-auto mt-5 max-w-xl rounded-xl border border-warning-300 bg-warning-50 p-4 text-left text-sm text-warning-950">
+                  <p className="font-semibold">The import was saved, but payroll could not refresh.</p>
+                  <p className="mt-1">Reload the saved payroll before calculating, approving or committing. These source hours are already recorded; do not import them again.</p>
+                  <Button className="mt-3 min-h-11" variant="outline" disabled={loading} onClick={() => void reloadSavedImport()}>{loading ? 'Reloading…' : 'Reload saved payroll'}</Button>
+                </div>
+              )}
               {isFinalizedBatch && (
                 <div className="mx-auto mt-5 max-w-xl rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-left text-sm leading-6 text-primary-900">
                   <div className="font-semibold">What happens next</div>
