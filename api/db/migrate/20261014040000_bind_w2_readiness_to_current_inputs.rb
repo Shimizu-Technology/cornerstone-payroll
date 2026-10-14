@@ -9,7 +9,7 @@ class BindW2ReadinessToCurrentInputs < ActiveRecord::Migration[8.1]
     execute <<~SQL
       UPDATE w2_filing_readinesses
       SET attestation_history = jsonb_build_array(jsonb_build_object(
-        'marked_ready_at', marked_ready_at, 'marked_ready_by_id', marked_ready_by_id,
+        'marked_ready_at', marked_ready_at AT TIME ZONE 'UTC', 'marked_ready_by_id', marked_ready_by_id,
         'notes', notes, 'source_fingerprint', NULL, 'legacy', true))
       WHERE marked_ready_at IS NOT NULL
     SQL
