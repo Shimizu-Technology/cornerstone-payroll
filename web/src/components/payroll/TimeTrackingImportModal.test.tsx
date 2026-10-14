@@ -288,21 +288,26 @@ describe('TimeTrackingImportModal payroll-first review', () => {
       total_hours: 0, regular_hours: 2, overtime_hours: -2, source_kinds: ['correction' as const], employee_wage_rate_id: null };
     const empty = { ...row.categories![0], source_category_id: 'unused', key: 'unused', name: 'Unused',
       total_hours: 0, regular_hours: 0, overtime_hours: 0, employee_wage_rate_id: null };
-    const { data } = await review({ rows: [{ ...row, categories: [...row.categories!, reclassification, empty] }] });
+    const current = { ...row.categories![0], total_hours: 3, regular_hours: 0, overtime_hours: 3, source_kinds: ['current' as const] };
+    const { data } = await review({ negative_adjustment_count: 1, rows: [{ ...row, regular_hours: 2, overtime_hours: 1, total_hours: 3,
+      estimated_gross_delta: 87.5, categories: [current, reclassification, empty] }] });
     expect(screen.queryByText('Unused')).toBeNull();
     const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }) as HTMLButtonElement;
     expect(apply.disabled).toBe(true);
     const selects = screen.getAllByRole('combobox', { name: 'Payroll earning type' });
     expect(selects).toHaveLength(2);
     await userEvent.selectOptions(selects[1], '22');
-    // The backend remains responsible for signed adjustment acknowledgement and math.
+    expect(apply.disabled).toBe(true);
+    await userEvent.click(screen.getByRole('checkbox', { name: /I reviewed the negative corrections/ }));
+    await userEvent.type(screen.getByLabelText('Review note'), 'Verified the REG and OT reclassification against retained work.');
     expect(apply.disabled).toBe(false);
     apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
     await userEvent.click(apply);
     expect(apiMocks.apply.mock.calls[0][1].mappings[0].wage_rate_mappings).toEqual([
-      { source_category_id: 'regular', source_category_key: 'regular', source_category_name: 'Regular', source_kind: null, employee_wage_rate_id: 22 },
+      { source_category_id: 'regular', source_category_key: 'regular', source_category_name: 'Regular', source_kind: 'current', employee_wage_rate_id: 22 },
       { source_category_id: 'reclass', source_category_key: 'reclass', source_category_name: 'Reclassification', source_kind: 'correction', employee_wage_rate_id: 22 },
     ]);
+    expect(apiMocks.apply.mock.calls[0][1].acknowledge_negative_adjustments).toBe(true);
   });
 
   it('continues to block missing employee and earning mappings', async () => {
