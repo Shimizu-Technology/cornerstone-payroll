@@ -84,10 +84,37 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
       source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0",
       source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ])
     allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [], "payment_attestations" => [])
-    expect(client).to receive(:payroll_payment_attestations).with(source_user_uuid: uuid, page: 1,
+    expect(client).to receive(:payroll_payment_attestations).with(page: 1,
       start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
       .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 1 })
     expect(service.review[:payment_attestations].first["id"]).to eq(hold["id"])
+  end
+
+  it "reads a verified period once for many mapped workers and retains a held-only worker" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, identity_verified_at: Time.current,
+      source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0",
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ])
+    12.times do |index|
+      TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+        employee: create(:employee, company: company), source_user_id: "extra-#{index}", source_user_uuid: SecureRandom.uuid)
+    end
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [], "exclusions" => [], "payment_attestations" => [])
+    expect(client).to receive(:payroll_payment_attestations).once.with(page: 1,
+      start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
+      .and_return("payment_attestations" => [ hold, hold.merge("source_user_uuid" => SecureRandom.uuid) ], "pagination" => { "total_pages" => 1 })
+    expect(service.review[:payment_attestations]).to eq([ hold.merge("employee_name" => employee.full_name) ])
+  end
+
+  it "loads later pages once each across workers and excludes out-of-period records" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, identity_verified_at: Time.current,
+      source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0",
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ])
+    allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [])
+    expect(client).to receive(:payroll_payment_attestations).with(page: 1, start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
+      .and_return("payment_attestations" => [ hold.merge("work_date" => (period.start_date - 1).iso8601) ], "pagination" => { "total_pages" => 2 })
+    expect(client).to receive(:payroll_payment_attestations).with(page: 2, start_date: period.start_date.iso8601, end_date: period.end_date.iso8601)
+      .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 2 })
+    expect(service.review[:payment_attestations].map { |row| row["id"] }).to eq([ "501" ])
   end
 
   it "ignores mismatched employee holds without hiding that employee's available hours" do
