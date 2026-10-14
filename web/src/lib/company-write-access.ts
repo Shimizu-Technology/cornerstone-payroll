@@ -9,9 +9,9 @@ export function isTestWorkspaceCompany(company: CompanyListItem | null | undefin
 // authoritative server guards still govern every write.
 export function canWriteCompany(company: CompanyListItem | null | undefined, capability = 'payroll_operations'): boolean {
   if (company?.workspace_can_write === false) return false;
+  if (company?.test_workspace_read_only || company?.test_workspace_expired || company?.test_workspace_archived_at || company?.test_workspace_sealed_at || company?.test_workspace_purpose === 'backup_snapshot') return false;
   const workspace = company?.test_workspace ?? company?.payroll_environment === 'migration_rehearsal';
   if (!workspace) return company?.workspace_write_permissions?.[capability] !== false;
-  if (company?.test_workspace_read_only || company?.test_workspace_expired || company?.test_workspace_archived_at || company?.test_workspace_sealed_at || company?.test_workspace_purpose === 'backup_snapshot') return false;
   if (capability === 'payroll_operations') return company?.workspace_write_permissions?.[capability] ?? company?.workspace_can_write === true;
   return company?.workspace_write_permissions?.[capability] === true;
 }

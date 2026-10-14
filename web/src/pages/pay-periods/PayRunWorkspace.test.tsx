@@ -159,6 +159,17 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.getByRole('link', { name: /Checks & direct deposit/ })).toBeTruthy();
   });
 
+  it('allows the reviewer to inspect a VOID rehearsal PDF without enabling payment actions', async () => {
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: false };
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview rehearsal checks' }));
+    expect(await screen.findByText(/Every check is marked VOID/)).toBeTruthy();
+    expect(apiMocks.rehearsalPreviewPdf).toHaveBeenCalledWith(12);
+    expect(screen.queryByRole('button', { name: 'Print checks' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Change method/ })).toBeNull();
+    expect(screen.queryByText('Open processing')).toBeNull();
+  });
+
   it('keeps a training baseline read-only and out of payroll processing', async () => {
     apiMocks.getPayPeriod.mockResolvedValue({
       pay_period: { ...payRun, status: 'approved', test_workspace_role: 'baseline', training_baseline_locked: true },

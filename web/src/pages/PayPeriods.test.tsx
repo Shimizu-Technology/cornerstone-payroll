@@ -162,6 +162,40 @@ describe('PayPeriods test workspaces', () => {
     }
     expect(screen.queryByText('Payroll Workflow')).toBeNull();
   });
+
+  it.each([
+    { test_workspace: true, workspace_can_write: false },
+    { test_workspace: true, workspace_can_write: true, test_workspace_expired: true },
+    { test_workspace: true, workspace_can_write: true, test_workspace_archived_at: '2026-10-14T00:00:00Z' },
+  ])('keeps both payroll-list layouts read-only for effective access %j', async (access) => {
+    apiMocks.activeCompany = { id: 11, test_workspace_purpose: 'sandbox', ...access };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod]));
+    render(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    expect(await screen.findAllByRole('button', { name: 'View' })).toHaveLength(2);
+    for (const action of ['New Pay Period', 'Edit', 'Delete', 'Recalculate', 'Approve', 'Commit']) {
+      expect(screen.queryByRole('button', { name: action })).toBeNull();
+    }
+    expect(apiMocks.payPeriodCreate).not.toHaveBeenCalled();
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+    expect(apiMocks.approve).not.toHaveBeenCalled();
+  });
+
+  it('retains an opened payroll draft through access loss without offering a submission', async () => {
+    apiMocks.activeCompany = { id: 11, test_workspace: true, workspace_can_write: true };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.companyGet.mockResolvedValue({ company: { next_check_number: 1001 } });
+    apiMocks.payScheduleGet.mockResolvedValue({ pay_schedule_settings: { pay_schedule: { confirmation_status: 'pending' } } });
+    const view = render(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    fireEvent.change(await screen.findByLabelText('Notes (optional)'), { target: { value: 'Retained operator draft' } });
+    apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: false };
+    view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.payPeriodCreate).not.toHaveBeenCalled();
+    apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: true };
+    view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    expect((await screen.findByLabelText('Notes (optional)') as HTMLTextAreaElement).value).toBe('Retained operator draft');
+  });
 });
 
 describe('fixed semimonthly paydays', () => {
