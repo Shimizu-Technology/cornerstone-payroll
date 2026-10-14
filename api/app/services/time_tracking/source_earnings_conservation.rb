@@ -5,6 +5,7 @@ module TimeTracking
   # independently of editable worksheet JSON and subsequent profile rate edits.
   class SourceEarningsConservation
     MESSAGE = "Imported source hours or captured earning rates changed. Reload the saved import; use the correction workflow to change source work."
+    PAY_BASIS_MESSAGE = "This imported payroll retains its captured pay basis. The employee's pay basis changed; review the saved source import before recalculating. Captured source earnings cannot be replaced with current salary or fee pay."
     LINE_KEYS = %w[source_time_entry_id line_key source_time_entry_version source_kind original_work_date total_hours regular_hours overtime_hours].freeze
 
     def self.validate!(item, calculated: false)
@@ -22,6 +23,13 @@ module TimeTracking
       # history and enforce exact frozen hours; do not manufacture rate evidence.
       return true if captured.empty?
       raise ArgumentError, MESSAGE unless captured.size == rows.size
+      pay_basis_changed = captured.any? do |row|
+        basis = row.earning_snapshot["employment_type"] || item.employment_type_in_database
+        basis != item.employment_type || basis != item.employee.employment_type ||
+          (basis == "contractor" && row.earning_snapshot["contractor_pay_type"].present? &&
+            row.earning_snapshot["contractor_pay_type"] != item.employee.contractor_pay_type)
+      end
+      raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed
       captured.map(&:time_tracking_import).uniq(&:id).each do |import|
         raw = import.raw_payload
         source = import.time_tracking_source

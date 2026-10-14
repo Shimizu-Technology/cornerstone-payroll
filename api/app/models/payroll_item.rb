@@ -628,6 +628,7 @@ class PayrollItem < ApplicationRecord
       TimeTracking::SourceEarningsConservation.validate!(self)
       calculator.calculate
       save!
+      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)
     end
   end
 
