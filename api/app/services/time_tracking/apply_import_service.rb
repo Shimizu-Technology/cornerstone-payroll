@@ -321,6 +321,13 @@ module TimeTracking
         end
       end
       active_rates = employee.active_wage_rates.to_a
+      if finalized_batch?
+        supplied_keys = wage_rate_overrides_by_category_key(override).keys
+        known_keys = categories.flat_map { |category| category_override_keys(category) }
+        unless (supplied_keys - known_keys).empty?
+          raise ArgumentError, "An earning mapping does not match this frozen source dimension; refresh the import"
+        end
+      end
       if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
         return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
@@ -541,6 +548,9 @@ module TimeTracking
         mapping = mapping.to_unsafe_h if mapping.respond_to?(:to_unsafe_h)
         mapping = mapping.to_h if mapping.respond_to?(:to_h)
         rate_id = mapping["employee_wage_rate_id"] || mapping[:employee_wage_rate_id]
+        if finalized_batch? && rate_id.blank?
+          raise ArgumentError, "Select an earning type for every supplied finalized source dimension"
+        end
         next if rate_id.blank?
         if finalized_batch? && !(mapping["source_kind"] || mapping[:source_kind]).to_s.in?(TimeTrackingEntryAllocation::SOURCE_KINDS)
           raise ArgumentError, "Retain the exact source kind for each finalized earning mapping; refresh this import"
