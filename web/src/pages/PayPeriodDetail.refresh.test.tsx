@@ -1285,3 +1285,62 @@ it.each(['mobile', 'desktop'])('retains both imported earning buckets and captur
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 6, overtime: 0, wage_rates: buckets });
 });
+
+it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and displays their recorded context on %s', async surface => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 99, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const buckets = [6, -1].map((hours, index) => ({ employee_wage_rate_id: 1, source_bucket_key: `bucket-${index}`, label: 'Regular', rate: 25,
+    regular_hours: hours, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true,
+    source_lines: [{ source_time_entry_id: `line-${index}`, line_key: 'REG', source_time_entry_version: 1,
+      source_kind: index === 0 ? 'current' : 'correction', original_work_date: index === 0 ? '2026-10-20' : '2026-10-10', total_hours: hours, regular_hours: hours, overtime_hours: 0 }] }));
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 5, overtime_hours: 0, gross_pay: 125, net_pay: 115.44,
+    import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: buckets };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const entry = surface === 'mobile' ? screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' }) : screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }))!;
+  expect(within(entry).getAllByText('Current work · Oct 20, 2026').length).toBeGreaterThan(0);
+  expect(within(entry).getAllByText('Correction · Oct 10, 2026').length).toBeGreaterThan(0);
+  const signedInput = within(entry).getAllByRole('textbox').find(input => (input as HTMLInputElement).value === '-1') as HTMLInputElement;
+  expect(signedInput.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 5, overtime: 0, wage_rates: buckets });
+  expect(screen.queryByText('Hours must be between 0 and 200 per period')).toBeNull();
+});
+
+it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async status => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary', salary_type: 'annual', pay_rate: 52000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const reason = 'Review original payroll evidence: retained hourly pay basis differs from current salary setup.';
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25, hours_worked: 3, overtime_hours: 0,
+    gross_pay: 75, net_pay: 69.26, timekeeping_source: 'correction_reference', correction_pay_basis_hold: { reason } };
+  const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Saved gross pay');
+  await waitFor(() => expect(screen.getAllByText(text => text.includes(reason)).length).toBeGreaterThan(0));
+  expect(screen.queryByText('$1.04/period')).toBeNull();
+  expect(screen.queryByText('$2,166.67/period')).toBeNull();
+  expect(screen.getAllByText('$75.00').length).toBeGreaterThan(0);
+  if (status !== 'committed') {
+    const mobile = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+    expect(within(mobile).getByText(reason)).toBeTruthy();
+    const row = screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }) && within(row).queryByText(reason))!;
+    expect(within(row).getByText('Retained pay basis · review required')).toBeTruthy();
+    const calculate = screen.getByRole('button', { name: status === 'draft' ? 'Calculate Payroll' : 'Recalculate' }) as HTMLButtonElement;
+    expect(calculate.disabled).toBe(true);
+    fireEvent.click(calculate);
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+    if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  } else {
+    expect(screen.getAllByRole('link', { name: 'View details' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
+  }
+});
