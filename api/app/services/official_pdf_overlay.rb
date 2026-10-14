@@ -25,6 +25,7 @@ class OfficialPdfOverlay
       base_page = template.pages[index] || load_template!.pages.first
       output << base_page
       output.pages[index] << overlay.pages[index]
+      prepare_template_page(output.pages[index])
     end
 
     output.to_pdf
@@ -61,6 +62,10 @@ class OfficialPdfOverlay
     end
 
     pdf.render
+  end
+
+  def prepare_template_page(_page)
+    # Optional hook for an output contract that differs from its input form.
   end
 
   def draw_page(_pdf, _page_number)
@@ -123,9 +128,10 @@ class OfficialPdfOverlay
     return [ nil, nil ] if blank_value?(value)
 
     amount = BigDecimal(value.to_s).round(2)
-    dollars = amount.truncate.to_i
+    dollars = amount.truncate.to_i.to_s
+    dollars = "-0" if amount.negative? && dollars == "0"
     cents = ((amount - amount.truncate) * 100).abs.to_i
-    [ dollars.to_s, cents.to_s.rjust(2, "0") ]
+    [ dollars, cents.to_s.rjust(2, "0") ]
   end
 
   def money_string(value)
