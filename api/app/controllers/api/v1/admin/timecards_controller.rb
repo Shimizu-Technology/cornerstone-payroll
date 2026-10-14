@@ -180,7 +180,7 @@ module Api
               if item.new_record?
                 item.company_id = current_company_id
                 item.employment_type = employee.employment_type
-                item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+                item.pay_rate = employee.default_payroll_rate
               end
 
               multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)

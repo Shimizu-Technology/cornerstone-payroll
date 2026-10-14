@@ -1,4 +1,4 @@
-import { forwardRef, type SelectHTMLAttributes, type ReactNode } from 'react';
+import { useId, forwardRef, type SelectHTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface SelectOption {
@@ -16,7 +16,8 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 
 const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ className, label, error, options, placeholder, id, children, ...props }, ref) => {
-    const selectId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const generatedId = useId();
+    const selectId = id || generatedId;
 
     return (
       <div className="space-y-1.5">
@@ -38,6 +39,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             className
           )}
           aria-invalid={error ? 'true' : 'false'}
+          aria-describedby={error ? `${selectId}-error` : undefined}
           {...props}
         >
           {placeholder && (
@@ -53,7 +55,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
                 </option>
               ))}
         </select>
-        {error && <p className="text-sm text-danger-600">{error}</p>}
+        {error && <p id={`${selectId}-error`} className="text-sm text-danger-600">{error}</p>}
       </div>
     );
   }
