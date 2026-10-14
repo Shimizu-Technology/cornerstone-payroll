@@ -140,7 +140,7 @@ module Api
               :source_user_id,
               :employee_id,
               :include,
-              { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :source_effective_rate_cents, :employee_wage_rate_id ] }
+              { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :source_effective_rate_cents, :source_kind, :employee_wage_rate_id ] }
             ]
           )
         end
