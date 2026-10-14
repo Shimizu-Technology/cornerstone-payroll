@@ -10,6 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { payScheduleSettingsApi, type PayScheduleSettingsResponse } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -69,6 +72,16 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
 }
 
 export function PayScheduleSettings() {
+  const { hasCapability, isLoading: authLoading } = useAuth();
+  const { activeCompany, activeCompanyId, loading: companyLoading } = useCompany();
+  const companyReady = !authLoading && !companyLoading && activeCompany != null && activeCompanyId != null && activeCompany.id === activeCompanyId;
+  const hasConfigurationAccess = hasCapability('manage_client_configuration');
+  const canConfigure = companyReady && hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const readOnlyReason = !companyReady
+    ? 'Access to the selected company is still being checked. You can review the schedule; your entries are preserved.'
+    : !hasConfigurationAccess
+      ? 'You can review this schedule. Ask an administrator for permission to change client configuration.'
+      : companyReadOnlyMessage(activeCompany);
   const [response, setResponse] = useState<PayScheduleSettingsResponse | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,7 +120,7 @@ export function PayScheduleSettings() {
   };
 
   const save = async () => {
-    if (!form) return;
+    if (!form || saving || !canConfigure) return;
     const cutoffMinutes = timeToMinutes(form.payroll_cutoff_time);
     if (form.notes.trim().length < 5) {
       setError('Add a short confirmation note identifying who confirmed the schedule or what source was used.');
@@ -201,7 +214,9 @@ export function PayScheduleSettings() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-6 xl:grid-cols-2">
+        {!canConfigure && <p id="pay-schedule-read-only" role="status" className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-700"><strong>Read-only schedule.</strong> {readOnlyReason}</p>}
+
+        <fieldset className="grid min-w-0 gap-6 border-0 p-0 xl:grid-cols-2" disabled={saving || !canConfigure} aria-label="Pay schedule and legal workweek configuration" aria-describedby={!canConfigure ? 'pay-schedule-read-only' : undefined}>
           <Card>
             <CardHeader>
               <div className="flex items-center gap-3"><CalendarClock className="h-5 w-5 text-primary-700" /><CardTitle>Payroll cadence</CardTitle></div>
@@ -240,7 +255,7 @@ export function PayScheduleSettings() {
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="schedule-notes">Confirmation source / notes</Label><Textarea id="schedule-notes" required value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Who confirmed this schedule, and what source was used?" /></div>
             </CardContent>
           </Card>
-        </div>
+        </fieldset>
 
         <Card className="border-primary-100 bg-primary-50/30">
           <CardContent className="flex items-start gap-3 py-5"><History className="mt-0.5 h-5 w-5 shrink-0 text-primary-700" /><div><p className="font-semibold text-neutral-950">Saving creates a new effective-dated record</p><p className="mt-1 text-sm leading-6 text-neutral-600">Prior settings and completed payroll remain intact. This confirmation does not recalculate payroll, change historical dates, or add employee hours.</p></div></CardContent>
@@ -248,7 +263,7 @@ export function PayScheduleSettings() {
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-16px_40px_-28px_rgba(15,23,42,0.6)] backdrop-blur sm:left-[var(--sidebar-width,0px)] sm:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto grid w-full grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button className="min-w-0" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto grid w-full grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button className="min-w-0" type="button" onClick={() => void save()} disabled={saving || !canConfigure}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
       </div>
     </div>
   );
