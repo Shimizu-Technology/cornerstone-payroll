@@ -875,6 +875,20 @@ it('withdraws approval and refreshes saved setup without asking the user to recr
   expect(await screen.findByRole('button', { name: 'Recalculate' })).toBeTruthy();
 });
 
+it.each(['payroll', 'employees'])('hides stale approved controls when setup changes but the canonical %s reload fails', async failedRead => {
+  await renderLoanWorksheet('approved');
+  if (failedRead === 'payroll') apiMocks.get.mockRejectedValueOnce(new Error('Payroll read unavailable'));
+  else apiMocks.employeesList.mockRejectedValueOnce(new Error('Employee read unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
+  expect(await screen.findByText(/Setup changed, but the updated payroll could not load/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
+  expect(screen.queryByText(/Current setup applied to the saved employees/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  expect(await screen.findByRole('button', { name: 'Recalculate' })).toBeTruthy();
+  expect(apiMocks.refreshSetup).toHaveBeenCalledTimes(1);
+});
+
 it('protects unsaved hours in a saved draft from being overwritten by setup refresh', async () => {
   const card = await renderLoanWorksheet('draft');
   fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
@@ -1243,4 +1257,31 @@ it('accepts a staged positive linked request alongside a separate amount without
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
   expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it.each(['mobile', 'desktop'])('retains both imported earning buckets and captured rates on the %s worksheet and calculate request', async surface => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 99, pay_frequency: 'semimonthly', status: 'active', wage_rates: [{ id: 1, label: 'Current profile', rate: 99, is_primary: true, active: true }] } as unknown as Employee;
+  const buckets = [
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Oct10', rate: 10, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Oct20', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
+  ];
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 6, overtime_hours: 0, gross_pay: 90, net_pay: 83.11, import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: buckets };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const entry = surface === 'mobile' ? screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' }) : screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }))!;
+  expect(within(entry).getAllByText(/Carryover Oct10/).length).toBeGreaterThan(0);
+  expect(within(entry).getAllByText(/Current Oct20/).length).toBeGreaterThan(0);
+  expect(within(entry).queryByText('$99.00/hr')).toBeNull();
+  const hourInputs = within(entry).getAllByRole('textbox').filter(input => ['4', '2'].includes((input as HTMLInputElement).value));
+  expect(hourInputs.length).toBe(2);
+  expect(hourInputs.every(input => (input as HTMLInputElement).disabled)).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 6, overtime: 0, wage_rates: buckets });
 });

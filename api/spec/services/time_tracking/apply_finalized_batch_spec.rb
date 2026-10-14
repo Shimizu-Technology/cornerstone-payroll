@@ -211,6 +211,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
               source_category_id: "flight",
               source_category_key: "flight_hours",
               source_category_name: "Flight Hours",
+              source_kind: "correction",
               employee_wage_rate_id: new_rate.id
             }
           ]

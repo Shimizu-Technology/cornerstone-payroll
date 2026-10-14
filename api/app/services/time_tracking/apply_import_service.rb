@@ -50,6 +50,9 @@ module TimeTracking
         validate_negative_adjustment_acknowledgement!
 
         rows = Array(ordinary_processed_payload["rows"] || ordinary_processed_payload[:rows])
+        if @mappings.map { |mapping| (mapping[:source_user_id] || mapping["source_user_id"]).to_s }.uniq.size != @mappings.size
+          raise ArgumentError, "Map each source employee exactly once"
+        end
         mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
         employee_ids = rows.filter_map do |row|
           source_user_id = row["source_user_id"].to_s
@@ -165,6 +168,7 @@ module TimeTracking
             payroll_item: item,
             source_employee: source_employee_for(row)
           ).call if finalized_batch?
+          TimeTracking::SourceEarningsConservation.validate!(item) if finalized_batch?
 
           results[:applied] << {
             employee_id: employee.id,
@@ -300,6 +304,22 @@ module TimeTracking
       categories = Array(row["categories"] || row[:categories]).select do |category|
         finalized_batch? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
       end
+      # An older saved preview predates source-line worksheet metadata. Derive
+      # it from the validated frozen batch, never from caller-supplied references.
+      if finalized_batch?
+        frozen_categories = BatchImportPreviewService.new(pay_period: @pay_period, source: @source)
+          .send(:category_buckets, source_employee_for(row).fetch("adjustments")).map(&:deep_stringify_keys)
+        categories = categories.map do |category|
+          category = category.deep_stringify_keys
+          frozen = frozen_categories.find do |candidate|
+            mapping_identity(candidate["source_category_id"], candidate["key"], candidate["name"], nil, candidate["source_kinds"].join(",")) ==
+              mapping_identity(category["source_category_id"], category["key"], category["name"], nil, Array(category["source_kinds"]).join(","))
+          end
+          raise ArgumentError, "Frozen source earning dimension changed; refresh the import" unless frozen &&
+            %w[total_hours regular_hours overtime_hours].all? { |field| frozen[field].to_d == category[field].to_d }
+          category.merge("source_lines" => frozen["source_lines"])
+        end
+      end
       active_rates = employee.active_wage_rates.to_a
       if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
         return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
@@ -347,7 +367,7 @@ module TimeTracking
 
     def build_finalized_batch_wage_rate_entries(item, categories, active_rates, override, preserved_holiday_hours:, preserved_pto_hours:)
       override_by_category_key = wage_rate_overrides_by_category_key(override)
-      hours_by_dimension = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0 } }
+      hours_by_dimension = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0, source_lines: [] } }
 
       categories.each do |category|
         rate = wage_rate_for_category(category, active_rates, override_by_category_key)
@@ -358,6 +378,7 @@ module TimeTracking
         bucket = hours_by_dimension[[ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]]
         bucket[:regular_hours] += category_regular_hours(category)
         bucket[:overtime_hours] += category_overtime_hours(category)
+        bucket[:source_lines].concat(Array(category["source_lines"] || category[:source_lines]))
       end
 
       preserved_by_rate_id = finalized_preserved_hours_by_rate_id(
@@ -375,6 +396,8 @@ module TimeTracking
         imported = hours_by_dimension.fetch([ rate_id, source_kind, first_date, last_date ])
         is_primary = rate.is_primary && primary_rate_ids.add?(rate.id)
         {
+          source_bucket_key: CanonicalPayload.checksum({ "rate_id" => rate.id, "source_lines" => imported[:source_lines].sort_by { |line| [ line["source_time_entry_id"].to_s, line["line_key"].to_s ] } }.deep_stringify_keys),
+          source_lines: imported[:source_lines],
           employee_wage_rate_id: rate.id,
           label: finalized_rate_label(rate, source_kind: source_kind, first_date: first_date, last_date: last_date),
           rate: rate.rate.to_f,
@@ -519,6 +542,9 @@ module TimeTracking
         mapping = mapping.to_h if mapping.respond_to?(:to_h)
         rate_id = mapping["employee_wage_rate_id"] || mapping[:employee_wage_rate_id]
         next if rate_id.blank?
+        if finalized_batch? && !(mapping["source_kind"] || mapping[:source_kind]).to_s.in?(TimeTrackingEntryAllocation::SOURCE_KINDS)
+          raise ArgumentError, "Retain the exact source kind for each finalized earning mapping; refresh this import"
+        end
 
         effective_rate_cents = mapping["source_effective_rate_cents"] || mapping[:source_effective_rate_cents]
         identity = mapping_identity(
@@ -528,9 +554,12 @@ module TimeTracking
           effective_rate_cents,
           mapping["source_kind"] || mapping[:source_kind]
         )
+        if identity.present? && acc.key?(identity)
+          raise ArgumentError, "Conflicting earning mappings; map each source dimension exactly once"
+        end
         acc[identity] = rate_id.to_i if identity.present?
 
-        if effective_rate_cents.blank?
+        if !finalized_batch? && effective_rate_cents.blank?
           [
             mapping["source_category_id"] || mapping[:source_category_id],
             mapping["source_category_key"] || mapping[:source_category_key],
@@ -576,6 +605,8 @@ module TimeTracking
         category["effective_rate_cents"] || category[:effective_rate_cents],
         Array(category["source_kinds"] || category[:source_kinds]).join(",")
       )
+      return [ identity ] if finalized_batch?
+
       [ identity ] + [
         category["source_category_id"] || category[:source_category_id],
         category["key"] || category[:key],

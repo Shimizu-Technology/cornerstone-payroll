@@ -335,6 +335,18 @@ export function TimeTrackingImportModal({
     return categories.every((category) => Boolean(rowMappings[categoryMappingKey(category)]));
   };
 
+  const mappedGrossEstimate = (row: TimeTrackingPreviewRow): number | null => {
+    if (!rowWageRateMappingsComplete(row)) return null;
+    const employeeId = mappings.get(row.source_user_id);
+    if (!employeeNeedsRateMapping(employeeId)) return row.estimated_gross_delta ?? null;
+    const rates = activeWageRatesFor(employeeId);
+    const selected = wageRateMappings.get(row.source_user_id) || {};
+    return rowCategories(row).reduce((sum, category) => {
+      const rate = rates.find(candidate => candidate.id === selected[categoryMappingKey(category)]);
+      return sum + Number(rate?.rate || 0) * (Number(category.regular_hours || 0) + Number(category.overtime_hours || 0) * 1.5);
+    }, 0);
+  };
+
   const effectiveWarningsFor = (row: TimeTrackingPreviewRow) => (row.warnings || []).filter((warning) => {
     if (warning.code === 'unmatched_employee' && mappings.get(row.source_user_id)) return false;
     if (warning.code === 'unmapped_wage_rate' && rowWageRateMappingsComplete(row)) return false;
@@ -846,9 +858,9 @@ export function TimeTrackingImportModal({
                               <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(row.total_hours)}</div>
                             </div>
                           </div>
-                          {isFinalizedBatch && !isHistoricalReconciliation && row.estimated_gross_delta != null && (
+                          {isFinalizedBatch && !isHistoricalReconciliation && (
                             <div className="mt-2 text-xs font-medium text-neutral-600">
-                              Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">{formatCurrency(row.estimated_gross_delta)}</span>
+                              Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">{mappedGrossEstimate(row) == null ? 'Select earning types to estimate' : formatCurrency(mappedGrossEstimate(row)!)}</span>
                             </div>
                           )}
                         </div>

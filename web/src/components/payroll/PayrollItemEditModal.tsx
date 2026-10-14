@@ -466,6 +466,7 @@ export function PayrollItemEditModal({
           {!isSalary && !isContractorFlat && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">Hours</h4>
+              {item.wage_rate_hours?.some(entry => entry.source_bucket_key) && <p className="mb-3 text-xs text-neutral-600">Imported hours and earning rates are retained. Use source review and the correction workflow to change work.</p>}
               {hasMultiRate ? (
                 <div className="space-y-3">
                   {fields.wage_rate_hours.map((rateEntry, index) => (
@@ -478,7 +479,7 @@ export function PayrollItemEditModal({
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Regular</label>
                           <NumericInput
-                            value={rateEntry.regular_hours}
+                            disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={rateEntry.regular_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'regular_hours', String(value ?? 0))}
                             min={0}
                           />
@@ -486,7 +487,7 @@ export function PayrollItemEditModal({
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Overtime</label>
                           <NumericInput
-                            value={rateEntry.overtime_hours}
+                            disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={rateEntry.overtime_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'overtime_hours', String(value ?? 0))}
                             min={0}
                           />
@@ -516,7 +517,7 @@ export function PayrollItemEditModal({
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Regular</label>
                     <NumericInput
-                      value={fields.hours_worked}
+                      disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={fields.hours_worked}
                       onValueChange={(value) => handleNumberFieldChange('hours_worked', value)}
                       min={0}
                     />
@@ -524,7 +525,7 @@ export function PayrollItemEditModal({
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Overtime</label>
                     <NumericInput
-                      value={fields.overtime_hours}
+                      disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={fields.overtime_hours}
                       onValueChange={(value) => handleNumberFieldChange('overtime_hours', value)}
                       min={0}
                     />

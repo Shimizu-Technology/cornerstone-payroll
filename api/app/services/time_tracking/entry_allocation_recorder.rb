@@ -24,6 +24,7 @@ module TimeTracking
           source_kind: adjustment.fetch("source_kind"),
           original_work_date: Date.iso8601(adjustment.fetch("original_work_date")),
           category_snapshot: adjustment["category"] || {},
+          earning_snapshot: earning_snapshot(adjustment),
           total_hours: decimal(adjustment.fetch("total_hours")),
           regular_hours: decimal(adjustment.fetch("regular_hours")),
           overtime_hours: decimal(adjustment.fetch("overtime_hours"))
@@ -34,6 +35,18 @@ module TimeTracking
     private
 
     attr_reader :import, :payroll_item, :source_employee
+
+    def earning_snapshot(adjustment)
+      bucket = payroll_item.wage_rate_hours.find do |entry|
+        Array(entry["source_lines"]).any? do |line|
+          line["source_time_entry_id"].to_s == adjustment["source_time_entry_id"].to_s &&
+            line["line_key"].to_s == adjustment["line_key"].to_s
+        end
+      end
+      return {} unless bucket
+
+      bucket.slice("source_bucket_key", "employee_wage_rate_id", "rate", "label", "source_lines")
+    end
 
     def decimal(value)
       BigDecimal(value.to_s).round(2)

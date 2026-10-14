@@ -47,7 +47,11 @@ module TimeTracking
         allocations.sum(&:overtime_hours) == @item.overtime_hours.to_d
         raise ArgumentError, "Original allocation union must use one earning/rate and sum to the original paycheck REG/OT totals"
       end
-      { allocations: allocations, lines: lines, evidence: { allocations: allocations.map(&:attributes), batches: batches.sort_by { |batch| batch["id"] },
+      # A schema addition must not invalidate retained pre-capture signatures.
+      captured_allocations = allocations.map do |row|
+        row.earning_snapshot.present? ? row.attributes : row.attributes.except("earning_snapshot")
+      end
+      { allocations: allocations, lines: lines, evidence: { allocations: captured_allocations, batches: batches.sort_by { |batch| batch["id"] },
         native_earnings: @item.payroll_item_earnings.order(:id).map(&:attributes) } }
     rescue PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error => e
       raise ArgumentError, e.message

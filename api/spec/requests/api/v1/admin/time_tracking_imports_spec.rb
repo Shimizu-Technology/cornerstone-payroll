@@ -135,6 +135,21 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/apply_time_tracking_import" do
+    it "retains source kind when forwarding distinct finalized earning mappings" do
+      import = create(:time_tracking_import, pay_period: pay_period, time_tracking_source: source)
+      request_mappings = [ { source_user_id: "42", employee_id: 123, include: true, wage_rate_mappings: [
+        { source_category_id: "7", source_category_key: "flight_hours", source_category_name: "Flight Hours", source_kind: "carryover", employee_wage_rate_id: 1 },
+        { source_category_id: "7", source_category_key: "flight_hours", source_category_name: "Flight Hours", source_kind: "current", employee_wage_rate_id: 2 }
+      ] } ]
+      expect(TimeTracking::ApplyImportService).to receive(:new) do |**arguments|
+        expect(arguments[:mappings].first["wage_rate_mappings"].map { |mapping| mapping["source_kind"] }).to eq(%w[carryover current])
+        instance_double(TimeTracking::ApplyImportService, call: { applied: [], skipped: [], errors: [] })
+      end
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_time_tracking_import",
+        params: { import_id: import.id, mappings: request_mappings }, headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok)
+    end
+
     it "loads the member pay period from the routed id parameter" do
       import = TimeTrackingImport.create!(
         pay_period: pay_period,
