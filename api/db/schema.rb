@@ -4353,6 +4353,4 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_14_020000) do
   add_foreign_key "time_tracking_financial_correction_links", "payroll_items", column: "predecessor_payroll_item_id", on_delete: :restrict
   add_foreign_key "time_tracking_financial_correction_links", "payroll_items", on_delete: :restrict
   add_foreign_key "time_tracking_financial_correction_links", "time_tracking_entry_allocations", column: "original_allocation_id", on_delete: :restrict
-
-
 end
