@@ -1311,7 +1311,9 @@ it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and
   const entry = surface === 'mobile' ? screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' }) : screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }))!;
   expect(within(entry).getAllByText('Current work · Oct 20, 2026').length).toBeGreaterThan(0);
   expect(within(entry).getAllByText('Correction · Oct 10, 2026').length).toBeGreaterThan(0);
-  const signedInput = within(entry).getAllByRole('textbox').find(input => (input as HTMLInputElement).value === '-1') as HTMLInputElement;
+  expect(within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Current work · Oct 20, 2026' })).toHaveProperty('disabled', true);
+  expect(within(entry).getByRole('textbox', { name: 'Overtime hours for Ana Cruz · Regular · Correction · Oct 10, 2026' })).toHaveProperty('disabled', true);
+  const signedInput = within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Correction · Oct 10, 2026' }) as HTMLInputElement;
   expect(signedInput.disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
@@ -1494,5 +1496,16 @@ it('keeps the saved-import hold when a newer superseding read fails its required
   await screen.findByText('Incomplete newer read');
   expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
   expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('names each ordinary regular and overtime hours input for its employee on phone cards and desktop rows', async () => {
+  await renderLoanWorksheet('draft');
+  const regular = screen.getAllByRole('textbox', { name: 'Regular hours for Ana Cruz' });
+  const overtime = screen.getAllByRole('textbox', { name: 'Overtime hours for Ana Cruz' });
+  expect(regular).toHaveLength(2);
+  expect(overtime).toHaveLength(2);
+  expect(regular.every(input => (input as HTMLInputElement).value === '80.3')).toBe(true);
+  expect(overtime.every(input => (input as HTMLInputElement).value === '14')).toBe(true);
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });

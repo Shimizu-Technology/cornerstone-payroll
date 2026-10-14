@@ -62,6 +62,11 @@ import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, NamedLoanOption } from '@/types';
 
+const payrollHoursInputLabel = (employee: Employee, kind: 'Regular' | 'Overtime', rate?: PayrollItemWageRateHours) => (
+  [`${kind} hours for ${employee.first_name} ${employee.last_name}`, rate?.label, rate && capturedSourceContext(rate)]
+    .filter(Boolean).join(' · ')
+);
+
 interface HoursEntry {
   regular: number;
   overtime: number;
@@ -2670,7 +2675,7 @@ export function PayPeriodDetail({
                   {isFlatContractor && payPeriod.run_purpose === 'off_cycle_tips' && <p className="text-xs font-medium text-primary-700">Flat fee excluded from this tips-only run</p>}
                   {correctionHold ? <p className="text-xs text-amber-800">Review retained source evidence and pay setup before entering new pay.</p> : isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
                     <NumericInput className="mt-1 min-h-11 w-full" value={salaryOverrideMap[String(emp.id)] || null} onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} aria-label={`Pay this period for ${name}`} />
-                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p>{capturedSourceContext(rate) && <p className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>}<div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
+                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p>{capturedSourceContext(rate) && <p className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>}<div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
                   <label className="block text-xs font-medium text-neutral-600">Bonus this payroll
                     <NumericInput className="mt-1 min-h-11 w-full" aria-label={`Bonus this payroll for ${name}`} value={bonusMap[String(emp.id)] ?? 0} onValueChange={(value) => { const amount = value ?? 0; if (amount === (bonusMap[String(emp.id)] ?? 0)) return; setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount })); setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount })); }} min={0} max={99999999.99} fixedDecimalsOnBlur={2} />
                   </label>
@@ -2858,6 +2863,7 @@ export function PayPeriodDetail({
                                   </span>
                                   <NumericInput
                                     disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Regular', rate)}
                                     value={toNumber(rate.regular_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2869,6 +2875,7 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Regular')}
                               value={hours.regular}
                               onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
@@ -2893,6 +2900,7 @@ export function PayPeriodDetail({
                                   </span>
                                   <NumericInput
                                     disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)}
                                     value={toNumber(rate.overtime_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2904,6 +2912,7 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Overtime')}
                               value={hours.overtime}
                               onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
