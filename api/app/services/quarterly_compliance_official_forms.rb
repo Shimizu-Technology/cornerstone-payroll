@@ -99,6 +99,25 @@ module QuarterlyComplianceOfficialForms
   class Form941 < BaseForm
     TEMPLATE_PATH = Rails.root.join("lib/assets/irs_form_941_2026.pdf")
     PAGE_SIZE = [ 611.976, 791.968 ].freeze
+    SUPPORTED_TAX_YEARS = [ 2026 ].freeze
+
+    def self.template_status(tax_year)
+      exact_year = case tax_year
+      when Integer then tax_year
+      when String then tax_year.to_i if tax_year.match?(/\A[0-9]{4}\z/)
+      end
+      available = SUPPORTED_TAX_YEARS.include?(exact_year)
+      {
+        available: available,
+        supported_tax_years: SUPPORTED_TAX_YEARS,
+        message: available ? nil : "Official Form 941 PDFs are available only for tax year #{SUPPORTED_TAX_YEARS.join(', ')}. For #{tax_year}, use the worksheet or reconciliation workbook and obtain the matching IRS Form 941 revision."
+      }
+    end
+
+    def self.ensure_supported_tax_year!(tax_year)
+      status = template_status(tax_year)
+      raise OfficialPdfOverlay::TemplateUnavailableError, status[:message] unless status[:available]
+    end
 
     HEADER = {
       ein_prefix: [ 153.281, 707.969, 197.504, 725.969 ],
@@ -148,6 +167,7 @@ module QuarterlyComplianceOfficialForms
     }.freeze
 
     def initialize(report:, fields: {})
+      self.class.ensure_supported_tax_year!(report.deep_symbolize_keys.dig(:meta, :year))
       super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ])
     end
 
