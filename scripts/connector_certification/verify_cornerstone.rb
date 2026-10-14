@@ -8,6 +8,7 @@ require "pathname"
 require "net/http"
 require "active_support/testing/time_helpers"
 require "factory_bot_rails"
+require_relative "../local_certification/finalized_wage_mapping"
 
 database = ActiveRecord::Base.connection_db_config.database.to_s
 unless Rails.env.test? && ENV["CONNECTOR_CERTIFICATION"] == "disposable_test_only" &&
@@ -82,9 +83,11 @@ travel_to(Time.iso8601(config.fetch("clock"))) do
 
   import = TimeTracking::BatchImportPreviewService.new(pay_period: period, source: source).call
   check!(import.raw_payload.dig("export", "checksum").present?, "real HTTP frozen payload is checksum validated and retained")
-  mapping = { source_user_id: config.fetch("employee_id", 2).to_s, employee_id: employee.id, include: true,
-    wage_rate_mappings: [{ source_category_id: "1", source_category_key: "operations", source_category_name: "Operations",
-      source_effective_rate_cents: 2500, employee_wage_rate_id: wage.id }] }
+  mapping = LocalCertification::FinalizedWageMapping.build(
+    import: import.as_json(only: %i[status contract_version external_batch_checksum processed_payload]),
+    source_user_id: config.fetch("employee_id", 2), source_user_uuid: config.fetch("employee_uuid"),
+    employee_id: employee.id, wage_rate_id: wage.id,
+    category_id: "1", category_key: "operations", category_name: "Operations", regular_hours: 40, overtime_hours: 5)
   applied = TimeTracking::ApplyImportService.new(import: import, mappings: [mapping], applied_by: actor).call
   check!(applied[:errors].empty?, "independent frozen batch applies through the production import service")
   item = period.payroll_items.find_by!(employee: employee)
