@@ -38,6 +38,21 @@ RSpec.describe RestoreLegacyPayrollDatabaseGuards do
     end.to raise_error(ActiveRecord::StatementInvalid, message)
   end
 
+  it "protects schema-loaded rows before any forward guard repair is invoked" do
+    guards = connection.select_rows(<<~SQL)
+      SELECT tgname, tgenabled::text FROM pg_trigger
+      WHERE (tgrelid = 'users'::regclass AND tgname = 'protect_primary_platform_owner_delete')
+         OR (tgrelid = 'pay_periods'::regclass AND tgname = 'pay_periods_parallel_run_immutable')
+    SQL
+    expect(guards).to match_array([
+      [ "protect_primary_platform_owner_delete", "O" ], [ "pay_periods_parallel_run_immutable", "O" ]
+    ])
+    before = saved_rows
+    reject_without_aborting_transaction("DELETE FROM users WHERE id = #{owner.id}", /primary platform owner cannot be deleted/)
+    reject_without_aborting_transaction("UPDATE pay_periods SET parallel_run = FALSE WHERE id = #{comparison.id}", /parallel_run cannot be cleared/)
+    expect(saved_rows).to eq(before)
+  end
+
   it "repairs a populated database with applied historical versions without rewriting retained rows" do
     historical_versions = connection.select_values("SELECT version FROM schema_migrations")
     expect(historical_versions).to include("20260717120000", "20260908120000")
