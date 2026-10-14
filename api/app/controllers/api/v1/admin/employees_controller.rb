@@ -57,6 +57,7 @@ module Api
         def create
           attributes, w4_attributes, w4_reason, election_received = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(nil, attributes)
+          attributes[:pay_frequency] = current_company.pay_frequency unless attributes.key?(:pay_frequency)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
 
@@ -82,8 +83,11 @@ module Api
             )
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
+          expired_incomplete_entry = @employee&.new_record? && EmployeeIntakePolicy.expired?(current_company) &&
+            EmployeeIntakePolicy.missing_fields(@employee).any?
           render json: {
-            error: "Validation failed",
+            error: expired_incomplete_entry ? "Incomplete employee entry has expired. Complete the required fields or ask an organization administrator to renew access. Your entered information has not been saved." : "Validation failed",
+            code: expired_incomplete_entry ? "employee_intake_expired" : nil,
             details: e.record.errors.messages
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e

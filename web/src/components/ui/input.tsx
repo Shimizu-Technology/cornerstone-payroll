@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type WheelEvent } from 'react';
+import { useId, forwardRef, type InputHTMLAttributes, type WheelEvent } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -9,7 +9,8 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, helperText, id, type = 'text', onWheel, ...props }, ref) => {
-    const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const generatedId = useId();
+    const inputId = id || generatedId;
     const handleWheel = (event: WheelEvent<HTMLInputElement>) => {
       if (type === 'number' && document.activeElement === event.currentTarget) {
         event.currentTarget.blur();
