@@ -50,6 +50,7 @@ module Api
           test_workspace_expired: company.test_workspace_expired?,
           test_workspace_read_only: company.test_workspace_read_only?,
           workspace_can_write: company_write_allowed?(company),
+          workspace_write_permissions: workspace_write_permissions(company),
           migration_rehearsal_status: company.migration_rehearsal_status,
           migration_source_company_id: company.migration_source_company_id,
           migration_source_company_name: company.migration_source_company&.name,
@@ -65,6 +66,16 @@ module Api
 
         StaffRolePolicy.allowed?(current_user, :payroll_operations) &&
           TestWorkspaceAccessPolicy.allowed?(user: current_user, company: company, request_method: "POST", capability: :payroll_operations)
+      end
+
+      def workspace_write_permissions(company)
+        return nil unless company.test_workspace?
+
+        accessible = !!(current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id))
+        StaffRolePolicy::CAPABILITY_ROLES.keys.index_with do |capability|
+          accessible && StaffRolePolicy.allowed?(current_user, capability) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: company, request_method: "POST", capability: capability)
+        end
       end
 
       def employee_counts_by_company(company_ids, active_only: false)

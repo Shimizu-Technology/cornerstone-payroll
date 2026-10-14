@@ -401,6 +401,7 @@ module Api
           }
 
           if detailed
+            json[:check_status] = item.check_status
             confirmation = item.direct_deposit_payment_confirmation
             json[:payment_confirmation] = confirmation && {
               settled_on: confirmation.settled_on.iso8601,

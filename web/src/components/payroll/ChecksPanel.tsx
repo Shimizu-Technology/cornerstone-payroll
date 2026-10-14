@@ -19,7 +19,7 @@ import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberFie
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
 import { useCompany } from '@/contexts/CompanyContext';
-import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { canWriteCompany, companyReadOnlyMessage, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 interface ChecksPanelProps {
@@ -398,7 +398,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   if (payPeriod.status !== 'committed') {
     return (
       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-        Check printing is only available for committed pay periods.
+        {isTestWorkspaceCompany(activeCompany)
+          ? 'Payments and official earnings statements are unavailable in test workspaces. Review the payroll results in this workspace.'
+          : 'Check printing is only available for committed pay periods.'}
       </div>
     );
   }

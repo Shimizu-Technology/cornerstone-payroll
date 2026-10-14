@@ -483,3 +483,10 @@ describe('individual check preview', () => {
     expect(screen.queryByRole('dialog', { name: 'Check #8101 — Avery Example' })).toBeNull();
   });
 });
+
+it('does not promise payment or official statement actions on a valid approved workspace baseline', () => {
+  companyContext.activeCompany = { test_workspace: true, workspace_can_write: false } as unknown as CompanyListItem;
+  render(<ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'approved', parallel_run: true, test_workspace_role: 'baseline' } as PayPeriod} />);
+  expect(screen.getByText(/Payments and official earnings statements are unavailable in test workspaces/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Print|Download|View stub|Issue|Record/i })).toBeNull();
+});
