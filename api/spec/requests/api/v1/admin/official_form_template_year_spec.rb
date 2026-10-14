@@ -37,6 +37,17 @@ RSpec.describe "Official quarterly template tax years", type: :request do
     end
   end
 
+  %w[preview download].each do |action|
+    it "rejects a fractional JSON year through edited #{action} before integer coercion" do
+      post "/api/v1/admin/reports/quarterly_compliance_packet_official_form_#{action}",
+        params: { year: 2026.9, quarter: 2, form_type: "form_941" }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.headers["Content-Disposition"]).to be_nil
+      expect(response.parsed_body.dig("official_form_template", "available")).to be(false)
+      expect(response.parsed_body.fetch("error")).to include("For 2026.9", "matching IRS Form 941 revision")
+    end
+  end
+
   it "discloses the same authoritative template availability while retaining historical JSON and Excel" do
     %w[form_941_gu quarterly_compliance_packet].each do |endpoint|
       [ 2025, 2026 ].each do |year|

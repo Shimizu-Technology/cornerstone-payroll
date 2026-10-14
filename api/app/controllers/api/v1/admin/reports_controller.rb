@@ -1578,7 +1578,7 @@ module Api
           end
 
           if official_form_941
-            template_status = QuarterlyComplianceOfficialForms::Form941.template_status(year)
+            template_status = QuarterlyComplianceOfficialForms::Form941.template_status(raw_year.presence || year)
             unless template_status[:available]
               return [ nil, render(json: { error: template_status[:message], official_form_template: template_status }, status: :unprocessable_entity) ]
             end
