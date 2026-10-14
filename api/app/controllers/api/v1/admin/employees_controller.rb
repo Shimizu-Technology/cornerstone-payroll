@@ -12,6 +12,7 @@ module Api
           :resolve_configuration_review_item, :review_intake_exception
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
+        before_action :validate_employee_company_context!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
         before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
         around_action :with_recurring_pay_item_setup_invalidation, only: :update
@@ -62,6 +63,7 @@ module Api
 
           Employee.transaction do
             current_company.lock!
+            revalidate_current_company_write_access!
             EmployeeIntakePolicy.prepare!(@employee, actor: current_user)
             @employee.save!
             EmployeeW4ElectionChangeService.new(
@@ -100,6 +102,7 @@ module Api
 
           Employee.transaction do
             current_company.lock!
+            revalidate_current_company_write_access!
             @employee.lock!
             if attributes.key?(:payment_delivery_method)
               @payment_default_service = EmployeePaymentDefaultService.new(
@@ -266,6 +269,16 @@ module Api
             error: "Validation failed",
             details: { department_id: [ "does not belong to this company" ] }
           }, status: :unprocessable_entity
+        end
+
+        def validate_employee_company_context!
+          requested_ids = [ params[:company_id], params.dig(:employee, :company_id) ].compact
+          return if requested_ids.all? { |id| id.to_s.match?(/\A[1-9]\d*\z/) && id.to_i == current_company_id }
+
+          render json: {
+            error: "The employee form belongs to a different client. Your changes were not saved. Reopen the form for the intended client.",
+            code: "company_context_mismatch"
+          }, status: :conflict
         end
 
         def employee_params
