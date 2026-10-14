@@ -511,7 +511,8 @@ export function PayPeriodDetail({
 
   const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
-    const retainInputs = preserveInputs && !savedImportReloadRequiredRef.current;
+    const requiresSavedSourceWorksheet = savedImportReloadRequiredRef.current;
+    const retainInputs = preserveInputs && !requiresSavedSourceWorksheet;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
     try {
@@ -537,6 +538,9 @@ export function PayPeriodDetail({
           return null;
         }),
         payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
+          if (requiresSavedSourceWorksheet) {
+            throw new Error(`Saved payroll worksheet could not load: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
           console.warn('Failed to load payroll field worksheet', err);
           return { payroll_field_inputs: { fields: [], assignments: [] } };
         }),
