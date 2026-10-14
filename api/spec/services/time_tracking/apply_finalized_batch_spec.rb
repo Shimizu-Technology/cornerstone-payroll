@@ -825,6 +825,11 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0 }
     payload = payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "NEUTRAL-101")
     payload["source"] = "neutral_time"
+    # The real HTTP client requires the pinned descriptor. This test's client
+    # double must retain that same producer contract in the frozen batch.
+    payload["integration"] = { "source_type" => "neutral_time", "protocol" => source.source_protocol,
+      "protocol_version" => source.source_protocol_version, "source_instance_id" => source.expected_source_instance_id,
+      "capabilities" => source.source_capabilities, "policy_constraints" => source.source_policy_constraints }
     payload["employees"].first["source_user_uuid"] = uuid
     payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
     confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: uuid)
