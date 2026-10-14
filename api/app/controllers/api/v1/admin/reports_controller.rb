@@ -284,6 +284,7 @@ module Api
 
           company = Company.find(current_company_id)
           report  = Form941GuAggregator.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.new(
             company: company,
             tax_year: year,
@@ -322,7 +323,7 @@ module Api
         end
 
         def form_941_gu_pdf
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
           send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data).generate,
@@ -351,6 +352,7 @@ module Api
             user: current_user
           )
           report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
             tax_year: year,
@@ -374,7 +376,7 @@ module Api
         end
 
         def quarterly_compliance_packet_pdf
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
           generator = QuarterlyCompliancePacketPdfGenerator.new(report_data)
@@ -478,14 +480,14 @@ module Api
         end
 
         def quarterly_compliance_packet_official_form_defaults
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: params[:form_type].to_s == "form_941")
           return error_response if error_response
 
           render json: {
             data: quarterly_compliance_official_form_defaults(report_data, params[:form_type]),
             filing_gate: report_data[:filing_gate]
           }
-        rescue ArgumentError => e
+        rescue OfficialPdfOverlay::TemplateUnavailableError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -1562,7 +1564,7 @@ module Api
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
         end
 
-        def build_quarterly_compliance_packet_data
+        def build_quarterly_compliance_packet_data(official_form_941: false)
           raw_year = params[:year]
           year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
           quarter = params[:quarter]&.to_i
@@ -1575,8 +1577,16 @@ module Api
             return [ nil, render(json: { error: "quarter is required and must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
           end
 
+          if official_form_941
+            template_status = QuarterlyComplianceOfficialForms::Form941.template_status(raw_year.presence || year)
+            unless template_status[:available]
+              return [ nil, render(json: { error: template_status[:message], official_form_template: template_status }, status: :unprocessable_entity) ]
+            end
+          end
+
           company = Company.find(current_company_id)
           report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
             tax_year: year,
@@ -1626,7 +1636,7 @@ module Api
         end
 
         def send_quarterly_compliance_official_form!(generator:, filename_prefix:)
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: generator == QuarterlyComplianceOfficialForms::Form941)
           return error_response if error_response
 
           send_data generator.new(report: report_data).generate,
@@ -1638,7 +1648,7 @@ module Api
         end
 
         def send_quarterly_compliance_official_form_from_params!(disposition:)
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: params[:form_type].to_s == "form_941")
           return error_response if error_response
 
           config = quarterly_compliance_official_form_config(params[:form_type])
