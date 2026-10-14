@@ -120,6 +120,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    it "includes additional withholding once in the company summary" do
+      item = native_period.payroll_items.first
+      item.update_columns(withholding_tax: 0, additional_withholding: 5)
+      travel_to Date.new(2026, 9, 20) do
+        get "/api/v1/admin/reports/dashboard"
+      end
+      # Imported withholding is 90; modern base 0 plus extra 5 is 95 total.
+      expect(response.parsed_body.dig("stats", "ytd_totals", "withholding_tax")).to eq(95.0)
+      expect(item.reload.withholding_tax.to_f).to eq(0)
+      expect(item.additional_withholding.to_f).to eq(5)
+    end
+
     it "combines committed Cornerstone and locked QuickBooks payroll in YTD and recent payrolls" do
       travel_to Date.new(2026, 9, 20) do
         get "/api/v1/admin/reports/dashboard"
@@ -1357,6 +1369,49 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         medicare_tax: 43.50)
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
       expect(response).to have_http_status(:ok)
+    end
+
+    it "requires a fresh explicit review when clean reportable payroll changes after readiness" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "First review" }
+      expect(response).to have_http_status(:ok)
+      original = W2FilingReadiness.find_by!(company: company, year: 2025)
+      original_fingerprint = original.ready_fingerprint
+      late_period = create(:pay_period, :committed, company: company, start_date: Date.new(2025, 2, 1), end_date: Date.new(2025, 2, 14), pay_date: Date.new(2025, 2, 18))
+      create(:payroll_item, company: company, employee: employee, pay_period: late_period, gross_pay: 100, reported_tips: 0)
+
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("stale")
+      expect(original.reload.status).to eq("filing_ready") # GET preserves the previous review.
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:conflict)
+      expect(original.reload.ready_fingerprint).to eq(original_fingerprint)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("preflight_passed")
+      expect(original.reload.attestation_history.length).to eq(1)
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed late payroll" }
+      expect(response).to have_http_status(:ok)
+      expect(original.reload.attestation_history.map { |review| review["notes"] }).to eq([ "First review", "Reviewed late payroll" ])
+      expect(original.ready_fingerprint).not_to eq(original_fingerprint)
+    end
+
+    it "detects full SSN changes while ignoring unrelated employee contact metadata" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      fingerprint = W2FilingReadiness.find_by!(company: company, year: 2025).ready_fingerprint
+      employee.update!(email: "updated-contact@example.test")
+      expect(W2FilingInputsFingerprint.new(company: company.reload, year: 2025).call).to eq(fingerprint)
+      employee.update!(ssn_encrypted: "987-65-6789") # Displayed last four remain unchanged.
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("stale")
+    end
+
+    it "does not accept an older browser's preflight after another operator refreshes it" do
+      old_fingerprint = W2FilingReadiness.find_by!(company: company, year: 2025).preflight_fingerprint
+      employee.update!(address_line1: "Updated filing address")
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, preflight_fingerprint: old_fingerprint }
+      expect(response).to have_http_status(:conflict)
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025).marked_ready_at).to be_nil
     end
 
     it "returns 403 for manager users (admin-only approval action)" do

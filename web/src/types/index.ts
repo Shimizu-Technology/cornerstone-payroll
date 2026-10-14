@@ -2258,6 +2258,7 @@ export interface W2GuEmployeeRow {
 }
 
 export interface W2GuReport {
+  filing_readiness?: W2GuFilingReadiness | null;
   meta: {
     report_type: string;
     company_id: number;
@@ -2310,7 +2311,12 @@ export interface W2GuPreflightResult {
 
 export interface W2GuFilingReadiness {
   year: number;
-  status: 'draft' | 'preflight_passed' | 'filing_ready';
+  status: 'draft' | 'preflight_passed' | 'filing_ready' | 'stale';
+  stale?: boolean;
+  preflight_current?: boolean;
+  preflight_fingerprint?: string | null;
+  ready_fingerprint?: string | null;
+  attestation_history?: { source_fingerprint: string | null; marked_ready_at: string; marked_ready_by_id: number | null; notes: string | null; legacy?: boolean }[];
   blocking_count: number;
   warning_count: number;
   preflight_run_at?: string | null;

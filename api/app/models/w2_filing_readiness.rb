@@ -6,6 +6,8 @@ class W2FilingReadiness < ApplicationRecord
   belongs_to :company
   belongs_to :marked_ready_by, class_name: "User", optional: true
 
+  validate :preserve_attestation_history
+
   validates :year,
     presence: true,
     numericality: {
@@ -15,4 +17,20 @@ class W2FilingReadiness < ApplicationRecord
     }
   validates :status, inclusion: { in: STATUSES }
   validates :company_id, uniqueness: { scope: :year }
+  def current?(fingerprint)
+    status == "filing_ready" && ready_fingerprint.present? && ready_fingerprint == fingerprint
+  end
+
+  def preflight_current?(fingerprint)
+    preflight_fingerprint.present? && preflight_fingerprint == fingerprint
+  end
+
+  private
+
+  def preserve_attestation_history
+    return if new_record? || !will_save_change_to_attestation_history?
+
+    retained = attestation_history_in_database || []
+    errors.add(:attestation_history, "cannot rewrite previous reviews") unless attestation_history.first(retained.length) == retained
+  end
 end
