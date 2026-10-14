@@ -1,4 +1,4 @@
-import type { PayrollItem, PayrollItemWageRateHours } from '@/types';
+import type { Employee, PayrollItem, PayrollItemWageRateHours } from '@/types';
 import { formatDate } from '@/lib/utils';
 
 interface WorksheetHours {
@@ -10,6 +10,18 @@ interface WorksheetHours {
 export function capturedSourceHoursLocked(item?: PayrollItem): boolean {
   return Boolean(item?.import_source?.startsWith('time_tracking:')
     || item?.wage_rate_hours?.some(rate => rate.source_bucket_key));
+}
+
+export function worksheetPayBasisHold(item?: PayrollItem, employee?: Employee): { reason: string } | null {
+  if (item?.correction_pay_basis_hold) return item.correction_pay_basis_hold;
+  if (!item || !capturedSourceHoursLocked(item)) return null;
+  if (employee && item.employment_type !== employee.employment_type) {
+    return { reason: 'Retained Source pay basis differs from current employee setup. Review the captured work and pay setup before recalculating.' };
+  }
+  if (item.employment_type === 'hourly' && !item.wage_rate_hours?.length) {
+    return { reason: 'Retained Source earning evidence is unavailable. Review original imported work and earning rates before recalculating.' };
+  }
+  return null;
 }
 
 function comparableRate(rate: PayrollItemWageRateHours) {

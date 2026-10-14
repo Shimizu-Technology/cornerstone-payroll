@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PayrollItem, PayrollItemWageRateHours } from '@/types';
-import { capturedSourceContext, capturedSourceHoursLocked, worksheetHoursInvalid } from './captured-source-worksheet';
+import { capturedSourceContext, capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from './captured-source-worksheet';
 
 const bucket = (hours: number, kind: string): PayrollItemWageRateHours => ({
   source_bucket_key: kind, employee_wage_rate_id: 1, label: 'Regular', rate: 25,
@@ -40,5 +40,14 @@ describe('captured Source worksheet validation', () => {
   it('labels only recorded work kind/date context, without inventing missing context', () => {
     expect(capturedSourceContext(rates[1])).toBe('Correction · Oct 10, 2026');
     expect(capturedSourceContext({ ...rates[0], source_lines: undefined })).toBeNull();
+  });
+
+  it('holds recorded imported basis mismatch and legacy missing earning evidence without inventing current rates', () => {
+    const retained = { ...item, employment_type: 'hourly' } as PayrollItem;
+    expect(worksheetPayBasisHold(retained, { employment_type: 'salary' } as import('@/types').Employee)?.reason).toContain('differs');
+    expect(worksheetPayBasisHold({ ...retained, wage_rate_hours: [] })?.reason).toContain('evidence is unavailable');
+    expect(worksheetPayBasisHold(retained, { employment_type: 'hourly' } as import('@/types').Employee)).toBeNull();
+    const serverHold = { reason: 'Retained frequency requires review.' };
+    expect(worksheetPayBasisHold({ ...retained, correction_pay_basis_hold: serverHold })).toBe(serverHold);
   });
 });

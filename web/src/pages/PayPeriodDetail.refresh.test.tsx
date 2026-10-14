@@ -1344,3 +1344,32 @@ it.each(['draft', 'calculated', 'committed'])('shows retained correction holds a
     expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
   }
 });
+
+it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without synthesizing profile rates or new salary forecasts', async shape => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: shape === 'changed basis' ? 'salary' : 'hourly',
+    salary_type: 'annual', pay_rate: shape === 'changed basis' ? 52000 : 99, pay_frequency: 'semimonthly', status: 'active',
+    wage_rates: [{ id: 1, label: 'Current primary profile', rate: 99, is_primary: true, active: true },
+      { id: 2, label: 'Current secondary profile', rate: 150, is_primary: false, active: true }] } as unknown as Employee;
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 3, overtime_hours: 0, gross_pay: 75, net_pay: 69.26,
+    import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: shape === 'changed basis' ? [{ employee_wage_rate_id: 1, label: 'Retained regular', rate: 25,
+      source_bucket_key: 'retained', regular_hours: 3, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] : [] };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const mobile = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(within(mobile).getByText('Retained pay basis · review required')).toBeTruthy();
+  const reason = shape === 'changed basis' ? /Retained Source pay basis differs/ : /Retained Source earning evidence is unavailable/;
+  expect(within(mobile).getByText(reason)).toBeTruthy();
+  const row = screen.getAllByRole('row').find(candidate => within(candidate).queryByRole('link', { name: 'Ana Cruz' }))!;
+  expect(within(row).getByText(reason)).toBeTruthy();
+  expect(within(row).getByText('$75.00')).toBeTruthy();
+  expect(screen.queryByText('$1.04/period')).toBeNull();
+  expect(screen.queryByText('Current primary profile')).toBeNull();
+  expect(screen.queryByText('Current secondary profile')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Calculate Payroll' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
