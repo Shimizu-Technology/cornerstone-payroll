@@ -40,4 +40,15 @@ RSpec.describe DatabaseIntegrity do
     described_class.install!
     expect(described_class.verify!).to eq(true)
   end
+
+  it "rejects a trigger with its original name and function but missing the DELETE guard" do
+    ApplicationRecord.connection.execute(<<~SQL)
+      DROP TRIGGER payroll_filing_events_append_only ON payroll_filing_events;
+      CREATE TRIGGER payroll_filing_events_append_only BEFORE UPDATE ON payroll_filing_events
+      FOR EACH ROW EXECUTE FUNCTION prevent_payroll_filing_event_mutation();
+    SQL
+    expect { described_class.verify! }.to raise_error(/trigger definitions differ:.*payroll_filing_events_append_only/)
+    described_class.install!
+    expect(described_class.verify!).to eq(true)
+  end
 end
