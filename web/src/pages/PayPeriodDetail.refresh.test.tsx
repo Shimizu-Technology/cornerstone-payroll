@@ -1296,8 +1296,8 @@ it.each([25, 10])('describes retained earning entries accurately when one wage I
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 25, status: 'active' } as Employee;
   const buckets = [
-    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: carryRate, regular_hours: 4, overtime_hours: 0, is_primary: true, active: true },
-    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, is_primary: false, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: carryRate, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
   ];
   const originalBuckets = JSON.stringify(buckets);
   const gross = carryRate * 4 + 50;
