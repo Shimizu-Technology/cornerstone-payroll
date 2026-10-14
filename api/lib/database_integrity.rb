@@ -25,6 +25,25 @@ module DatabaseIntegrity
     SQL
     missing = expected - actual
     raise "Payroll database integrity guards missing: #{missing.map(&:first).join(', ')}" if missing.any?
+    sql = File.read(PATH)
+    declarations = sql.scan(/CREATE OR REPLACE FUNCTION\s+(\w+)/).flatten
+    definitions = sql.scan(/CREATE OR REPLACE FUNCTION\s+(\w+)\([^)]*\)(.*?)(\$[a-zA-Z0-9_]*\$)(.*?)\3(.*?);/m)
+    unless definitions.map(&:first) == declarations
+      raise "Payroll integrity snapshot contains an unrecognized function definition"
+    end
+    expected_functions = definitions.to_h do |name, header, _delimiter, body, tail|
+      language = "#{header} #{tail}"[/LANGUAGE\s+(\w+)/, 1]
+      raise "Payroll integrity function language missing: #{name}" unless language
+      [ name, [ body.strip, language ] ]
+    end
+    functions = connection.select_rows(<<~SQL).to_h { |name, body, language| [ name, [ body.strip, language ] ] }
+      SELECT p.proname, p.prosrc, l.lanname FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      JOIN pg_language l ON l.oid = p.prolang
+      WHERE n.nspname = current_schema()
+    SQL
+    altered = expected_functions.reject { |name, definition| functions[name] == definition }.keys
+    raise "Payroll database integrity functions differ: #{altered.join(', ')}" if altered.any?
     true
   end
 
