@@ -45,7 +45,10 @@ module TimeTracking
       end
       return {} unless bucket
 
-      bucket.slice("source_bucket_key", "employee_wage_rate_id", "rate", "label", "source_lines")
+      bucket.slice("source_bucket_key", "employee_wage_rate_id", "rate", "label", "source_lines").merge(
+        "employment_type" => payroll_item.employment_type,
+        "contractor_pay_type" => payroll_item.employee.contractor_pay_type
+      )
     end
 
     def decimal(value)

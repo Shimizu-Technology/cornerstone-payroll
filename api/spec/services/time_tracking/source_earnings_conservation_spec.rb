@@ -108,4 +108,60 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     expect { item.calculate! }.to raise_error(ArgumentError, /Imported source hours/)
     expect(item.reload.gross_pay).to eq(0)
   end
+
+  it "rolls back a new salary calculation that would replace captured hourly earnings" do
+    item = apply!
+    item.calculate!
+    original = item.reload.attributes
+    original_earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
+    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+    item.employment_type = employee.employment_type
+    item.pay_rate = employee.pay_rate
+    expect { item.calculate! }.to raise_error(ArgumentError, /captured pay basis/)
+    expect(item.reload.attributes).to eq(original)
+    expect(item.payroll_item_earnings.reload.order(:id).map(&:attributes)).to eq(original_earnings)
+    expect(item.time_tracking_entry_allocations.count).to eq(2)
+  end
+
+  it "rolls back mismatched computed earnings before accepting a calculation" do
+    item = apply!
+    item.calculate!
+    original = item.reload.attributes
+    original_earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
+    allow_any_instance_of(HourlyPayrollCalculator).to receive(:calculate).and_wrap_original do |method|
+      method.call
+      earning = item.payroll_item_earnings.detect { |row| row.category == "regular" }
+      earning.amount += 1
+    end
+    expect { item.calculate! }.to raise_error(ArgumentError, /Imported source hours/)
+    expect(item.reload.attributes).to eq(original)
+    expect(item.payroll_item_earnings.reload.order(:id).map(&:attributes)).to eq(original_earnings)
+  end
+
+  describe "worksheet calculation", type: :request do
+    it "reports a captured pay-basis error before field or loan draft writes" do
+      item = apply!
+      item.calculate!
+      original = item.reload.attributes
+      original_earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
+      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      expect_any_instance_of(PayrollFieldInputApplier).not_to receive(:apply!)
+      expect(NamedPayrollLoanInput).not_to receive(:apply!)
+      post "/api/v1/admin/pay_periods/#{next_period.id}/run_payroll", headers: { "X-Company-Id" => company.id.to_s },
+        params: { employee_ids: [ employee.id ], payroll_field_inputs: { employee.id.to_s => {
+          "999" => { mode: "override", amount: 10 }
+        } }, named_loan_payments: { employee.id.to_s => { "999" => { mode: "override", amount: 20 } } } }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "success")).to be_empty
+      expect(response.parsed_body.dig("results", "errors")).to contain_exactly(include("employee_id" => employee.id,
+        "error" => include("captured pay basis")))
+      expect(item.reload.attributes).to eq(original)
+      expect(item.payroll_item_earnings.reload.order(:id).map(&:attributes)).to eq(original_earnings)
+      expect(item.payroll_item_field_entries).to be_empty
+      expect(item.loan_transactions).to be_empty
+      expect(item.named_loan_payments).to be_empty
+      expect(next_period.reload.status).to eq("draft")
+    end
+  end
 end
