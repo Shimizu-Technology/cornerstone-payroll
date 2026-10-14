@@ -31,6 +31,40 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     next_period.payroll_items.find_by!(employee: employee)
   end
 
+  context "a zero-total REG/OT correction alongside current overtime" do
+    let(:next_import) do
+      make_import(next_period, 3, "current", "RECLASS", daily_lines: [
+        { source_time_entry_id: "101", line_key: "reclassified-line", source_kind: "correction", source_time_entry_version: 1,
+          original_work_date: "2026-10-10", total_hours: 0, regular_hours: 2, overtime_hours: -2 },
+        { source_time_entry_id: "104", line_key: "current-line", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 3, regular_hours: 0, overtime_hours: 3 }
+      ])
+    end
+
+    it "retains both signed components through apply, calculation, approval and commitment" do
+      item = apply!(same_rate: true, source_kinds: %w[correction current], signed_acknowledgement: true)
+      expect(item.reload.wage_rate_hours).to contain_exactly(
+        include("regular_hours" => 2, "overtime_hours" => -2, "source_lines" => [ include("line_key" => "reclassified-line") ]),
+        include("regular_hours" => 0, "overtime_hours" => 3)
+      )
+      item.calculate!
+      expect(item.reload.gross_pay).to eq(87.50) # 2*25 - 2*37.50 + 3*37.50
+      expect(item.hours_worked).to eq(2)
+      expect(item.overtime_hours).to eq(1)
+      expect(item.time_tracking_entry_allocations.count).to eq(2)
+      expect(described_class.validate!(item, calculated: true)).to eq(true)
+      item.payroll_item_earnings.find_by!(category: "other").update_columns(amount: -74)
+      expect { described_class.validate!(item, calculated: true) }.to raise_error(ArgumentError, /Imported source hours/)
+      item.calculate!
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.gross_pay).to eq(87.50)
+      expect(next_period.reload.status).to eq("committed")
+    end
+  end
+
   it "rejects incomplete and unknown explicit mapping dimensions without partial imports" do
     [ { employee_wage_rate_id: nil }, { source_category_id: "invented" }, { source_kind: nil } ].each do |change|
       expect { apply!(mapping_change: change) }.to raise_error(ArgumentError, /earning|source kind/)

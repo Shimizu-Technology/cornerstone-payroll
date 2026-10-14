@@ -62,3 +62,57 @@ RSpec.describe DatabaseIntegrity do
     expect(described_class.verify!).to eq(true)
   end
 end
+
+RSpec.describe "Schema database targeting" do
+  self.use_transactional_tests = false
+
+  it "loads each actual secondary schema without touching primary payroll guards" do
+    primary = ActiveRecord::Base.connection_pool
+    original_guards = primary.with_connection { |connection| connection.select_values("SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal ORDER BY tgname") }
+    %w[cache queue cable].each do |name|
+      primary = ActiveRecord::Base.connection_pool
+      namespace = "integrity_secondary_#{name}_#{SecureRandom.hex(4)}"
+      primary.with_connection { |connection| connection.execute("CREATE SCHEMA #{namespace}") }
+      config = ActiveRecord::DatabaseConfigurations::HashConfig.new(Rails.env, name,
+        primary.db_config.configuration_hash.merge(schema_search_path: namespace))
+      expect(config.primary?).to eq(false)
+      expect(DatabaseIntegrity).not_to receive(:install!)
+      ActiveRecord::Tasks::DatabaseTasks.send(:with_temporary_pool, config) do |pool|
+        load Rails.root.join("db/#{name}_schema.rb")
+        pool.with_connection do |connection|
+          expect(connection.select_value("SELECT current_schema()")).to eq(namespace)
+          expect(connection.tables).not_to include("payroll_items")
+          expect(connection.tables).to include("solid_#{name == 'queue' ? 'queue_jobs' : name == 'cache' ? 'cache_entries' : 'cable_messages'}")
+        end
+      end
+    ensure
+      ActiveRecord::Base.connection_pool.with_connection { |connection| connection.execute("DROP SCHEMA IF EXISTS #{namespace} CASCADE") }
+    end
+    expect(DatabaseIntegrity.verify!).to eq(true)
+    expect(ActiveRecord::Base.connection_pool.with_connection { |connection| connection.select_values("SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal ORDER BY tgname") }).to eq(original_guards)
+  end
+
+  it "installs and verifies the actual primary target connection in an isolated schema" do
+    primary = ActiveRecord::Base.connection_pool
+    namespace = "integrity_primary_#{SecureRandom.hex(4)}"
+    primary.with_connection { |connection| connection.execute("CREATE SCHEMA #{namespace}") }
+    config = ActiveRecord::DatabaseConfigurations::HashConfig.new(Rails.env, "primary",
+      primary.db_config.configuration_hash.merge(schema_search_path: namespace))
+    expect(config.primary?).to eq(true)
+    installed_connections = []
+    allow(DatabaseIntegrity).to receive(:install!).and_wrap_original do |method, connection|
+      installed_connections << connection
+      expect(connection.select_value("SELECT current_schema()")).to eq(namespace)
+      method.call(connection)
+    end
+    ActiveRecord::Tasks::DatabaseTasks.send(:with_temporary_pool, config) do |pool|
+      load Rails.root.join("db/schema.rb")
+      pool.with_connection do |connection|
+        expect(installed_connections).to eq([ connection ])
+        expect(DatabaseIntegrity.verify!(connection)).to eq(true)
+      end
+    end
+  ensure
+    ActiveRecord::Base.connection_pool.with_connection { |connection| connection.execute("DROP SCHEMA IF EXISTS #{namespace} CASCADE") } if namespace
+  end
+end

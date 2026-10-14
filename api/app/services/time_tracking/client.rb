@@ -304,7 +304,7 @@ module TimeTracking
       uri = payroll_cockpit_uri("/payment_attestations", query)
       require_secure_payroll_transport!(uri)
       result = request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
-      if source_user_uuid.blank?
+      if start_date.present? || end_date.present?
         identity = ConnectionIdentity.validate!(source: @source, payload: result)
         raise Error, "Verify this source installation before reviewing period payment evidence" if identity.legacy || !@source.remote_identity_pinned?
         validate_integration_response!(result)
