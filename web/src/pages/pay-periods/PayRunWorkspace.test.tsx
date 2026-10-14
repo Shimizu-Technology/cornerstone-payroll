@@ -19,7 +19,7 @@ const apiMocks = vi.hoisted(() => ({
   updatePaymentMethod: vi.fn(),
   getPayrollItem: vi.fn(),
   isAdmin: true,
-  activeCompany: { id: 7, payroll_environment: 'migration_rehearsal' } as Record<string, unknown>,
+  activeCompany: { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true } as Record<string, unknown>,
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
@@ -109,7 +109,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.isAdmin = true;
-    apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal' };
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true };
     apiMocks.getPayPeriod.mockResolvedValue({ pay_period: payRun });
     apiMocks.rehearsalPreviewPdf.mockResolvedValue({
       blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
@@ -147,6 +147,16 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.getByText('void_rehearsal_checks_2026-09-24.pdf')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/TEST ONLY|NOT NEGOTIABLE|VOID - TEST/);
     expect(apiMocks.rehearsalPreviewPdf).toHaveBeenCalledWith(12);
+  });
+
+  it('routes an assigned reviewer away from processing while preserving record links', async () => {
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: false };
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes></MemoryRouter>);
+    expect(await screen.findByText('Read-only workspace')).toBeTruthy();
+    expect(screen.queryByText('Process payroll')).toBeNull();
+    expect(screen.queryByText('Open processing')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Open payroll item for Alice Reyes' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Checks & direct deposit/ })).toBeTruthy();
   });
 
   it('keeps a training baseline read-only and out of payroll processing', async () => {

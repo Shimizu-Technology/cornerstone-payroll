@@ -18,6 +18,8 @@ import { ReprintCheckModal } from './ReprintCheckModal';
 import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 interface ChecksPanelProps {
@@ -89,14 +91,17 @@ function CancellationSyncNotice({ state, reviewHref }: { state?: PaymentCancella
   </div>;
 }
 
-function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
+function BankPaymentEvidence({ item, readOnly, onConfirm }: { item?: DirectDepositItem; readOnly: boolean; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
   if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
+  if (readOnly) return <span className="text-sm text-neutral-500">Bank payment not recorded</span>;
   return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined} onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }
 
 export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod, timeTrackingReviewHref }: ChecksPanelProps) {
   const { notify } = useFeedback();
+  const { activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const loadRequest = useRef(0);
   const runScope = `${payPeriod.company_id || 0}:${payPeriod.id}`;
   const currentRunScope = useRef(runScope);
@@ -354,7 +359,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   };
 
   const saveCheckNumberChanges = async () => {
-    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    if (readOnly || checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
     setSavingCheckNumbers(true);
     setCheckNumberSaveError(null);
     try {
@@ -594,8 +599,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                           <p className="ml-8 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end [&>button]:min-h-11">
-                          <BankPaymentEvidence item={depositsById.get(item.id)} onConfirm={setDepositTarget} />
-                          {!item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
+                          <BankPaymentEvidence readOnly={readOnly} item={depositsById.get(item.id)} onConfirm={setDepositTarget} />
+                          {!readOnly && !item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
                           <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
                           <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Print</Button>
                           <Button size="sm" variant="outline" className={item.statement_only || !onChangePaymentMethod ? 'col-span-2 sm:col-span-1' : undefined} onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
@@ -620,7 +625,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
-            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={readOnly || savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
               {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
             </Button>
           </div>
@@ -679,7 +684,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       <InlineCheckNumberField
                         value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                         ariaLabel={`Check number for ${item.employee_name}`}
-                        disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
+                        disabled={readOnly || savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                         dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                         error={checkNumberErrors[item.id]}
                         onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -705,17 +710,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         {isActionLoading(item.id, 'stub') ? 'Loading…' : 'Stub'}
                       </Button>
                     )}
-                    {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
+                    {!readOnly && !item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
                       <Button size="sm" className="max-sm:min-h-[44px]" onClick={() => setDeliveryTarget(item)} disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined}>
                         Record Issued
                       </Button>
                     )}
-                    {!item.voided && item.check_number && (
+                    {!readOnly && !item.voided && item.check_number && (
                       <Button size="sm" variant="outline" onClick={() => setReprintTarget(item)} disabled={actionLoading?.id === item.id} className="border-orange-300 text-orange-700 hover:bg-orange-50">
                         Reissue
                       </Button>
                     )}
-                    {!item.voided && item.check_number && (
+                    {!readOnly && !item.voided && item.check_number && (
                       <Button size="sm" variant="outline" onClick={() => setVoidTarget(item)} disabled={actionLoading?.id === item.id} className="border-red-300 text-red-700 hover:bg-red-50">
                         Void
                       </Button>
@@ -752,7 +757,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         <InlineCheckNumberField
                           value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                           ariaLabel={`Check number for ${item.employee_name}`}
-                          disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
+                          disabled={readOnly || savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                           dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                           error={checkNumberErrors[item.id]}
                           onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -828,7 +833,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         </Button>
                       )}
 
-                      {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
+                      {!readOnly && !item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
                         <Button
                           size="sm"
                           onClick={() => setDeliveryTarget(item)}
@@ -841,7 +846,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       )}
 
                       {/* Reissue physical check */}
-                      {!item.voided && item.check_number && (
+                      {!readOnly && !item.voided && item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -854,7 +859,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       )}
 
                       {/* Void */}
-                      {!item.voided && item.check_number && (
+                      {!readOnly && !item.voided && item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -882,9 +887,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         </>
       )}
 
+      {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{companyReadOnlyMessage(activeCompany)}</p>}
+
       {/* Modals */}
       {voidTarget && (
         <VoidCheckModal
+          readOnly={readOnly}
           item={voidTarget}
           onClose={() => setVoidTarget(null)}
           onComplete={handleVoidComplete}
@@ -892,6 +900,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {reprintTarget && (
         <ReprintCheckModal
+          readOnly={readOnly}
           item={reprintTarget}
           onClose={() => setReprintTarget(null)}
           onComplete={handleReprintComplete}
@@ -899,6 +908,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {depositTarget && (
         <RecordDirectDepositPaymentDialog
+          readOnly={readOnly}
           item={depositTarget}
           onClose={() => setDepositTarget(null)}
           onComplete={async () => {
@@ -911,6 +921,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {deliveryTarget && (
         <RecordCheckDeliveryDialog
+          readOnly={readOnly}
           item={deliveryTarget}
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {

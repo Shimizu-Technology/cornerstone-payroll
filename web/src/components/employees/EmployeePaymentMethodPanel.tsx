@@ -1,3 +1,5 @@
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { employeesApi } from '@/services/api';
@@ -20,7 +22,8 @@ export function EmployeePaymentMethodPanel({ employee, onEmployeeReload }: { emp
   useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
-  const canChange = hasCapability('payroll_operations');
+  const { activeCompany } = useCompany();
+  const canChange = canWriteCompany(activeCompany) && hasCapability('payroll_operations');
 
   const save = async (): Promise<void> => {
     if (saving || !canChange || method === employee.payment_delivery_method) return;

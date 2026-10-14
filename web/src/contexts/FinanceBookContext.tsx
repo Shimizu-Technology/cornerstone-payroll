@@ -1,3 +1,4 @@
+import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -117,7 +118,7 @@ export function useFinanceBook() {
 
 export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }) {
   const { user } = useAuth();
-  const { companies, activeOrganizationId } = useCompany();
+  const { companies, activeOrganizationId, activeCompany } = useCompany();
   const { books, activeBook, switchBook, createBook } = useFinanceBook();
   const [showSetup, setShowSetup] = useState(false);
   const [name, setName] = useState('');
@@ -126,7 +127,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
   const [companyId, setCompanyId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
-  const canManage = ['super_admin', 'org_admin', 'admin'].includes(user?.role || '');
+  const canManage = !isTestWorkspaceCompany(activeCompany) && ['super_admin', 'org_admin', 'admin'].includes(user?.role || '');
   const canCreatePersonal = canManage && (user?.role === 'super_admin' || activeOrganizationId === user?.organization_id);
   const eligibleCompanies = companies.filter((company) => company.organization_id === activeBook.organization_id
     && !company.test_workspace && !books.some((book) => book.company_id === company.id));

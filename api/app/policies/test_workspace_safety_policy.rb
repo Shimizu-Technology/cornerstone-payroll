@@ -26,7 +26,28 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/invoice_credit_notes" => %w[create void]
   }.freeze
 
+  # Firm books are shared live records even while a copied payroll client is
+  # selected. New finance actions fail closed until reviewed as read-only.
+  FINANCE_READ_ACTIONS = {
+    "api/v1/admin/invoices" => %w[index show preview_pdf download_artifact],
+    "api/v1/admin/invoice_receivables" => %w[show statement],
+    "api/v1/admin/expenses" => %w[index show export download_artifact],
+    "api/v1/admin/finance_overviews" => %w[show],
+    "api/v1/admin/finance_books" => %w[index],
+    "api/v1/admin/finance_api_tokens" => %w[index],
+    "api/v1/admin/invoice_chat_sessions" => %w[index show],
+    "api/v1/admin/invoice_send_schedules" => %w[index],
+    "api/v1/admin/invoice_recurrences" => %w[index],
+    "api/v1/admin/invoice_recipients" => %w[index show],
+    "api/v1/admin/invoice_billing_profiles" => %w[index show],
+    "api/v1/admin/expense_vendors" => %w[index]
+  }.freeze
+
   def self.blocked?(controller_path:, action_name:)
+    if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")
+      return !FINANCE_READ_ACTIONS.fetch(controller_path, []).include?(action_name)
+    end
+
     BLOCKED_ACTIONS.fetch(controller_path, []).include?(action_name)
   end
 end

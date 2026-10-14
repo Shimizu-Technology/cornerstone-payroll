@@ -148,6 +148,26 @@ RSpec.describe PayrollAccess::SessionRevoker do
     expect(connection).to have_received(:close).with(reason: "remote", reconnect: false)
   end
 
+  it "uses one native user broadcast without enumerating companies" do
+    current = connected_as(user, user.company)
+    former = create(:company, active: false)
+    switched = connected_as(user, former)
+    create_list(:company, 20)
+    company_queries = []
+    subscriber = ->(_name, _started, _finished, _id, payload) { company_queries << payload[:sql] if payload[:sql].match?(/FROM "companies"/i) }
+
+    ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      described_class.disconnect_user(user)
+    end
+
+    [ current, switched ].each do |connection|
+      wait_for { @received_messages[connection].size == 1 }
+      expect(connection).to have_received(:close).with(reason: "remote", reconnect: false).once
+    end
+    expect(adapter.broadcasts(current.send(:internal_channel)).size).to eq(1)
+    expect(company_queries).to be_empty
+  end
+
   it "raises adapter failures so the revocation job retries them" do
     allow(adapter).to receive(:broadcast).and_raise(StandardError, "adapter unavailable")
 

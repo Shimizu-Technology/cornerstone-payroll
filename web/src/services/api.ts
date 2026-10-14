@@ -3752,6 +3752,7 @@ export interface CompanyListItem {
   test_workspace_sealed_at?: string | null;
   test_workspace_expired?: boolean;
   test_workspace_read_only?: boolean;
+  workspace_can_write?: boolean;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;

@@ -38,11 +38,12 @@ const EMPTY_EMPLOYEE: BulkImportEmployeeData = {
 
 interface Props {
   open: boolean;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => void;
 }
 
-export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
+export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onComplete }: Props) {
   const { activeCompanyId } = useCompany();
   const intake = useEmployeeIntakeSettings(activeCompanyId || 0, false, open && Boolean(activeCompanyId));
   const allowIncomplete = Boolean(intake.settings?.enabled);
@@ -94,6 +95,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   };
 
   const handlePreview = async () => {
+    if (readOnly) return;
     if (!file) return;
     setLoading(true);
     setError(null);
@@ -170,6 +172,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   [rows]);
 
   const handleApply = async () => {
+    if (readOnly) return;
     const toImport = rows.filter(r => r.included && r.errors.length === 0);
     if (toImport.length === 0) return;
 
@@ -440,7 +443,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
               </Button>
             )}
             {step === 'upload' && (
-              <Button onClick={handlePreview} disabled={!file || loading}>
+              <Button onClick={handlePreview} disabled={readOnly || !file || loading}>
                 {loading ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -452,7 +455,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
               </Button>
             )}
             {step === 'preview' && (
-              <Button onClick={handleApply} disabled={includedCount === 0}>
+              <Button onClick={handleApply} disabled={readOnly || includedCount === 0}>
                 Import {includedCount} Employee{includedCount !== 1 ? 's' : ''}
               </Button>
             )}

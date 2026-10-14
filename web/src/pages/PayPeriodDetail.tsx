@@ -3170,7 +3170,7 @@ export function PayPeriodDetail({
                     </TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Net Pay</TableHead>
-                    {(isCalculated || isCommitted) && <TableHead className="text-center w-20"></TableHead>}
+                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-gray-50 text-center"></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -3505,7 +3505,7 @@ export function PayPeriodDetail({
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>
                           <TableCell className={`text-right font-bold text-green-600 ${rowTone}`}>{formatCurrency(toNumber(item.net_pay))}</TableCell>
                           {isCalculated && (
-                            <TableCell className={`text-center ${rowTone}`}>
+                            <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 text-center ${rowTone}`}>
                               <button
                                 onClick={() => setEditingItem(item)}
                                 className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
@@ -3525,9 +3525,9 @@ export function PayPeriodDetail({
                               payPeriod?.cycle !== 'supplemental' &&
                               !item.voided &&
                               !!item.check_number;
-                            if (!canCorrect && !canReplace) return <TableCell />;
+                            if (!canCorrect && !canReplace) return <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 ${rowTone}`} />;
                             return (
-                              <TableCell className={`text-center ${rowTone}`}>
+                              <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 text-center ${rowTone}`}>
                                 <div className="flex flex-col items-center gap-0.5">
                                   {canCorrect && (
                                     <button
@@ -3552,7 +3552,7 @@ export function PayPeriodDetail({
                             );
                           })()}
                           {isCommitted && isContractor && (
-                            <TableCell className={rowTone} />
+                            <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 ${rowTone}`} />
                           )}
                         </TableRow>
                       </Fragment>
@@ -3598,7 +3598,7 @@ export function PayPeriodDetail({
                         <TableCell className="bg-slate-100 text-right text-amber-700">{formatCurrency(registerTotals.employerMedicare)}</TableCell>
                         <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.deductions)}</TableCell>
                         <TableCell className="bg-slate-100 text-right text-green-600">{formatCurrency(registerTotals.net)}</TableCell>
-                        {(isCalculated || isCommitted) && <TableCell className="bg-slate-100" />}
+                        {(isCalculated || isCommitted) && <TableCell className="sticky right-0 z-10 border-l border-neutral-200 bg-slate-100" />}
                       </TableRow>
                     );
                   })()}

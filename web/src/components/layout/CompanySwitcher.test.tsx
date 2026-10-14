@@ -48,6 +48,7 @@ describe('CompanySwitcher', () => {
           historical_payroll_enabled: false,
           payroll_environment: 'migration_rehearsal',
           test_workspace: true,
+          workspace_can_write: true,
           test_workspace_purpose_label: 'Training replay',
           migration_rehearsal_status: 'ready',
         },
