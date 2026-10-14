@@ -318,7 +318,9 @@ export function TimeTrackingImportModal({
   };
 
   const rowCategories = (row: TimeTrackingPreviewRow) => (row.categories || []).filter((category) => (
-    isFinalizedBatch ? categoryHours(category) !== 0 : categoryHours(category) > 0
+    isFinalizedBatch
+      ? [categoryHours(category), category.regular_hours ?? 0, category.overtime_hours ?? 0].some(hours => hours !== 0)
+      : categoryHours(category) > 0
   ));
 
   const rowWageRateMappingsComplete = (row: TimeTrackingPreviewRow) => {
@@ -515,7 +517,7 @@ export function TimeTrackingImportModal({
           source_user_id: row.source_user_id,
           employee_id: employeeId,
           include: includedRows.has(row.source_user_id) && Boolean(employeeId),
-          wage_rate_mappings: (row.categories || []).map((category) => ({
+          wage_rate_mappings: (isFinalizedBatch ? rowCategories(row) : (row.categories || [])).map((category) => ({
             source_category_id: category.source_category_id,
             source_category_key: category.key,
             source_category_name: category.name,

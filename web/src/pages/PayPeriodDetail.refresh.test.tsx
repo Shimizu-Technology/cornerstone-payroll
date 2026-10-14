@@ -23,6 +23,7 @@ const componentMocks = vi.hoisted(() => ({
   timeTrackingImport: vi.fn(),
   calendarRefreshCompleted: vi.fn(),
   correctionCallback: vi.fn(),
+  paymentMethodSaved: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
@@ -45,6 +46,9 @@ vi.mock('@/components/payroll/ChecksPanel', () => ({
     <><div data-testid="processing-check-list-refresh-token">{refreshToken}</div>
       <div data-testid="saved-instrument-state">{payPeriod.payroll_items?.[0]?.voided ? 'Voided' : 'Assigned'}</div></>
   ),
+}));
+vi.mock('@/components/payroll/PaymentMethodDialog', () => ({
+  PaymentMethodDialog: ({ onSaved }: { onSaved: () => Promise<void> }) => { componentMocks.paymentMethodSaved(onSaved); return null; },
 }));
 vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => null }));
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
@@ -1140,9 +1144,11 @@ async function renderRefreshNavigation() {
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   function Page() {
     const navigate = useNavigate();
-    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next refresh run</button>
+    const [refreshToken, setRefreshToken] = useState(0);
+    return <><button onClick={() => setRefreshToken(token => token + 1)}>Sibling refresh</button>
+      <button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next refresh run</button>
       <button onClick={() => navigate('/companies/8/pay-runs/12/work')}>Next refresh company</button>
-      <PayPeriodDetail initialPayPeriod={original} /></>;
+      <PayPeriodDetail initialPayPeriod={original} refreshToken={refreshToken} /></>;
   }
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
   await screen.findByRole('button', { name: 'Refresh current setup' });
@@ -1372,4 +1378,32 @@ it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without 
   expect((screen.getByRole('button', { name: 'Calculate Payroll' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it.each(['resolve', 'reject'])('retains a newer same-run reload when the setup GET is superseded then %s', async completion => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  let reject!: (error: Error) => void;
+  apiMocks.refreshSetup.mockResolvedValue({ results: { success: [], skipped: [], errors: [] } });
+  apiMocks.get.mockImplementationOnce(() => new Promise((resolve, failure) => { finish = resolve; reject = failure; }));
+  submitRefreshNavigation();
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Latest same-run payroll' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Latest same-run payroll');
+  await act(async () => completion === 'resolve'
+    ? finish({ pay_period: { ...original, notes: 'Old canonical setup' } })
+    : reject(new Error('Old setup GET failed')));
+  expect(screen.getByText('Latest same-run payroll')).toBeTruthy();
+  expect(screen.queryByText(/Setup changed, but the updated payroll could not load/)).toBeNull();
+  expect(screen.queryByText(/Current setup applied to the saved employees/)).toBeNull();
+  expect(screen.queryByText('Old setup GET failed')).toBeNull();
+});
+
+it('rejects the saved-payment callback when the current canonical reload fails', async () => {
+  await renderRefreshNavigation();
+  apiMocks.get.mockRejectedValueOnce(new Error('Saved method read failed'));
+  const callback = componentMocks.paymentMethodSaved.mock.calls.at(-1)![0] as () => Promise<void>;
+  await act(async () => { await expect(callback()).rejects.toThrow('Saved payment method could not refresh.'); });
+  expect(await screen.findByText('Saved method read failed')).toBeTruthy();
 });

@@ -302,13 +302,16 @@ module TimeTracking
       end
 
       categories = Array(row["categories"] || row[:categories]).select do |category|
-        finalized_batch? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
+        if finalized_batch?
+          %w[total_hours regular_hours overtime_hours].any? { |field| (category[field] || category[field.to_sym]).to_d.nonzero? }
+        else
+          category_total_hours(category).positive?
+        end
       end
       # An older saved preview predates source-line worksheet metadata. Derive
       # it from the validated frozen batch, never from caller-supplied references.
       if finalized_batch?
-        frozen_categories = BatchImportPreviewService.new(pay_period: @pay_period, source: @source)
-          .send(:category_buckets, source_employee_for(row).fetch("adjustments")).map(&:deep_stringify_keys)
+        frozen_categories = SourceCategoryBuckets.call(source_employee_for(row).fetch("adjustments")).map(&:deep_stringify_keys)
         categories = categories.map do |category|
           category = category.deep_stringify_keys
           frozen = frozen_categories.find do |candidate|

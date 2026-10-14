@@ -283,6 +283,28 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(onImportComplete).toHaveBeenCalledOnce();
   });
 
+  it('maps a zero-total signed component correction and omits a completely empty category from apply', async () => {
+    const reclassification = { ...row.categories![0], source_category_id: 'reclass', key: 'reclass', name: 'Reclassification',
+      total_hours: 0, regular_hours: 2, overtime_hours: -2, source_kinds: ['correction' as const], employee_wage_rate_id: null };
+    const empty = { ...row.categories![0], source_category_id: 'unused', key: 'unused', name: 'Unused',
+      total_hours: 0, regular_hours: 0, overtime_hours: 0, employee_wage_rate_id: null };
+    const { data } = await review({ rows: [{ ...row, categories: [...row.categories!, reclassification, empty] }] });
+    expect(screen.queryByText('Unused')).toBeNull();
+    const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }) as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    const selects = screen.getAllByRole('combobox', { name: 'Payroll earning type' });
+    expect(selects).toHaveLength(2);
+    await userEvent.selectOptions(selects[1], '22');
+    // The backend remains responsible for signed adjustment acknowledgement and math.
+    expect(apply.disabled).toBe(false);
+    apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
+    await userEvent.click(apply);
+    expect(apiMocks.apply.mock.calls[0][1].mappings[0].wage_rate_mappings).toEqual([
+      { source_category_id: 'regular', source_category_key: 'regular', source_category_name: 'Regular', source_kind: null, employee_wage_rate_id: 22 },
+      { source_category_id: 'reclass', source_category_key: 'reclass', source_category_name: 'Reclassification', source_kind: 'correction', employee_wage_rate_id: 22 },
+    ]);
+  });
+
   it('continues to block missing employee and earning mappings', async () => {
     await review({ rows: [{ ...row, employee_id: null }] });
     const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' });

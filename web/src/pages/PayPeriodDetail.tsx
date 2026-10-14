@@ -507,7 +507,7 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<boolean> => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -539,7 +539,7 @@ export function PayPeriodDetail({
         }),
       ]);
 
-      if (!isCurrentRequest()) return false;
+      if (!isCurrentRequest()) return 'superseded';
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
@@ -553,12 +553,11 @@ export function PayPeriodDetail({
         if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
       loadedPeriodIdRef.current = periodId;
-      return true;
+      return 'loaded';
     } catch (err) {
-      if (isCurrentRequest()) {
-        setError(err instanceof Error ? err.message : 'Failed to load pay period');
-      }
-      return false;
+      if (!isCurrentRequest()) return 'superseded';
+      setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      return 'failed';
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
@@ -1007,7 +1006,8 @@ export function PayPeriodDetail({
       setRefreshSetupOpen(false);
       const reloaded = await loadPayPeriod(scope.payRunId, true);
       if (!isCurrentRoute()) return;
-      if (!reloaded) {
+      if (reloaded === 'superseded') return;
+      if (reloaded === 'failed') {
         setPayPeriod(null);
         setPayrollItems([]);
         setError('Setup changed, but the updated payroll could not load. Your inputs are retained. Try again before reviewing or committing payroll.');
@@ -1867,7 +1867,10 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => { await loadPayPeriod(payPeriod.id, true); }} />
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => {
+        const result = await loadPayPeriod(payPeriod.id, true);
+        if (result === 'failed') throw new Error('Saved payment method could not refresh.');
+      }} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -2041,8 +2044,7 @@ export function PayPeriodDetail({
             onSourceChanged={invalidateAireSource}
             onRefresh={async () => {
               invalidateAireSource();
-              await loadPayPeriod(payPeriod.id, true, true);
-              return true;
+              return (await loadPayPeriod(payPeriod.id, true, true)) !== 'failed';
             }}
             onReviewFinalizedBatch={() => {
               setTimeTrackingAutoPreview(true);
@@ -3849,7 +3851,10 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={async () => { await loadPayPeriod(payPeriod.id, true); }} />
+              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={async () => {
+                const result = await loadPayPeriod(payPeriod.id, true);
+                if (result === 'failed') throw new Error('Saved checks could not refresh.');
+              }} />
             </div>
           </Card>
         )}
@@ -3960,7 +3965,7 @@ export function PayPeriodDetail({
         }}
         payPeriod={payPeriod}
         employees={employees}
-        onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+        onImportComplete={async () => (await loadPayPeriod(payPeriod.id, true)) === 'loaded'}
         onCorrectionRecorded={() => {
           invalidateAireSource();
           void loadPayPeriod(payPeriod.id, true, true);

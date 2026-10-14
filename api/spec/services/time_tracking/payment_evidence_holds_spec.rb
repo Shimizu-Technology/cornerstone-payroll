@@ -141,4 +141,95 @@ RSpec.describe TimeTracking::PaymentEvidenceHolds do
       command_id: command_id, reason: reason) }.to raise_error(TimeTracking::Client::Error, /too large/)
     expect(client).to have_received(:payroll_payment_attestations).exactly(10).times
   end
+  describe "bounded modern period fallback" do
+    before do
+      source.update!(expected_source_instance_id: SecureRandom.uuid, identity_verified_at: Time.current,
+        source_protocol: "shimizu_time_payroll", source_protocol_version: "1.0",
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ])
+      allow(client).to receive(:payroll_cockpit_manual_review).and_return("employees" => [])
+    end
+
+    def modern_query(**attributes)
+      { start_date: period.start_date.iso8601, end_date: period.end_date.iso8601, **attributes }
+    end
+
+    def overflow
+      { "payment_attestations" => [ hold.merge("id" => "discard-bulk") ], "pagination" => { "total_pages" => 11 } }
+    end
+
+    it "abandons bulk evidence and retrieves thirteen mappings including held-only and later pages" do
+      uuids = 12.times.map do |index|
+        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+          employee: create(:employee, company: company), source_user_id: "fallback-#{index}", source_user_uuid: SecureRandom.uuid).source_user_uuid
+      end
+      expect(client).to receive(:payroll_payment_attestations).with(**modern_query(page: 1)).once.and_return(overflow)
+      ([ uuid ] + uuids).each do |worker_uuid|
+        pages = worker_uuid == uuid ? 2 : 1
+        rows = worker_uuid == uuid ? [ hold.merge("source_user_uuid" => SecureRandom.uuid), hold.merge("work_date" => (period.start_date - 1).iso8601) ] : []
+        expect(client).to receive(:payroll_payment_attestations).with(**modern_query(source_user_uuid: worker_uuid, page: 1))
+          .and_return("payment_attestations" => rows, "pagination" => { "total_pages" => pages })
+      end
+      expect(client).to receive(:payroll_payment_attestations).with(**modern_query(source_user_uuid: uuid, page: 2))
+        .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 2 })
+      expect(service.review[:payment_attestations]).to eq([ hold.merge("employee_name" => employee.full_name) ])
+    end
+
+    it "refuses oversized scope before fanout without publishing partial evidence" do
+      20.times do |index|
+        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+          employee: create(:employee, company: company), source_user_id: "oversize-#{index}", source_user_uuid: SecureRandom.uuid)
+      end
+      expect(client).to receive(:payroll_payment_attestations).with(**modern_query(page: 1)).once.and_return(overflow)
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /request budget/)
+      expect(service.instance_variable_get(:@attestations)).to eq({})
+    end
+
+    it "enforces the global budget when each worker is within ten pages" do
+      TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source,
+        employee: create(:employee, company: company), source_user_id: "budget-worker", source_user_uuid: SecureRandom.uuid)
+      calls = 0
+      allow(client).to receive(:payroll_payment_attestations) do |**query|
+        calls += 1
+        query[:source_user_uuid] ? { "payment_attestations" => [], "pagination" => { "total_pages" => 10 } } : overflow
+      end
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /request budget/)
+      expect(calls).to eq(20)
+      expect(service.instance_variable_get(:@attestations)).to eq({})
+    end
+
+    it "keeps the per-worker cap and discards exhausted fallback evidence" do
+      allow(client).to receive(:payroll_payment_attestations).and_return(overflow)
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /too large/)
+      expect(client).to have_received(:payroll_payment_attestations).exactly(11).times
+      expect(service.instance_variable_get(:@attestations)).to eq({})
+    end
+
+    it "enforces the elapsed deadline and starts a later retry without partial cache" do
+      now = 100.0
+      timed = described_class.new(pay_period: period, source: source, client: client, monotonic_clock: -> { now })
+      allow(client).to receive(:payroll_payment_attestations) do |**_query|
+        now += 31
+        overflow
+      end
+      expect { timed.review }.to raise_error(TimeTracking::Client::Error, /timed out/)
+      expect(timed.instance_variable_get(:@attestations)).to eq({})
+      allow(client).to receive(:payroll_payment_attestations).with(**modern_query(page: 1))
+        .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 1 })
+      expect(timed.review[:payment_attestations].map { |row| row["id"] }).to eq([ "501" ])
+    end
+
+    it "does not fall back on contract or malformed/changing pagination failures" do
+      allow(client).to receive(:payroll_payment_attestations).and_raise(TimeTracking::Client::Error, "Installation descriptor changed")
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /descriptor changed/)
+      expect(client).to have_received(:payroll_payment_attestations).once
+      allow(client).to receive(:payroll_payment_attestations).and_return("payment_attestations" => [], "pagination" => { "total_pages" => 11.5 })
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /pagination/)
+      allow(client).to receive(:payroll_payment_attestations).with(**modern_query(page: 1))
+        .and_return("payment_attestations" => [ hold ], "pagination" => { "total_pages" => 2 })
+      allow(client).to receive(:payroll_payment_attestations).with(**modern_query(page: 2))
+        .and_return("payment_attestations" => [], "pagination" => { "total_pages" => 3 })
+      expect { service.review }.to raise_error(TimeTracking::Client::Error, /pagination changed/)
+      expect(service.instance_variable_get(:@attestations)).to eq({})
+    end
+  end
 end
