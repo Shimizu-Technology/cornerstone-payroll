@@ -123,9 +123,12 @@ module Api
           end
           return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
 
-          render json: {
-            error: "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
-          }, status: :forbidden
+          message = if finance_request?
+            "You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue."
+          else
+            "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
+          end
+          render json: { error: message }, status: :forbidden
         end
 
         def require_capability!(capability, error: nil)

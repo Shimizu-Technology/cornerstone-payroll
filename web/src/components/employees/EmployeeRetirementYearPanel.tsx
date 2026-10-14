@@ -1,3 +1,5 @@
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { FileCheck2, Pencil } from 'lucide-react';
@@ -37,7 +39,8 @@ function isCurrentReview(review: HistoricalRetirementReview | undefined, source:
 export function EmployeeRetirementYearPanel({ employee, initialYear }: { employee: Employee; initialYear?: number }): ReactElement {
   const { hasCapability } = useAuth();
   const { notify } = useFeedback();
-  const canManage = hasCapability('manage_client_configuration');
+  const { activeCompany } = useCompany();
+  const canManage = canWriteCompany(activeCompany) && hasCapability('manage_client_configuration');
   const [year, setYear] = useState(() => initialYear != null && Number.isInteger(initialYear) && initialYear >= 2000 && initialYear <= 2200 ? initialYear : new Date().getFullYear());
   const [records, setRecords] = useState<EmployeeRetirementYearInput[]>([]);
   const [historicalSources, setHistoricalSources] = useState<HistoricalRetirementSource[]>([]);
@@ -100,6 +103,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
     setNotice(null);
   };
   const save = async (): Promise<void> => {
+    if (!canManage) return;
     if (!draft.source_reference.trim() || !draft.reason.trim()) {
       setError('Add the evidence reference and a review note before saving.');
       return;
@@ -162,7 +166,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
         {!catchUpAgeEligible && <p className="text-sm leading-6 text-neutral-600">Prior-year wages need verification only before age-based catch-up is used. Check yearly records when there are imported contributions, outside-employer contributions, or additional opening balances to account for.</p>}
         <p className="text-sm leading-6 text-neutral-600"><a href="#retirement-plan" className="font-semibold text-primary-700 underline underline-offset-2">Review contribution settings</a> to change the amounts deducted each payroll. Saving yearly records does not change those amounts.</p>
         {annual && <p className="text-xs leading-5 text-neutral-500">Age at year end: {age == null ? 'DOB needs verification' : age}. This preview uses {election ? `the election effective ${election.effective_on}` : 'legacy settings'} at year end; each paycheck uses its actual pay-date election. The ceiling combines Traditional and Roth. Plan restrictions, outside contributions, and available compensation may reduce it.</p>}
-        {historicalSource && <fieldset disabled={saving} className={`min-w-0 rounded-xl border p-4 ${historicalReviewed ? 'border-neutral-200 bg-neutral-50' : 'border-warning-200 bg-warning-50'}`} aria-label="Retained historical retirement contributions">
+        {historicalSource && <fieldset disabled={saving || !canManage} className={`min-w-0 rounded-xl border p-4 ${historicalReviewed ? 'border-neutral-200 bg-neutral-50' : 'border-warning-200 bg-warning-50'}`} aria-label="Retained historical retirement contributions">
           <p className="text-sm font-semibold text-neutral-900">{historicalReviewed ? 'Imported contribution types verified' : 'Confirm imported contribution types'}</p>
           <p className="mt-2 text-sm leading-6 text-neutral-700">Classify the retained retirement totals using the source evidence. This review does not rewrite gross pay, net pay, or taxes already paid. A separate historical tax-bucket or filing review may still be needed.</p>
           <div className="mt-3 space-y-3">{historicalSource.classifications.map((source, index) => <div key={`${source.source_bucket}:${source.source_label}`} className="rounded-lg border border-neutral-200 bg-white p-3">
@@ -191,7 +195,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
             <details className="rounded-xl border border-neutral-200 p-4"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Additional recorded balances</summary><div className="mt-4 grid gap-3 sm:grid-cols-3"><Value label="Eligible compensation" value={formatCurrency(Number(current.eligible_compensation_before_system))} /><Value label="Employer additions" value={formatCurrency(Number(current.employer_additions_before_system))} /><Value label="Non-Roth after-tax" value={formatCurrency(Number(current.non_roth_after_tax_before_system))} /></div><p className="mt-3 text-sm text-neutral-600">Opening balance verification: {current.opening_balances_verified ? 'Confirmed' : 'Not recorded'}.</p></details>
             <p className="break-words text-sm leading-6 text-neutral-600">Evidence: {current.source_reference}<br />Review note: {current.reason}{current.created_at && <><br />Recorded {formatGuamDateTime(current.created_at)}{current.created_by_name ? ` by ${current.created_by_name}` : ''}</>}</p></>}
           {!error && canManage && (!historicalSource || historicalReviewed) && <Button variant="outline" onClick={edit}><Pencil className="mr-2 h-4 w-4" />{current ? 'Record a new review' : 'Review yearly records'}</Button>}
-        </> : <fieldset disabled={saving} className="space-y-5">
+        </> : <fieldset disabled={saving || !canManage} className="space-y-5">
           <div><p className="text-sm font-semibold text-neutral-900">Prior-year employer wages for catch-up</p><p className="mt-1 text-sm leading-6 text-neutral-600">Verify these wages before catch-up payroll from 2026 onward. If they exceed the applicable IRS threshold, catch-up must satisfy the Roth requirement. Ordinary Traditional contributions remain permitted.</p></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={`${year - 1} wages from this employer`}><Select value={draft.prior_year_wage_status} onChange={(event) => {

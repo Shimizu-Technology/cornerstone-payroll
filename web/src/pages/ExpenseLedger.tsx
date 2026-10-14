@@ -1,3 +1,5 @@
+import { isTestWorkspaceCompany } from '@/lib/company-write-access';
+import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownToLine, CircleDollarSign, FileText, Plus, Receipt, Search, Upload, X } from 'lucide-react';
@@ -61,8 +63,9 @@ function StatusLabel({ status }: { status: Expense['payment_status'] }) {
 
 export function ExpenseLedger() {
   const { user } = useAuth();
-  const { activeOrganizationId } = useCompany();
+  const { activeOrganizationId, activeCompany } = useCompany();
   const { activeBook } = useFinanceBook();
+  const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const organizationId = activeOrganizationId || user?.organization_id;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
@@ -142,7 +145,8 @@ export function ExpenseLedger() {
     ? summary.currencies.map((entry) => `${entry.currency} ${money(entry[field], entry.currency)}`).join(' · ')
     : money(0);
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>, readOnlyAction = false) => {
+    if (financeReadOnly && !readOnlyAction) { setError(financeWriteBlockedMessage); return; }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -250,11 +254,11 @@ export function ExpenseLedger() {
             kind: kindFilter === 'all' ? undefined : kindFilter,
             q: debouncedSearch || undefined,
             status: statusFilter === 'all' ? undefined : statusFilter,
-          }), 'expenses.csv'))} disabled={busy}>
+          }), 'expenses.csv'), true)} disabled={busy}>
             <ArrowDownToLine className="mr-2 h-4 w-4" />Export CSV
           </Button>
-          <Button variant="secondary" onClick={() => setShowVendorForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Vendor</Button>
-          <Button onClick={() => setShowExpenseForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Bill or purchase</Button>
+          <Button variant="secondary" disabled={financeReadOnly} onClick={() => setShowVendorForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Vendor</Button>
+          <Button disabled={financeReadOnly} onClick={() => setShowExpenseForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Bill or purchase</Button>
         </>} />
 
       <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -277,7 +281,7 @@ export function ExpenseLedger() {
             <label className="text-sm font-medium">Vendor name<Input className="mt-1" value={vendorName} onChange={(event) => setVendorName(event.target.value)} /></label>
             <label className="text-sm font-medium">Email (optional)<Input className="mt-1" type="email" value={vendorEmail} onChange={(event) => setVendorEmail(event.target.value)} /></label>
           </div>
-          <Button className="mt-4" onClick={saveVendor} disabled={busy}>Save vendor</Button>
+          <Button className="mt-4" onClick={saveVendor} disabled={busy || financeReadOnly}>Save vendor</Button>
         </section>}
 
         {showExpenseForm && <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-label="Add expense">
@@ -303,7 +307,7 @@ export function ExpenseLedger() {
             <label className="text-sm font-medium">Statement or transaction reference<Input className="mt-1" value={purchaseReference} onChange={(event) => setPurchaseReference(event.target.value)} /></label>
             <label className="text-sm font-medium">Evidence note<Input className="mt-1" value={purchaseEvidenceNote} onChange={(event) => setPurchaseEvidenceNote(event.target.value)} /></label>
           </div>}
-          <Button className="mt-4" onClick={saveExpense} disabled={busy}>{alreadyPaid ? 'Save paid purchase' : 'Save vendor bill'}</Button>
+          <Button className="mt-4" onClick={saveExpense} disabled={busy || financeReadOnly}>{alreadyPaid ? 'Save paid purchase' : 'Save vendor bill'}</Button>
         </section>}
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
@@ -329,14 +333,14 @@ export function ExpenseLedger() {
               <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-widest text-primary-700">{selected.entry_kind === 'bill' ? 'Vendor bill' : 'Purchase'}</p><h2 className="mt-1 text-xl font-bold text-neutral-950">{selected.vendor_name}</h2><p className="mt-1 text-sm text-neutral-500">{selected.description}</p></div><StatusLabel status={selected.payment_status} /></div>
               <dl className="mt-5 grid grid-cols-2 gap-3 border-y border-neutral-200 py-4 text-sm"><div><dt className="text-neutral-500">Total</dt><dd className="font-semibold tabular-nums">{money(selected.total_amount, selected.currency)}</dd></div><div><dt className="text-neutral-500">Still due</dt><dd className="font-semibold tabular-nums">{money(selected.balance_due, selected.currency)}</dd></div><div><dt className="text-neutral-500">{selected.entry_kind === 'bill' ? 'Bill date' : 'Purchase date'}</dt><dd>{selected.expense_on}</dd></div><div><dt className="text-neutral-500">Due date</dt><dd>{selected.due_on || '—'}</dd></div></dl>
 
-              <div className="mt-5"><h3 className="text-sm font-semibold text-neutral-950">Original documents</h3><ul className="mt-2 space-y-2">{selected.artifacts?.map((artifact) => <li key={artifact.id}><button className="inline-flex items-center gap-2 text-sm text-primary-700 hover:underline" onClick={() => void run(async () => downloadBlob(await expensesApi.downloadArtifact(selected.id, artifact.id), artifact.filename))}><FileText className="h-4 w-4" />{artifact.filename}</button></li>)}</ul>{!selected.artifacts?.length && <p className="mt-2 text-xs text-neutral-500">No bill or receipt attached yet.</p>}{!selected.voided_at && <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-primary-700"><Upload className="h-4 w-4" />Attach PDF or image<input className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadReceipt(file); event.target.value = ''; }} /></label>}</div>
+              <div className="mt-5"><h3 className="text-sm font-semibold text-neutral-950">Original documents</h3><ul className="mt-2 space-y-2">{selected.artifacts?.map((artifact) => <li key={artifact.id}><button className="inline-flex items-center gap-2 text-sm text-primary-700 hover:underline" onClick={() => void run(async () => downloadBlob(await expensesApi.downloadArtifact(selected.id, artifact.id), artifact.filename), true)}><FileText className="h-4 w-4" />{artifact.filename}</button></li>)}</ul>{!selected.artifacts?.length && <p className="mt-2 text-xs text-neutral-500">No bill or receipt attached yet.</p>}{!financeReadOnly && !selected.voided_at && <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-primary-700"><Upload className="h-4 w-4" />Attach PDF or image<input className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadReceipt(file); event.target.value = ''; }} /></label>}</div>
 
-              <div className="mt-6 border-t border-neutral-200 pt-5"><h3 className="text-sm font-semibold text-neutral-950">Payments</h3><ul className="mt-3 space-y-3">{selected.payments?.map((payment) => <li key={payment.id} className="rounded-lg bg-neutral-50 p-3 text-sm"><div className="flex items-start justify-between gap-2"><div><p className={payment.reversed_at ? 'text-neutral-400 line-through' : 'font-semibold text-neutral-900'}>{money(payment.amount, selected.currency)}</p><p className="text-xs text-neutral-500">{payment.paid_on} · {payment.payment_method}{payment.reference_number ? ` · ${payment.reference_number}` : ''}</p></div>{!payment.reversed_at && !selected.voided_at && <button className="text-xs font-medium text-rose-700 hover:underline" onClick={() => { setReversePaymentId(payment.id); setReversalReason(''); }}>Reverse</button>}</div>{payment.reversed_at && <p className="mt-1 text-xs text-rose-700">Reversed: {payment.reversal_reason}</p>}</li>)}</ul>{!selected.payments?.length && <p className="mt-2 text-xs text-neutral-500">No payment has been recorded.</p>}
-                {reversePaymentId && <div className="mt-3 rounded-lg border border-rose-200 p-3"><label className="text-xs font-medium">Reason for reversal<Input className="mt-1" value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} /></label><div className="mt-2 flex gap-2"><Button size="sm" variant="danger" disabled={busy} onClick={reversePayment}>Reverse payment</Button><Button size="sm" variant="ghost" onClick={() => setReversePaymentId(null)}>Cancel</Button></div></div>}
-                {!selected.voided_at && Number(selected.balance_due) > 0 && <div className="mt-4 grid grid-cols-2 gap-2"><label className="text-xs font-medium">Amount<Input className="mt-1" type="number" min="0.01" step="0.01" max={selected.balance_due} value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} /></label><label className="text-xs font-medium">Paid on<Input className="mt-1" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label><label className="text-xs font-medium">Method<select className={inputClass} value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>{['ach', 'card', 'check', 'wire', 'cash', 'other'].map((method) => <option key={method} value={method}>{method.toUpperCase()}</option>)}</select></label><label className="text-xs font-medium">Reference<Input className="mt-1" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label><Button className="col-span-2 mt-1" disabled={busy || !paymentAmount} onClick={savePayment}>Record verified payment</Button></div>}
+              <div className="mt-6 border-t border-neutral-200 pt-5"><h3 className="text-sm font-semibold text-neutral-950">Payments</h3><ul className="mt-3 space-y-3">{selected.payments?.map((payment) => <li key={payment.id} className="rounded-lg bg-neutral-50 p-3 text-sm"><div className="flex items-start justify-between gap-2"><div><p className={payment.reversed_at ? 'text-neutral-400 line-through' : 'font-semibold text-neutral-900'}>{money(payment.amount, selected.currency)}</p><p className="text-xs text-neutral-500">{payment.paid_on} · {payment.payment_method}{payment.reference_number ? ` · ${payment.reference_number}` : ''}</p></div>{!payment.reversed_at && !selected.voided_at && <button disabled={financeReadOnly} className="text-xs font-medium text-rose-700 hover:underline" onClick={() => { setReversePaymentId(payment.id); setReversalReason(''); }}>Reverse</button>}</div>{payment.reversed_at && <p className="mt-1 text-xs text-rose-700">Reversed: {payment.reversal_reason}</p>}</li>)}</ul>{!selected.payments?.length && <p className="mt-2 text-xs text-neutral-500">No payment has been recorded.</p>}
+                {reversePaymentId && <div className="mt-3 rounded-lg border border-rose-200 p-3"><label className="text-xs font-medium">Reason for reversal<Input className="mt-1" value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} /></label><div className="mt-2 flex gap-2"><Button size="sm" variant="danger" disabled={financeReadOnly || busy} onClick={reversePayment}>Reverse payment</Button><Button size="sm" variant="ghost" onClick={() => setReversePaymentId(null)}>Cancel</Button></div></div>}
+                {!selected.voided_at && Number(selected.balance_due) > 0 && <div className="mt-4 grid grid-cols-2 gap-2"><label className="text-xs font-medium">Amount<Input className="mt-1" type="number" min="0.01" step="0.01" max={selected.balance_due} value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} /></label><label className="text-xs font-medium">Paid on<Input className="mt-1" type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label><label className="text-xs font-medium">Method<select className={inputClass} value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>{['ach', 'card', 'check', 'wire', 'cash', 'other'].map((method) => <option key={method} value={method}>{method.toUpperCase()}</option>)}</select></label><label className="text-xs font-medium">Reference<Input className="mt-1" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} /></label><Button className="col-span-2 mt-1" disabled={financeReadOnly || busy || !paymentAmount} onClick={savePayment}>Record verified payment</Button></div>}
               </div>
 
-              {!selected.voided_at && Number(selected.amount_paid) === 0 && <div className="mt-6 border-t border-neutral-200 pt-5"><label className="text-xs font-medium">Void reason<Input className="mt-1" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} /></label><Button className="mt-2" variant="outline" size="sm" disabled={busy || !voidReason.trim()} onClick={voidExpense}>Void record</Button></div>}
+              {!selected.voided_at && Number(selected.amount_paid) === 0 && <div className="mt-6 border-t border-neutral-200 pt-5"><label className="text-xs font-medium">Void reason<Input className="mt-1" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} /></label><Button className="mt-2" variant="outline" size="sm" disabled={financeReadOnly || busy || !voidReason.trim()} onClick={voidExpense}>Void record</Button></div>}
             </>}
           </aside>
         </div>

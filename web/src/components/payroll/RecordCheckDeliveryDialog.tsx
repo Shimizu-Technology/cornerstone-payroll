@@ -10,11 +10,12 @@ import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 interface RecordCheckDeliveryDialogProps {
   item: CheckItem;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => Promise<void>;
 }
 
-export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordCheckDeliveryDialogProps) {
+export function RecordCheckDeliveryDialog({ item, readOnly = false, onClose, onComplete }: RecordCheckDeliveryDialogProps) {
   const [deliveredOn, setDeliveredOn] = useState(guamBusinessDate());
   const [deliveryMethod, setDeliveryMethod] = useState<'hand_delivery' | 'mail' | 'courier' | 'other'>('hand_delivery');
   const [evidenceReference, setEvidenceReference] = useState('');
@@ -24,6 +25,7 @@ export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordC
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   const submit = async (): Promise<void> => {
+    if (readOnly) return;
     setSaving(true);
     setError(null);
     try {
@@ -66,10 +68,11 @@ export function RecordCheckDeliveryDialog({ item, onClose, onComplete }: RecordC
           <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
           <span>I confirm this check was released using the method and date above. Any linked time tracking hours will be marked as paid.</span>
         </label>
+        {readOnly && <p role="status" className="text-sm text-amber-800">Changes are unavailable with your current workspace access. Your entered details remain here; Cancel is available.</p>}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         <DialogFooter className="gap-2 sm:gap-0">
           <Button className="max-sm:min-h-[44px]" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button className="max-sm:min-h-[44px]" onClick={() => void submit()} disabled={saving || !deliveredOn || !attested}>{saving ? 'Recording…' : 'Record Issued'}</Button>
+          <Button className="max-sm:min-h-[44px]" onClick={() => void submit()} disabled={readOnly || saving || !deliveredOn || !attested}>{saving ? 'Recording…' : 'Record Issued'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

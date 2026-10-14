@@ -14,6 +14,8 @@ import {
   UserRound,
 } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { Header } from '@/components/layout/Header';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +38,8 @@ import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
 export function PayrollItemDetail(): ReactElement {
+  const { activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
     companyId: string;
     id: string;
@@ -156,6 +160,7 @@ export function PayrollItemDetail(): ReactElement {
 
   return (
     <div>
+      {readOnly && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 lg:px-8">{companyReadOnlyMessage(activeCompany)}</p>}
       <Header
         title={`${employeeName} · ${formatDate(payRun.pay_date)}`}
         description={`${formatDateRange(payRun.start_date, payRun.end_date)} · Payroll item #${payrollItem.id}`}
