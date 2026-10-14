@@ -102,7 +102,11 @@ module QuarterlyComplianceOfficialForms
     SUPPORTED_TAX_YEARS = [ 2026 ].freeze
 
     def self.template_status(tax_year)
-      available = SUPPORTED_TAX_YEARS.include?(Integer(tax_year, exception: false))
+      exact_year = case tax_year
+      when Integer then tax_year
+      when String then tax_year.to_i if tax_year.match?(/\A[0-9]{4}\z/)
+      end
+      available = SUPPORTED_TAX_YEARS.include?(exact_year)
       {
         available: available,
         supported_tax_years: SUPPORTED_TAX_YEARS,
