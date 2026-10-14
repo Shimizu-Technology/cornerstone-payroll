@@ -15,17 +15,27 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     ])
   end
 
-  def apply!(same_rate: false)
+  def apply!(same_rate: false, mapping_change: nil)
     category = next_import.raw_payload["employees"].first["adjustments"].first
     mappings = %w[carryover current].map do |kind|
       { source_category_id: category["source_category_id"], source_category_key: category.dig("category", "key"),
         source_category_name: category.dig("category", "name"), source_kind: kind,
         employee_wage_rate_id: kind == "carryover" && !same_rate ? carry_rate.id : rate.id }
     end
+    mappings.first.merge!(mapping_change) if mapping_change
     result = TimeTracking::ApplyImportService.new(import: next_import,
       mappings: [ { source_user_id: "42", employee_id: employee.id, wage_rate_mappings: mappings } ], applied_by: actor).call
     expect(result[:errors]).to eq([])
     next_period.payroll_items.find_by!(employee: employee)
+  end
+
+  it "rejects incomplete and unknown explicit mapping dimensions without partial imports" do
+    [ { employee_wage_rate_id: nil }, { source_category_id: "invented" }, { source_kind: nil } ].each do |change|
+      expect { apply!(mapping_change: change) }.to raise_error(ArgumentError, /earning|source kind/)
+      expect(next_period.payroll_items).not_to exist
+      expect(next_import.reload.status).to eq("previewed")
+      expect(next_import.time_tracking_entry_allocations).not_to exist
+    end
   end
 
   it "captures distinct carry/current selected rates and conserves six hours and ninety dollars after reload and calculation" do
