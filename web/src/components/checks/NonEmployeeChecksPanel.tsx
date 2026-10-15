@@ -100,7 +100,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   useLayoutEffect(() => {
     currentListScope.current = listScope;
     listRequest.current++;
-    return () => { currentListScope.current = null; listRequest.current++; };
+    return () => { currentListScope.current = null; };
   }, [listScope]);
   const listUnavailable = loading || Boolean(loadError) || loadedScope !== listScope;
   const [company, setCompany] = useState<CompanyDetail | null>(null);
