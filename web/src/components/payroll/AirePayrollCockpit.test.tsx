@@ -427,6 +427,34 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.correct).not.toHaveBeenCalled();
   });
 
+  it('keeps missing optional source counters unavailable instead of inventing zero or deriving held hours', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_hours: 6, eligible_hours: 0, eligible_entries: 0,
+      held_hours: undefined, held_entries: undefined,
+      payment_attested_pending_evidence_hours: undefined,
+      payment_attested_pending_evidence_entries: undefined,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    for (const name of ['Other held time', 'Payment reported']) {
+      const metric = await screen.findByRole('group', { name });
+      expect(within(metric).getByText('—')).toBeTruthy();
+      expect(within(metric).getByText(/Timecard count unavailable · hours unavailable/)).toBeTruthy();
+      expect(within(metric).queryByText('0.00 hrs')).toBeNull();
+      expect(within(metric).queryByText('6.00 hrs')).toBeNull();
+    }
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Other held hours are unavailable; review source details separately/)).toBeTruthy();
+    expect(within(dialog).getByText(/Reported-payment hours are unavailable; review payment evidence separately/)).toBeTruthy();
+    expect(within(dialog).queryByText(/0.00 other held hours|0.00 reported-payment hours|6.00 other held hours/)).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Lock eligible time' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+  });
+
   it('shows exact paid hours and batch events in a clear payment history', async () => {
     const user = userEvent.setup();
     const data = fixtures();
