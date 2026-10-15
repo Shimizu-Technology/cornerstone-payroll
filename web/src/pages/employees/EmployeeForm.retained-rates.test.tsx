@@ -31,6 +31,8 @@ const retainedRates: EmployeeWageRate[] = [
   { id: 101, employee_id: 7, label: 'Certification Operations', rate: 25, is_primary: true, active: true },
   { id: 205, employee_id: 7, label: 'Administrative Support', rate: 17.5, is_primary: false, active: true },
 ];
+const hiddenInactiveRate: EmployeeWageRate = { id: 309, employee_id: 7, label: 'Retired rate', rate: 12, is_primary: false, active: false };
+const unseenActiveRate: EmployeeWageRate = { id: 411, employee_id: 7, label: 'New weekend rate', rate: 40, is_primary: false, active: true };
 function employee(overrides: Partial<Employee> = {}): Employee {
   return {
     id: 7, company_id: 1, first_name: 'Synthetic', last_name: 'Retained', ssn: '900-70-1234',
@@ -97,6 +99,8 @@ describe.each(bases)('retained hourly definitions after $label', ({ overrides, s
     expect((screen.getByLabelText(scalarLabel) as HTMLInputElement).value).toBe(scalar);
     assertNoWrites();
     fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+    // Fresh list includes inactive history and another operator's later active addition.
+    mocks.listRates.mockResolvedValue({ wage_rates: [...retainedRates, hiddenInactiveRate, unseenActiveRate] });
     fireEvent.submit(document.getElementById('employee-form')!);
     await screen.findByText('Saved employee profile');
     expect(mocks.updateEmployee).toHaveBeenCalledTimes(1);
@@ -152,4 +156,42 @@ it('preserves the existing single-scalar fallback for an already-hourly employee
   await loadEmployee(employee({ employment_type: 'hourly', pay_rate: 25, wage_rates: [] }));
   expect(hourlyValues()).toEqual({ labels: ['Regular'], rates: ['25.00'] });
   assertNoWrites();
+});
+
+
+it('preserves hidden inactive and unseen active rates during an ordinary hourly save', async () => {
+  await loadEmployee(employee({ employment_type: 'hourly', pay_rate: 25 }));
+  expect(hourlyValues()).toEqual({ labels: ['Certification Operations', 'Administrative Support'], rates: ['25.00', '17.50'] });
+  assertNoWrites();
+  mocks.listRates.mockResolvedValue({ wage_rates: [...retainedRates, hiddenInactiveRate, unseenActiveRate] });
+  fireEvent.submit(document.getElementById('employee-form')!);
+  await screen.findByText('Saved employee profile');
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 25, wage_rates: [
+    { id: 101, label: 'Certification Operations', rate: 25, active: true },
+    { id: 205, label: 'Administrative Support', rate: 17.5, active: true },
+  ] });
+  expect(mocks.deleteRate).not.toHaveBeenCalled();
+  expect(mocks.createRate).not.toHaveBeenCalled();
+  expect(mocks.updateRate.mock.calls.map(([id]) => id)).toEqual([101, 205]);
+});
+
+it.each([true, false])('limits explicit removal to the displayed saved ID still active in the fresh list (%s)', async (stillActive) => {
+  await loadEmployee(employee({ employment_type: 'hourly', pay_rate: 25 }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove hourly rate Administrative Support' }));
+  expect(hourlyValues()).toEqual({ labels: ['Certification Operations'], rates: ['25.00'] });
+  assertNoWrites();
+  mocks.listRates.mockResolvedValue({ wage_rates: [
+    retainedRates[0], { ...retainedRates[1], active: stillActive }, hiddenInactiveRate, unseenActiveRate,
+  ] });
+  fireEvent.submit(document.getElementById('employee-form')!);
+  await screen.findByText('Saved employee profile');
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 25, wage_rates: [
+    { id: 101, label: 'Certification Operations', rate: 25, is_primary: true, active: true },
+  ] });
+  if (stillActive) expect(mocks.deleteRate).toHaveBeenCalledExactlyOnceWith(205, 1);
+  else expect(mocks.deleteRate).not.toHaveBeenCalled();
+  expect(mocks.createRate).not.toHaveBeenCalled();
+  expect(mocks.updateRate.mock.calls).toEqual([
+    [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true }, 1],
+  ]);
 });

@@ -907,6 +907,11 @@ export function EmployeeForm() {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
+        const displayedSavedRateIds = new Set(
+          (loadedEmployee?.wage_rates || [])
+            .filter((rate) => rate.active !== false && rate.id)
+            .map((rate) => rate.id as number)
+        );
         const normalizedById = new Map(
           normalizedWageRates
             .filter((rate) => rate.id)
@@ -915,7 +920,8 @@ export function EmployeeForm() {
 
         await Promise.all(
           existingRates
-            .filter((rate) => !normalizedById.has(rate.id as number))
+            // Removing a displayed row must not delete hidden or newly added definitions.
+            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
         if (!isCurrentSubmission()) return;
@@ -1511,6 +1517,7 @@ export function EmployeeForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => removeWageRate(rate.temp_id)}
+                        aria-label={`Remove hourly rate ${rate.label.trim() || index + 1}`}
                         disabled={wageRates.length === 1}
                       >
                         <X className="w-4 h-4" />
