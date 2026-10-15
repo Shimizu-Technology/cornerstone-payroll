@@ -849,6 +849,8 @@ export interface AirePayrollReadiness {
   eligible_hours: number;
   held_entries?: number;
   held_hours?: number;
+  payment_attested_pending_evidence_entries?: number;
+  payment_attested_pending_evidence_hours?: number;
   pending_approvals: number;
   denied_entries: number;
   missing_punches: number;

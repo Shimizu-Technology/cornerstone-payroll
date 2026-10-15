@@ -156,6 +156,8 @@ function fixtures(canCommand = true) {
       eligible_hours: 8,
       held_entries: 1,
       held_hours: 8.08,
+      payment_attested_pending_evidence_entries: 0,
+      payment_attested_pending_evidence_hours: 0,
       pending_approvals: 1,
       denied_entries: 0,
       missing_punches: 0,
@@ -364,6 +366,93 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getAllByText('Mapped').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting approval').length).toBeGreaterThan(0);
     expect(apiMocks.entries).toHaveBeenCalledWith(17, { page: 1 });
+  });
+
+  it.each([
+    { total: 6, eligible: 0, held: 0, heldEntries: 0 },
+    { total: 20, eligible: 8, held: 6, heldEntries: 1 },
+  ])('keeps reported-payment evidence separate from eligible and other held hours ($total total)', async ({ total, eligible, held, heldEntries }) => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_hours: total, total_entries: total === 6 ? 1 : 3,
+      eligible_hours: eligible, eligible_entries: eligible > 0 ? 1 : 0,
+      held_hours: held, held_entries: heldEntries,
+      pending_approvals: 0,
+      payment_attested_pending_evidence_hours: 6,
+      payment_attested_pending_evidence_entries: 1,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    const reported = await screen.findByRole('group', { name: 'Payment reported' });
+    expect(within(reported).getByText('6.00 hrs')).toBeTruthy();
+    expect(within(reported).getByText('1 timecard · evidence pending · not included')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText(`${eligible.toFixed(2)} hrs`)).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Other held time' })).getByText(`${held.toFixed(2)} hrs`)).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Total time' })).getByText(`${total.toFixed(2)} hrs`)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    expect(within(screen.getByRole('dialog')).getByText(new RegExp(`${held.toFixed(2)} other held hours remain outside this payroll for review`))).toBeTruthy();
+    expect(within(screen.getByRole('dialog')).getByText(/6.00 reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it/)).toBeTruthy();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+  });
+
+  it('refreshes approved hours into the canonical reported-payment bucket without changing time or payroll', async () => {
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_entries: 1, total_hours: 6, eligible_entries: 1, eligible_hours: 6,
+      held_entries: 0, held_hours: 0,
+      pending_approvals: 0,
+      payment_attested_pending_evidence_entries: 0, payment_attested_pending_evidence_hours: 0,
+    };
+    apiMocks.overview.mockResolvedValueOnce({ aire_payroll_cockpit: data.overview });
+    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={0} onRefresh={vi.fn()} />);
+    await screen.findByRole('group', { name: 'Payment reported' });
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText('6.00 hrs')).toBeTruthy();
+
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: { ...data.overview, readiness: { ...data.overview.readiness,
+      eligible_entries: 0, eligible_hours: 0,
+      payment_attested_pending_evidence_entries: 1, payment_attested_pending_evidence_hours: 6,
+    } } });
+    view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={1} onRefresh={vi.fn()} />);
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('6.00 hrs')).toBeTruthy());
+    expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('1 timecard · evidence pending · not included')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText('0.00 hrs')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Other held time' })).getByText('0.00 hrs')).toBeTruthy();
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('keeps missing optional source counters unavailable instead of inventing zero or deriving held hours', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_hours: 6, eligible_hours: 0, eligible_entries: 0,
+      held_hours: undefined, held_entries: undefined,
+      payment_attested_pending_evidence_hours: undefined,
+      payment_attested_pending_evidence_entries: undefined,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    for (const name of ['Other held time', 'Payment reported']) {
+      const metric = await screen.findByRole('group', { name });
+      expect(within(metric).getByText('—')).toBeTruthy();
+      expect(within(metric).getByText(/Timecard count unavailable · hours unavailable/)).toBeTruthy();
+      expect(within(metric).queryByText('0.00 hrs')).toBeNull();
+      expect(within(metric).queryByText('6.00 hrs')).toBeNull();
+    }
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Other held hours are unavailable; review source details separately/)).toBeTruthy();
+    expect(within(dialog).getByText(/Reported-payment hours are unavailable; review payment evidence separately/)).toBeTruthy();
+    expect(within(dialog).queryByText(/0.00 other held hours|0.00 reported-payment hours|6.00 other held hours/)).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Lock eligible time' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
   });
 
   it('shows exact paid hours and batch events in a clear payment history', async () => {
