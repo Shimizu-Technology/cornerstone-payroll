@@ -3954,8 +3954,8 @@ interface AuthApiUser {
   role: string;
   organization_id?: number;
   organization_name?: string;
-  company_id: number;
-  company_name: string;
+  company_id: number | null;
+  company_name: string | null;
   home_company_id: number;
   assigned_company_ids: number[];
   capabilities: string[];
