@@ -382,7 +382,7 @@ describe('AirePayrollCockpit', () => {
       payment_attested_pending_evidence_hours: 6,
       payment_attested_pending_evidence_entries: 1,
     };
-    apiMocks.overview.mockResolvedValue(data.overview);
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
     const reported = await screen.findByRole('group', { name: 'Payment reported' });
@@ -408,15 +408,15 @@ describe('AirePayrollCockpit', () => {
       pending_approvals: 0,
       payment_attested_pending_evidence_entries: 0, payment_attested_pending_evidence_hours: 0,
     };
-    apiMocks.overview.mockResolvedValueOnce(data.overview);
+    apiMocks.overview.mockResolvedValueOnce({ aire_payroll_cockpit: data.overview });
     const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={0} onRefresh={vi.fn()} />);
     await screen.findByRole('group', { name: 'Payment reported' });
     expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText('6.00 hrs')).toBeTruthy();
 
-    apiMocks.overview.mockResolvedValue({ ...data.overview, readiness: { ...data.overview.readiness,
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: { ...data.overview, readiness: { ...data.overview.readiness,
       eligible_entries: 0, eligible_hours: 0,
       payment_attested_pending_evidence_entries: 1, payment_attested_pending_evidence_hours: 6,
-    } });
+    } } });
     view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={1} onRefresh={vi.fn()} />);
     await waitFor(() => expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('6.00 hrs')).toBeTruthy());
     expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('1 timecard · evidence pending · not included')).toBeTruthy();
