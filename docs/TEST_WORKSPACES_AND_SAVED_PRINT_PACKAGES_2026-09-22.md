@@ -59,6 +59,14 @@ Each package retains its check selection, check numbers, amounts, stock layout, 
 
 An unconfirmed package can be confirmed only while its manifest still matches the current payroll records. If a check number, amount, record timestamp, void state, or print activity changes, the old PDF remains available as history but cannot be confirmed. The operator must generate a new package from the current queue. Confirmed packages remain immutable history.
 
+## Correcting numbers on an unissued employee-check package
+
+Generating a package does not issue its checks. Staff can correct the numbers on prepared, unissued employee checks from the pay run's **Checks** worksheet and choose **Save check numbers**. The save validates the entire batch, retains a renumbering audit trail, updates the transmittal and sign-off sheet, and advances the company's next check number when needed. Wages, taxes, deductions, and net pay do not change. This is a number correction; individual reissues are unnecessary when only the package was generated.
+
+The saved package retains its original manifest and becomes outdated after a number correction. Open **Print checks**, choose **Generate replacement package**, review the current selection and numbers, and generate the new package. The old package cannot be used as the current package for download or issuance. Checks that have been issued, cleared, voided, or marked replacement-required retain their existing lifecycle restrictions. Prepared other-payment checks retain their separate restrictions.
+
+The batch-save correction aligns the worksheet with the existing single-check correction path. Release evidence must cover generated-only checks on desktop and narrow layouts, corrected numbers after reload and in the new package manifest/render inputs, matching payees and amounts in the rendered PDF, unchanged payroll amounts, stale-package rejection, document/audit synchronization, duplicate-number rejection, and atomic rejection of a batch containing an issued check. Implementation and final deployment evidence will be recorded in the linked PR's release comment; local tests alone do not establish Cornerstone operator acceptance.
+
 ## Release evidence
 
 Before this work is called operationally verified:
