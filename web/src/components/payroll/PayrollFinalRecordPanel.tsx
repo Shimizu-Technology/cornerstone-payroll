@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -44,7 +44,7 @@ export function PayrollFinalRecordPanel({ companyId, payPeriodId, refreshToken =
   const [retryToken, setRetryToken] = useState(0);
   const scope = useMemo(() => ({ context, refreshToken, retryToken }), [context, refreshToken, retryToken]);
   const currentScope = useRef(scope);
-  currentScope.current = scope;
+  useLayoutEffect(() => { currentScope.current = scope; }, [scope]);
   const mounted = useRef(false);
   const exportRequest = useRef(0);
   const [result, setResult] = useState<{ scope: typeof scope; record: PayrollFinalRecord | null } | null>(null);

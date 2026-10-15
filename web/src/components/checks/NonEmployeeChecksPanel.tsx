@@ -31,6 +31,8 @@ interface NonEmployeeChecksPanelProps {
    * value derived from PayrollItems.
    */
   onChecksLoaded?: (checks: NonEmployeeCheck[]) => void;
+  /** A mutation was saved, independently of whether the subsequent list reload succeeds. */
+  onChecksChanged?: () => void;
 }
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -86,10 +88,11 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
   const { notify } = useFeedback();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError, loadErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -158,16 +161,17 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
       setChecks(res.non_employee_checks);
       setCheckNumberDrafts(Object.fromEntries(res.non_employee_checks.map((check) => [check.id, check.check_number || ''])));
     } catch {
-      // ignore
+      setLoadError('Could not reload non-employee checks. Saved changes are retained. Reload the checks before continuing.');
     } finally {
       setLoading(false);
     }
-  }, [payPeriodId]);
+  }, [payPeriodId, setLoadError]);
 
   useEffect(() => { loadChecks(); }, [loadChecks, refreshToken]);
 
@@ -205,6 +209,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         reference_number: formData.reference_number || undefined,
         check_number: formData.check_number || undefined,
       });
+      onChecksChanged?.();
       setShowForm(false);
       setFormData({ payable_to: '', amount: '', check_type: 'other', memo: '', description: '', reference_number: '', check_number: '' });
       loadChecks();
@@ -220,6 +225,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     setVoidConfirming(true);
     try {
       await nonEmployeeChecksApi.voidCheck(id, voidReason);
+      onChecksChanged?.();
       setVoidingId(null);
       setVoidReason('');
       loadChecks();
@@ -235,6 +241,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     setDeletingId(id);
     try {
       await nonEmployeeChecksApi.delete(id);
+      onChecksChanged?.();
       loadChecks();
     } catch {
       // ignore
@@ -338,6 +345,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         })),
         'Saved from the non-employee Checks worksheet'
       );
+      onChecksChanged?.();
       await loadChecks();
     } catch (err) {
       setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
@@ -363,6 +371,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     setFitError(null);
     try {
       await payPeriodsApi.generateFitCheck(payPeriodId);
+      onChecksChanged?.();
       await loadChecks();
     } catch (err) {
       setFitError(err instanceof Error ? err.message : 'Failed to generate FIT check');
@@ -405,7 +414,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit}
+                disabled={generatingFit || loading || Boolean(loadError)}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit
@@ -420,7 +429,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         </div>
       </div>
 
-      {checkNumberChanges.length > 0 && (
+      {!loadError && !loading && checkNumberChanges.length > 0 && (
         <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-amber-950">
@@ -492,7 +501,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           auto-FIT check or changing its check_type via the Edit modal doesn't
           silently hide the quick-fill helper. Falls back to legacy payee
           matching for pre-marker rows. */}
-      {!loading && checks.some(c =>
+      {!loading && !loadError && checks.some(c =>
         !c.voided &&
         (c.auto_generated_type === 'fit_deposit' ||
           (c.check_type === 'tax_deposit' &&
@@ -571,7 +580,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         </div>
       )}
 
-      {isFirstHawaiian4Up && printableChecks.length > 0 && (
+      {!loadError && isFirstHawaiian4Up && printableChecks.length > 0 && (
         <div className="mx-4 mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
           Batch printing packs non-employee checks together in check-number order, starting at the selected slot, so multiple pay-period payments can share one First Hawaiian 4-Up sheet.
         </div>
@@ -580,6 +589,11 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       <div className="p-4">
         {loading ? (
           <p className="text-sm text-gray-500">Loading...</p>
+        ) : loadError ? (
+          <div className="space-y-3">
+            <ActionFeedback retryKey={loadErrorFeedbackAttempt} tone="error" message={loadError} />
+            <Button size="sm" variant="outline" onClick={() => void loadChecks()}>Reload checks</Button>
+          </div>
         ) : checks.length === 0 ? (
           <p className="text-sm text-gray-500 italic">No non-employee checks for this pay period.</p>
         ) : (

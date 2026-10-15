@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { startTransition, Suspense, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayrollFinalRecord } from '@/services/api';
 import { PayrollFinalRecordPanel } from './PayrollFinalRecordPanel';
@@ -138,6 +139,38 @@ describe('PayrollFinalRecordPanel', () => {
     await act(async () => old.resolve({ final_record: record }));
     expect(screen.getByText('Voided')).toBeTruthy();
     expect(screen.queryByText('$750.00 net')).toBeNull();
+  });
+
+  it('keeps the committed read valid while a newer render suspends without committing', async () => {
+    const current = deferred<{ final_record: PayrollFinalRecord }>();
+    const suspended = deferred<void>();
+    const attempted = vi.fn();
+    apiMocks.payrollFinalRecord.mockReturnValueOnce(current.promise);
+    function PendingSibling({ pending }: { pending: boolean }) {
+      if (pending) {
+        attempted();
+        throw suspended.promise;
+      }
+      return null;
+    }
+    function Harness() {
+      const [revision, setRevision] = useState(0);
+      return <>
+        <button onClick={() => startTransition(() => setRevision(1))}>Start pending revision</button>
+        <Suspense fallback={<p>Replacement pending</p>}>
+          <PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={revision} />
+          <PendingSibling pending={revision === 1} />
+        </Suspense>
+      </>;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start pending revision' }));
+    await waitFor(() => expect(attempted).toHaveBeenCalled());
+    expect(screen.queryByText('Replacement pending')).toBeNull();
+    await act(async () => current.resolve({ final_record: record }));
+    expect(await screen.findByText('$750.00 net')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'View record' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(apiMocks.payrollFinalRecord).toHaveBeenCalledOnce();
   });
 
   it.each(['company', 'pay run'] as const)('clears the previous view immediately when the %s changes', async changed => {
