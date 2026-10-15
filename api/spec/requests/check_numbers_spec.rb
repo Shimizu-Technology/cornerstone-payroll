@@ -150,6 +150,85 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(item_a.check_printed_at).to be_present
   end
 
+  it "corrects saved-package check numbers without changing payroll and makes the old package stale" do
+    transmittal = Transmittal.create!(pay_period: pay_period, company: company,
+      payroll_check_numbers: %w[3000 3001], non_employee_check_numbers: { non_employee_check.id.to_s => "3500" })
+    signoff = CheckSignoffSheet.create!(pay_period: pay_period, company: company,
+      entries: [ { name: "Reyes, Alice", check_number: "3000" }, { name: "Cruz, Ben", check_number: "3001" } ])
+    item_a.mark_package_prepared!(user: admin_user)
+    item_b.mark_package_prepared!(user: admin_user)
+    originals = [ item_a, item_b ].map { |item| item.reload.attributes.except("check_number", "updated_at") }
+    manifest = [ item_a, item_b ].map do |item|
+      {
+        "key" => "payroll_item:#{item.id}", "source_type" => "payroll_item", "source_id" => item.id,
+        "check_number" => item.check_number, "amount" => item.net_pay.to_s,
+        "source_updated_at" => item.updated_at.iso8601(6), "print_count" => 0, "printed_at" => nil
+      }
+    end
+    package = CheckPrintRun.create!(
+      company: company, pay_period: pay_period, created_by: admin_user, status: "prepared",
+      check_stock_type: company.check_stock_type, starting_slot: 1, selected_count: 2,
+      manifest: manifest, storage_key: "check-print-runs/renumber-spec.pdf", filename: "renumber-spec.pdf",
+      sha256: "a" * 64, byte_size: 100, generated_at: Time.current
+    )
+    expect(CheckReconciliationStatus.for(item_a)).to eq("prepared")
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }.not_to raise_error
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        reason: "Correct starting number to match physical stock",
+        changes: [
+          { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+          { source_type: "payroll_item", source_id: item_b.id, check_number: "4101" }
+        ]
+      }
+    }.to change { CheckEvent.where(event_type: "renumbered").count }.by(2)
+      .and change { AuditLog.where(action: "checks#check_number_updated").count }.by(2)
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["updated_count"]).to eq(2)
+    expect([ item_a.reload.check_number, item_b.reload.check_number ]).to eq(%w[4100 4101])
+    expect([ item_a, item_b ].map { |item| item.attributes.except("check_number", "updated_at") }).to eq(originals)
+    expect(company.reload.next_check_number).to eq(4102)
+    expect(transmittal.reload.payroll_check_numbers).to eq(%w[4100 4101])
+    expect(transmittal.check_number_first).to eq("3500")
+    expect(transmittal.check_number_last).to eq("4101")
+    expect(transmittal.non_employee_check_numbers).to eq(non_employee_check.id.to_s => "3500")
+    expect(signoff.reload.entries.pluck("check_number")).to eq(%w[4100 4101])
+    expect(CheckEvent.where(event_type: "voided")).to be_empty
+    expect(item_a.check_prepared?).to be(false)
+    corrected_queue = response.parsed_body.dig("check_print_queue", "items").select { |row| row["source_type"] == "payroll_item" }
+    expect(corrected_queue.pluck("status")).to eq(%w[unprinted unprinted])
+    expect {
+      item_a.mark_delivered!(user: admin_user, delivered_on: Date.current, delivery_method: "hand_delivery", attestation: true)
+    }.to raise_error(ArgumentError, /Generate a current check package/)
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }
+      .to raise_error(CheckPrintRunSelectionVerifier::StaleSelectionError, /different check number/)
+    expect(package.reload.manifest).to eq(manifest)
+  end
+
+  it "keeps a prepared check unchanged when another worksheet check has already been issued" do
+    item_a.mark_package_prepared!(user: admin_user)
+    item_b.mark_printed!(user: admin_user)
+    item_b.mark_delivered!(user: admin_user, delivered_on: Date.current, delivery_method: "hand_delivery", attestation: true)
+    originals = [ item_a, item_b ].map { |item| item.reload.attributes }
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        changes: [
+          { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+          { source_type: "payroll_item", source_id: item_b.id, check_number: "4101" }
+        ]
+      }
+    }.not_to change { AuditLog.count }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
+    expect([ item_a, item_b ].map { |item| item.reload.attributes }).to eq(originals)
+    expect(company.reload.next_check_number).to eq(3002)
+    expect(CheckEvent.where(event_type: "renumbered")).to be_empty
+  end
+
   it "does not renumber checks after they are issued" do
     item_a.mark_printed!(user: admin_user)
     item_a.mark_delivered!(
@@ -166,6 +245,27 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
     expect(item_a.reload.check_number).to eq("3000")
+  end
+
+  it "rejects a voided check without partially renumbering a prepared check" do
+    item_a.mark_package_prepared!(user: admin_user)
+    item_b.update!(voided: true, voided_at: Time.current, void_reason: "Synthetic voided stock")
+    originals = [ item_a, item_b ].map { |item| item.reload.attributes }
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        changes: [
+          { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+          { source_type: "payroll_item", source_id: item_b.id, check_number: "4101" }
+        ]
+      }
+    }.not_to change { AuditLog.count }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("voided payroll check")
+    expect([ item_a, item_b ].map { |item| item.reload.attributes }).to eq(originals)
+    expect(company.reload.next_check_number).to eq(3002)
+    expect(CheckEvent.where(event_type: "renumbered")).to be_empty
   end
 
   %w[cleared replacement_required].each do |status|
