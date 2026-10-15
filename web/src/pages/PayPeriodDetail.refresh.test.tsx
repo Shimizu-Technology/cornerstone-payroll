@@ -56,8 +56,9 @@ vi.mock('@/components/payroll/PaymentMethodDialog', () => ({
   PaymentMethodDialog: ({ onSaved }: { onSaved: () => Promise<void> }) => { componentMocks.paymentMethodSaved(onSaved); return null; },
 }));
 vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({
-  NonEmployeeChecksPanel: ({ onChecksLoaded }: { onChecksLoaded?: (checks: []) => void }) => componentMocks.finalRecordEnabled
-    ? <button onClick={() => onChecksLoaded?.([])}>Saved liability check changed</button> : null,
+  NonEmployeeChecksPanel: ({ onChecksLoaded, onChecksChanged }: { onChecksLoaded?: (checks: []) => void; onChecksChanged?: () => void }) => componentMocks.finalRecordEnabled
+    ? <><button onClick={() => onChecksLoaded?.([])}>Saved liability check changed</button>
+      <button onClick={onChecksChanged}>Liability saved without a list reload</button></> : null,
 }));
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', async importOriginal => {
@@ -1148,6 +1149,24 @@ it('refreshes final liability totals when the non-employee check observer report
   expect(await screen.findByText('$316.50 paid')).toBeTruthy();
   expect(screen.getByText('$0.00 outstanding')).toBeTruthy();
   expect(apiMocks.get).not.toHaveBeenCalled();
+});
+
+it('invalidates final liability truth after a saved check without requiring a successful check-list reload', async () => {
+  enableFinalRecord();
+  await renderCorrectionRefresh();
+  await screen.findByText('$316.50 outstanding');
+  apiMocks.payrollFinalRecord.mockRejectedValueOnce(new Error('Final record reload unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: 'Liability saved without a list reload' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Final record reload unavailable');
+  expect(screen.queryByText('$316.50 outstanding')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Export final payroll record' }) as HTMLButtonElement).disabled).toBe(true);
+  apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
+    liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reload final payroll record' }));
+  expect(await screen.findByText('$316.50 paid')).toBeTruthy();
+  expect(apiMocks.get).not.toHaveBeenCalled();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 
 it('reloads saved instruments, journal liabilities and source history after a partial correction response', async () => {

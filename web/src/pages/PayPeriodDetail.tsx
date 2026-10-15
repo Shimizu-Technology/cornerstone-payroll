@@ -418,6 +418,9 @@ export function PayPeriodDetail({
     setNonEmployeeChecks(checks);
     setFinalRecordRefreshToken(token => token + 1);
   }, []);
+  const handleNonEmployeeChecksChanged = useCallback(() => {
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
   const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
   const invalidateAireSource = useCallback(() => {
     setAireSourceRefreshToken(token => token + 1);
@@ -3925,6 +3928,7 @@ export function PayPeriodDetail({
             payDate={payPeriod.pay_date}
             refreshToken={checkPrintRefreshToken}
             onChecksLoaded={handleNonEmployeeChecksLoaded}
+            onChecksChanged={handleNonEmployeeChecksChanged}
           />
         )}
 
