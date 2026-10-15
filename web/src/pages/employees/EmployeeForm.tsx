@@ -360,6 +360,10 @@ export function EmployeeForm() {
                 rate: employee.pay_rate,
               }]
         );
+      } else {
+        // Retain hourly definitions for a later basis change without replacing
+        // the current salary or flat fee with the hidden primary hourly rate.
+        setWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [defaultHourlyWageRate()]);
       }
       setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
         temp_id: crypto.randomUUID(),
