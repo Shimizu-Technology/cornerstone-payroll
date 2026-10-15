@@ -72,12 +72,12 @@ const mutations = [
 async function renderChecks() {
   const onChecksLoaded = vi.fn();
   const onChecksChanged = vi.fn();
-  render(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed"
+  const view = render(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed"
     onChecksLoaded={onChecksLoaded} onChecksChanged={onChecksChanged} />);
   await screen.findByText('Synthetic vendor');
   await waitFor(() => expect(onChecksLoaded).toHaveBeenLastCalledWith([check]));
   onChecksLoaded.mockClear();
-  return { onChecksLoaded, onChecksChanged };
+  return { ...view, onChecksLoaded, onChecksChanged };
 }
 
 describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
@@ -104,6 +104,7 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     expect(screen.queryByText('Synthetic vendor')).toBeNull();
     expect(screen.queryByText('No non-employee checks for this pay period.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save check numbers' })).toBeNull();
+    expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(true);
     expect(onChecksLoaded).not.toHaveBeenCalled();
     expect(onChecksChanged).toHaveBeenCalledOnce();
 
@@ -113,6 +114,7 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     expect(await screen.findByText('Current saved vendor')).toBeTruthy();
     await waitFor(() => expect(onChecksLoaded).toHaveBeenLastCalledWith([recovered]));
     expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(false);
     expect(mutation.api).toHaveBeenCalledOnce();
     expect(onChecksChanged).toHaveBeenCalledOnce();
   });
@@ -137,5 +139,96 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     expect(onChecksChanged).toHaveBeenCalledOnce();
     expect(onChecksLoaded).toHaveBeenLastCalledWith([remaining]);
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it.each(['success', 'failure'] as const)('ignores an older list %s after the current list succeeds, preserving drafts and observers', async outcome => {
+    const { rerender, onChecksLoaded, onChecksChanged } = await renderChecks();
+    const older = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    const current = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    api.list.mockReturnValueOnce(older.promise).mockReturnValueOnce(current.promise);
+    rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed" refreshToken={1}
+      onChecksLoaded={onChecksLoaded} onChecksChanged={onChecksChanged} />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed" refreshToken={2}
+      onChecksLoaded={onChecksLoaded} onChecksChanged={onChecksChanged} />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(3));
+    const saved = { ...check, payable_to: 'Current saved vendor' };
+    await act(async () => current.resolve({ non_employee_checks: [saved] }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Check number for Current saved vendor' }), { target: { value: '8200' } });
+    onChecksLoaded.mockClear();
+    await act(async () => {
+      if (outcome === 'success') older.resolve({ non_employee_checks: [{ ...check, payable_to: 'Obsolete vendor' }] });
+      else older.reject(new Error('Obsolete outage'));
+    });
+    expect(screen.queryByText('Obsolete vendor')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('textbox', { name: 'Check number for Current saved vendor' }) as HTMLInputElement).value).toBe('8200');
+    expect(onChecksLoaded).not.toHaveBeenCalled();
+    expect(onChecksChanged).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer failed reload unavailable when an older successful response arrives', async () => {
+    const { rerender, onChecksLoaded } = await renderChecks();
+    const older = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    const current = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    api.list.mockReturnValueOnce(older.promise).mockReturnValueOnce(current.promise);
+    rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} refreshToken={1} onChecksLoaded={onChecksLoaded} />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} refreshToken={2} onChecksLoaded={onChecksLoaded} />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(3));
+    await act(async () => current.reject(new Error('Current outage')));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    await act(async () => older.resolve({ non_employee_checks: [check] }));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByText('Synthetic vendor')).toBeNull();
+    expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChecksLoaded).not.toHaveBeenCalled();
+  });
+
+  it('does not end a current load when the previous pay run responds and ignores responses after unmount', async () => {
+    const older = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    const current = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    const onChecksLoaded = vi.fn();
+    api.list.mockReturnValueOnce(older.promise).mockReturnValueOnce(current.promise);
+    const { rerender, unmount } = render(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} onChecksLoaded={onChecksLoaded} />);
+    rerender(<NonEmployeeChecksPanel payPeriodId={9} companyId={1} onChecksLoaded={onChecksLoaded} />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    onChecksLoaded.mockClear();
+    await act(async () => older.resolve({ non_employee_checks: [check] }));
+    expect(screen.getByText('Loading...')).toBeTruthy();
+    expect(screen.queryByText('Synthetic vendor')).toBeNull();
+    expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(true);
+    unmount();
+    await act(async () => current.resolve({ non_employee_checks: [{ ...check, pay_period_id: 9 }] }));
+    expect(onChecksLoaded).not.toHaveBeenCalled();
+  });
+
+  it('blocks initial Add and an open Create form during pending or failed reads, then recovers the draft with a read-only reload', async () => {
+    const initial = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    api.list.mockReturnValueOnce(initial.promise);
+    const view = render(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} />);
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Check' }));
+    expect(screen.queryByPlaceholderText('Payable To *')).toBeNull();
+    await act(async () => initial.resolve({ non_employee_checks: [check] }));
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Check' }));
+    fireEvent.change(screen.getByPlaceholderText('Payable To *'), { target: { value: 'Retained draft' } });
+    fireEvent.change(screen.getByPlaceholderText('Amount *'), { target: { value: '25' } });
+    const reload = deferred<{ non_employee_checks: NonEmployeeCheck[] }>();
+    api.list.mockReturnValueOnce(reload.promise);
+    view.rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} refreshToken={1} />);
+    expect((screen.getByRole('button', { name: 'Create Check' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Check' }));
+    expect(api.create).not.toHaveBeenCalled();
+    await act(async () => reload.reject(new Error('Current outage')));
+    expect((await screen.findByRole('alert')).textContent).toContain('Saved changes are retained');
+    expect((screen.getByRole('button', { name: 'Create Check' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Check' }));
+    expect(api.create).not.toHaveBeenCalled();
+    api.list.mockResolvedValueOnce({ non_employee_checks: [check] });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload checks' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create Check' }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByPlaceholderText('Payable To *') as HTMLInputElement).value).toBe('Retained draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Create Check' }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
   });
 });
