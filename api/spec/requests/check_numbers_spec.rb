@@ -96,6 +96,8 @@ RSpec.describe "Check-number worksheet", type: :request do
   end
 
   it "rejects duplicate numbers inside the submitted worksheet" do
+    item_a.mark_package_prepared!(user: admin_user)
+    non_employee_check.mark_package_prepared!
     patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
       changes: [
         { source_type: "payroll_item", source_id: item_a.id, check_number: "3100" },
@@ -245,6 +247,107 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body.fetch("error")).to include("cannot be changed after")
     expect(item_a.reload.check_number).to eq("3000")
+  end
+
+  it "corrects a prepared TOG check and payroll check together without recreating the tax payment" do
+    item_a.update!(withholding_tax: 150)
+    non_employee_check.update!(payable_to: "Treasurer of Guam", check_type: "tax_deposit",
+      auto_generated_type: "fit_deposit", amount: 150)
+    non_employee_check.line_items.create!(description: "FIT withholding", amount: 150, position: 0)
+    posting = PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: admin_user)
+    entry_ids = posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT).pluck(:id)
+    PayrollLiabilityCheckAllocationService.allocate!(non_employee_check: non_employee_check, entry_ids: entry_ids)
+    transmittal = Transmittal.create!(pay_period: pay_period, company: company,
+      payroll_check_numbers: %w[3000 3001], non_employee_check_numbers: { non_employee_check.id.to_s => "3500" })
+    item_a.mark_package_prepared!(user: admin_user)
+    non_employee_check.mark_package_prepared!
+    originals = [ item_a, non_employee_check ].map { |record| record.reload.attributes.except("check_number", "updated_at") }
+    allocations = non_employee_check.payroll_liability_check_allocations.map(&:attributes)
+    journal = posting.entries.map(&:attributes)
+    line_items = non_employee_check.line_items.map(&:attributes)
+    manifest = [ item_a, non_employee_check ].map do |record|
+      type = record.is_a?(PayrollItem) ? "payroll_item" : "non_employee_check"
+      {
+        "key" => "#{type}:#{record.id}", "source_type" => type, "source_id" => record.id,
+        "check_number" => record.check_number,
+        "amount" => (record.is_a?(PayrollItem) ? record.net_pay : record.amount).to_s,
+        "source_updated_at" => record.updated_at.iso8601(6), "print_count" => 0, "printed_at" => nil
+      }
+    end
+    package = CheckPrintRun.create!(
+      company: company, pay_period: pay_period, created_by: admin_user, status: "prepared",
+      check_stock_type: company.check_stock_type, starting_slot: 1, selected_count: 2,
+      manifest: manifest, storage_key: "check-print-runs/tog-renumber-spec.pdf", filename: "tog-renumber-spec.pdf",
+      sha256: "b" * 64, byte_size: 100, generated_at: Time.current
+    )
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }.not_to raise_error
+
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        reason: "Match physical stock before printing",
+        changes: [
+          { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+          { source_type: "non_employee_check", source_id: non_employee_check.id, check_number: "4101" }
+        ]
+      }
+    }.to change { NonEmployeeCheckEdit.count }.by(1)
+      .and change { AuditLog.where(action: [ "checks#check_number_updated", "non_employee_checks#updated" ]).count }.by(2)
+      .and change { NonEmployeeCheck.count }.by(0)
+
+    expect(response).to have_http_status(:ok)
+    expect([ item_a.reload.check_number, non_employee_check.reload.check_number ]).to eq(%w[4100 4101])
+    expect([ item_a, non_employee_check ].map { |record| record.attributes.except("check_number", "updated_at") }).to eq(originals)
+    expect(non_employee_check.payroll_liability_check_allocations.reload.map(&:attributes)).to eq(allocations)
+    expect(posting.entries.reload.map(&:attributes)).to eq(journal)
+    expect(non_employee_check.line_items.reload.map(&:attributes)).to eq(line_items)
+    expect(non_employee_check.edits.last.changed_fields).to eq([ "check_number" ])
+    expect(company.reload.next_check_number).to eq(4102)
+    expect(transmittal.reload.payroll_check_numbers).to eq(%w[3001 4100])
+    expect(transmittal.non_employee_check_numbers).to eq(non_employee_check.id.to_s => "4101")
+    expect(non_employee_check.prepared?).to be(false)
+    expect {
+      non_employee_check.mark_paid!(actor: admin_user, payment_date: Date.current.iso8601)
+    }.to raise_error(ArgumentError, /Generate a current check package/)
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }
+      .to raise_error(CheckPrintRunSelectionVerifier::StaleSelectionError, /different check number/)
+    expect(package.reload.manifest).to eq(manifest)
+  end
+
+  %w[printed paid cleared replacement_required voided electronic].each do |state|
+    it "rejects a #{state.humanize.downcase} other-payment check without partially changing the worksheet" do
+      item_a.mark_package_prepared!(user: admin_user)
+      non_employee_check.mark_package_prepared!
+      case state
+      when "printed"
+        non_employee_check.mark_printed!
+      when "paid"
+        non_employee_check.update!(paid_at: Time.current, paid_by: admin_user)
+      when "cleared", "replacement_required"
+        non_employee_check.check_reconciliation_events.create!(company: company, pay_period: pay_period,
+          recorded_by: admin_user, event_type: state, check_number: non_employee_check.check_number,
+          amount: non_employee_check.amount, effective_on: Date.current, idempotency_key: SecureRandom.uuid)
+      when "voided"
+        non_employee_check.void!(reason: "Synthetic voided stock")
+      when "electronic"
+        non_employee_check.update!(payment_method: "eftps")
+      end
+      originals = [ item_a, non_employee_check ].map { |record| record.reload.attributes }
+
+      expect {
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+          changes: [
+            { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+            { source_type: "non_employee_check", source_id: non_employee_check.id, check_number: "4101" }
+          ]
+        }
+      }.not_to change { AuditLog.count }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect([ item_a, non_employee_check ].map { |record| record.reload.attributes }).to eq(originals)
+      expect(company.reload.next_check_number).to eq(3002)
+      expect(NonEmployeeCheckEdit.count).to eq(0)
+      expect(CheckEvent.where(event_type: "renumbered")).to be_empty
+    end
   end
 
   it "rejects a voided check without partially renumbering a prepared check" do
