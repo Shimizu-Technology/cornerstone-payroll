@@ -120,8 +120,8 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
   it.each(mutations)('does not report a saved change when $name is rejected', async mutation => {
     const { onChecksLoaded, onChecksChanged } = await renderChecks();
     mutation.api.mockRejectedValueOnce(new Error('Mutation rejected'));
-    await act(async () => mutation.perform());
-    expect(mutation.api).toHaveBeenCalledOnce();
+    mutation.perform();
+    await waitFor(() => expect(mutation.api).toHaveBeenCalledOnce());
     expect(onChecksChanged).not.toHaveBeenCalled();
     expect(onChecksLoaded).not.toHaveBeenCalled();
     expect(api.list).toHaveBeenCalledOnce();
