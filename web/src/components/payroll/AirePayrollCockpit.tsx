@@ -240,7 +240,7 @@ function Metric({ label, value, detail, tone = 'neutral' }: { label: string; val
     ? 'border-success-200 bg-success-50/70'
     : tone === 'warning' ? 'border-warning-200 bg-warning-50/70' : 'border-neutral-200 bg-white';
   return (
-    <div className={`rounded-xl border p-4 ${toneClass}`}>
+    <div role="group" aria-label={label} className={`rounded-xl border p-4 ${toneClass}`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
       <p className="mt-2 font-display text-2xl font-bold tracking-tight text-neutral-950">{value}</p>
       <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
@@ -497,9 +497,9 @@ function AirePayrollCockpitWorkspace({
     [overview]
   );
   const unmappedCount = employeesRequiringMapping.filter((employee) => employee.cornerstone.status !== 'mapped').length;
-  const heldHours = overview
-    ? overview.readiness.held_hours ?? Math.max(0, overview.readiness.total_hours - overview.readiness.eligible_hours)
-    : 0;
+  const heldHours = overview?.readiness.held_hours ?? 0;
+  const reportedPaymentHours = overview?.readiness.payment_attested_pending_evidence_hours ?? 0;
+  const reportedPaymentEntries = overview?.readiness.payment_attested_pending_evidence_entries ?? 0;
   const paymentHistory = useMemo(
     () => groupPaymentHistory(overview?.entry_processing_history || []),
     [overview?.entry_processing_history]
@@ -819,10 +819,11 @@ function AirePayrollCockpitWorkspace({
               </div>
             ) : overview && (
               <>
-                <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5 sm:p-6">
+                <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-6">
                   <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in time tracking`} />
                   <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
-                  <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecard${overview.readiness.held_entries === 1 ? '' : 's'} · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Other held time" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecard${overview.readiness.held_entries === 1 ? '' : 's'} · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Payment reported" value={`${reportedPaymentHours.toFixed(2)} hrs`} detail={`${reportedPaymentEntries} timecard${reportedPaymentEntries === 1 ? '' : 's'} · evidence pending · not included`} tone={reportedPaymentHours > 0 ? 'warning' : 'neutral'} />
                   <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
                   <Metric
                     label="Visible mapping"
@@ -1312,7 +1313,7 @@ function AirePayrollCockpitWorkspace({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">Lock the time tracking cutoff</DialogTitle>
-              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
+              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} other held hours remain outside this payroll for review. {reportedPaymentHours.toFixed(2)} reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it.</DialogDescription>
             </DialogHeader>
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
