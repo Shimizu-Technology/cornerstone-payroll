@@ -346,25 +346,17 @@ export function EmployeeForm() {
         w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
-      const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
-        ...rate,
-        temp_id: crypto.randomUUID(),
-      }));
-      if (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly')) {
-        replaceWageRates(
-          fetchedWageRates.length > 0
-            ? fetchedWageRates
-            : [{
-                ...defaultHourlyWageRate(),
-                label: 'Regular',
-                rate: employee.pay_rate,
-              }]
-        );
-      } else {
-        // Retain hourly definitions for a later basis change without replacing
-        // the current salary or flat fee with the hidden primary hourly rate.
-        setWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [defaultHourlyWageRate()]);
-      }
+      const fetchedWageRates = (employee.wage_rates || [])
+        .filter((rate) => rate.active !== false)
+        .map((rate) => ({ ...rate, temp_id: crypto.randomUUID() }));
+      const usesHourlyRates = employee.employment_type === 'hourly'
+        || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+      replaceWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [{
+        ...defaultHourlyWageRate(),
+        // Preserve the existing scalar fallback for an hourly profile with an
+        // empty response. Explicit retired rows and non-hourly money are not fallback rates.
+        rate: usesHourlyRates && !employee.wage_rates?.length ? employee.pay_rate : 0,
+      }]);
       setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
         temp_id: crypto.randomUUID(),
         label: adjustment.label,
@@ -519,12 +511,9 @@ export function EmployeeForm() {
       active: rate.active !== false,
     }));
 
+    // Hourly submission derives its scalar from these rows. Keep the separate
+    // salary/flat-fee draft intact when operators edit rates and switch back.
     setWageRates(normalized);
-
-    const primaryRate = normalized.find((rate) => rate.is_primary) || normalized[0];
-    if (primaryRate) {
-      setForm((prev) => ({ ...prev, pay_rate: roundCurrencyValue(Number(primaryRate.rate) || 0) }));
-    }
   };
 
   const updateWageRate = (tempId: string, patch: Partial<WageRateFormRow>) => {
@@ -714,7 +703,7 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!isVariableSalary && form.pay_rate <= 0) {
+    if (!supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {

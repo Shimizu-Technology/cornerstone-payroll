@@ -53,6 +53,7 @@ function view(editing = true) {
   return render(<MemoryRouter initialEntries={[path]}><Routes>
     <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
     <Route path="/companies/:companyId/employees/new" element={<EmployeeForm />} />
+    <Route path="/companies/1/employees/7/overview" element={<p>Created employee 7 overview</p>} />
     <Route path="/saved" element={<p>Saved employee profile</p>} />
   </Routes></MemoryRouter>);
 }
@@ -143,6 +144,136 @@ describe.each(bases)('retained hourly definitions after $label', ({ overrides, s
     assertNoWrites();
     expect(mocks.listRates).not.toHaveBeenCalled();
   });
+
+  it.each(['edit', 'remove', 'primary', 'add'])('preserves the non-hourly amount after an hourly %s and a round trip before Save', async (action) => {
+    await loadEmployee(employee(overrides));
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+    if (action === 'edit') {
+      fireEvent.change(screen.getAllByLabelText(/^Hourly Rate/)[0], { target: { value: '30' } });
+    } else if (action === 'remove') {
+      fireEvent.click(screen.getByRole('button', { name: 'Remove hourly rate Certification Operations' }));
+    } else if (action === 'primary') {
+      fireEvent.click(screen.getAllByRole('radio', { name: 'Primary' })[1]);
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Add Rate' }));
+      fireEvent.change(screen.getAllByLabelText(/^Rate Label/)[2], { target: { value: 'Weekend' } });
+      fireEvent.change(screen.getAllByLabelText(/^Hourly Rate/)[2], { target: { value: '40' } });
+    }
+    const expectedDraft = action === 'remove'
+      ? { labels: ['Administrative Support'], rates: ['17.50'] }
+      : { labels: ['Certification Operations', 'Administrative Support', ...(action === 'add' ? ['Weekend'] : [])],
+          rates: [action === 'edit' ? '30.00' : '25.00', '17.50', ...(action === 'add' ? ['40.00'] : [])] };
+    expect(hourlyValues()).toEqual(expectedDraft);
+    const expectedPrimary = action === 'primary' ? [false, true] : action === 'remove' ? [true] : [true, false, ...(action === 'add' ? [false] : [])];
+    expect(screen.getAllByRole('radio', { name: 'Primary' }).map((field) => (field as HTMLInputElement).checked)).toEqual(expectedPrimary);
+    assertNoWrites();
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: nonHourlyValue } });
+    expect((screen.getByLabelText(scalarLabel) as HTMLInputElement).value).toBe(scalar);
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+    expect(hourlyValues()).toEqual(expectedDraft);
+    expect(screen.getAllByRole('radio', { name: 'Primary' }).map((field) => (field as HTMLInputElement).checked)).toEqual(expectedPrimary);
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: nonHourlyValue } });
+    assertNoWrites();
+    fireEvent.submit(document.getElementById('employee-form')!);
+    await screen.findByText('Saved employee profile');
+    expect(mocks.updateEmployee).toHaveBeenCalledTimes(1);
+    expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ employment_type: overrides.employment_type, pay_rate: overrides.pay_rate });
+    expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toBeUndefined();
+    for (const endpoint of [mocks.listRates, mocks.updateRate, mocks.createRate, mocks.deleteRate]) expect(endpoint).not.toHaveBeenCalled();
+  });
+
+  it('preserves a newly entered non-hourly amount while editing and returning from hourly rates', async () => {
+    await loadEmployee(employee(overrides));
+    const amount = (overrides.pay_rate || 0) + 100;
+    fireEvent.change(screen.getByLabelText(scalarLabel), { target: { value: String(amount) } });
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+    fireEvent.change(screen.getAllByLabelText(/^Hourly Rate/)[0], { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: nonHourlyValue } });
+    expect((screen.getByLabelText(scalarLabel) as HTMLInputElement).value).toBe(amount.toFixed(2));
+    assertNoWrites();
+    fireEvent.submit(document.getElementById('employee-form')!);
+    await screen.findByText('Saved employee profile');
+    expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ employment_type: overrides.employment_type, pay_rate: amount });
+    for (const endpoint of [mocks.listRates, mocks.updateRate, mocks.createRate, mocks.deleteRate]) expect(endpoint).not.toHaveBeenCalled();
+  });
+
+  it('defensively filters an inactive primary supplied in the response and saves only the active retained ID', async () => {
+    const inactivePrimary = { ...retainedRates[0], active: false };
+    await loadEmployee(employee({ ...overrides, wage_rates: [inactivePrimary, retainedRates[1], hiddenInactiveRate] }));
+    fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+    expect(hourlyValues()).toEqual({ labels: ['Administrative Support'], rates: ['17.50'] });
+    expect((screen.getByRole('radio', { name: 'Primary' }) as HTMLInputElement).checked).toBe(true);
+    assertNoWrites();
+    mocks.listRates.mockResolvedValue({ wage_rates: [inactivePrimary, retainedRates[1], hiddenInactiveRate, unseenActiveRate] });
+    fireEvent.submit(document.getElementById('employee-form')!);
+    await screen.findByText('Saved employee profile');
+    expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 17.5, wage_rates: [
+      { id: 205, label: 'Administrative Support', rate: 17.5, is_primary: true, active: true },
+    ] });
+    expect(mocks.updateRate.mock.calls).toEqual([
+      [205, { label: 'Administrative Support', rate: 17.5, is_primary: true, active: true }, 1],
+    ]);
+    expect(mocks.createRate).not.toHaveBeenCalled();
+    expect(mocks.deleteRate).not.toHaveBeenCalled();
+  });
+});
+
+it.each([
+  ...bases.map((base) => ({ ...base, responseShape: 'canonical empty active-rate list' })),
+  ...bases.map((base) => ({ ...base, responseShape: 'defensive supplied inactive rows' })),
+  { label: 'existing hourly profile', overrides: { employment_type: 'hourly', pay_rate: 25 } as Partial<Employee>, toggleLabel: null, responseShape: 'defensive supplied inactive rows' },
+])('requires an explicit new hourly definition on $label with $responseShape and preserves retired IDs', async ({ overrides, toggleLabel, responseShape }) => {
+  const inactiveRates = retainedRates.map((rate) => ({ ...rate, active: false }));
+  // Normal employee GET serializes only active rows. The later rate-list GET
+  // returns all definitions, including retired ones that must remain untouched.
+  await loadEmployee(employee({ ...overrides, wage_rates: responseShape === 'canonical empty active-rate list' ? [] : inactiveRates }));
+  if (toggleLabel) fireEvent.change(screen.getByLabelText(toggleLabel), { target: { value: 'hourly' } });
+  expect(hourlyValues()).toEqual({ labels: ['Regular'], rates: ['0.00'] });
+  assertNoWrites();
+  fireEvent.submit(document.getElementById('employee-form')!);
+  expect(await screen.findByText('Each hourly pay rate must be greater than 0')).toBeTruthy();
+  assertNoWrites();
+  expect(mocks.listRates).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText(/^Hourly Rate/), { target: { value: '30' } });
+  mocks.listRates.mockResolvedValue({ wage_rates: [...inactiveRates, unseenActiveRate] });
+  fireEvent.submit(document.getElementById('employee-form')!);
+  await screen.findByText('Saved employee profile');
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 30, wage_rates: [
+    { label: 'Regular', rate: 30, is_primary: true, active: true },
+  ] });
+  expect(mocks.updateEmployee.mock.calls[0][1].wage_rates[0].id).toBeUndefined();
+  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 30, is_primary: true, active: true }, 1);
+  expect(mocks.updateRate).not.toHaveBeenCalled();
+  expect(mocks.deleteRate).not.toHaveBeenCalled();
+});
+
+it.each(['salary', 'hourly'])('preserves a zero variable-salary draft and validates the chosen %s basis from its own amount', async (basis) => {
+  await loadEmployee(employee({ employment_type: 'salary', salary_type: 'variable', pay_rate: 0 }));
+  expect(screen.queryByLabelText(/^Pay Rate/)).toBeNull();
+  fireEvent.change(screen.getByLabelText(/^Employment Type/), { target: { value: 'hourly' } });
+  fireEvent.change(screen.getAllByLabelText(/^Hourly Rate/)[0], { target: { value: '30' } });
+  fireEvent.change(screen.getByLabelText(/^Employment Type/), { target: { value: 'salary' } });
+  expect(screen.queryByLabelText(/^Pay Rate/)).toBeNull();
+  expect(screen.getByText(/Pay is set each pay period using the salary override/)).toBeTruthy();
+  if (basis === 'hourly') fireEvent.change(screen.getByLabelText(/^Employment Type/), { target: { value: 'hourly' } });
+  assertNoWrites();
+  fireEvent.submit(document.getElementById('employee-form')!);
+  await screen.findByText('Saved employee profile');
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ employment_type: basis, pay_rate: basis === 'hourly' ? 30 : 0 });
+  if (basis === 'salary') {
+    expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toBeUndefined();
+    for (const endpoint of [mocks.listRates, mocks.updateRate]) expect(endpoint).not.toHaveBeenCalled();
+  } else {
+    expect(mocks.updateEmployee.mock.calls[0][1].wage_rates).toMatchObject([
+      { id: 101, rate: 30, is_primary: true }, { id: 205, rate: 17.5, is_primary: false },
+    ]);
+    expect(mocks.updateRate.mock.calls).toEqual([
+      [101, { label: 'Certification Operations', rate: 30, is_primary: true, active: true }, 1],
+      [205, { label: 'Administrative Support', rate: 17.5, is_primary: false, active: true }, 1],
+    ]);
+  }
+  expect(mocks.createRate).not.toHaveBeenCalled();
+  expect(mocks.deleteRate).not.toHaveBeenCalled();
 });
 
 it('keeps a brand-new hourly profile at an explicit zero default rather than inventing a saved rate', () => {
@@ -150,6 +281,31 @@ it('keeps a brand-new hourly profile at an explicit zero default rather than inv
   expect(hourlyValues()).toEqual({ labels: ['Regular'], rates: ['0.00'] });
   expect(mocks.get).not.toHaveBeenCalled();
   assertNoWrites();
+});
+
+it('creates a new hourly employee from the explicitly entered rate without requiring a hidden scalar', async () => {
+  mocks.createEmployee.mockResolvedValue({ data: employee({ employment_type: 'hourly', pay_rate: 25, wage_rates: [] }) });
+  mocks.listRates.mockResolvedValue({ wage_rates: [] });
+  view(false);
+  const fields: Array<[RegExp, string]> = [
+    [/^First Name/, 'Synthetic'], [/^Last Name/, 'Retained'],
+    [/^Social Security Number/, '900-70-1234'], [/^Re-enter Social Security Number/, '900-70-1234'],
+    [/^Hire Date/, '2025-01-01'], [/^Address Line 1/, '100 Synthetic Lane'],
+    [/^City/, 'Hagatna'], [/^State/, 'GU'], [/^ZIP Code/, '96910'],
+    [/^Effective date/, '2026-01-01'], [/^Hourly Rate/, '25'],
+  ];
+  for (const [label, value] of fields) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  assertNoWrites();
+  fireEvent.submit(document.getElementById('employee-form')!);
+  await screen.findByText('Created employee 7 overview');
+  expect(mocks.createEmployee).toHaveBeenCalledTimes(1);
+  expect(mocks.createEmployee.mock.calls[0][0]).toMatchObject({ company_id: 1, employment_type: 'hourly', pay_rate: 25,
+    wage_rates: [{ label: 'Regular', rate: 25, is_primary: true, active: true }],
+  });
+  expect(mocks.createRate).toHaveBeenCalledExactlyOnceWith({ employee_id: 7, label: 'Regular', rate: 25, is_primary: true, active: true }, 1);
+  expect(mocks.updateEmployee).not.toHaveBeenCalled();
+  expect(mocks.updateRate).not.toHaveBeenCalled();
+  expect(mocks.deleteRate).not.toHaveBeenCalled();
 });
 
 it('preserves the existing single-scalar fallback for an already-hourly employee without labeled definitions', async () => {
