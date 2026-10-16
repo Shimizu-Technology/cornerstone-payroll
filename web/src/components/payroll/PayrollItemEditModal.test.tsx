@@ -235,7 +235,6 @@ it('associates repeated adjustment amounts separately and edits only the chosen 
   ]);
 });
 
-
 // The label-association repair is a separate slice. Use existing visible
 // placeholders here so these regressions reproduce on the held parent itself.
 it.each([
