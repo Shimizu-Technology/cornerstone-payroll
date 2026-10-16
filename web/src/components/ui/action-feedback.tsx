@@ -70,7 +70,7 @@ export function FeedbackProvider({ children, scopeKey = 'default' }: { children:
   return <FeedbackContext.Provider value={value}>
     {children}
     {typeof document !== 'undefined' && createPortal(
-      <div data-feedback-portal aria-label="Action notifications" className={`pointer-events-none fixed inset-x-0 top-[max(1rem,env(safe-area-inset-top))] ${ACTION_OVERLAY_LAYERS.feedback} mx-auto flex max-h-[min(60dvh,36rem)] w-[min(36rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-1`}>
+      <div data-feedback-portal aria-label="Action notifications" className={`pointer-events-none fixed inset-x-0 top-[calc(4rem+env(safe-area-inset-top))] lg:top-[max(1rem,env(safe-area-inset-top))] ${ACTION_OVERLAY_LAYERS.feedback} mx-auto flex max-h-[min(60dvh,36rem)] w-[min(36rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-1`}>
         {visible.map((entry) => <FeedbackToast key={entry.id} entry={entry} dismiss={dismiss} />)}
       </div>, document.body)}
   </FeedbackContext.Provider>;
