@@ -116,7 +116,7 @@ it('retains both drafts after a genuine failed mutation and retries the selected
   await waive(user, identity, 'First draft');
   await waive(user, withholding, 'Second draft');
   await user.click(save(identity));
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Review changed; try again.');
+  expect(within(await screen.findByRole('alert')).getByText('Review changed; try again.', { exact: true })).toBeTruthy();
   expect(note(identity).value).toBe('First draft');
   expect(note(withholding).value).toBe('Second draft');
   expect(screen.queryByText(`${identity} readiness updated`)).toBeNull();
