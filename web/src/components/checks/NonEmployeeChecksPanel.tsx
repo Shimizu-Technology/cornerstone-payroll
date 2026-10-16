@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useId, useMemo, useRef } from 'react';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -21,6 +21,7 @@ interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
+  payPeriodVoided?: boolean;
   payDate?: string;
   refreshToken?: number;
   /**
@@ -88,8 +89,9 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodVoided = false, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
   const { notify } = useFeedback();
+  const formId = useId();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError, loadErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -207,7 +209,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
 
   const handleCreate = async () => {
-    if (listUnavailable || creating) return;
+    if (payPeriodVoided || listUnavailable || creating) return;
     setFormError(null);
     if (!formData.payable_to || !formData.amount) {
       setFormError('Payable To and Amount are required');
@@ -383,6 +385,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const showGenerateFit = payPeriodStatus === 'committed' && (!fitCheck || fitCheckNeedsNumber);
 
   const handleGenerateFitCheck = async () => {
+    if (payPeriodVoided) return;
     setGeneratingFit(true);
     setFitError(null);
     try {
@@ -430,7 +433,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit || listUnavailable}
+                disabled={payPeriodVoided || generatingFit || listUnavailable}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit
@@ -438,12 +441,18 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   : fitCheckNeedsNumber ? 'Assign FIT number' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={!showForm && listUnavailable}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={!showForm && (payPeriodVoided || listUnavailable)}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>
         </div>
       </div>
+
+      {payPeriodVoided && (
+        <p role="status" className="mx-4 mt-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+          This payroll is voided. New payments and FIT checks cannot be created. Saved payment records remain available for review.
+        </p>
+      )}
 
       {!listUnavailable && checkNumberChanges.length > 0 && (
         <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -467,26 +476,36 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         <div className="p-4 border-b bg-blue-50/30">
           {formError && <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
-            <NumericInput
-              className="px-3 py-2 text-sm"
-              placeholder="Amount *"
-              min={0.01}
-              fixedDecimalsOnBlur={2}
-              inputMode="decimal"
-              value={formData.amount === '' ? null : Number(formData.amount)}
-              onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
-            />
-            <select className="border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
-              {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-            <Input className="px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
-            <Input className="px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
-            <Input className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
+            <Input id={`${formId}-payable-to`} label="Payable To *" className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
+            <div className="space-y-1.5">
+              <label htmlFor={`${formId}-amount`} className="block text-sm font-medium text-neutral-700">Amount *</label>
+              <NumericInput
+                id={`${formId}-amount`}
+                className="px-3 py-2 text-sm"
+                placeholder="Amount *"
+                min={0.01}
+                fixedDecimalsOnBlur={2}
+                inputMode="decimal"
+                value={formData.amount === '' ? null : Number(formData.amount)}
+                onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor={`${formId}-check-type`} className="block text-sm font-medium text-neutral-700">Check Type</label>
+              <select id={`${formId}-check-type`} className="w-full border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
+                {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <Input id={`${formId}-check-number`} label="Check #" className="px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
+            <Input id={`${formId}-memo`} label="Memo" className="px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
+            <Input id={`${formId}-reference-number`} label="Reference #" className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
           </div>
-          <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
+          <div className="mt-2 space-y-1.5">
+            <label htmlFor={`${formId}-description`} className="block text-sm font-medium text-neutral-700">Description</label>
+            <textarea id={`${formId}-description`} className="w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
+          </div>
           {formData.check_type === 'grt' && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -501,7 +520,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             </div>
           )}
           <div className="mt-3 flex gap-2">
-            <Button size="sm" onClick={handleCreate} disabled={creating || listUnavailable}>
+            <Button size="sm" onClick={handleCreate} disabled={payPeriodVoided || creating || listUnavailable}>
               {creating ? 'Creating...' : 'Create Check'}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>

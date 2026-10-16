@@ -21,7 +21,7 @@ module Api
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :corrected_hours, :connect_corrected_hours
         ]
-        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup ]
+        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup, :generate_fit_check ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -952,6 +952,10 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/generate_fit_check
         def generate_fit_check
+          if @pay_period.voided?
+            return render json: { error: "Cannot generate a FIT check for a voided payroll" }, status: :unprocessable_entity
+          end
+
           unless @pay_period.status == "committed"
             return render json: { error: "FIT check can only be generated for committed pay periods" }, status: :unprocessable_entity
           end
