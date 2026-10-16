@@ -718,8 +718,8 @@ export function TimeTrackingImportModal({
               {!isHistoricalReconciliation && (preview.correction_lines || []).filter((line) => !(preview.correction_dispositions || []).some((done) => done.source_user_id === line.source_user_id && done.source_time_entry_id === line.source_time_entry_id && done.line_key === line.line_key)).map((line) => (
                 <section key={`${line.source_user_id}:${line.source_time_entry_id}:${line.line_key}`} aria-label="Source accounting correction" className="rounded-xl border border-warning-200 bg-warning-50 p-4">
                   <p className="text-sm font-semibold">Review source correction: {formatHours(line.regular_hours)} REG / {formatHours(line.overtime_hours)} OT</p>
-                  <p className="mt-2 text-sm">Record the correction against the original payroll before adding the remaining ordinary hours.</p>
-                  <Button className="mt-3" variant="outline" disabled={loading || correctionBusy} onClick={() => void reviewCorrection(line)}>Review correction</Button>
+                  <p className="mt-2 text-sm">Use this review for an accounting-only adjustment against a verified paid payroll. To add signed earnings here, review each employee's combined totals, which must remain nonnegative, and acknowledge the negative corrections below. Adding them keeps separate earning lines and does not replace the original payroll or record a payment or recovery.</p>
+                  <Button className="mt-3" variant="outline" disabled={loading || correctionBusy} onClick={() => void reviewCorrection(line)}>Review paid payroll correction</Button>
                 </section>
               ))}
               {correction && (
