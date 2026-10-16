@@ -93,12 +93,14 @@ describe('GeneralTransmittals PDF preview dialog', () => {
     expect(view.container.hasAttribute('inert')).toBe(true);
     expect(frame.getAttribute('src')).toBe('blob:synthetic-preview-1');
     expect(api.artifactPdf).toHaveBeenCalledExactlyOnceWith(17, 31);
-    expect(api.createUrl).toHaveBeenCalledExactlyOnceWith(pdf);
+    // Compare the exact Blob by identity without traversing JSDOM internals.
+    expect(api.createUrl).toHaveBeenCalledTimes(1);
+    expect(api.createUrl.mock.calls[0]?.length).toBe(1);
+    expect(api.createUrl.mock.calls[0]?.[0] === pdf).toBe(true);
     expect(api.revokeUrl).not.toHaveBeenCalled();
 
-    // Exercise the parent document's real dialog handler. user-event descends
-    // into the synthetic blob iframe's opaque JSDOM window after focusing it;
-    // PDF viewer internals are outside this component test's environment.
+    // Exercise the parent document's real dialog handler; embedded PDF viewer
+    // keyboard behavior remains outside this component test's environment.
     const backwardTab = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
     fireEvent(close, backwardTab);
     expect(backwardTab.defaultPrevented).toBe(true);
