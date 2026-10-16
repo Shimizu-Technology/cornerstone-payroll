@@ -3925,6 +3925,7 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
+            payPeriodVoided={isVoided}
             payDate={payPeriod.pay_date}
             refreshToken={checkPrintRefreshToken}
             onChecksLoaded={handleNonEmployeeChecksLoaded}
