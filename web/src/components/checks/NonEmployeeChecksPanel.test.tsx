@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NonEmployeeCheck } from '@/types';
 import { NonEmployeeChecksPanel } from './NonEmployeeChecksPanel';
@@ -268,5 +269,35 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
     expect(screen.queryByPlaceholderText('Payable To *')).toBeNull();
     expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('supports labeled keyboard entry and keeps the same payment payload after closing a draft', async () => {
+    const user = userEvent.setup();
+    await renderChecks();
+    await user.click(screen.getByRole('button', { name: '+ Add Check' }));
+    await user.click(screen.getByText('Payable To *', { selector: 'label' }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Payable To *' }));
+    await user.keyboard('Synthetic labeled payee');
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Amount *' }));
+    await user.keyboard('25.50');
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Check Type' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check Type' }), 'vendor');
+    await user.type(screen.getByRole('textbox', { name: 'Check #' }), '8200');
+    await user.type(screen.getByRole('textbox', { name: 'Memo' }), 'Labeled memo');
+    await user.type(screen.getByRole('textbox', { name: 'Reference #' }), 'SYNTHETIC-LABELS');
+    await user.type(screen.getByRole('textbox', { name: 'Description' }), 'Private QA draft');
+
+    await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+    expect(api.create).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '+ Add Check' }));
+    expect((screen.getByRole('textbox', { name: 'Payable To *' }) as HTMLInputElement).value).toBe('Synthetic labeled payee');
+    expect((screen.getByRole('textbox', { name: 'Description' }) as HTMLTextAreaElement).value).toBe('Private QA draft');
+    await user.click(screen.getByRole('button', { name: 'Create Check' }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledWith({
+      pay_period_id: 8, payable_to: 'Synthetic labeled payee', amount: 25.50, check_type: 'vendor',
+      memo: 'Labeled memo', description: 'Private QA draft', reference_number: 'SYNTHETIC-LABELS', check_number: '8200',
+    }));
   });
 });
