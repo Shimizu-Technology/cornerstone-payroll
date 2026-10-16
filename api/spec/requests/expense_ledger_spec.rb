@@ -166,7 +166,7 @@ RSpec.describe "Organization expense ledger", type: :request do
 
     post "/api/v1/admin/expenses", params: {
       expense: { expense_vendor_id: vendor.id, category: "Software", description: "Annual subscription",
-                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: "120.00", source_key: "bill-42" }
+                 expense_on: "2026-09-28", due_on: expense.due_on.iso8601, total_amount: "120.00", source_key: "bill-42" }
     }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body["already_exists"]).to be(true)
@@ -212,14 +212,14 @@ RSpec.describe "Organization expense ledger", type: :request do
     expense = create_expense(vendor: vendor, source_key: "card-statement-42")
     post "/api/v1/admin/expenses", params: {
       expense: { expense_vendor_id: vendor.id, category: "Software", description: "Annual subscription",
-                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: "120.00", source_key: "card-statement-42" }
+                 expense_on: "2026-09-28", due_on: expense.due_on.iso8601, total_amount: "120.00", source_key: "card-statement-42" }
     }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("expense", "id")).to eq(expense.id)
 
     post "/api/v1/admin/expenses", params: {
       expense: { expense_vendor_id: vendor.id, category: "Software", description: "Different expense",
-                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: "120.00",
+                 expense_on: "2026-09-28", due_on: expense.due_on.iso8601, total_amount: "120.00",
                  source_key: "card-statement-42" }
     }
     expect(response).to have_http_status(:conflict)
