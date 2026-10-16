@@ -148,12 +148,12 @@ it('associates distinct tax labels while preserving zero, signed FIT and the ret
   const user = userEvent.setup();
   mountSaved({ ...savedItem, additional_withholding: 25, additional_withholding_override: 25,
     withholding_tax_adjustment: 5, withholding_tax_override: 40, custom_deductions: [] } as PayrollItem);
-  const extra = screen.getByRole('textbox', { name: 'W-4 4(c) Extra W/H', exact: true });
-  const adjustment = screen.getByRole('textbox', { name: 'FIT Adjustment', exact: true });
-  const final = screen.getByRole('textbox', { name: 'Final FIT Override', exact: true });
+  const extra = screen.getByRole('textbox', { name: 'W-4 4(c) Extra W/H' });
+  const adjustment = screen.getByRole('textbox', { name: 'FIT Adjustment' });
+  const final = screen.getByRole('textbox', { name: 'Final FIT Override' });
   for (const label of ['W-4 4(c) Extra W/H', 'FIT Adjustment', 'Final FIT Override']) {
     await user.click(screen.getByText(label, { selector: 'label', exact: true }));
-    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: label, exact: true }));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: label }));
   }
   expect((extra as HTMLInputElement).value).toBe('25.00');
   expect((final as HTMLInputElement).value).toBe('40.00');
@@ -185,12 +185,12 @@ it.each([
 ])('associates the $employment_type branch label without saving on cancel', async ({ employment_type, name }) => {
   const user = userEvent.setup();
   const { onOpenChange } = mountSaved({ ...savedItem, employment_type, custom_deductions: [] } as PayrollItem);
-  const field = screen.getByRole('textbox', { name, exact: true });
+  const field = screen.getByRole('textbox', { name });
   await user.click(screen.getByText(name, { selector: 'label', exact: true }));
   expect(document.activeElement).toBe(field);
   expect(screen.getByLabelText('Check Date')).toHaveProperty('type', 'date');
-  expect(screen.getByRole('textbox', { name: 'Check Memo', exact: true })).toBeTruthy();
-  expect(screen.getByRole('spinbutton', { name: 'Qualified Overtime Premium', exact: true })).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: 'Check Memo' })).toBeTruthy();
+  expect(screen.getByRole('spinbutton', { name: 'Qualified Overtime Premium' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(onOpenChange).toHaveBeenCalledWith(false);
   expect(mocks.update).not.toHaveBeenCalled();
@@ -203,14 +203,14 @@ it('names repeated earning fields by row and retains imported-hour disabled beha
     { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover', rate: 25, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true },
     { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, active: true },
   ] } as PayrollItem);
-  const carry = screen.getByRole('textbox', { name: 'Carryover Regular', exact: true }) as HTMLInputElement;
-  const current = screen.getByRole('textbox', { name: 'Current Regular', exact: true }) as HTMLInputElement;
+  const carry = screen.getByRole('textbox', { name: 'Carryover Regular' }) as HTMLInputElement;
+  const current = screen.getByRole('textbox', { name: 'Current Regular' }) as HTMLInputElement;
   expect(carry.disabled).toBe(true);
   expect(current.disabled).toBe(true);
   expect([carry.value, current.value]).toEqual(['4', '2']);
   expect(carry.id).not.toBe(current.id);
   await user.click(screen.getAllByText('Holiday', { selector: 'label', exact: true })[1]);
-  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Current Holiday', exact: true }));
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Current Holiday' }));
   await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(mocks.update).not.toHaveBeenCalled();
 });
@@ -221,8 +221,8 @@ it('associates repeated adjustment amounts separately and edits only the chosen 
     { label: 'Uniform', amount: 3, treatment: 'post_tax_deduction', notes: '', active: true },
     { label: 'Uniform', amount: 2, treatment: 'post_tax_deduction', notes: '', active: true },
   ] } as PayrollItem);
-  const first = screen.getByRole('textbox', { name: 'Payroll adjustment 1 amount', exact: true }) as HTMLInputElement;
-  const second = screen.getByRole('textbox', { name: 'Payroll adjustment 2 amount', exact: true }) as HTMLInputElement;
+  const first = screen.getByRole('textbox', { name: 'Payroll adjustment 1 amount' }) as HTMLInputElement;
+  const second = screen.getByRole('textbox', { name: 'Payroll adjustment 2 amount' }) as HTMLInputElement;
   expect(first.id).not.toBe(second.id);
   expect(screen.getByLabelText('Payroll adjustment 2 amount', { exact: true })).toBe(second);
   await user.clear(second);
