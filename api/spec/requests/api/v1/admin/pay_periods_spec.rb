@@ -323,6 +323,54 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "number_assigned" => true
       )
     end
+
+    it "rechecks a committed payroll voided after request loading before creating or numbering a FIT payment" do
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        withholding_tax: 43.13, additional_withholding: 5, voided: false)
+      # Keep the controller's initially loaded instance stale so the financial
+      # lock must reload it before checking the void state or using its items.
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:set_pay_period).and_wrap_original do |original|
+        original.call
+        pay_period.update!(correction_status: "voided", voided_at: Time.current, void_reason: "Retained voided payroll")
+      end
+      retained_item = item.attributes
+
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      end.not_to change {
+        [ NonEmployeeCheck.count, PayrollLiabilityPosting.count, PayrollLiabilityEntry.count,
+          PayrollLiabilityCheckAllocation.count, company.reload.next_check_number ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot generate a FIT check for a voided payroll")
+      expect(pay_period.reload).to have_attributes(status: "committed", correction_status: "voided")
+      expect(pay_period.voided_at).to be_present
+      expect(item.reload.attributes).to eq(retained_item)
+    end
+
+    it "rejects reuse of an unnumbered FIT payment after its committed payroll is voided" do
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        withholding_tax: 43.13, additional_withholding: 0, voided: false)
+      PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: admin_user)
+      fit_check = create(:non_employee_check,
+        company: company, pay_period: pay_period, amount: 43.13, payable_to: "Treasurer of Guam",
+        payment_period_type: "pay_period", tax_year: nil, tax_month: nil,
+        auto_generated_type: "fit_deposit", check_type: "tax_deposit", check_number: nil)
+      pay_period.update!(correction_status: "voided", voided_at: Time.current, void_reason: "Retained voided payroll")
+      retained_check = fit_check.attributes
+
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      end.not_to change {
+        [ NonEmployeeCheck.count, PayrollLiabilityPosting.count, PayrollLiabilityEntry.count,
+          PayrollLiabilityCheckAllocation.count, company.reload.next_check_number ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot generate a FIT check for a voided payroll")
+      expect(fit_check.reload.attributes).to eq(retained_check)
+    end
   end
 
   describe "GET /api/v1/admin/pay_periods/:id" do

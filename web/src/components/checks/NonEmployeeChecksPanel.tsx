@@ -21,6 +21,7 @@ interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
+  payPeriodVoided?: boolean;
   payDate?: string;
   refreshToken?: number;
   /**
@@ -88,7 +89,7 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodVoided = false, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
   const { notify } = useFeedback();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,7 +208,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
 
   const handleCreate = async () => {
-    if (listUnavailable || creating) return;
+    if (payPeriodVoided || listUnavailable || creating) return;
     setFormError(null);
     if (!formData.payable_to || !formData.amount) {
       setFormError('Payable To and Amount are required');
@@ -383,6 +384,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const showGenerateFit = payPeriodStatus === 'committed' && (!fitCheck || fitCheckNeedsNumber);
 
   const handleGenerateFitCheck = async () => {
+    if (payPeriodVoided) return;
     setGeneratingFit(true);
     setFitError(null);
     try {
@@ -430,7 +432,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit || listUnavailable}
+                disabled={payPeriodVoided || generatingFit || listUnavailable}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit
@@ -438,12 +440,18 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   : fitCheckNeedsNumber ? 'Assign FIT number' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={!showForm && listUnavailable}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={!showForm && (payPeriodVoided || listUnavailable)}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>
         </div>
       </div>
+
+      {payPeriodVoided && (
+        <p role="status" className="mx-4 mt-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+          This payroll is voided. New payments and FIT checks cannot be created. Saved payment records remain available for review.
+        </p>
+      )}
 
       {!listUnavailable && checkNumberChanges.length > 0 && (
         <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -501,7 +509,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             </div>
           )}
           <div className="mt-3 flex gap-2">
-            <Button size="sm" onClick={handleCreate} disabled={creating || listUnavailable}>
+            <Button size="sm" onClick={handleCreate} disabled={payPeriodVoided || creating || listUnavailable}>
               {creating ? 'Creating...' : 'Create Check'}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>

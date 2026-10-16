@@ -231,4 +231,42 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Check' }));
     await waitFor(() => expect(api.create).toHaveBeenCalledOnce());
   });
+
+  it('blocks new payments for a voided committed payroll while retaining saved payment review', async () => {
+    api.list.mockResolvedValue({ non_employee_checks: [{ ...check, voided: true, edit_count: 1 }] });
+    render(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed" payPeriodVoided />);
+    await screen.findByText('Synthetic vendor');
+
+    expect(screen.getByRole('status').textContent).toContain('This payroll is voided');
+    const generate = screen.getByRole('button', { name: 'Generate FIT Check' }) as HTMLButtonElement;
+    const add = screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement;
+    expect(generate.disabled).toBe(true);
+    expect(add.disabled).toBe(true);
+    fireEvent.click(generate);
+    fireEvent.click(add);
+    expect(api.generateFitCheck).not.toHaveBeenCalled();
+    expect(api.create).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText('Payable To *')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Preview' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTitle('Show edit history'));
+    expect(screen.getByText('Edit History')).toBeTruthy();
+  });
+
+  it('preserves an open draft and allows Cancel when the payroll becomes voided', async () => {
+    const view = await renderChecks();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Check' }));
+    fireEvent.change(screen.getByPlaceholderText('Payable To *'), { target: { value: 'Retained draft' } });
+    fireEvent.change(screen.getByPlaceholderText('Amount *'), { target: { value: '25' } });
+
+    view.rerender(<NonEmployeeChecksPanel payPeriodId={8} companyId={1} payPeriodStatus="committed" payPeriodVoided />);
+    expect((screen.getByPlaceholderText('Payable To *') as HTMLInputElement).value).toBe('Retained draft');
+    expect((screen.getByPlaceholderText('Amount *') as HTMLInputElement).value).toBe('25.00');
+    const create = screen.getByRole('button', { name: 'Create Check' }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.click(create);
+    expect(api.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+    expect(screen.queryByPlaceholderText('Payable To *')).toBeNull();
+    expect((screen.getByRole('button', { name: '+ Add Check' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });
