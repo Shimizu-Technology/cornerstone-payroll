@@ -449,6 +449,7 @@ export function PayrollItemEditModal({
                   </label>
                   <NumericInput
                     id={`${inputId}-salary_override`}
+                    emptyValue={null}
                     placeholder={`Default: ${formatCurrency(Number(item.pay_rate))}/period`}
                     value={fields.salary_override === '' ? null : Number(fields.salary_override)}
                     onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
@@ -576,6 +577,7 @@ export function PayrollItemEditModal({
                   </label>
                   <NumericInput
                     id={`${inputId}-salary_override`}
+                    emptyValue={null}
                     placeholder="Leave blank for default"
                     value={fields.salary_override === '' ? null : Number(fields.salary_override)}
                     onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
@@ -866,6 +868,7 @@ export function PayrollItemEditModal({
                   </label>
                   <NumericInput
                     id={`${inputId}-additional_withholding_override`}
+                    emptyValue={null}
                     placeholder={employeeAdditionalWithholding > 0 ? employeeAdditionalWithholding.toFixed(2) : 'Use employee default'}
                     value={fields.additional_withholding_override === '' ? null : Number(fields.additional_withholding_override)}
                     onValueChange={(value) => handleChange('additional_withholding_override', value == null ? '' : String(value))}
@@ -882,6 +885,7 @@ export function PayrollItemEditModal({
                   </label>
                   <NumericInput
                     id={`${inputId}-withholding_tax_adjustment`}
+                    emptyValue={null}
                     placeholder="0.00"
                     value={fields.withholding_tax_adjustment === '' ? null : Number(fields.withholding_tax_adjustment)}
                     onValueChange={(value) => handleChange('withholding_tax_adjustment', value == null ? '' : String(value))}
@@ -897,6 +901,7 @@ export function PayrollItemEditModal({
                   </label>
                   <NumericInput
                     id={`${inputId}-withholding_tax_override`}
+                    emptyValue={null}
                     placeholder="Auto-calculated"
                     value={fields.withholding_tax_override === '' ? null : Number(fields.withholding_tax_override)}
                     onValueChange={(value) => handleChange('withholding_tax_override', value == null ? '' : String(value))}
