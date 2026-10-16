@@ -413,6 +413,14 @@ export function PayPeriodDetail({
   const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
+  const [finalRecordRefreshToken, setFinalRecordRefreshToken] = useState(0);
+  const handleNonEmployeeChecksLoaded = useCallback((checks: NonEmployeeCheck[]) => {
+    setNonEmployeeChecks(checks);
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
+  const handleNonEmployeeChecksChanged = useCallback(() => {
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
   const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
   const invalidateAireSource = useCallback(() => {
     setAireSourceRefreshToken(token => token + 1);
@@ -516,6 +524,9 @@ export function PayPeriodDetail({
 
   const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
+    // Saved check, correction and payment changes invalidate the final record
+    // even if the surrounding pay-run reload subsequently fails.
+    setFinalRecordRefreshToken(token => token + 1);
     const requiresSavedSourceWorksheet = savedImportReloadRequiredRef.current;
     const retainInputs = preserveInputs && !requiresSavedSourceWorksheet;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
@@ -3914,9 +3925,11 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
+            payPeriodVoided={isVoided}
             payDate={payPeriod.pay_date}
             refreshToken={checkPrintRefreshToken}
-            onChecksLoaded={setNonEmployeeChecks}
+            onChecksLoaded={handleNonEmployeeChecksLoaded}
+            onChecksChanged={handleNonEmployeeChecksChanged}
           />
         )}
 
@@ -3932,7 +3945,7 @@ export function PayPeriodDetail({
           />
         )}
 
-        {isCommitted && <PayrollFinalRecordPanel payPeriodId={payPeriod.id} />}
+        {isCommitted && <PayrollFinalRecordPanel companyId={companyId} payPeriodId={payRunId} refreshToken={finalRecordRefreshToken} />}
 
         {/* Reports Download Panel — for calculated/approved/committed */}
         {!isDraft && payrollItems.length > 0 && (
