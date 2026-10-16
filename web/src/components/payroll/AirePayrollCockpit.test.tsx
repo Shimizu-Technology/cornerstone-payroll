@@ -727,8 +727,10 @@ describe('AirePayrollCockpit', () => {
     await screen.findByText('Malia Cruz');
     expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Correct' }));
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Confirmed ordinary shift description' } });
-    fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Verified the clock entry with the employee' } });
+    const description = screen.getByLabelText('Description');
+    await user.clear(description);
+    await user.type(description, 'Confirmed ordinary shift description');
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the clock entry with the employee');
     await user.click(screen.getByRole('button', { name: 'Save correction' }));
     await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 3,
@@ -746,7 +748,7 @@ describe('AirePayrollCockpit', () => {
     expect(within(dialog).getByRole('heading', { name: 'Approve time' })).toBeTruthy();
     const approve = within(dialog).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /reason/i }), { target: { value: 'Manager verified the corrected ordinary shift' } });
+    await user.type(within(dialog).getByRole('textbox', { name: /reason/i }), 'Manager verified the corrected ordinary shift');
     await user.click(approve);
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 4,
