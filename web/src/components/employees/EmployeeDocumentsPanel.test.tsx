@@ -32,11 +32,11 @@ const response = (data = missing) => ({
   readiness: { ready_for_payroll: data.every(row => row.status === 'waived' || row.status === 'verified'), required: data.length },
 });
 const document = { id: 8, title: 'Synthetic identity', file_name: 'synthetic.pdf', content_type: 'application/pdf', file_size: 100, created_at: '2026-01-01T00:00:00Z' };
-const row = (label: string) => within(screen.getByRole('button', { name: `Save ${label} status`, exact: true }).parentElement!);
-const card = (label: string) => within(screen.getByRole('button', { name: `Save ${label} status`, exact: true }).parentElement!.parentElement!);
+const row = (label: string) => within(screen.getByRole('button', { name: `Save ${label} status` }).parentElement!);
+const card = (label: string) => within(screen.getByRole('button', { name: `Save ${label} status` }).parentElement!.parentElement!);
 const select = (label: string) => row(label).getByLabelText('Readiness outcome') as HTMLSelectElement;
 const note = (label: string) => row(label).getByLabelText('Review note') as HTMLInputElement;
-const save = (label: string) => screen.getByRole('button', { name: `Save ${label} status`, exact: true });
+const save = (label: string) => screen.getByRole('button', { name: `Save ${label} status` });
 async function waive(user: ReturnType<typeof userEvent.setup>, label: string, text: string) {
   await user.selectOptions(select(label), 'waived');
   await user.clear(note(label));
@@ -139,7 +139,7 @@ it('keeps unsaved drafts through a failed refresh after a successful save and an
   await waive(user, identity, 'Saved reason');
   await waive(user, withholding, 'Preserved pending reason');
   await user.click(save(identity));
-  const retry = await screen.findByRole('button', { name: 'Retry payroll readiness', exact: true });
+  const retry = await screen.findByRole('button', { name: 'Retry payroll readiness' });
   expect(screen.getByRole('alert').textContent).toContain('Readiness GET unavailable');
   expect(screen.getByText(`${identity} readiness updated`, { exact: true })).toBeTruthy();
   expect(screen.queryByText('Ready for payroll', { exact: true })).toBeNull();
@@ -163,7 +163,7 @@ it.each(['employee', 'access'])('resets drafts on an actual %s scope change and 
   view.changeEmployee(kind === 'employee' ? 28 : 27);
   await waitFor(() => expect(note(identity).value).toBe(''));
   expect(select(identity).value).toBe('received');
-  if (kind === 'access') expect(row(identity).queryByRole('option', { name: 'Waived with reason', exact: true })).toBeNull();
+  if (kind === 'access') expect(row(identity).queryByRole('option', { name: 'Waived with reason' })).toBeNull();
   // Returning to the original employee/actor must not adopt its older in-flight save.
   mocks.auth = { user: { id: 1, role: 'admin' } };
   view.changeEmployee(27);
