@@ -3325,7 +3325,7 @@ export function PayPeriodDetail({
                                   )}
                                   {hasMultiRateResults && (
                                     <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
-                                      Multi-rate
+                                      Multiple earnings
                                     </span>
                                   )}
                                   {item.time_tracking_provenance && (
