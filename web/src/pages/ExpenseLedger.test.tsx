@@ -186,29 +186,32 @@ describe('ExpenseLedger read access in payroll test workspaces', () => {
 
     state.testWorkspace = true;
     view.rerender(<ExpenseLedger />);
-    expect(vendor.getByRole('textbox', { name: 'Vendor name' })).toHaveProperty('value', 'Unsaved QA vendor');
-    expect(vendor.getByRole('textbox', { name: 'Email (optional)' })).toHaveProperty('value', 'draft@example.invalid');
-    expect(expense.getByRole('combobox', { name: 'Vendor' })).toHaveProperty('value', '9');
-    expect(expense.getByRole('textbox', { name: 'Category' })).toHaveProperty('value', 'Office');
-    expect(expense.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '23.45');
-    expect(expense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
-    expect(detail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
-    expect(detail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
-    for (const button of [vendor.getByRole('button', { name: 'Save vendor' }),
-      expense.getByRole('button', { name: 'Save vendor bill' }),
-      detail.getByRole('button', { name: 'Record verified payment' })]) {
+    const currentVendor = within(screen.getByRole('region', { name: 'Add vendor' }));
+    const currentExpense = within(screen.getByRole('region', { name: 'Add expense' }));
+    const currentDetail = within(screen.getByRole('complementary', { name: 'Bill or purchase details' }));
+    expect(currentVendor.getByRole('textbox', { name: 'Vendor name' })).toHaveProperty('value', 'Unsaved QA vendor');
+    expect(currentVendor.getByRole('textbox', { name: 'Email (optional)' })).toHaveProperty('value', 'draft@example.invalid');
+    expect(currentExpense.getByRole('combobox', { name: 'Vendor' })).toHaveProperty('value', '9');
+    expect(currentExpense.getByRole('textbox', { name: 'Category' })).toHaveProperty('value', 'Office');
+    expect(currentExpense.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '23.45');
+    expect(currentExpense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
+    expect(currentDetail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
+    expect(currentDetail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
+    for (const button of [currentVendor.getByRole('button', { name: 'Save vendor' }),
+      currentExpense.getByRole('button', { name: 'Save vendor bill' }),
+      currentDetail.getByRole('button', { name: 'Record verified payment' })]) {
       expect(button).toHaveProperty('disabled', true);
       await user.click(button);
     }
     expectNoWrites();
 
-    await user.click(vendor.getByRole('button', { name: 'Close vendor form' }));
+    await user.click(currentVendor.getByRole('button', { name: 'Close vendor form' }));
     expect(screen.queryByRole('region', { name: 'Add vendor' })).toBeNull();
-    expect(expense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
-    await user.click(expense.getByRole('button', { name: 'Close expense form' }));
+    expect(currentExpense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
+    await user.click(currentExpense.getByRole('button', { name: 'Close expense form' }));
     expect(screen.queryByRole('region', { name: 'Add expense' })).toBeNull();
-    expect(detail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
-    expect(detail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
+    expect(currentDetail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
+    expect(currentDetail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
     expectNoWrites();
   });
 });
