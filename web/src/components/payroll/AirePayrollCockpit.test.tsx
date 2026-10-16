@@ -769,7 +769,11 @@ describe('AirePayrollCockpit', () => {
     }];
     apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
     apiMocks.entries.mockResolvedValue(data.entries);
-    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    render(
+      <MemoryRouter>
+        <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
+      </MemoryRouter>
+    );
 
     await screen.findByText('Malia Cruz');
     for (const name of ['Correct', 'Approve time', 'Deny time']) {
