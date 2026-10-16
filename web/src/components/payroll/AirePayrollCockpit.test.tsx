@@ -737,9 +737,10 @@ describe('AirePayrollCockpit', () => {
       command_id: expect.any(String),
       reason: 'Verified the clock entry with the employee',
       description: 'Confirmed ordinary shift description',
-      work_date: '2026-10-14', start_time: '08:04', end_time: '17:09', time_category_id: '2',
-      breaks: [{ start_time: '12:00', end_time: '13:00' }],
     })));
+    for (const field of ['work_date', 'start_time', 'end_time', 'time_category_id', 'breaks']) {
+      expect(apiMocks.correct.mock.calls[0][2]).not.toHaveProperty(field);
+    }
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
     expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Deny time' })).toBeTruthy();
@@ -830,15 +831,104 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 3,
       reason: 'Employee confirmed the missed punch',
-      work_date: '2026-10-14',
-      start_time: '08:04',
       end_time: '17:15',
-      time_category_id: '2',
-      breaks: [{ start_time: '12:00', end_time: '13:00' }],
       command_id: expect.any(String),
     })));
     expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
+  });
+
+  it.each([
+    ['Start time', '13:45', { start_time: '13:45' }],
+    ['End time', '14:15', { end_time: '14:15' }],
+    ['Work date', '2026-10-15', { work_date: '2026-10-15' }],
+    ['Time category', '3', { time_category_id: '3' }],
+  ] as const)('sends only changed %s and leaves exact punches and breaks to the source', async (label, value, fields) => {
+    const user = userEvent.setup();
+    const preciseEntry = {
+      ...timeEntry,
+      start_time: '01:59 PM', end_time: '02:00 PM',
+      clock_in_at: '2026-10-14T03:59:19.427187Z',
+      clock_out_at: '2026-10-14T04:00:32.935086Z',
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      breaks: [{ id: '9', start_time: '2026-10-14T03:59:30.123456Z', end_time: '2026-10-14T03:59:40.987654Z', active: false }],
+    };
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [preciseEntry] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    if (label === 'Time category') await user.selectOptions(screen.getByLabelText(label), value);
+    else fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the changed field with the employee');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3,
+      reason: 'Verified the changed field with the employee', ...fields,
+    }));
+  });
+
+  it('does not submit a reason-only correction or fields changed back to their original display values', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Correction reason'), 'Checked the original record');
+    const save = screen.getByRole('button', { name: 'Save correction' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '08:00' } });
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '08:04' } });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    await user.click(save);
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('completes a missing clock-out without resubmitting its original punch, date or breaks', async () => {
+    const user = userEvent.setup();
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [{
+      ...timeEntry, end_time: null, clock_in_at: '2026-10-14T08:04:19.123456+10:00', clock_out_at: null,
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, status: 'active', missing_punch: true },
+    }] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('End time'), { target: { value: '17:15' } });
+    await user.type(screen.getByLabelText('Correction reason'), 'Confirmed the missing clock-out');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3, reason: 'Confirmed the missing clock-out', end_time: '17:15',
+    }));
+  });
+
+  it.each(['edit', 'remove', 'add', 'remove all'] as const)('preserves raw endpoints of retained breaks during %s', async (operation) => {
+    const user = userEvent.setup();
+    const first = { id: '9', start_time: '2026-10-14T02:00:12.123456Z', end_time: '2026-10-14T02:15:32.987654Z', active: false };
+    const second = { id: '10', start_time: '2026-10-14T14:00:19.111222+10:00', end_time: '2026-10-14T14:15:27.333444+10:00', active: false };
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [{ ...timeEntry, breaks: [first, second] }] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    if (operation === 'edit') fireEvent.change(screen.getByLabelText('Break 1 end'), { target: { value: '12:20' } });
+    else if (operation === 'add') {
+      await user.click(screen.getByRole('button', { name: 'Add break' }));
+      fireEvent.change(screen.getByLabelText('Break 3 start'), { target: { value: '15:00' } });
+      fireEvent.change(screen.getByLabelText('Break 3 end'), { target: { value: '15:10' } });
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Remove break 1' }));
+      if (operation === 'remove all') await user.click(screen.getByRole('button', { name: 'Remove break 1' }));
+    }
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the complete corrected break list');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    const rawFirst = { start_time: first.start_time, end_time: first.end_time };
+    const rawSecond = { start_time: second.start_time, end_time: second.end_time };
+    const breaks = operation === 'edit' ? [{ ...rawFirst, end_time: '12:20' }, rawSecond]
+      : operation === 'remove' ? [rawSecond]
+      : operation === 'add' ? [rawFirst, rawSecond, { start_time: '15:00', end_time: '15:10' }] : [];
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3,
+      reason: 'Verified the complete corrected break list', breaks,
+    }));
   });
 
   it('uses categories carried by the time entry when its employee is outside the current team page', async () => {
@@ -884,7 +974,8 @@ describe('AirePayrollCockpit', () => {
 
     await user.click(screen.getByRole('button', { name: 'Correct' }));
     expect(screen.getByText(/time tracking has 60 total break minutes but no exact break times/i)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Correcting the description only' } });
+    await user.type(screen.getByLabelText('Description'), 'Corrected description');
+    await user.type(screen.getByLabelText('Correction reason'), 'Correcting the description only');
     const save = screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     await user.click(save);
