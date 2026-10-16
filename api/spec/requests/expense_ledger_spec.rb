@@ -30,7 +30,7 @@ RSpec.describe "Organization expense ledger", type: :request do
   def create_expense(vendor:, amount: "120.00", source_key: nil)
     post "/api/v1/admin/expenses", params: {
       expense: { expense_vendor_id: vendor.id, category: "Software", description: "Annual subscription",
-                 expense_on: "2026-09-28", due_on: "2026-10-15", total_amount: amount,
+                 expense_on: "2026-09-28", due_on: (Date.current + 30).iso8601, total_amount: amount,
                  source_key: source_key }
     }
     expect(response).to have_http_status(:created), response.body
