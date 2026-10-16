@@ -667,6 +667,122 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
   });
 
+  it.each(['not_required', 'approved'])('offers correction after cutoff for ordinary completed time without redundant %s approval', async (approvalStatus) => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.payroll_period = { ...period, status: 'finalized', cutoff_state: 'finalized' };
+    data.overview.readiness.pending_approvals = 0;
+    data.entries.time_entries = [{
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'kiosk', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, approval_status: approvalStatus, payable_now: true, payroll_disposition: 'eligible', payroll_exclusion_reasons: [], included_hours: 8.08 },
+      lifecycle: { status: 'ready_for_cutoff', label: 'Ready for cutoff' },
+    }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Deny time' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByRole('heading', { name: 'Correct time in time tracking' })).toBeTruthy();
+    expect((screen.getByLabelText('Start time') as HTMLInputElement).value).toBe('08:04');
+    expect((screen.getByLabelText('End time') as HTMLInputElement).value).toBe('17:09');
+    expect((screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+  });
+
+  it('corrects ordinary completed time and reviews its renewed pending approval at the new source version', async () => {
+    const user = userEvent.setup();
+    const onSourceChanged = vi.fn();
+    const data = fixtures();
+    const ordinaryEntry = {
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, approval_status: 'not_required', payable_now: true, payroll_disposition: 'eligible', payroll_exclusion_reasons: [], included_hours: 8.08 },
+      lifecycle: { status: 'ready_for_cutoff', label: 'Ready for cutoff' },
+    };
+    const correctedEntry = { ...ordinaryEntry, version: 4, description: 'Confirmed ordinary shift description',
+      state: { ...ordinaryEntry.state, approval_status: 'pending', payable_now: false, payroll_disposition: 'pending_approval', payroll_exclusion_reasons: ['pending_approval'], included_hours: 0 },
+      lifecycle: { status: 'awaiting_approval', label: 'Awaiting approval' },
+    };
+    const approvedEntry = { ...correctedEntry, version: 5, state: { ...ordinaryEntry.state, approval_status: 'approved' }, lifecycle: ordinaryEntry.lifecycle };
+    data.overview.readiness.pending_approvals = 0;
+    apiMocks.overview
+      .mockResolvedValueOnce({ aire_payroll_cockpit: data.overview })
+      .mockResolvedValueOnce({ aire_payroll_cockpit: { ...data.overview, readiness: { ...data.overview.readiness, pending_approvals: 1 } } })
+      .mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries
+      .mockResolvedValueOnce({ ...data.entries, time_entries: [ordinaryEntry] })
+      .mockResolvedValueOnce({ ...data.entries, time_entries: [correctedEntry] })
+      .mockResolvedValue({ ...data.entries, time_entries: [approvedEntry] });
+    apiMocks.correct.mockResolvedValue({ time_entry: correctedEntry });
+    apiMocks.review.mockResolvedValue({ time_entry: approvedEntry });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} onSourceChanged={onSourceChanged} />);
+
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Confirmed ordinary shift description' } });
+    fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Verified the clock entry with the employee' } });
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 3,
+      command_id: expect.any(String),
+      reason: 'Verified the clock entry with the employee',
+      description: 'Confirmed ordinary shift description',
+      work_date: '2026-10-14', start_time: '08:04', end_time: '17:09', time_category_id: '2',
+      breaks: [{ start_time: '12:00', end_time: '13:00' }],
+    })));
+    await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Deny time' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Approve time' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Approve time' })).toBeTruthy();
+    const approve = within(dialog).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /reason/i }), { target: { value: 'Manager verified the corrected ordinary shift' } });
+    await user.click(approve);
+    await waitFor(() => expect(apiMocks.review).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 4,
+      command_id: expect.any(String),
+      decision: 'approve',
+      reason: 'Manager verified the corrected ordinary shift',
+    })));
+    await waitFor(() => expect(onSourceChanged).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Deny time' })).toBeNull();
+    expect(apiMocks.reviewOvertime).not.toHaveBeenCalled();
+  });
+
+  it('keeps correction and pending ordinary-time review disabled without command permission', async () => {
+    const user = userEvent.setup();
+    const data = fixtures(false);
+    data.entries.time_entries = [{
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'kiosk', ordinary: true, admin_override: false },
+    }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    await screen.findByText('Malia Cruz');
+    for (const name of ['Correct', 'Approve time', 'Deny time']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      await user.click(button);
+    }
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.reviewOvertime).not.toHaveBeenCalled();
+  });
+
   it('shows who approved time and overtime, when, and why', async () => {
     const data = fixtures();
     const reviewedEntry = {

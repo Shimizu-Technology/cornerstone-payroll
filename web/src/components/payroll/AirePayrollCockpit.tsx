@@ -275,7 +275,7 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   onCorrect: (entry: AirePayrollTimeEntry) => void;
 }) {
   const pending = entry.state.approval_status === 'pending';
-  const needsTimeReview = pending && !entry.capture.ordinary;
+  const needsTimeReview = pending;
   const needsOvertimeReview = entry.state.overtime_status === 'pending'
     && !['pending', 'denied'].includes(entry.state.approval_status);
   const statusLabel = dispositionLabel(entry);
@@ -321,7 +321,7 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         )}
       </div>
       <div className="flex flex-wrap gap-2 lg:justify-end">
-        {(entry.state.missing_punch || !entry.capture.ordinary) && (
+        {(entry.state.status === 'completed' || entry.state.missing_punch || !entry.capture.ordinary) && (
           <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onCorrect(entry)}>
             <FilePenLine className="mr-1 h-3.5 w-3.5" /> Correct
           </Button>
@@ -1209,7 +1209,7 @@ function AirePayrollCockpitWorkspace({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">
-                {review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'manual time'}
+                {review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}
               </DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
                 {review.entry.employee.name} · {formatDate(review.entry.work_date)} · {Number(review.entry.hours).toFixed(2)} hours
