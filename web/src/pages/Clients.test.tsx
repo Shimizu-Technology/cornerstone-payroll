@@ -552,9 +552,9 @@ describe('Client create/edit field labels', () => {
     const fields = [
       screen.getByRole('textbox', { name: /^Client Name/ }),
       ...['EIN', 'Phone', 'Email', 'Address Line 1', 'Address Line 2', 'City', 'State', 'ZIP', 'Bank Name', 'Bank Address', 'Next Check Number']
-        .map(name => screen.getByRole('textbox', { name, exact: true })),
-      screen.getByRole('combobox', { name: 'Pay Frequency', exact: true }),
-      screen.getByRole('combobox', { name: 'Check Stock Type', exact: true }),
+        .map(name => screen.getByRole('textbox', { name })),
+      screen.getByRole('combobox', { name: 'Pay Frequency' }),
+      screen.getByRole('combobox', { name: 'Check Stock Type' }),
     ];
     expect(fields.every(field => field.id !== '')).toBe(true);
     expect(new Set(fields.map(field => field.id)).size).toBe(14);
@@ -569,16 +569,16 @@ describe('Client create/edit field labels', () => {
     await user.click(screen.getByText(/Client Name/, { selector: 'label' }));
     expect(document.activeElement).toBe(name);
     await user.type(name, 'Synthetic labelled client');
-    await user.type(screen.getByRole('textbox', { name: 'EIN', exact: true }), '123456789');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Pay Frequency', exact: true }), 'monthly');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Check Stock Type', exact: true }), 'bottom_check');
-    const number = screen.getByRole('textbox', { name: 'Next Check Number', exact: true });
+    await user.type(screen.getByRole('textbox', { name: 'EIN' }), '123456789');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Pay Frequency' }), 'monthly');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check Stock Type' }), 'bottom_check');
+    const number = screen.getByRole('textbox', { name: 'Next Check Number' });
     await user.clear(number);
     await user.type(number, '5001');
-    expect(screen.getByRole('switch', { name: 'Simple payroll register Excel format', exact: true })).toBeTruthy();
-    expect(screen.getByRole('switch', { name: 'Historical payroll workspace', exact: true })).toBeTruthy();
-    expect(screen.getByRole('switch', { name: 'Require client approval before payroll approval', exact: true })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Create Client', exact: true }));
+    expect(screen.getByRole('switch', { name: 'Simple payroll register Excel format' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Historical payroll workspace' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Require client approval before payroll approval' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Create Client' }));
     await waitFor(() => expect(apiMocks.create).toHaveBeenCalledTimes(1));
     expect(apiMocks.create).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Synthetic labelled client', ein: '12-3456789', pay_frequency: 'monthly',
@@ -591,19 +591,19 @@ describe('Client create/edit field labels', () => {
   it('associates the loaded edit fields and cancels contact edits without updating the client', async () => {
     const user = userEvent.setup();
     render(<FeedbackProvider scopeKey="client-label-edit"><Clients /></FeedbackProvider>);
-    await user.click((await screen.findAllByRole('button', { name: 'Edit', exact: true }))[0]);
-    await screen.findByRole('heading', { name: 'Edit Client', exact: true });
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    await screen.findByRole('heading', { name: 'Edit Client' });
     expectNamedFields();
     expect(apiMocks.get).toHaveBeenCalledWith(target.id);
     expect((screen.getByRole('textbox', { name: /^Client Name/ }) as HTMLInputElement).value).toBe(target.name);
-    const phone = screen.getByRole('textbox', { name: 'Phone', exact: true }) as HTMLInputElement;
+    const phone = screen.getByRole('textbox', { name: 'Phone' }) as HTMLInputElement;
     expect(phone.value).toBe('(671) 555-0100');
     await user.click(screen.getByText('Phone', { selector: 'label', exact: true }));
     expect(document.activeElement).toBe(phone);
     await user.clear(phone);
     await user.type(phone, '(671) 555-0199');
-    await user.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
-    expect(screen.queryByRole('heading', { name: 'Edit Client', exact: true })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('heading', { name: 'Edit Client' })).toBeNull();
     expect(apiMocks.update).not.toHaveBeenCalled();
     expect(apiMocks.create).not.toHaveBeenCalled();
   });
