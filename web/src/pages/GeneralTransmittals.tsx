@@ -652,7 +652,7 @@ export function GeneralTransmittals() {
         <DialogContent className="dialog-wide dialog-center-mobile !mx-auto flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden !rounded-2xl !p-0">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4">
             <div className="flex items-center gap-2"><FileText className="h-5 w-5 shrink-0 text-primary-600" /><DialogTitle>Transmittal preview</DialogTitle></div>
-            <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={() => setPreviewUrl(null)}>Close</Button>
+            <Button type="button" variant="outline" className="min-h-11 sm:min-h-11 shrink-0" onClick={() => setPreviewUrl(null)}>Close</Button>
           </div>
           {previewUrl && <iframe title="Transmittal PDF preview" src={previewUrl} className="min-h-0 w-full flex-1 bg-neutral-100" />}
         </DialogContent>
