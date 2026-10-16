@@ -234,3 +234,93 @@ it('associates repeated adjustment amounts separately and edits only the chosen 
     { label: 'Uniform', amount: 4.5, treatment: 'post_tax_deduction', notes: '', active: true },
   ]);
 });
+
+
+// The label-association repair is a separate slice. Use existing visible
+// placeholders here so these regressions reproduce on the held parent itself.
+it.each([
+  { field: 'additional_withholding_override', employment_type: 'hourly', placeholder: '25.00' },
+  { field: 'withholding_tax_adjustment', employment_type: 'hourly', placeholder: '0.00' },
+  { field: 'withholding_tax_override', employment_type: 'hourly', placeholder: 'Auto-calculated' },
+  { field: 'salary_override', employment_type: 'salary', placeholder: 'Leave blank for default' },
+  { field: 'salary_override', employment_type: 'contractor', placeholder: 'Default: $25.00/period' },
+])('keeps a visited blank $employment_type $field optional instead of sending zero', async ({ field, employment_type, placeholder }) => {
+  const user = userEvent.setup();
+  mountSaved({ ...savedItem, employment_type, additional_withholding: 25, custom_deductions: [] } as PayrollItem);
+  const input = screen.getByPlaceholderText(placeholder) as HTMLInputElement;
+  expect(input.value).toBe('');
+  await user.click(input);
+  await user.tab();
+  expect(input.value).toBe('');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+  expect(mocks.update.mock.calls[0][2][field]).toBeNull();
+});
+
+it('continues sending explicit zero overrides and a signed FIT adjustment when those values are entered', async () => {
+  const user = userEvent.setup();
+  mountSaved({ ...savedItem, additional_withholding: 25, custom_deductions: [] } as PayrollItem);
+  const extra = screen.getByPlaceholderText('25.00') as HTMLInputElement;
+  const adjustment = screen.getByPlaceholderText('0.00') as HTMLInputElement;
+  const final = screen.getByPlaceholderText('Auto-calculated') as HTMLInputElement;
+  await user.type(extra, '0');
+  await user.type(adjustment, '-12.34');
+  await user.type(final, '0');
+  await user.tab();
+  expect(extra.value).toBe('0.00');
+  expect(adjustment.value).toBe('-12.34');
+  expect(final.value).toBe('0.00');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+  expect(mocks.update.mock.calls[0][2]).toMatchObject({
+    additional_withholding_override: 0, withholding_tax_adjustment: -12.34, withholding_tax_override: 0,
+  });
+});
+
+it('clears saved tax overrides back to null and keeps the saved cleared fields blank when reopened and visited', async () => {
+  const user = userEvent.setup();
+  const item = { ...savedItem, additional_withholding: 25, custom_deductions: [],
+    additional_withholding_override: 20, withholding_tax_adjustment: -5, withholding_tax_override: 40 } as PayrollItem;
+  const cleared = { ...item, additional_withholding_override: null, withholding_tax_adjustment: null, withholding_tax_override: null } as unknown as PayrollItem;
+  const onSaved = vi.fn();
+  const onOpenChange = vi.fn();
+  mocks.update.mockResolvedValue({ payroll_item: cleared });
+  mocks.recalculate.mockResolvedValue({ payroll_item: cleared });
+  const view = render(<PayrollItemEditModal open onOpenChange={onOpenChange} payPeriodId={3} item={item} onSaved={onSaved} />);
+  for (const placeholder of ['25.00', '0.00', 'Auto-calculated']) {
+    const input = screen.getByPlaceholderText(placeholder) as HTMLInputElement;
+    await user.clear(input);
+    await user.tab();
+    expect(input.value).toBe('');
+  }
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(cleared));
+  expect(mocks.update.mock.calls[0][2]).toMatchObject({
+    additional_withholding_override: null, withholding_tax_adjustment: null, withholding_tax_override: null,
+  });
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+  view.rerender(<PayrollItemEditModal open={false} onOpenChange={onOpenChange} payPeriodId={3} item={cleared} onSaved={onSaved} />);
+  view.rerender(<PayrollItemEditModal open onOpenChange={onOpenChange} payPeriodId={3} item={cleared} onSaved={onSaved} />);
+  for (const placeholder of ['25.00', '0.00', 'Auto-calculated']) {
+    const input = screen.getByPlaceholderText(placeholder) as HTMLInputElement;
+    expect(input.value).toBe('');
+    await user.click(input);
+    await user.tab();
+    expect(input.value).toBe('');
+  }
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(mocks.update).toHaveBeenCalledTimes(1);
+});
+
+it('retains the existing zero-on-clear behavior for ordinary numeric hours', async () => {
+  const user = userEvent.setup();
+  mountSaved({ ...savedItem, custom_deductions: [] });
+  const input = screen.getByText('Regular', { selector: 'label', exact: true }).parentElement?.querySelector('input') as HTMLInputElement;
+  expect(input.value).toBe('4');
+  await user.clear(input);
+  await user.tab();
+  expect(input.value).toBe('0');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+  expect(mocks.update.mock.calls[0][2].hours_worked).toBe(0);
+});
