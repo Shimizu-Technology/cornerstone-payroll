@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeneralTransmittal } from '@/services/api';
@@ -96,9 +96,14 @@ describe('GeneralTransmittals PDF preview dialog', () => {
     expect(api.createUrl).toHaveBeenCalledExactlyOnceWith(pdf);
     expect(api.revokeUrl).not.toHaveBeenCalled();
 
-    await user.tab({ shift: true });
-    expect(document.activeElement).toBe(frame);
-    await user.click(close);
+    // Exercise the parent document's real dialog handler. user-event descends
+    // into the synthetic blob iframe's opaque JSDOM window after focusing it;
+    // PDF viewer internals are outside this component test's environment.
+    const backwardTab = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    fireEvent(close, backwardTab);
+    expect(backwardTab.defaultPrevented).toBe(true);
+    expect(document.activeElement === frame).toBe(true);
+    fireEvent.click(close);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(document.activeElement).toBe(opener);
     expect(view.container.hasAttribute('inert')).toBe(false);
