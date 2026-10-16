@@ -206,7 +206,7 @@ export function ExpenseLedger() {
       window.requestAnimationFrame(() => detailRef.current?.scrollIntoView({ block: 'start',
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }));
     }
-  });
+  }, true);
 
   const savePayment = () => run(async () => {
     if (!selected) return;
