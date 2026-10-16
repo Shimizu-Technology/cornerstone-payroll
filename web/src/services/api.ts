@@ -1434,11 +1434,11 @@ export const payPeriodsApi = {
       command_id: string;
       expected_version: number;
       reason: string;
-      work_date: string;
-      start_time: string;
-      end_time: string;
-      time_category_id: string;
-      description: string;
+      work_date?: string;
+      start_time?: string;
+      end_time?: string;
+      time_category_id?: string;
+      description?: string;
       breaks?: Array<{ start_time: string; end_time: string }>;
     }
   ) => api.post<import('@/types').AirePayrollCommandResponse>(
