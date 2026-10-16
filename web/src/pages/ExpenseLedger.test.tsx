@@ -163,4 +163,52 @@ describe('ExpenseLedger read access in payroll test workspaces', () => {
     expect(state.show).toHaveBeenCalledTimes(2);
     expectNoWrites();
   });
+
+  it('preserves live finance drafts after switching to a test workspace and closes both forms without saving', async () => {
+    const user = userEvent.setup();
+    state.testWorkspace = false;
+    const view = render(<ExpenseLedger />);
+    await screen.findByRole('button', { name: /Open Synthetic vendor/ });
+    await user.click(screen.getByRole('button', { name: 'Vendor' }));
+    const vendor = within(screen.getByRole('region', { name: 'Add vendor' }));
+    await user.type(vendor.getByRole('textbox', { name: 'Vendor name' }), 'Unsaved QA vendor');
+    await user.type(vendor.getByRole('textbox', { name: 'Email (optional)' }), 'draft@example.invalid');
+
+    await user.click(screen.getByRole('button', { name: 'Bill or purchase' }));
+    const expense = within(screen.getByRole('region', { name: 'Add expense' }));
+    await user.selectOptions(expense.getByRole('combobox', { name: 'Vendor' }), '9');
+    await user.type(expense.getByRole('textbox', { name: 'Category' }), 'Office');
+    await user.type(expense.getByRole('spinbutton', { name: 'Amount' }), '23.45');
+    await user.type(expense.getByRole('textbox', { name: 'Description' }), 'Unsaved bill draft');
+    const detail = await openBill();
+    await user.type(detail.getByRole('spinbutton', { name: 'Amount' }), '12.34');
+    await user.type(detail.getByRole('textbox', { name: 'Reference' }), 'UNSAVED-PAYMENT');
+
+    state.testWorkspace = true;
+    view.rerender(<ExpenseLedger />);
+    expect(vendor.getByRole('textbox', { name: 'Vendor name' })).toHaveProperty('value', 'Unsaved QA vendor');
+    expect(vendor.getByRole('textbox', { name: 'Email (optional)' })).toHaveProperty('value', 'draft@example.invalid');
+    expect(expense.getByRole('combobox', { name: 'Vendor' })).toHaveProperty('value', '9');
+    expect(expense.getByRole('textbox', { name: 'Category' })).toHaveProperty('value', 'Office');
+    expect(expense.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '23.45');
+    expect(expense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
+    expect(detail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
+    expect(detail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
+    for (const button of [vendor.getByRole('button', { name: 'Save vendor' }),
+      expense.getByRole('button', { name: 'Save vendor bill' }),
+      detail.getByRole('button', { name: 'Record verified payment' })]) {
+      expect(button).toHaveProperty('disabled', true);
+      await user.click(button);
+    }
+    expectNoWrites();
+
+    await user.click(vendor.getByRole('button', { name: 'Close vendor form' }));
+    expect(screen.queryByRole('region', { name: 'Add vendor' })).toBeNull();
+    expect(expense.getByRole('textbox', { name: 'Description' })).toHaveProperty('value', 'Unsaved bill draft');
+    await user.click(expense.getByRole('button', { name: 'Close expense form' }));
+    expect(screen.queryByRole('region', { name: 'Add expense' })).toBeNull();
+    expect(detail.getByRole('spinbutton', { name: 'Amount' })).toHaveProperty('value', '12.34');
+    expect(detail.getByRole('textbox', { name: 'Reference' })).toHaveProperty('value', 'UNSAVED-PAYMENT');
+    expectNoWrites();
+  });
 });

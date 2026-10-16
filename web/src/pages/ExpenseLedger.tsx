@@ -276,7 +276,7 @@ export function ExpenseLedger() {
         </section>
 
         {showVendorForm && <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-label="Add vendor">
-          <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-neutral-950">New vendor</h2><button aria-label="Close vendor form" onClick={() => setShowVendorForm(false)}><X className="h-4 w-4" /></button></div>
+          <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-neutral-950">New vendor</h2><Button type="button" variant="ghost" className="h-11 w-11 shrink-0 !p-0" aria-label="Close vendor form" onClick={() => setShowVendorForm(false)}><X className="h-4 w-4" /></Button></div>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm font-medium">Vendor name<Input className="mt-1" value={vendorName} onChange={(event) => setVendorName(event.target.value)} /></label>
             <label className="text-sm font-medium">Email (optional)<Input className="mt-1" type="email" value={vendorEmail} onChange={(event) => setVendorEmail(event.target.value)} /></label>
@@ -285,7 +285,7 @@ export function ExpenseLedger() {
         </section>}
 
         {showExpenseForm && <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm" aria-label="Add expense">
-          <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-neutral-950">Add a bill or purchase</h2><p className="text-sm text-neutral-500">Choose whether this still needs payment or has already been paid.</p></div><button aria-label="Close expense form" onClick={() => setShowExpenseForm(false)}><X className="h-4 w-4" /></button></div>
+          <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-semibold text-neutral-950">Add a bill or purchase</h2><p className="text-sm text-neutral-500">Choose whether this still needs payment or has already been paid.</p></div><Button type="button" variant="ghost" className="h-11 w-11 shrink-0 !p-0" aria-label="Close expense form" onClick={() => setShowExpenseForm(false)}><X className="h-4 w-4" /></Button></div>
           <fieldset className="mb-4 flex flex-wrap gap-4" aria-label="Expense payment state">
             <label className="flex items-center gap-2 text-sm font-medium"><input type="radio" name="expense-entry-kind" checked={!alreadyPaid} onChange={() => setAlreadyPaid(false)} />Bill to pay</label>
             <label className="flex items-center gap-2 text-sm font-medium"><input type="radio" name="expense-entry-kind" checked={alreadyPaid} onChange={() => setAlreadyPaid(true)} />Paid purchase</label>
