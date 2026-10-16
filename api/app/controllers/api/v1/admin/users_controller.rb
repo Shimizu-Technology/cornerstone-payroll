@@ -253,8 +253,22 @@ module Api
             raise ActiveRecord::RecordInvalid, user
           end
 
-          user.company_assignments.destroy_all
-          normalized_company_ids.each do |company_id|
+          existing_assignments = user.company_assignments.to_a
+          retained_assignments = existing_assignments.select do |assignment|
+            normalized_company_ids.include?(assignment.company_id) ||
+              # The Users payload lists active grants only. A name edit must
+              # not erase hidden expired grants or renew their access.
+              (assignment.expired? && (user.staff_member? || !assignment.company.test_workspace?))
+          end
+          retained_assignments.each do |assignment|
+            # Retention must not bypass role/organization validation after a
+            # role change (for example, staff becoming a client portal user).
+            assignment.user = user
+            raise ActiveRecord::RecordInvalid, assignment unless assignment.valid?
+          end
+          (existing_assignments - retained_assignments).each(&:destroy!)
+          new_company_ids = normalized_company_ids - existing_assignments.map(&:company_id)
+          new_company_ids.each do |company_id|
             company = Company.find(company_id)
             user.company_assignments.create!(
               company: company,
