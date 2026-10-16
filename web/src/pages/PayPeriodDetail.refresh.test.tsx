@@ -1375,6 +1375,37 @@ it.each(['mobile', 'desktop'])('retains both imported earning buckets and captur
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 6, overtime: 0, wage_rates: buckets });
 });
 
+it.each([25, 10])('describes retained earning entries accurately when one wage ID captured $%i and $25 rates', async carryRate => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 25, status: 'active' } as Employee;
+  const buckets = [
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: carryRate, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
+  ];
+  const originalBuckets = JSON.stringify(buckets);
+  const gross = carryRate * 4 + 50;
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25,
+    hours_worked: 6, overtime_hours: 0, gross_pay: gross, net_pay: gross - 10, wage_rate_hours: buckets };
+  const period = { ...initialPayPeriod, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const badge = await screen.findByText('Multiple earnings');
+  const row = badge.closest('tr')!;
+  const mobile = screen.getByRole('region', { name: 'Payroll result for Ana Cruz' });
+  for (const container of [row, mobile]) {
+    expect(within(container).getAllByText(/Carryover Nov2/).length).toBeGreaterThan(0);
+    expect(within(container).getAllByText(/Current Nov16/).length).toBeGreaterThan(0);
+    expect(within(container).getByText(`$${gross.toFixed(2)}`)).toBeTruthy();
+  }
+  expect(within(row).getAllByText('$25.00/hr').length).toBe(carryRate === 25 ? 2 : 1);
+  if (carryRate !== 25) expect(within(row).getByText('$10.00/hr')).toBeTruthy();
+  expect(screen.queryByText('Multi-rate')).toBeNull();
+  expect(JSON.stringify(buckets)).toBe(originalBuckets);
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
 it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and displays their recorded context on %s', async surface => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 99, pay_frequency: 'biweekly', status: 'active' } as Employee;
