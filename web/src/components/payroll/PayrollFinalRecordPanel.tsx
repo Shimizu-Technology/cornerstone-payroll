@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -8,7 +8,9 @@ import { ReportDownloadMenu } from '@/components/reports/ReportDownloadMenu';
 import { reportsApi, type PayrollFinalRecord } from '@/services/api';
 
 interface Props {
+  companyId: number;
   payPeriodId: number;
+  refreshToken?: number;
 }
 
 const money = (value: string) => new Intl.NumberFormat('en-US', {
@@ -37,36 +39,64 @@ function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
-  const [record, setRecord] = useState<PayrollFinalRecord | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
+export function PayrollFinalRecordPanel({ companyId, payPeriodId, refreshToken = 0 }: Props) {
+  const context = useMemo(() => ({ companyId, payPeriodId }), [companyId, payPeriodId]);
+  const [retryToken, setRetryToken] = useState(0);
+  const scope = useMemo(() => ({ context, refreshToken, retryToken }), [context, refreshToken, retryToken]);
+  const currentScope = useRef(scope);
+  useLayoutEffect(() => { currentScope.current = scope; }, [scope]);
+  const mounted = useRef(false);
+  const exportRequest = useRef(0);
+  const [result, setResult] = useState<{ scope: typeof scope; record: PayrollFinalRecord | null } | null>(null);
+  const [failure, setFailure, errorFeedbackAttempt] = useFeedbackState<{ scope: typeof scope; message: string } | null>(null);
+  const [openFor, setOpenFor] = useState<typeof context | null>(null);
+  const [exportState, setExportState] = useState<{ scope: typeof scope; format: 'xlsx' | 'pdf' } | null>(null);
+  const currentResult = result?.scope === scope ? result : null;
+  const record = currentResult?.record ?? null;
+  const loading = currentResult === null;
+  const error = failure?.scope === scope ? failure.message : null;
+  const open = openFor === context;
+  const exporting = exportState?.scope === scope ? exportState.format : null;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
+    setFailure(null);
     reportsApi.payrollFinalRecord(payPeriodId)
-      .then(({ final_record }) => { if (active) setRecord(final_record); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load the final payroll record'); })
-      .finally(() => { if (active) setLoading(false); });
+      .then(({ final_record }) => {
+        if (!active || currentScope.current !== scope) return;
+        if (final_record.company.id !== companyId || final_record.pay_period.id !== payPeriodId) {
+          throw new Error('The final payroll record does not match the selected company and pay run. Reload the record.');
+        }
+        setResult({ scope, record: final_record });
+      })
+      .catch((cause) => {
+        if (!active || currentScope.current !== scope) return;
+        setResult({ scope, record: null });
+        setFailure({ scope, message: cause instanceof Error ? cause.message : 'Unable to load the final payroll record' });
+      });
     return () => { active = false; };
-  }, [payPeriodId, setError]);
+  }, [companyId, payPeriodId, scope, setFailure]);
 
   const exportRecord = async (format: 'xlsx' | 'pdf') => {
-    setExporting(format);
-    setError(null);
+    if (!record || loading || exporting || currentScope.current !== scope) return;
+    const request = ++exportRequest.current;
+    const isCurrent = () => mounted.current && currentScope.current === scope && exportRequest.current === request;
+    setExportState({ scope, format });
+    setFailure(null);
     try {
       const result = format === 'xlsx'
         ? await reportsApi.payrollFinalRecordXlsx(payPeriodId)
         : await reportsApi.payrollFinalRecordPdf(payPeriodId);
-      download(result.blob, `final_payroll_record.${format}`);
+      if (isCurrent()) download(result.blob, `final_payroll_record.${format}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to export the final payroll record');
+      if (isCurrent()) setFailure({ scope, message: cause instanceof Error ? cause.message : 'Unable to export the final payroll record' });
     } finally {
-      setExporting(null);
+      if (isCurrent()) setExportState(null);
     }
   };
 
@@ -98,12 +128,12 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} disabled={!record || loading}>
+            <Button type="button" variant="outline" size="sm" onClick={() => setOpenFor(context)} disabled={!record || loading}>
               {loading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Eye className="mr-1.5 h-4 w-4" aria-hidden="true" />}
               {loading ? 'Loading' : 'View record'}
             </Button>
             <ReportDownloadMenu
-              disabled={!record}
+              disabled={!record || loading}
               ariaLabel="Export final payroll record"
               formats={[
                 { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Accountant-ready record with separate supporting tabs.', kind: 'spreadsheet', loading: exporting === 'xlsx', onSelect: () => exportRecord('xlsx') },
@@ -113,7 +143,9 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
           </div>
         </div>
 
-        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {!open && error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+        {loading && <p role="status" className="border-t border-slate-200 p-4 text-sm text-slate-600">Loading the current final payroll record…</p>}
+        {!loading && !record && !open && <div className="border-t border-slate-200 p-4"><Button type="button" variant="outline" className="min-h-11" onClick={() => setRetryToken(value => value + 1)}>Reload final payroll record</Button></div>}
 
         {record && (
           <div className="grid grid-cols-2 border-t border-slate-200 md:grid-cols-4">
@@ -141,7 +173,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
         )}
       </Card>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={value => setOpenFor(value ? context : null)}>
         <DialogContent className="dialog-wide dialog-top max-h-[90vh] overflow-y-auto">
           <div className="flex items-start justify-between gap-4">
             <DialogHeader>
@@ -150,10 +182,14 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
                 {record ? `${record.company.name} · ${record.pay_period.start_date} through ${record.pay_period.end_date} · scheduled pay date ${record.pay_period.pay_date}` : 'Committed payroll record'}
               </DialogDescription>
             </DialogHeader>
-            <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setOpen(false)} aria-label="Close final payroll record">
+            <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setOpenFor(null)} aria-label="Close final payroll record">
               <X className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
+
+          {loading && <p role="status" className="text-sm text-slate-600">Loading the current final payroll record…</p>}
+          {open && error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+          {!loading && !record && <Button type="button" variant="outline" className="min-h-11" onClick={() => setRetryToken(value => value + 1)}>Reload final payroll record</Button>}
 
           {record && (
             <div className="space-y-6">
@@ -202,7 +238,7 @@ export function PayrollFinalRecordPanel({ payPeriodId }: Props) {
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Close</Button>
+            <Button type="button" variant="outline" onClick={() => setOpenFor(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
