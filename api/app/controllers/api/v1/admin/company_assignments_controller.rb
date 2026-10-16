@@ -77,8 +77,17 @@ module Api
           end
 
           CompanyAssignment.transaction do
-            user.company_assignments.destroy_all
-            company_ids.each do |cid|
+            existing_assignments = user.company_assignments.to_a
+            retained_assignments = existing_assignments.select { |assignment| company_ids.include?(assignment.company_id) }
+            retained_assignments.each do |assignment|
+              assignment.user = user
+              raise ActiveRecord::RecordInvalid, assignment unless assignment.valid?
+            end
+            # This endpoint replaces the full membership list, including
+            # expired grants. Retained grants keep their original metadata.
+            (existing_assignments - retained_assignments).each(&:destroy!)
+            new_company_ids = company_ids - existing_assignments.map(&:company_id)
+            new_company_ids.each do |cid|
               company = Company.find(cid)
               user.company_assignments.create!(
                 company: company,
@@ -87,6 +96,7 @@ module Api
               )
             end
           end
+          user.association(:company_assignments).reset
 
           render json: {
             data: user.company_assignments.includes(:company, :granted_by).map { |a| serialize_assignment(a) }
