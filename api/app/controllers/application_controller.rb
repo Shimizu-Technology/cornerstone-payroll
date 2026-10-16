@@ -152,14 +152,18 @@ class ApplicationController < ActionController::API
   end
 
   # Resolve the active company for this request.
-  # Priority: X-Company-Id header (if user can access it) → user's home company → first accessible company.
+  # Explicit scope never falls back. Company discovery can still suggest an
+  # accessible selection when the caller has a stale header, without reading or
+  # writing another client's business records.
   def resolve_company_id
     return current_user&.company_id unless current_user
 
-    header_company_id = request.headers["X-Company-Id"].presence&.to_i
-
-    if header_company_id && current_user.can_access_company?(header_company_id)
-      return header_company_id
+    requested_company = request.headers["X-Company-Id"]
+    unless requested_company.nil?
+      return unless requested_company.match?(/\A[1-9]\d*\z/)
+      requested_id = requested_company.to_i
+      return requested_id if Company.exists?(requested_id) && current_user.can_access_company?(requested_id)
+      return
     end
 
     # Fall back to home company if accessible, otherwise first assigned company
