@@ -137,7 +137,7 @@ describe('NonEmployeeChecksPanel saved mutation invalidation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await screen.findByText('Remaining vendor');
     expect(onChecksChanged).toHaveBeenCalledOnce();
-    expect(onChecksLoaded).toHaveBeenLastCalledWith([remaining]);
+    await waitFor(() => expect(onChecksLoaded).toHaveBeenLastCalledWith([remaining]));
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
