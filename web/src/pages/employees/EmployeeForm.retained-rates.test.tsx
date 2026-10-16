@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   listRates: vi.fn(), updateRate: vi.fn(), createRate: vi.fn(), deleteRate: vi.fn(),
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: false, isSuperAdmin: true, isManager: true }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1, activeCompany: { id: 1, pay_frequency: 'biweekly' } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: { id: 1, pay_frequency: 'biweekly' } }) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/employees/EmployeePayItemsPanel', () => ({ EmployeePayItemsPanel: () => null }));
