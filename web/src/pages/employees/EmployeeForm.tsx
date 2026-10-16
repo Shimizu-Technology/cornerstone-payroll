@@ -191,7 +191,7 @@ export function EmployeeForm() {
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
   const { user, isClient, isSuperAdmin, isManager } = useAuth();
-  const { activeCompanyId, activeCompany } = useCompany();
+  const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
@@ -888,6 +888,11 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          if (isCurrentSubmission()) {
+            // The employee is already saved. Summary recovery must not block
+            // navigation or turn a successful create into a duplicate retry.
+            void refreshCompanies().catch(() => {});
+          }
         }
       }
       if (!isCurrentSubmission()) return;
