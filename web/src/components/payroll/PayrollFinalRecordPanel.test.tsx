@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { startTransition, Suspense, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayrollFinalRecord } from '@/services/api';
 import { PayrollFinalRecordPanel } from './PayrollFinalRecordPanel';
+import { payrollFinalRecordFixture as record, voidedFinalRecordFixture } from './PayrollFinalRecordPanel.fixtures';
+import type { ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 
 const apiMocks = vi.hoisted(() => ({
   payrollFinalRecord: vi.fn(),
@@ -12,29 +15,23 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/services/api', () => ({ reportsApi: apiMocks }));
+// Exercise the panel's export callbacks without emulating native popover layout.
+vi.mock('@/components/reports/ReportDownloadMenu', () => ({
+  ReportDownloadMenu: ({ disabled, formats }: { disabled: boolean; formats: ReportDownloadFormat[] }) => <>
+    {formats.map(format => <button key={format.key} disabled={disabled || format.loading}
+      onClick={() => void format.onSelect()}>{format.label}</button>)}
+  </>,
+}));
 
-const record: PayrollFinalRecord = {
-  schema_version: 'v1', generated_at: '2026-08-20T12:00:00Z', record_fingerprint: 'a'.repeat(64),
-  company: { id: 1, name: 'MoSa LLC' },
-  pay_period: { id: 8, start_date: '2026-08-01', end_date: '2026-08-15', pay_date: '2026-08-20', status: 'committed', correction_status: null, cycle: 'regular', run_purpose: 'regular', committed_at: '2026-08-20T12:00:00Z', committed_by_name: 'Dana' },
-  official_payroll: { status: 'official', paycheck_count: 1, gross_pay: '1000.0', non_taxable_pay: '0.0', employee_deductions: '250.0', net_pay: '750.0', employer_taxes: '76.5', employer_contributions: '40.0', total_payroll_cost: '1116.5', client_approval_required: true, approved_review_revision: 2, calculation_checksum: 'b'.repeat(64) },
-  journal: { basis: 'Committed paycheck values.', lines: [
-    { account_key: 'gross', account_label: 'Gross payroll expense', debit: '1000.0', credit: '0.0', source: 'Committed gross pay' },
-    { account_key: 'net', account_label: 'Employee net payroll payable', debit: '0.0', credit: '750.0', source: 'Committed net pay' },
-  ], debit_total: '1116.5', credit_total: '1116.5', difference: '0.0', balanced: true },
-  employee_payments: { required_count: 1, direct_deposit_count: 0, assigned_count: 1, printed_count: 1, delivered_count: 1, reconciled_count: 0, outstanding_count: 1, total_amount: '750.0', by_status: { issued: 1 }, rows: [
-    { payroll_item_id: 10, employee_id: 2, employee_name: 'Mo Shimizu', amount: '750.0', payment_delivery_method: 'paper_check', check_number: '8200', issuance_status: 'delivered', reconciliation_status: 'issued' },
-  ] },
-  liabilities: { posting_status: 'posted', payment_tracking_status: 'tracked_in_liability_center', calculated_amount: '316.5', prepared_amount: '0.0', paid_amount: '0.0', outstanding_amount: '316.5', unreserved_amount: '316.5', unclassified_components: [], obligations: [
-    { key: '8:DRT', authority: 'Treasurer of Guam', liability_date: '2026-08-20', due_date: null, calculated_amount: '100.0', prepared_amount: '0.0', paid_amount: '0.0', outstanding_amount: '100.0', status: 'unpaid' },
-  ] },
-  ytd_reconciliation: { status: 'reconciled', basis: 'Pay date', through_pay_date: '2026-08-20', cornerstone_payroll_count: 4, cornerstone_paycheck_count: 4, quickbooks_paycheck_count: 8, historical_adjustment_count: 0, excluded_unlinked_paycheck_count: 0, historical_ytd_bridge: { applied: true, tax_years: [2026], through_pay_date: '2026-06-30', through_period_end: '2026-06-30' }, totals: { net_pay: '8200.0' } },
-  evidence: { payroll_approval: { approved_at: '2026-08-19T13:00:00Z', approved_by_name: 'Dana' }, client_approval_required: true, review: { revision: 2, calculation_checksum: 'b'.repeat(64), approved_at: '2026-08-19T12:00:00Z', approved_by_name: 'Sarah', approval_method: 'email_attestation', approval_evidence_reference: 'Email thread' }, source_packages: [], time_tracking_imports: [] },
-  completion: { status: 'in_progress', blockers: [], open_items: ['Reconcile 1 employee check', 'Settle $316.50 in payroll liabilities'] },
-};
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((success, failure) => { resolve = success; reject = failure; });
+  return { promise, resolve, reject };
+}
 
 describe('PayrollFinalRecordPanel', () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -42,7 +39,7 @@ describe('PayrollFinalRecordPanel', () => {
   });
 
   it('summarizes payroll truth and opens the supporting record', async () => {
-    render(<PayrollFinalRecordPanel payPeriodId={8} />);
+    render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
 
     expect(await screen.findByText('In Progress')).toBeTruthy();
     expect(screen.getByText('Balanced')).toBeTruthy();
@@ -60,7 +57,7 @@ describe('PayrollFinalRecordPanel', () => {
 
   it('surfaces load failures as an accessible alert', async () => {
     apiMocks.payrollFinalRecord.mockRejectedValue(new Error('Record unavailable'));
-    render(<PayrollFinalRecordPanel payPeriodId={8} />);
+    render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Record unavailable'));
     expect(screen.getByRole('button', { name: 'View record' }).hasAttribute('disabled')).toBe(true);
@@ -83,11 +80,171 @@ describe('PayrollFinalRecordPanel', () => {
         }],
       },
     } });
-    render(<PayrollFinalRecordPanel payPeriodId={8} />);
+    render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
 
     expect(await screen.findByText('0 checks open · 1 direct deposit')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View record' }));
     expect(screen.getByText('Direct deposit · earnings stub ready')).toBeTruthy();
     expect(screen.getByText('Bank transfer not tracked here')).toBeTruthy();
+  });
+
+  it('replaces a same-run official record with current voided totals and hides stale details while reloading', async () => {
+    const pending = deferred<{ final_record: PayrollFinalRecord }>();
+    const { rerender } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    await screen.findByText('$750.00 net');
+    fireEvent.click(screen.getByRole('button', { name: 'View record' }));
+    expect(within(screen.getByRole('dialog')).getByText('Mo Shimizu')).toBeTruthy();
+    apiMocks.payrollFinalRecord.mockReturnValueOnce(pending.promise);
+    rerender(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={1} />);
+    expect(screen.queryByText('$750.00 net')).toBeNull();
+    expect(screen.queryByText('Mo Shimizu')).toBeNull();
+    expect(screen.queryByText('Reconcile 1 employee check')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Loading', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'PDF record (.pdf)', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(screen.getByRole('dialog')).getByRole('status').textContent).toContain('current final payroll record');
+    await act(async () => pending.resolve({ final_record: voidedFinalRecordFixture }));
+    expect(await screen.findByText('Voided')).toBeTruthy();
+    expect(screen.getByText('$0.00 net')).toBeTruthy();
+    expect(screen.getByText('0 checks open · 0 direct deposit')).toBeTruthy();
+    expect(screen.getByText('$0.00 outstanding')).toBeTruthy();
+    expect(within(screen.getByRole('dialog')).getByText('This payroll has been voided')).toBeTruthy();
+    expect(screen.queryByText('Reconcile 1 employee check')).toBeNull();
+  });
+
+  it('keeps a failed refresh unavailable and retries only the current read from the open record', async () => {
+    const { rerender } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    await screen.findByText('$750.00 net');
+    fireEvent.click(screen.getByRole('button', { name: 'View record' }));
+    apiMocks.payrollFinalRecord.mockRejectedValueOnce(new Error('Current record could not load'));
+    rerender(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={1} />);
+    const dialog = screen.getByRole('dialog');
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('Current record could not load');
+    expect(screen.queryByText('$750.00 net')).toBeNull();
+    expect((screen.getByRole('button', { name: 'PDF record (.pdf)', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: voidedFinalRecordFixture });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reload final payroll record' }));
+    expect(await screen.findByText('Voided')).toBeTruthy();
+    expect(apiMocks.payrollFinalRecord.mock.calls.map(call => call[0])).toEqual([8, 8, 8]);
+    expect(apiMocks.payrollFinalRecordPdf).not.toHaveBeenCalled();
+    expect(apiMocks.payrollFinalRecordXlsx).not.toHaveBeenCalled();
+  });
+
+  it('ignores an old official read that completes after the newer voided revision', async () => {
+    const old = deferred<{ final_record: PayrollFinalRecord }>();
+    apiMocks.payrollFinalRecord.mockReturnValueOnce(old.promise);
+    const { rerender } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: voidedFinalRecordFixture });
+    rerender(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={1} />);
+    await screen.findByText('Voided');
+    await act(async () => old.resolve({ final_record: record }));
+    expect(screen.getByText('Voided')).toBeTruthy();
+    expect(screen.queryByText('$750.00 net')).toBeNull();
+  });
+
+  it('keeps the committed read valid while a newer render suspends without committing', async () => {
+    const current = deferred<{ final_record: PayrollFinalRecord }>();
+    const suspended = deferred<void>();
+    const attempted = vi.fn();
+    apiMocks.payrollFinalRecord.mockReturnValueOnce(current.promise);
+    function PendingSibling({ pending }: { pending: boolean }) {
+      if (pending) {
+        attempted();
+        throw suspended.promise;
+      }
+      return null;
+    }
+    function Harness() {
+      const [revision, setRevision] = useState(0);
+      return <>
+        <button onClick={() => startTransition(() => setRevision(1))}>Start pending revision</button>
+        <Suspense fallback={<p>Replacement pending</p>}>
+          <PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={revision} />
+          <PendingSibling pending={revision === 1} />
+        </Suspense>
+      </>;
+    }
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start pending revision' }));
+    await waitFor(() => expect(attempted).toHaveBeenCalled());
+    expect(screen.queryByText('Replacement pending')).toBeNull();
+    await act(async () => current.resolve({ final_record: record }));
+    expect(await screen.findByText('$750.00 net')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'View record' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(apiMocks.payrollFinalRecord).toHaveBeenCalledOnce();
+  });
+
+  it.each(['company', 'pay run'] as const)('clears the previous view immediately when the %s changes', async changed => {
+    const next = deferred<{ final_record: PayrollFinalRecord }>();
+    const companyId = changed === 'company' ? 2 : 1;
+    const payPeriodId = changed === 'pay run' ? 9 : 8;
+    const { rerender } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    await screen.findByText('$750.00 net');
+    fireEvent.click(screen.getByRole('button', { name: 'View record' }));
+    apiMocks.payrollFinalRecord.mockReturnValueOnce(next.promise);
+    rerender(<PayrollFinalRecordPanel companyId={companyId} payPeriodId={payPeriodId} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText('$750.00 net')).toBeNull();
+    expect((screen.getByRole('button', { name: 'PDF record (.pdf)' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => next.resolve({ final_record: { ...voidedFinalRecordFixture,
+      company: { id: companyId, name: 'Current company' }, pay_period: { ...record.pay_period, id: payPeriodId } } }));
+    expect(await screen.findByText('Voided')).toBeTruthy();
+  });
+
+  it('refuses a response for another company instead of exposing its record', async () => {
+    apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...record, company: { id: 2, name: 'Other client' } } });
+    render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('does not match the selected company and pay run');
+    expect(screen.queryByText('$750.00 net')).toBeNull();
+    expect(screen.queryByText('Other client')).toBeNull();
+  });
+
+  it.each(['refresh', 'run change', 'unmount'] as const)('discards a pending export after %s and permits fresh exports', async changed => {
+    const createObjectURL = vi.fn(() => 'blob:current-record');
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const old = deferred<{ blob: Blob }>();
+    apiMocks.payrollFinalRecordPdf.mockReturnValueOnce(old.promise);
+    const { rerender, unmount } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    await screen.findByText('$750.00 net');
+    fireEvent.click(screen.getByRole('button', { name: 'PDF record (.pdf)' }));
+    if (changed === 'unmount') unmount();
+    else {
+      apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: {
+        ...voidedFinalRecordFixture, pay_period: { ...voidedFinalRecordFixture.pay_period, id: changed === 'run change' ? 9 : 8 },
+      } });
+      rerender(<PayrollFinalRecordPanel companyId={1} payPeriodId={changed === 'run change' ? 9 : 8} refreshToken={1} />);
+      await screen.findByText('Voided');
+    }
+    await act(async () => old.resolve({ blob: new Blob(['obsolete']) }));
+    expect(createObjectURL).not.toHaveBeenCalled();
+    if (changed !== 'unmount') {
+      apiMocks.payrollFinalRecordPdf.mockResolvedValueOnce({ blob: new Blob(['current']) });
+      fireEvent.click(screen.getByRole('button', { name: 'PDF record (.pdf)' }));
+      await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
+      expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('ignores an obsolete export failure while the current revision export is pending', async () => {
+    const createObjectURL = vi.fn(() => 'blob:current-record');
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const old = deferred<{ blob: Blob }>();
+    const current = deferred<{ blob: Blob }>();
+    apiMocks.payrollFinalRecordPdf.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    const { rerender } = render(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} />);
+    await screen.findByText('$750.00 net');
+    fireEvent.click(screen.getByRole('button', { name: 'PDF record (.pdf)' }));
+    apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: voidedFinalRecordFixture });
+    rerender(<PayrollFinalRecordPanel companyId={1} payPeriodId={8} refreshToken={1} />);
+    await screen.findByText('Voided');
+    fireEvent.click(screen.getByRole('button', { name: 'PDF record (.pdf)' }));
+    await act(async () => old.reject(new Error('Old export failed')));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: 'PDF record (.pdf)' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    await act(async () => current.resolve({ blob: new Blob(['current']) }));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect((screen.getByRole('button', { name: 'PDF record (.pdf)' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
