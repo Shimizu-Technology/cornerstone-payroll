@@ -36,7 +36,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     end
   end
 
-  def create_imported_payroll(company:, status: "locked", suffix: "client", pay_date: Date.new(2026, 3, 20))
+  def create_imported_payroll(company:, status: "locked", suffix: "client", pay_date: Date.new(2026, 3, 20), locked_at: Time.zone.parse("2026-03-21 09:00"))
     employee = company.employees.first || create(:employee, company: company)
     batch = HistoricalImportBatch.create!(
       company: company,
@@ -44,7 +44,7 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
       bundle_digest: "client-pay-periods-#{company.id}-#{suffix}",
       importer_version: "quickbooks-online-payroll-v5",
       status: status,
-      locked_at: status == "locked" ? Time.zone.parse("2026-03-21 09:00") : nil,
+      locked_at: status == "locked" ? locked_at : nil,
       locked_by: status == "locked" ? client_user : nil
     )
     period = HistoricalPayPeriod.create!(
@@ -136,6 +136,27 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
 
     ids = response.parsed_body.fetch("pay_periods").map { |pay_period| pay_period.fetch("id") }
     expect(ids).to eq([ committed_pay_period.id, march_period.id, earlier_march_period.id ])
+  end
+
+  it "returns explicit instants for native and imported processing times" do
+    committed_at = Time.utc(2026, 11, 22, 7, 0, 1, 123456)
+    committed_pay_period.update!(committed_at: committed_at)
+    locked_at = Time.utc(2026, 3, 21, 9, 0, 0, 654321)
+    _batch, imported_period, = create_imported_payroll(company: company, suffix: "processing-time", locked_at: locked_at)
+    ActiveRecord::Base.connection.execute("SET LOCAL TIME ZONE 'Pacific/Guam'")
+
+    get "/api/v1/client/pay_periods"
+
+    expect(response).to have_http_status(:ok)
+    records = response.parsed_body.fetch("pay_periods").index_by { |record| record.fetch("key") }
+    {
+      "native:#{committed_pay_period.id}" => committed_at,
+      "imported:#{imported_period.id}" => locked_at
+    }.each do |key, expected|
+      timestamp = records.fetch(key).fetch("processed_at")
+      expect(timestamp).to match(/(?:Z|[+-]\d{2}:\d{2})\z/)
+      expect(Time.iso8601(timestamp)).to eq(expected)
+    end
   end
 
   it "shows a safe read-only QuickBooks payroll detail" do

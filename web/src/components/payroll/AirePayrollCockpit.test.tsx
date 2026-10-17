@@ -14,6 +14,8 @@ import type {
 } from '@/types';
 import { AirePayrollCockpit } from './AirePayrollCockpit';
 import { AireManualPaymentReconciliation } from './AireManualPaymentReconciliation';
+import { FeedbackProvider } from '@/components/ui/action-feedback';
+import { ApiError } from '@/services/api';
 
 const apiMocks = vi.hoisted(() => ({
   overview: vi.fn(),
@@ -154,6 +156,8 @@ function fixtures(canCommand = true) {
       eligible_hours: 8,
       held_entries: 1,
       held_hours: 8.08,
+      payment_attested_pending_evidence_entries: 0,
+      payment_attested_pending_evidence_hours: 0,
       pending_approvals: 1,
       denied_entries: 0,
       missing_punches: 0,
@@ -287,14 +291,33 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe('AirePayrollCockpit', () => {
+  it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
+    render(<AirePayrollCockpit payPeriodId={17} calendar={{
+      ...calendar,
+      source_name: 'Neutral Weekly Time',
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
+      publication: published ? calendar.publication : null,
+    }} onRefresh={vi.fn()} />);
+
+    expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
+    expect(screen.getByText(/Neutral Weekly Time provides cutoff batches/)).toBeTruthy();
+    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    expect(screen.queryByText('Time tracking payroll workspace')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
+  });
+
   it('replaces the live preview with the verified batch action', async () => {
     const user = userEvent.setup();
     const onReviewFinalizedBatch = vi.fn();
     const verifiedCalendar: AirePayrollCalendarState = {
       ...calendar,
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
       cutoff_state: 'batch_verified',
       finalized_batch: {
         event_id: 'event-17',
@@ -328,6 +351,9 @@ describe('AirePayrollCockpit', () => {
     await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
     expect(apiMocks.manualReview).not.toHaveBeenCalled();
+    for (const api of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).not.toHaveBeenCalled();
+    }
   });
 
   it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {
@@ -340,6 +366,93 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getAllByText('Mapped').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting approval').length).toBeGreaterThan(0);
     expect(apiMocks.entries).toHaveBeenCalledWith(17, { page: 1 });
+  });
+
+  it.each([
+    { total: 6, eligible: 0, held: 0, heldEntries: 0 },
+    { total: 20, eligible: 8, held: 6, heldEntries: 1 },
+  ])('keeps reported-payment evidence separate from eligible and other held hours ($total total)', async ({ total, eligible, held, heldEntries }) => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_hours: total, total_entries: total === 6 ? 1 : 3,
+      eligible_hours: eligible, eligible_entries: eligible > 0 ? 1 : 0,
+      held_hours: held, held_entries: heldEntries,
+      pending_approvals: 0,
+      payment_attested_pending_evidence_hours: 6,
+      payment_attested_pending_evidence_entries: 1,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    const reported = await screen.findByRole('group', { name: 'Payment reported' });
+    expect(within(reported).getByText('6.00 hrs')).toBeTruthy();
+    expect(within(reported).getByText('1 timecard · evidence pending · not included')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText(`${eligible.toFixed(2)} hrs`)).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Other held time' })).getByText(`${held.toFixed(2)} hrs`)).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Total time' })).getByText(`${total.toFixed(2)} hrs`)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    expect(within(screen.getByRole('dialog')).getByText(new RegExp(`${held.toFixed(2)} other held hours remain outside this payroll for review`))).toBeTruthy();
+    expect(within(screen.getByRole('dialog')).getByText(/6.00 reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it/)).toBeTruthy();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+  });
+
+  it('refreshes approved hours into the canonical reported-payment bucket without changing time or payroll', async () => {
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_entries: 1, total_hours: 6, eligible_entries: 1, eligible_hours: 6,
+      held_entries: 0, held_hours: 0,
+      pending_approvals: 0,
+      payment_attested_pending_evidence_entries: 0, payment_attested_pending_evidence_hours: 0,
+    };
+    apiMocks.overview.mockResolvedValueOnce({ aire_payroll_cockpit: data.overview });
+    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={0} onRefresh={vi.fn()} />);
+    await screen.findByRole('group', { name: 'Payment reported' });
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText('6.00 hrs')).toBeTruthy();
+
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: { ...data.overview, readiness: { ...data.overview.readiness,
+      eligible_entries: 0, eligible_hours: 0,
+      payment_attested_pending_evidence_entries: 1, payment_attested_pending_evidence_hours: 6,
+    } } });
+    view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={calendar} refreshToken={1} onRefresh={vi.fn()} />);
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('6.00 hrs')).toBeTruthy());
+    expect(within(screen.getByRole('group', { name: 'Payment reported' })).getByText('1 timecard · evidence pending · not included')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Ready this payroll' })).getByText('0.00 hrs')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: 'Other held time' })).getByText('0.00 hrs')).toBeTruthy();
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('keeps missing optional source counters unavailable instead of inventing zero or deriving held hours', async () => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.readiness = { ...data.overview.readiness,
+      total_hours: 6, eligible_hours: 0, eligible_entries: 0,
+      held_hours: undefined, held_entries: undefined,
+      payment_attested_pending_evidence_hours: undefined,
+      payment_attested_pending_evidence_entries: undefined,
+    };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    for (const name of ['Other held time', 'Payment reported']) {
+      const metric = await screen.findByRole('group', { name });
+      expect(within(metric).getByText('—')).toBeTruthy();
+      expect(within(metric).getByText(/Timecard count unavailable · hours unavailable/)).toBeTruthy();
+      expect(within(metric).queryByText('0.00 hrs')).toBeNull();
+      expect(within(metric).queryByText('6.00 hrs')).toBeNull();
+    }
+    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/Other held hours are unavailable; review source details separately/)).toBeTruthy();
+    expect(within(dialog).getByText(/Reported-payment hours are unavailable; review payment evidence separately/)).toBeTruthy();
+    expect(within(dialog).queryByText(/0.00 other held hours|0.00 reported-payment hours|6.00 other held hours/)).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Lock eligible time' }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
   });
 
   it('shows exact paid hours and batch events in a clear payment history', async () => {
@@ -554,6 +667,129 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
   });
 
+  it.each(['not_required', 'approved'])('offers correction after cutoff for ordinary completed time without redundant %s approval', async (approvalStatus) => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.overview.payroll_period = { ...period, status: 'finalized', cutoff_state: 'finalized' };
+    data.overview.readiness.pending_approvals = 0;
+    data.entries.time_entries = [{
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'kiosk', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, approval_status: approvalStatus, payable_now: true, payroll_disposition: 'eligible', payroll_exclusion_reasons: [], included_hours: 8.08 },
+      lifecycle: { status: 'ready_for_cutoff', label: 'Ready for cutoff' },
+    }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Deny time' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByRole('heading', { name: 'Correct time in time tracking' })).toBeTruthy();
+    expect((screen.getByLabelText('Start time') as HTMLInputElement).value).toBe('08:04');
+    expect((screen.getByLabelText('End time') as HTMLInputElement).value).toBe('17:09');
+    expect((screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+  });
+
+  it('corrects ordinary completed time and reviews its renewed pending approval at the new source version', async () => {
+    const user = userEvent.setup();
+    const onSourceChanged = vi.fn();
+    const data = fixtures();
+    const ordinaryEntry = {
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, approval_status: 'not_required', payable_now: true, payroll_disposition: 'eligible', payroll_exclusion_reasons: [], included_hours: 8.08 },
+      lifecycle: { status: 'ready_for_cutoff', label: 'Ready for cutoff' },
+    };
+    const correctedEntry = { ...ordinaryEntry, version: 4, description: 'Confirmed ordinary shift description',
+      state: { ...ordinaryEntry.state, approval_status: 'pending', payable_now: false, payroll_disposition: 'pending_approval', payroll_exclusion_reasons: ['pending_approval'], included_hours: 0 },
+      lifecycle: { status: 'awaiting_approval', label: 'Awaiting approval' },
+    };
+    const approvedEntry = { ...correctedEntry, version: 5, state: { ...ordinaryEntry.state, approval_status: 'approved' }, lifecycle: ordinaryEntry.lifecycle };
+    data.overview.readiness.pending_approvals = 0;
+    apiMocks.overview
+      .mockResolvedValueOnce({ aire_payroll_cockpit: data.overview })
+      .mockResolvedValueOnce({ aire_payroll_cockpit: { ...data.overview, readiness: { ...data.overview.readiness, pending_approvals: 1 } } })
+      .mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries
+      .mockResolvedValueOnce({ ...data.entries, time_entries: [ordinaryEntry] })
+      .mockResolvedValueOnce({ ...data.entries, time_entries: [correctedEntry] })
+      .mockResolvedValue({ ...data.entries, time_entries: [approvedEntry] });
+    apiMocks.correct.mockResolvedValue({ time_entry: correctedEntry });
+    apiMocks.review.mockResolvedValue({ time_entry: approvedEntry });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} onSourceChanged={onSourceChanged} />);
+
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    const description = screen.getByLabelText('Description');
+    await user.clear(description);
+    await user.type(description, 'Confirmed ordinary shift description');
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the clock entry with the employee');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 3,
+      command_id: expect.any(String),
+      reason: 'Verified the clock entry with the employee',
+      description: 'Confirmed ordinary shift description',
+    })));
+    for (const field of ['work_date', 'start_time', 'end_time', 'time_category_id', 'breaks']) {
+      expect(apiMocks.correct.mock.calls[0][2]).not.toHaveProperty(field);
+    }
+    await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Deny time' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Approve time' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Approve time' })).toBeTruthy();
+    const approve = within(dialog).getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    await user.type(within(dialog).getByRole('textbox', { name: /reason/i }), 'Manager verified the corrected ordinary shift');
+    await user.click(approve);
+    await waitFor(() => expect(apiMocks.review).toHaveBeenCalledWith(17, '42', expect.objectContaining({
+      expected_version: 4,
+      command_id: expect.any(String),
+      decision: 'approve',
+      reason: 'Manager verified the corrected ordinary shift',
+    })));
+    await waitFor(() => expect(onSourceChanged).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Deny time' })).toBeNull();
+    expect(apiMocks.reviewOvertime).not.toHaveBeenCalled();
+  });
+
+  it('keeps correction and pending ordinary-time review disabled without command permission', async () => {
+    const user = userEvent.setup();
+    const data = fixtures(false);
+    data.entries.time_entries = [{
+      ...timeEntry,
+      capture: { entry_method: 'clock', clock_source: 'kiosk', ordinary: true, admin_override: false },
+    }];
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(
+      <MemoryRouter>
+        <AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    await screen.findByText('Malia Cruz');
+    for (const name of ['Correct', 'Approve time', 'Deny time']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      await user.click(button);
+    }
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.reviewOvertime).not.toHaveBeenCalled();
+  });
+
   it('shows who approved time and overtime, when, and why', async () => {
     const data = fixtures();
     const reviewedEntry = {
@@ -595,15 +831,104 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledWith(17, '42', expect.objectContaining({
       expected_version: 3,
       reason: 'Employee confirmed the missed punch',
-      work_date: '2026-10-14',
-      start_time: '08:04',
       end_time: '17:15',
-      time_category_id: '2',
-      breaks: [{ start_time: '12:00', end_time: '13:00' }],
       command_id: expect.any(String),
     })));
     expect(await screen.findByText(/now needs administrator approval/i)).toBeTruthy();
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
+  });
+
+  it.each([
+    ['Start time', '13:45', { start_time: '13:45' }],
+    ['End time', '14:15', { end_time: '14:15' }],
+    ['Work date', '2026-10-15', { work_date: '2026-10-15' }],
+    ['Time category', '3', { time_category_id: '3' }],
+  ] as const)('sends only changed %s and leaves exact punches and breaks to the source', async (label, value, fields) => {
+    const user = userEvent.setup();
+    const preciseEntry = {
+      ...timeEntry,
+      start_time: '01:59 PM', end_time: '02:00 PM',
+      clock_in_at: '2026-10-14T03:59:19.427187Z',
+      clock_out_at: '2026-10-14T04:00:32.935086Z',
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      breaks: [{ id: '9', start_time: '2026-10-14T03:59:30.123456Z', end_time: '2026-10-14T03:59:40.987654Z', active: false }],
+    };
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [preciseEntry] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    if (label === 'Time category') await user.selectOptions(screen.getByLabelText(label), value);
+    else fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the changed field with the employee');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3,
+      reason: 'Verified the changed field with the employee', ...fields,
+    }));
+  });
+
+  it('does not submit a reason-only correction or fields changed back to their original display values', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    await user.type(screen.getByLabelText('Correction reason'), 'Checked the original record');
+    const save = screen.getByRole('button', { name: 'Save correction' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '08:00' } });
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '08:04' } });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    await user.click(save);
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('completes a missing clock-out without resubmitting its original punch, date or breaks', async () => {
+    const user = userEvent.setup();
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [{
+      ...timeEntry, end_time: null, clock_in_at: '2026-10-14T08:04:19.123456+10:00', clock_out_at: null,
+      capture: { entry_method: 'clock', clock_source: 'mobile', ordinary: true, admin_override: false },
+      state: { ...timeEntry.state, status: 'active', missing_punch: true },
+    }] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    fireEvent.change(screen.getByLabelText('End time'), { target: { value: '17:15' } });
+    await user.type(screen.getByLabelText('Correction reason'), 'Confirmed the missing clock-out');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3, reason: 'Confirmed the missing clock-out', end_time: '17:15',
+    }));
+  });
+
+  it.each(['edit', 'remove', 'add', 'remove all'] as const)('preserves raw endpoints of retained breaks during %s', async (operation) => {
+    const user = userEvent.setup();
+    const first = { id: '9', start_time: '2026-10-14T02:00:12.123456Z', end_time: '2026-10-14T02:15:32.987654Z', active: false };
+    const second = { id: '10', start_time: '2026-10-14T14:00:19.111222+10:00', end_time: '2026-10-14T14:15:27.333444+10:00', active: false };
+    apiMocks.entries.mockResolvedValue({ ...fixtures().entries, time_entries: [{ ...timeEntry, breaks: [first, second] }] });
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    if (operation === 'edit') fireEvent.change(screen.getByLabelText('Break 1 end'), { target: { value: '12:20' } });
+    else if (operation === 'add') {
+      await user.click(screen.getByRole('button', { name: 'Add break' }));
+      fireEvent.change(screen.getByLabelText('Break 3 start'), { target: { value: '15:00' } });
+      fireEvent.change(screen.getByLabelText('Break 3 end'), { target: { value: '15:10' } });
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Remove break 1' }));
+      if (operation === 'remove all') await user.click(screen.getByRole('button', { name: 'Remove break 1' }));
+    }
+    await user.type(screen.getByLabelText('Correction reason'), 'Verified the complete corrected break list');
+    await user.click(screen.getByRole('button', { name: 'Save correction' }));
+    const rawFirst = { start_time: first.start_time, end_time: first.end_time };
+    const rawSecond = { start_time: second.start_time, end_time: second.end_time };
+    const breaks = operation === 'edit' ? [{ ...rawFirst, end_time: '12:20' }, rawSecond]
+      : operation === 'remove' ? [rawSecond]
+      : operation === 'add' ? [rawFirst, rawSecond, { start_time: '15:00', end_time: '15:10' }] : [];
+    await waitFor(() => expect(apiMocks.correct).toHaveBeenCalledExactlyOnceWith(17, '42', {
+      command_id: expect.any(String), expected_version: 3,
+      reason: 'Verified the complete corrected break list', breaks,
+    }));
   });
 
   it('uses categories carried by the time entry when its employee is outside the current team page', async () => {
@@ -649,7 +974,8 @@ describe('AirePayrollCockpit', () => {
 
     await user.click(screen.getByRole('button', { name: 'Correct' }));
     expect(screen.getByText(/time tracking has 60 total break minutes but no exact break times/i)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Correction reason'), { target: { value: 'Correcting the description only' } });
+    await user.type(screen.getByLabelText('Description'), 'Corrected description');
+    await user.type(screen.getByLabelText('Correction reason'), 'Correcting the description only');
     const save = screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     await user.click(save);
@@ -722,6 +1048,7 @@ describe('AirePayrollCockpit', () => {
       </MemoryRouter>
     );
     await screen.findByText(/actions need your time tracking access/i);
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock time tracking cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
@@ -729,7 +1056,47 @@ describe('AirePayrollCockpit', () => {
       .toBe('/app/aire-account-connection?source_id=1&return_to=%2Fcompanies%2F1%2Fpay-periods%2F17');
   });
 
-  it('does not let an older refresh overwrite a newer payroll view', async () => {
+  it('explains role-disabled commands when time tracking access is already configured', async () => {
+    mockLoads(false);
+    const data = fixtures(false);
+    data.overview.command_access.delegation_configured = true;
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    const user = userEvent.setup();
+    render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
+
+    await screen.findByText('Time changes require a Payroll manager or admin');
+    expect(screen.getByText('Time approvals, corrections and held-time destinations require that role. You can still review time and payroll evidence.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /connect my time tracking account/i })).toBeNull();
+    expect(screen.getByText('Malia Cruz')).toBeTruthy();
+    const approve = screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
+    const correct = screen.getByRole('button', { name: 'Correct' }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(correct.disabled).toBe(true);
+    await user.click(approve);
+    await user.click(correct);
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+    expect((screen.getByRole('button', { name: 'Choose destination' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(apiMocks.routeSettlement).not.toHaveBeenCalled();
+  });
+
+  it('does not describe a role restriction for authorized commands temporarily disabled during refresh', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    let finish!: (value: { aire_payroll_cockpit: AirePayrollCockpitOverview }) => void;
+    apiMocks.overview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+    expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    await act(async () => finish({ aire_payroll_cockpit: fixtures().overview }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+  });
+
+  it.each([{ payPeriodId: 18, sourceId: 1 }, { payPeriodId: 17, sourceId: 2 }])('does not let an older refresh overwrite period $payPeriodId/source $sourceId', async ({ payPeriodId, sourceId }) => {
     const stale = fixtures();
     const current = fixtures();
     current.overview.employees[0] = { ...current.overview.employees[0], full_name: 'Current Employee' };
@@ -754,7 +1121,7 @@ describe('AirePayrollCockpit', () => {
 
     const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(1));
-    view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
+    view.rerender(<AirePayrollCockpit payPeriodId={payPeriodId} calendar={{ ...calendar, source_id: sourceId }} onRefresh={vi.fn()} />);
     expect(await screen.findByText('Current Employee')).toBeTruthy();
 
     await act(async () => { releaseStale?.(); });
@@ -773,6 +1140,52 @@ describe('AirePayrollCockpit', () => {
     view.rerender(<AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} />);
 
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull());
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+  });
+
+  it('clears prior-source details and open commands while a replacement source loads for the same period', async () => {
+    const user = userEvent.setup();
+    const view = render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    expect(screen.getByRole('heading', { name: 'Correct time in time tracking' })).toBeTruthy();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const next = fixtures(false);
+    next.overview.employees = [];
+    next.entries.time_entries = [];
+    next.exceptions.time_exceptions = [];
+    apiMocks.overview.mockImplementationOnce(async () => { await gate; return { aire_payroll_cockpit: next.overview }; });
+    apiMocks.entries.mockImplementationOnce(async () => { await gate; return next.entries; });
+    apiMocks.exceptions.mockImplementationOnce(async () => { await gate; return next.exceptions; });
+    apiMocks.settlements.mockImplementationOnce(async () => { await gate; return next.settlements; });
+    view.rerender(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, source_id: 2 }} onRefresh={vi.fn()} /></MemoryRouter>);
+
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Approve time' })).toBeNull();
+    expect(apiMocks.correct).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+    await act(async () => { release(); });
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+  });
+
+  it('closes live commands when the same source stops advertising the cockpit', async () => {
+    const user = userEvent.setup();
+    const view = render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: 'Correct' }));
+    view.rerender(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar,
+      source_capabilities: ['time_summary_v1', 'payroll_calendar_v2', 'finalized_batch_v2', 'exact_line_receipts_v2'],
+    }} onRefresh={vi.fn()} />);
+    expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Correct time in time tracking' })).toBeNull();
+    expect(screen.queryByText('Malia Cruz')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+      expect(api).toHaveBeenCalledTimes(1);
+    }
     expect(apiMocks.correct).not.toHaveBeenCalled();
   });
 
@@ -817,6 +1230,59 @@ describe('AirePayrollCockpit', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
     await waitFor(() => expect(apiMocks.review).toHaveBeenCalledTimes(2));
     expect(apiMocks.review.mock.calls[1][2].command_id).toBe(apiMocks.review.mock.calls[0][2].command_id);
+  });
+
+  it('publishes one stale-review notification and reannounces one identical retry with the refreshed version', async () => {
+    const user = userEvent.setup();
+    apiMocks.review.mockRejectedValue(new ApiError('Entry version changed', 409));
+    const view = render(<FeedbackProvider><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Approve time' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), { target: { value: 'Verified source review' } });
+    const latest = fixtures();
+    latest.entries.time_entries = latest.entries.time_entries.map(entry => ({ ...entry, version: 4 }));
+    latest.exceptions.time_exceptions = latest.exceptions.time_exceptions.map(entry => ({ ...entry, version: 4 }));
+    apiMocks.entries.mockResolvedValue(latest.entries);
+    apiMocks.exceptions.mockResolvedValue(latest.exceptions);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    const notifications = within(document.querySelector('[data-feedback-portal]') as HTMLElement);
+    await waitFor(() => expect(notifications.getAllByRole('alert')).toHaveLength(1));
+    expect(apiMocks.review).toHaveBeenCalledOnce();
+    expect(apiMocks.review.mock.calls[0][2].expected_version).toBe(3);
+    expect(notifications.getByRole('alert').textContent).toContain('review it again before deciding');
+    await waitFor(() => expect(apiMocks.entries).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+    await user.click(notifications.getByRole('button', { name: /Dismiss notification/ }));
+    expect(notifications.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    await waitFor(() => expect(notifications.getAllByRole('alert')).toHaveLength(1));
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+    expect(apiMocks.review.mock.calls[1][2].expected_version).toBe(4);
+    expect(apiMocks.review.mock.calls[1][2].command_id).not.toBe(apiMocks.review.mock.calls[0][2].command_id);
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(notifications.getAllByRole('alert')).toHaveLength(1);
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+    view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await waitFor(() => expect(notifications.queryByRole('alert')).toBeNull());
+    expect(apiMocks.review).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not publish a late stale-review error after leaving its pay period', async () => {
+    const user = userEvent.setup();
+    let reject!: (error: Error) => void;
+    apiMocks.review.mockImplementationOnce(() => new Promise<void>((_, fail) => { reject = fail; }));
+    const view = render(<FeedbackProvider><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Approve time' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /reason/i }), { target: { value: 'Verified source review' } });
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Approve time' }));
+    view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
+    await act(async () => { reject(new ApiError('Entry version changed', 409)); });
+    expect(within(document.querySelector('[data-feedback-portal]') as HTMLElement).queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.review).toHaveBeenCalledOnce();
+    expect(apiMocks.review.mock.calls[0][0]).toBe(17);
   });
 
   it('reports a post-lock Cornerstone refresh failure separately from the successful time tracking command', async () => {
@@ -1039,4 +1505,79 @@ it.each(['new event', 'verified status'])('refreshes source state after a meanin
   for (const endpoint of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
     expect(endpoint).toHaveBeenCalledTimes(2);
   }
+});
+
+function mockCorrectionCase(currentHours: number | null = 3, reason = 'changed_after_cutoff') {
+  const data = fixtures();
+  const original = data.settlements.settlement_cases[0];
+  data.settlements.settlement_cases = [{ ...original, origin: { ...original.origin, reason },
+    time: { ...original.time, held_total_hours: 1, current_total_hours: currentHours },
+  }];
+  apiMocks.settlements.mockResolvedValue(data.settlements);
+  // Overall source history can be paid even while this correction has no
+  // acknowledgment. Its latest label must not be reused as correction evidence.
+  apiMocks.entries.mockResolvedValue({ ...data.entries, time_entries: [{ ...timeEntry,
+    hours: currentHours ?? 0, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true },
+    lifecycle: { status: 'payment_issued', label: 'Paid', payment_reference: 'ORIGINAL-CHECK',
+      settlements: [{ batch_id: original.origin.payroll_batch_id, total_hours: 4, status: 'payment_issued' }] },
+  }] });
+  return data.settlements.settlement_cases[0];
+}
+
+it.each([3, 1])('keeps correction magnitude and current source %sh separate without inferring sign or baseline', async currentHours => {
+  const user = userEvent.setup();
+  mockCorrectionCase(currentHours);
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await screen.findByText('Paid');
+  await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+  const card = screen.getByText('Correction magnitude: 1.00 hours').closest('article')!;
+  expect(within(card).getByText(`Current source time is ${currentHours.toFixed(2)} hours. Review the signed change against the original batch before applying a payroll adjustment.`)).toBeTruthy();
+  expect(within(card).getByText('Correction processing')).toBeTruthy();
+  expect(within(card).getByText('No processing acknowledgment for this correction yet')).toBeTruthy();
+  expect(within(card).getByText('Review original payment evidence in the source history.')).toBeTruthy();
+  expect(within(card).queryByText(/original cutoff record|originally held|Not imported into payroll|No payment has been recorded|1.00 held hours/)).toBeNull();
+  expect(within(card).queryByText(/decrease|increase|4.00|ORIGINAL-CHECK/)).toBeNull();
+  expect(apiMocks.routeSettlement).not.toHaveBeenCalled();
+});
+
+it('does not invent current hours or a baseline for a deleted correction source', async () => {
+  const user = userEvent.setup();
+  mockCorrectionCase(null, 'deleted_after_cutoff');
+  const data = fixtures();
+  apiMocks.entries.mockResolvedValue({ ...data.entries, time_entries: [] });
+  apiMocks.exceptions.mockResolvedValue({ ...data.exceptions, time_exceptions: [] });
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: /Held time 1/i }));
+  const card = screen.getByText('Correction magnitude: 1.00 hours').closest('article')!;
+  expect(within(card).getByText('Current source time is unavailable. Review the original batch and signed correction before applying a payroll adjustment.')).toBeTruthy();
+  expect(within(card).queryByText(/Current source time is 0|original cutoff record/)).toBeNull();
+  await user.click(within(card).getByRole('button', { name: 'Choose destination' }));
+  expect(within(screen.getByRole('dialog')).queryByText(/current source time: 0|originally held/)).toBeNull();
+});
+
+it.each(['regular', 'not_payable'] as const)('scopes correction routing copy without changing the %s command', async destination => {
+  const user = userEvent.setup();
+  const correctionCase = mockCorrectionCase();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: /Held time 1/i }));
+  await user.click(screen.getByRole('button', { name: 'Choose destination' }));
+  const dialog = screen.getByRole('dialog');
+  expect(within(dialog).getByRole('heading', { name: 'Choose where to review this correction' })).toBeTruthy();
+  expect(within(dialog).getByText(/Correction magnitude: 1.00 hours · current source time: 3.00 hours/)).toBeTruthy();
+  expect(within(dialog).getByText("Review the signed change in that payroll's cutoff batch. Routing does not record a payment.")).toBeTruthy();
+  expect(within(dialog).queryByText(/originally held|will be included automatically|should never be paid/)).toBeNull();
+  if (destination === 'not_payable') await user.click(within(dialog).getByRole('radio', { name: /Do not apply this correction/ }));
+  await user.type(within(dialog).getByLabelText('Routing reason'), 'Reviewed the signed correction and preserved original payment evidence');
+  await user.click(within(dialog).getByRole('button', { name: destination === 'regular' ? 'Route to payroll' : 'Do not apply correction' }));
+  await waitFor(() => expect(apiMocks.routeSettlement).toHaveBeenCalledExactlyOnceWith(17, correctionCase.id, expect.objectContaining({
+    expected_version: correctionCase.version, destination_kind: destination,
+    reason: 'Reviewed the signed correction and preserved original payment evidence', command_id: expect.any(String),
+    ...(destination === 'regular' ? { target_external_pay_period_id: fixtures().overview.routing_options[0].external_pay_period_id } : {}),
+  })));
+  if (destination === 'not_payable') expect(apiMocks.routeSettlement.mock.calls[0][2]).not.toHaveProperty('target_external_pay_period_id');
+  await screen.findByText(destination === 'regular'
+    ? 'Correction routed to the selected payroll for review. The original payment remains unchanged.'
+    : 'Correction marked not applied with your review reason. The original payment remains unchanged.');
+  expect(apiMocks.correct).not.toHaveBeenCalled();
+  expect(apiMocks.finalize).not.toHaveBeenCalled();
 });

@@ -9,6 +9,6 @@ class EnhanceDeductionTypes < ActiveRecord::Migration[8.0]
       t.boolean :generates_check, default: false, null: false
     end
 
-    add_index :deduction_types, [:company_id, :sub_category]
+    add_index :deduction_types, [ :company_id, :sub_category ]
   end
 end

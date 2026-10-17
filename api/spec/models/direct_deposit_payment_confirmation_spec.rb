@@ -46,5 +46,4 @@ RSpec.describe DirectDepositPaymentConfirmation do
     expect(item.aire_payroll_entry_acknowledgements).to be_empty
     expect(item.net_pay).to eq(100)
   end
-
 end

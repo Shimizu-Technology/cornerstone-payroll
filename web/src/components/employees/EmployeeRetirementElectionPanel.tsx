@@ -1,3 +1,5 @@
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
 import { CheckCircle2, Landmark, Pencil, ShieldCheck, X } from 'lucide-react';
@@ -75,7 +77,8 @@ function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
 export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): ReactElement {
   const { hasCapability } = useAuth();
   const { notify } = useFeedback();
-  const canManage = hasCapability('manage_client_configuration');
+  const { activeCompany } = useCompany();
+  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasCapability('manage_client_configuration');
   const hasDatedElection = Boolean(employee.current_retirement_election || employee.upcoming_retirement_election || employee.retirement_elections?.length);
   const legacySplitMatch = !employee.current_retirement_election && !employee.upcoming_retirement_election && Number(employee.employer_retirement_match_rate || 0) > 0 && Number(employee.employer_roth_match_rate || 0) > 0;
   const [editing, setEditing] = useState(false);
@@ -95,6 +98,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
   };
 
   const save = async (): Promise<void> => {
+    if (!canManage) return;
     if (legacySplitMatch) {
       setError('This legacy setup has both Traditional and Roth employer match. Have the plan administrator resolve the split before saving a single-destination election.');
       return;
@@ -150,7 +154,7 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
       {legacySplitMatch && <p role="alert" className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm leading-6 text-warning-900">Both Traditional and Roth employer match are configured in the legacy setup. Administrator review is required: this election supports one employer contribution destination and cannot preserve the split. Saving is blocked until the legacy setup is resolved.</p>}
       {upcoming && <p className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-900"><strong>Scheduled:</strong> {upcoming.plan_name} becomes effective {formatDate(upcoming.effective_on)}.</p>}
 
-      {!editing ? <ElectionSummary election={current} upcoming={upcoming} employee={employee} /> : <fieldset disabled={saving} className="space-y-6">
+      {!editing ? <ElectionSummary election={current} upcoming={upcoming} employee={employee} /> : <><fieldset disabled={saving || !canManage} className="space-y-6">
         <section>
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Participation and start date</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -221,12 +225,13 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
 
         <section className="border-t border-neutral-200 pt-6">
           <Field label={hasDatedElection ? 'Reason for this change' : 'Setup note'} helper="Saved permanently with this election."><Input value={draft.reason} onChange={(event) => set('reason', event.target.value)} placeholder={hasDatedElection ? 'Example: New signed election received' : 'Example: Verified against signed plan election'} /></Field>
-          <div className="mt-5 flex flex-wrap justify-end gap-3">
-            <Button variant="outline" onClick={() => { setEditing(false); setError(null); }}><X className="mr-2 h-4 w-4" />Cancel</Button>
-            <Button disabled={saving || legacySplitMatch} onClick={() => void save()}>{saving ? 'Saving…' : 'Save contribution change'}</Button>
-          </div>
         </section>
-      </fieldset>}
+      </fieldset>
+          <div className="mt-5 flex flex-wrap justify-end gap-3">
+            <Button disabled={saving} variant="outline" onClick={() => { setEditing(false); setError(null); }}><X className="mr-2 h-4 w-4" />Cancel</Button>
+            <Button disabled={saving || !canManage || legacySplitMatch} onClick={() => void save()}>{saving ? 'Saving…' : 'Save contribution change'}</Button>
+          </div>
+      </>}
 
       {(employee.retirement_elections || []).length > 0 && !editing && <details className="border-t border-neutral-200 pt-5">
         <summary className="cursor-pointer text-sm font-semibold text-neutral-800">Election history ({employee.retirement_elections?.length})</summary>

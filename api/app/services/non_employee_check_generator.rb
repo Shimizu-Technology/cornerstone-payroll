@@ -84,7 +84,7 @@ class NonEmployeeCheckGenerator
 
   def render_document(voided: false)
     Prawn::Document.new(
-      page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN
+      page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_check_face(pdf, check_y, voided)
       draw_stub(pdf, stub1_y, voided)
@@ -105,27 +105,27 @@ class NonEmployeeCheckGenerator
     memo_cfg = layout_field(:memo)
 
     # Date (top-right)
-    pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
+    pdf.bounding_box([ date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy ], width: date_cfg["width"].to_f) do
       pdf.font_size(date_cfg["font_size"].to_f) { pdf.text check_date_str, align: :right }
     end
 
     # Payee (left)
-    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f) do
+    pdf.bounding_box([ payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy ], width: payee_cfg["width"].to_f) do
       pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text check.payable_to }
     end
 
     # Amount (right)
-    pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
+    pdf.bounding_box([ amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy ], width: amount_cfg["width"].to_f) do
       pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(check.amount), align: :right }
     end
 
     # Amount in words
-    pdf.bounding_box([words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy], width: words_cfg["width"].to_f) do
+    pdf.bounding_box([ words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy ], width: words_cfg["width"].to_f) do
       pdf.font_size(words_cfg["font_size"].to_f) { pdf.text NumberToWords.convert(check.amount) }
     end
 
     # Memo
-    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
+    pdf.bounding_box([ memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy ], width: memo_cfg["width"].to_f) do
       pdf.font_size(memo_cfg["font_size"].to_f) { pdf.text check.memo.to_s }
     end
   end
@@ -149,14 +149,14 @@ class NonEmployeeCheckGenerator
     # ROW 1:  PAYMENT DETAILS (left)  |  CHECK INFO (right)
     # ================================================================
     pdf.font_size(7) do
-      pdf.draw_text check.payable_to, at: [lx, row1_top], style: :bold
+      pdf.draw_text check.payable_to, at: [ lx, row1_top ], style: :bold
     end
 
     draw_section_table(pdf,
       x: lx, y: row1_top - 10, w: left_w - 8,
       title: "PAYMENT DETAILS",
       columns: %w[Amount],
-      col_ratios: [0.65, 0.35],
+      col_ratios: [ 0.65, 0.35 ],
       rows: payment_detail_rows
     )
 
@@ -164,7 +164,7 @@ class NonEmployeeCheckGenerator
       x: rx, y: row1_top - 10, w: right_w,
       title: "CHECK INFO",
       columns: %w[Value],
-      col_ratios: [0.45, 0.55],
+      col_ratios: [ 0.45, 0.55 ],
       rows: check_info_rows
     )
 
@@ -175,7 +175,7 @@ class NonEmployeeCheckGenerator
       x: lx, y: row2_top, w: left_w - 8,
       title: "MEMO / DESCRIPTION",
       columns: %w[],
-      col_ratios: [1.0],
+      col_ratios: [ 1.0 ],
       rows: memo_rows
     )
 
@@ -183,14 +183,14 @@ class NonEmployeeCheckGenerator
       x: rx, y: row2_top, w: right_w,
       title: "REFERENCES",
       columns: %w[Value],
-      col_ratios: [0.45, 0.55],
+      col_ratios: [ 0.45, 0.55 ],
       rows: reference_rows
     )
 
     # ================================================================
     # ROW 3:  Period / Date (left)  |  SUMMARY (right)
     # ================================================================
-    pdf.bounding_box([lx, row3_top], width: left_w) do
+    pdf.bounding_box([ lx, row3_top ], width: left_w) do
       pdf.font_size(6.5) do
         if check.pay_period.present?
           pdf.text "Pay Period", style: :bold
@@ -214,32 +214,32 @@ class NonEmployeeCheckGenerator
   def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:)
     return if rows.empty? && columns.empty?
 
-    header = [{ content: title, font_style: :bold }] +
+    header = [ { content: title, font_style: :bold } ] +
       columns.map { |c| { content: c, font_style: :bold, align: :right } }
 
-    data = [header] + rows
+    data = [ header ] + rows
     col_widths = col_ratios.map { |r| w * r }
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
-    pdf.bounding_box([x, y], width: w) do
+    pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6.5) do
         pdf.table(data, column_widths: col_widths, cell_style: {
-          padding: [1, 2], borders: [], size: 6.5, overflow: :shrink_to_fit
+          padding: [ 1, 2 ], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
-          row(0).borders = [:bottom]
+          row(0).borders = [ :bottom ]
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1..-1).align = :right
           if has_total
-            row(last_idx).borders = [:top]
+            row(last_idx).borders = [ :top ]
             row(last_idx).border_color = "999999"
           end
         end
       end
     end
   rescue Prawn::Errors::CannotFit
-    pdf.bounding_box([x, y], width: w) do
+    pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
   end
@@ -252,10 +252,10 @@ class NonEmployeeCheckGenerator
 
     pdf.stroke_color "333333"
     pdf.line_width 0.8
-    pdf.stroke_rectangle [x, y], w, box_h
+    pdf.stroke_rectangle [ x, y ], w, box_h
 
     inner_w = w - 6
-    cw = [inner_w * 0.55, inner_w * 0.45]
+    cw = [ inner_w * 0.55, inner_w * 0.45 ]
 
     header = [
       { content: "SUMMARY", font_style: :bold },
@@ -263,17 +263,17 @@ class NonEmployeeCheckGenerator
     ]
 
     data_rows = [
-      [check_type_label, fd(check.amount)]
+      [ check_type_label, fd(check.amount) ]
     ]
 
-    data = [header] + data_rows
+    data = [ header ] + data_rows
 
-    pdf.bounding_box([x + 3, y - 3], width: inner_w) do
+    pdf.bounding_box([ x + 3, y - 3 ], width: inner_w) do
       pdf.font_size(6.5) do
         pdf.table(data, column_widths: cw, cell_style: {
-          padding: [1.5, 2], borders: [], size: 6.5
+          padding: [ 1.5, 2 ], borders: [], size: 6.5
         }) do
-          row(0).borders = [:bottom]
+          row(0).borders = [ :bottom ]
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1).align = :right
@@ -286,11 +286,11 @@ class NonEmployeeCheckGenerator
     net_y = y - box_h - 8
     amount_text = fd(check.amount)
     pdf.font_size(7) do
-      pdf.draw_text "CHECK AMOUNT:", at: [x + 3, net_y], style: :bold
+      pdf.draw_text "CHECK AMOUNT:", at: [ x + 3, net_y ], style: :bold
     end
     pdf.font_size(9) do
       amount_w = pdf.width_of(amount_text, style: :bold)
-      pdf.draw_text amount_text, at: [x + w - amount_w - 3, net_y], style: :bold
+      pdf.draw_text amount_text, at: [ x + w - amount_w - 3, net_y ], style: :bold
     end
   end
 
@@ -314,30 +314,30 @@ class NonEmployeeCheckGenerator
 
   def check_info_rows
     rows = []
-    rows << ["Check #", check.check_number || "—"]
-    rows << ["Date", check_date_str]
-    rows << ["Type", check_type_label]
+    rows << [ "Check #", check.check_number || "—" ]
+    rows << [ "Date", check_date_str ]
+    rows << [ "Type", check_type_label ]
     rows
   end
 
   def memo_rows
     rows = []
-    rows << [check.memo] if check.memo.present?
-    rows << [check.description] if check.description.present?
-    rows << ["—"] if rows.empty?
+    rows << [ check.memo ] if check.memo.present?
+    rows << [ check.description ] if check.description.present?
+    rows << [ "—" ] if rows.empty?
     rows
   end
 
   def reference_rows
     rows = []
-    rows << ["Reference #", check.reference_number] if check.reference_number.present?
-    rows << ["Confirmation #", check.confirmation_number] if check.respond_to?(:confirmation_number) && check.confirmation_number.present?
-    rows << ["Tax Period", tax_period_label] if tax_period_label.present?
-    rows << ["Due Date", format_date(check.due_date)] if check.respond_to?(:due_date) && check.due_date.present?
+    rows << [ "Reference #", check.reference_number ] if check.reference_number.present?
+    rows << [ "Confirmation #", check.confirmation_number ] if check.respond_to?(:confirmation_number) && check.confirmation_number.present?
+    rows << [ "Tax Period", tax_period_label ] if tax_period_label.present?
+    rows << [ "Due Date", format_date(check.due_date) ] if check.respond_to?(:due_date) && check.due_date.present?
     if check.pay_period.present?
-      rows << ["Pay Period", "#{format_date(check.pay_period.start_date)} - #{format_date(check.pay_period.end_date)}"]
+      rows << [ "Pay Period", "#{format_date(check.pay_period.start_date)} - #{format_date(check.pay_period.end_date)}" ]
     end
-    rows << ["Created", check.created_at.strftime("%m/%d/%Y")]
+    rows << [ "Created", check.created_at.strftime("%m/%d/%Y") ]
     rows
   end
 
@@ -419,8 +419,8 @@ class NonEmployeeCheckGenerator
       pdf.fill_color "FFCCCC"
       pdf.transparent(0.25) do
         pdf.font_size(90) do
-          pdf.rotate(30, origin: [cx, cy]) do
-            pdf.draw_text "VOID", at: [cx - 140, cy - 30], style: :bold
+          pdf.rotate(30, origin: [ cx, cy ]) do
+            pdf.draw_text "VOID", at: [ cx - 140, cy - 30 ], style: :bold
           end
         end
       end

@@ -63,6 +63,8 @@ jobs:
       # Schema-only setup keeps deterministic test fixtures separate from
       # operational tax-rule seeds loaded by db:prepare on a new database.
       - run: bundle exec rails db:schema:load
+      - run: bundle exec rails db:integrity
+      - run: bundle exec rubocop
       - run: bundle exec rspec
       - run: bundle exec brakeman -q
       - run: bundle exec bundler-audit check --update
@@ -132,6 +134,22 @@ jobs:
         working-directory: web
       - run: npm run test:e2e:release
         working-directory: web
+      - name: Prepare isolated payroll refresh acceptance fixture
+        working-directory: api
+        env:
+          PGPASSWORD: postgres
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_refresh_qa
+          E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/payroll-refresh.json
+        run: |
+          createdb --host 127.0.0.1 --username postgres cornerstone_payroll_refresh_qa
+          bundle exec rails db:schema:load db:seed
+          bundle exec rails runner 'require Rails.root.join("lib/payroll_refresh_qa_fixture"); PayrollRefreshQaFixture.seed!(output_path: ENV.fetch("E2E_FIXTURE_PATH"))'
+      - name: Payroll refresh acceptance
+        working-directory: web
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_refresh_qa
+          E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/payroll-refresh.json
+        run: npm run test:e2e:refresh
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,6 +159,35 @@ jobs:
             web/playwright-report
             web/test-results
             web/.e2e-fixtures/release.json
+            web/.e2e-fixtures/payroll-refresh.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Prepare isolated pay-item workflow fixture
+        working-directory: api
+        env:
+          PGPASSWORD: postgres
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_pay_items_qa
+          E2E_TEST_MODE: "true"
+          E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/pay-items.json
+        run: |
+          createdb --host 127.0.0.1 --username postgres cornerstone_payroll_pay_items_qa
+          bundle exec rails db:schema:load
+          bundle exec rails runner 'require Rails.root.join("lib/pay_item_workflow_qa_fixture"); PayItemWorkflowQaFixture.seed!(output_path: ENV.fetch("E2E_FIXTURE_PATH"))'
+      - name: Pay-item workflow acceptance
+        working-directory: web
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_pay_items_qa
+          E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/pay-items.json
+        run: npm run test:e2e:pay-items
+      - name: Upload pay-item browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pay-item-browser-evidence
+          path: |
+            web/playwright-report
+            web/test-results
+            web/.e2e-fixtures/pay-items.json
           if-no-files-found: warn
           retention-days: 14
 

@@ -37,7 +37,7 @@ class PayrollReminderService
       # 2) "Upcoming" — pay period exists but hasn't been committed, pay_date approaching
       upcoming_periods = company.pay_periods
                                 .where(status: %w[draft calculated])
-                                .where(correction_status: [nil, "correction"])
+                                .where(correction_status: [ nil, "correction" ])
                                 .where(pay_date: today..deadline)
 
       upcoming_periods.find_each do |pp|
@@ -49,7 +49,7 @@ class PayrollReminderService
 
       overdue_periods = company.pay_periods
                                .where(status: %w[draft calculated])
-                               .where(correction_status: [nil, "correction"])
+                               .where(correction_status: [ nil, "correction" ])
                                .where(pay_date: (today - 90.days)...today)
 
       overdue_periods.find_each do |pp|
@@ -59,7 +59,7 @@ class PayrollReminderService
 
     def check_create_payroll(config, company, today)
       last_period = company.pay_periods
-                           .where(correction_status: [nil, "correction"])
+                           .where(correction_status: [ nil, "correction" ])
                            .order(end_date: :desc)
                            .first
 
@@ -76,7 +76,7 @@ class PayrollReminderService
 
       # Does a pay period already exist that covers this expected range?
       existing = company.pay_periods
-                        .where(correction_status: [nil, "correction"])
+                        .where(correction_status: [ nil, "correction" ])
                         .where("start_date <= ? AND end_date >= ?", expected[:end_date], expected[:start_date])
       return if existing.exists?
 
@@ -107,7 +107,7 @@ class PayrollReminderService
         return nil
       end
 
-      next_pay_date = next_end + [pay_offset, 0].max.days
+      next_pay_date = next_end + [ pay_offset, 0 ].max.days
 
       { start_date: next_start, end_date: next_end, pay_date: next_pay_date }
     end

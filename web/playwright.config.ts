@@ -2,8 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 
 const externalBaseUrl = process.env.E2E_BASE_URL;
-const releaseLane = process.env.E2E_RELEASE_LANE === 'true';
-const fixturePath = process.env.E2E_FIXTURE_PATH || resolve(process.cwd(), '.e2e-fixtures/release.json');
+const releaseLane = process.env.E2E_RELEASE_LANE === 'true' || process.env.E2E_REFRESH_LANE === 'true' || process.env.E2E_PAY_ITEMS_LANE === 'true';
+const fixturePath = process.env.E2E_FIXTURE_PATH || resolve(process.cwd(),
+  process.env.E2E_PAY_ITEMS_LANE === 'true' ? '.e2e-fixtures/pay-items.json'
+    : process.env.E2E_REFRESH_LANE === 'true' ? '.e2e-fixtures/payroll-refresh.json' : '.e2e-fixtures/release.json');
 const apiPort = process.env.E2E_API_PORT || '4317';
 const webPort = process.env.E2E_WEB_PORT || (releaseLane ? '4318' : '4173');
 const localBaseUrl = `http://127.0.0.1:${webPort}`;
@@ -35,6 +37,18 @@ export default defineConfig({
       name: 'gate0-release',
       use: { ...devices['Desktop Chrome'], timezoneId: 'Pacific/Guam' },
       testMatch: /gate0-payroll-release\.spec\.ts/,
+      retries: 0,
+    },
+    {
+      name: 'payroll-refresh',
+      use: { ...devices['Desktop Chrome'], timezoneId: 'Pacific/Guam' },
+      testMatch: /payroll-refresh-release\.spec\.ts/,
+      retries: 0,
+    },
+    {
+      name: 'pay-items',
+      use: { ...devices['Desktop Chrome'], timezoneId: 'Pacific/Guam' },
+      testMatch: /pay-item-workflow-release\.spec\.ts/,
       retries: 0,
     },
   ],

@@ -15,7 +15,10 @@ class PayrollLoanConfigurationGuard
     end
     available = payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_d.positive? }
     shared_type_ids = loans.group_by(&:deduction_type_id).select { |type_id, group| type_id.present? && group.size > 1 }.keys
+    explicit = payroll_item.named_loan_payments.to_h
     missing = loans.reject do |loan|
+      next true if explicit.key?(loan.id.to_s) && explicit[loan.id.to_s].to_d.zero?
+
       match_index = available.index { |deduction| deduction.employee_loan_id == loan.id }
       if match_index.nil? && loan.deduction_type_id.present? && !shared_type_ids.include?(loan.deduction_type_id)
         match_index = available.index do |deduction|

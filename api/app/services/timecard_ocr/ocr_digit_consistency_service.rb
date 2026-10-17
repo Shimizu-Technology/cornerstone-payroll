@@ -73,7 +73,7 @@ module TimecardOcr
 
       alternatives
         .select { |alt| should_prefer?(field, group, alt, current_min, minute_freq) }
-        .max_by { |alt| [minute_freq[alt], avg_confidence_for_minute(field, group, alt)] }
+        .max_by { |alt| [ minute_freq[alt], avg_confidence_for_minute(field, group, alt) ] }
     end
 
     def should_prefer?(field, group, candidate, current, freq)
@@ -168,7 +168,7 @@ module TimecardOcr
     end
 
     def merge_notes(existing, new_note)
-      [existing, new_note].compact_blank.join("; ").presence
+      [ existing, new_note ].compact_blank.join("; ").presence
     end
   end
 end

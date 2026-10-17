@@ -4,6 +4,7 @@ class StaffRolePolicy
   CAPABILITY_ROLES = {
     staff_workspace: %w[super_admin org_admin admin manager accountant],
     payroll_operations: %w[super_admin org_admin admin manager accountant],
+    manage_payroll_fields: %w[super_admin org_admin admin manager accountant],
     use_printer_profiles: %w[super_admin org_admin admin manager accountant],
     create_printer_profiles: %w[super_admin org_admin admin manager accountant],
     manage_printer_profile_library: %w[super_admin org_admin admin manager],
@@ -21,6 +22,7 @@ class StaffRolePolicy
   CAPABILITY_ERRORS = {
     staff_workspace: "Staff access required",
     payroll_operations: "Payroll operations access required",
+    manage_payroll_fields: "Payroll field management access required",
     use_printer_profiles: "Printer profile access required",
     create_printer_profiles: "Printer profile creation access required",
     manage_printer_profile_library: "Printer profile library management access required",
@@ -36,6 +38,7 @@ class StaffRolePolicy
   }.freeze
 
   CONTROLLER_CAPABILITIES = {
+    "api/v1/admin/time_tracking_imports" => :payroll_operations,
     "api/v1/admin/time_tracking_source_health" => :payroll_operations,
     "api/v1/admin/employee_hours_evidence" => :payroll_operations,
     "api/v1/admin/organizations" => :manage_platform,
@@ -68,6 +71,8 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/pay_periods#corrected_hours" => :payroll_operations,
+    "api/v1/admin/pay_periods#connect_corrected_hours" => :payroll_operations,
     "api/v1/admin/annual_retirement_limits#create" => :manage_platform,
     "api/v1/admin/annual_retirement_limits#update" => :manage_platform,
     "api/v1/admin/employee_retirement_year_inputs#create" => :manage_client_configuration,
@@ -111,6 +116,8 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_cockpits#payment_evidence" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#create_payment_attestation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#retract_payment_attestation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#resolve_payment_attestation" => :manage_historical_time_reconciliation,
+    "api/v1/admin/aire_payroll_cockpits#retry_payment_resolution" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#finalize" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
@@ -121,10 +128,12 @@ class StaffRolePolicy
     "api/v1/admin/pay_periods#promoted_payment_preview" => :manage_organization,
     "api/v1/admin/pay_periods#prepare_promoted_payment" => :manage_organization,
     "api/v1/admin/pay_periods#adopt_confirmed_workweek" => :manage_client_configuration,
-    "api/v1/admin/payroll_fields#create" => :manage_client_configuration,
-    "api/v1/admin/payroll_fields#update" => :manage_client_configuration,
-    "api/v1/admin/payroll_fields#destroy" => :manage_client_configuration,
+    "api/v1/admin/payroll_fields#create" => :manage_payroll_fields,
+    "api/v1/admin/payroll_fields#update" => :manage_payroll_fields,
+    "api/v1/admin/payroll_fields#destroy" => :manage_payroll_fields,
     "api/v1/admin/employee_payroll_fields#create_personal" => :payroll_operations,
+    "api/v1/admin/employee_payroll_fields#create_and_assign" => :manage_payroll_fields,
+    "api/v1/admin/employee_payroll_fields#pay_item" => :manage_payroll_fields,
     "api/v1/admin/payroll_reminder_configs#update" => :manage_client_configuration,
     "api/v1/admin/payroll_reminder_configs#test" => :manage_client_configuration,
     "api/v1/admin/checks#update_check_settings" => :manage_client_check_settings,
@@ -140,6 +149,8 @@ class StaffRolePolicy
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#reject" => :manage_client_configuration,
+    "api/v1/admin/employee_intake_settings#update" => :manage_organization,
+    "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#reactivate" => :manage_client_configuration,
     "api/v1/admin/employees#transition_tax_classification" => :manage_platform,

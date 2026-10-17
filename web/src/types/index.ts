@@ -131,6 +131,8 @@ export interface PayrollFieldDefinition {
   reference_number?: string | null;
   created_at?: string;
   updated_at?: string;
+  assigned_employee_count?: number;
+  active_assignment_count?: number;
 }
 
 export interface EmployeePayrollField {
@@ -144,7 +146,7 @@ export interface EmployeePayrollField {
   end_date?: string | null;
   notes?: string | null;
   employee_loan_id?: number | null;
-  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
+  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'owner_employee_id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active' | 'payee_name' | 'reference_number' | 'assigned_employee_count' | 'active_assignment_count'>;
 }
 
 export interface PayPeriodPayrollFieldAssignment {
@@ -164,7 +166,22 @@ export interface PayPeriodPayrollFieldAssignment {
   skipped_reason?: string | null;
 }
 
+export interface NamedLoanOption {
+  employee_id: number;
+  loan_id: number;
+  name: string;
+  tracking_mode: LoanTrackingMode;
+  current_balance: number | null;
+  scheduled_amount: number;
+  eligible: boolean;
+  unavailable_reason?: string | null;
+  current_amount: number;
+  mode: 'default' | 'override';
+  requested_amount?: number | null;
+}
+
 export interface PayPeriodPayrollFieldInputs {
+  named_loan_options?: NamedLoanOption[];
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
   retained_manual_entries?: Array<{ employee_id: number; field_id: number | null; label: string; requested_amount: number; applied_amount: number; source: 'manual' | 'import' }>;
@@ -204,6 +221,7 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
   id: number;
   company_id: number;
   department_id?: number;
@@ -297,7 +315,7 @@ export interface Employee {
   updated_at: string;
 }
 
-export type EmployeeW4ElectionSource = 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
+export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
 
 export interface EmployeeW4Election {
   id: number;
@@ -538,6 +556,7 @@ export interface EmployeeClassificationTransition {
 }
 
 export interface EmployeeFormData {
+  w4_election_received?: boolean;
   first_name: string;
   middle_name?: string;
   last_name: string;
@@ -629,6 +648,17 @@ export interface PayDateCorrection {
   corrected_by_name?: string | null;
 }
 
+export interface SourceAccountingReceiptState {
+  verification_error?: string | null;
+  id: number;
+  event_id: string;
+  status: 'pending' | 'error' | 'confirmed';
+  queued_at: string | null;
+  confirmed_at: string | null;
+  error: string | null;
+  can_retry: boolean;
+}
+
 export interface AirePayrollRecord {
   id: number;
   source_name: string;
@@ -648,6 +678,23 @@ export interface AirePayrollRecord {
     cornerstone_overtime_hours: string;
     total_difference_hours: string;
   }>;
+  correction_dispositions?: Array<{
+    verification_status?: 'verified' | 'needs_review';
+    verification_error?: string | null;
+    id: number;
+    source_user_id: string;
+    source_time_entry_id: string;
+    line_key: string;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+    original_pay_period_id: number;
+    original_payroll_item_id: number;
+    corrective_pay_period_id: number;
+    corrective_payroll_item_id: number;
+    accounting_only: true;
+    source_receipt?: SourceAccountingReceiptState | null;
+  }>;
   payable_line_status?: {
     line_count: number;
     total_hours: number;
@@ -657,6 +704,7 @@ export interface AirePayrollRecord {
     payment_pending: AirePayableLineStatusBucket;
     paid: AirePayableLineStatusBucket;
     needs_attention: AirePayableLineStatusBucket;
+    accounting_corrections?: AirePayableLineStatusBucket;
     held: { entry_count: number; total_hours: number };
     synchronization: {
       pending_event_count: number;
@@ -694,6 +742,7 @@ export interface AirePayrollCalendarState {
   enabled: boolean;
   source_id: number;
   source_name: string;
+  source_capabilities?: string[];
   eligible: boolean;
   eligibility_error?: string | null;
   eligibility_code?:
@@ -800,6 +849,8 @@ export interface AirePayrollReadiness {
   eligible_hours: number;
   held_entries?: number;
   held_hours?: number;
+  payment_attested_pending_evidence_entries?: number;
+  payment_attested_pending_evidence_hours?: number;
   pending_approvals: number;
   denied_entries: number;
   missing_punches: number;
@@ -953,6 +1004,8 @@ export interface AirePayrollManualReview {
   start_date: string;
   end_date: string;
   generated_at: string;
+  source_available?: boolean;
+  source_error?: string;
   command_access?: { can_manage_manual_allocations: boolean; delegation_configured?: boolean };
   payment_attestations?: Array<{
     id: number; source_time_entry_id: string; source_user_uuid: string; hours: number;
@@ -976,7 +1029,7 @@ export interface AirePayrollManualReview {
     open_clock_count: number;
     pending_overtime_count: number;
     denied_overtime_count: number;
-  };
+  } | null;
   summary: {
     employee_count: number;
     adjustment_count: number;
@@ -987,7 +1040,7 @@ export interface AirePayrollManualReview {
     carryover_count: number;
     correction_count: number;
     exclusion_count: number;
-  };
+  } | null;
 }
 
 export interface AireManualAllocation {
@@ -1004,6 +1057,9 @@ export interface AireManualAllocation {
   overtime_hours: number;
   status: string;
   payment_cancellation_pending?: boolean;
+  payment_issue_pending?: boolean;
+  payment_resolution_pending?: boolean;
+  source_payment_attestation_id?: string;
   payroll_item_check_status?: string;
   payment_method?: string;
   remote_allocation_id?: string;
@@ -1228,6 +1284,7 @@ export interface PayPeriod {
   tax_sync_last_error?: string | null;
   tax_synced_at?: string | null;
   // CPR-71: correction lifecycle fields
+  source_correction_required?: boolean;
   correction_status?: CorrectionStatus | null;
   voided_at?: string | null;
   voided_by_id?: number | null;
@@ -1385,7 +1442,7 @@ export interface PayPeriodComparisonEmployeeChange {
 }
 
 export interface PayPeriodComparisonResponse {
-  comparison_kind: 'previous_period' | 'training_benchmark';
+  comparison_kind: 'previous_period' | 'training_benchmark' | 'selected_employees';
   current_pay_period: PayPeriodComparisonPeriodSummary;
   previous_pay_period: PayPeriodComparisonPeriodSummary | null;
   summary: Record<string, PayPeriodComparisonMetric>;
@@ -1410,6 +1467,7 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  named_loan_payments?: Record<string, number>;
   id: number;
   pay_period_id?: number;
   employee_id: number;
@@ -1427,6 +1485,7 @@ export interface PayrollItem {
   pto_hours?: number;
   total_hours?: number;
   timekeeping_source?: 'schedule' | 'import' | 'manual' | 'correction_reference' | 'production_backfill' | null;
+  correction_pay_basis_hold?: { reason: string } | null;
   timekeeping_context_snapshot?: Record<string, unknown>;
   // Additional earnings
   reported_tips?: number;
@@ -1523,6 +1582,7 @@ export interface PayrollItem {
   effective_payment_delivery_method?: PaymentDeliveryMethod;
   payment_method_change?: PaymentMethodChangeEligibility;
   earnings_statement_eligible?: boolean;
+  payment_confirmation?: DirectDepositItem['payment_confirmation'];
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -1597,6 +1657,7 @@ export interface CorrectivePaycheckSnapshot {
 
 export interface CorrectivePaycheckPreview {
   original: CorrectivePaycheckSnapshot;
+  recorded?: CorrectivePaycheckSnapshot;
   corrected: CorrectivePaycheckSnapshot;
   deltas: Record<string, number>;
   meta: {
@@ -1604,6 +1665,8 @@ export interface CorrectivePaycheckPreview {
     original_payroll_item_id: number;
     employee_id: number;
     employee_name: string;
+    active_corrective_count?: number;
+    review_digest?: string;
     will_generate_check: boolean;
     is_zero_change: boolean;
   };
@@ -1694,6 +1757,17 @@ export interface SupplementalPayPeriodSummary {
 }
 
 export interface PayrollItemWageRateHours {
+  source_bucket_key?: string;
+  source_lines?: Array<{
+    source_time_entry_id: string;
+    line_key: string;
+    source_time_entry_version?: number;
+    source_kind: string;
+    original_work_date: string;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+  }>;
   employee_wage_rate_id?: number;
   label: string;
   rate: number;
@@ -1816,7 +1890,18 @@ export interface CheckEvent {
   created_at: string;
 }
 
+export interface PaymentCancellationSync {
+  status: 'pending' | 'error' | 'acknowledged';
+  pending_count: number;
+  acknowledged_count: number;
+  oldest_pending_at: string | null;
+  errors: string[];
+  hours_reserved: boolean;
+}
+
 export interface CheckItem {
+  source_payment_blocker?: string | null;
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   pay_period_id: number;
   employee_id: number;
@@ -1850,6 +1935,7 @@ export interface PaymentMethodChangeEligibility {
 }
 
 export interface EarningsStatementItem {
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;
   employee_id: number;
   employee_name: string;
@@ -1874,6 +1960,8 @@ export interface CheckListMeta {
 }
 
 export interface DirectDepositItem {
+  source_payment_blocker?: string | null;
+  payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number; employee_id: number; employee_name: string; net_pay: number;
   payment_confirmation?: { settled_on: string; bank_reference: string; confirmed_at: string } | null;
 }
@@ -2184,6 +2272,7 @@ export interface W2GuEmployeeRow {
 }
 
 export interface W2GuReport {
+  filing_readiness?: W2GuFilingReadiness | null;
   meta: {
     report_type: string;
     company_id: number;
@@ -2236,7 +2325,12 @@ export interface W2GuPreflightResult {
 
 export interface W2GuFilingReadiness {
   year: number;
-  status: 'draft' | 'preflight_passed' | 'filing_ready';
+  status: 'draft' | 'preflight_passed' | 'filing_ready' | 'stale';
+  stale?: boolean;
+  preflight_current?: boolean;
+  preflight_fingerprint?: string | null;
+  ready_fingerprint?: string | null;
+  attestation_history?: { source_fingerprint: string | null; marked_ready_at: string; marked_ready_by_id: number | null; notes: string | null; legacy?: boolean }[];
   blocking_count: number;
   warning_count: number;
   preflight_run_at?: string | null;
@@ -2499,6 +2593,27 @@ export interface DashboardStats {
   pending_approvals: number;
 }
 
+export interface ReportedPaymentResolution {
+  id: number;
+  source_payment_attestation_id: string;
+  payroll_item_id: number;
+  pay_period_id: number;
+  employee_name: string;
+  original_work_date: string;
+  regular_hours: number;
+  overtime_hours: number;
+  status: 'pending' | 'matched';
+  allocation_status: string;
+  payment_method: string;
+  payment_reference: string;
+  payment_effective_on: string;
+  note: string;
+  original_report?: { reason?: string; attested_at: string; hours: number };
+  last_sync_error: string | null;
+  can_retry: boolean;
+  hours_reserved: boolean;
+}
+
 export interface AirePaymentEvidenceHold {
   id: string;
   version: number;
@@ -2511,6 +2626,11 @@ export interface AirePaymentEvidenceHold {
   status: string;
   reason: string;
   source_changed: boolean;
+  resolution_context?: { available: boolean; reason: string | null; regular_hours: string | null; overtime_hours: string | null; total_hours: string | null; weekly_context_fingerprint: string | null };
+  payment_options?: Array<{ payroll_item_id: number; pay_period_id: number; pay_date: string; gross_pay: number; net_pay: number; regular_hours: number; overtime_hours: number; payment_recorded_at: string; regular_hours_available: number; overtime_hours_available: number; payment_method: string; payment_reference: string; payment_effective_on: string }>;
+  resolved_manual_allocation_id?: string;
+  resolved_issued_event_id?: string;
+  resolved_at?: string;
 }
 
 export interface AirePaymentEvidenceReview {
@@ -2523,4 +2643,8 @@ export interface AirePaymentEvidenceReview {
     total_hours: number;
   }>;
   payment_attestations: AirePaymentEvidenceHold[];
+  source_available?: boolean;
+  source_error?: string;
+  resolution_access?: boolean;
+  payment_resolutions?: ReportedPaymentResolution[];
 }

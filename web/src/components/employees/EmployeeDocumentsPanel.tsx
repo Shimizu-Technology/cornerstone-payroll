@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Eye, FileText, ShieldCheck, UploadCloud, Trash2, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -58,6 +58,12 @@ interface RequirementReviewDraft {
 }
 
 type ReadinessLoadStatus = 'loading' | 'available' | 'unavailable';
+type EmployeeDocumentScope = { key: string };
+
+function sameRequirementDraft(left: RequirementReviewDraft | undefined, right: RequirementReviewDraft | undefined): boolean {
+  return Boolean(left && right && left.status === right.status
+    && left.clientDocumentId === right.clientDocumentId && left.reviewNote === right.reviewNote);
+}
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -80,6 +86,7 @@ function requirementStatusLabel(value: EmployeeDocumentRequirementStatus) {
 
 export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, className, headerAction, onReadinessChange }: EmployeeDocumentsPanelProps) {
   const { user } = useAuth();
+  const canReviewDocuments = ['super_admin', 'org_admin', 'admin', 'manager'].includes(user?.role || '');
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [requirements, setRequirements] = useState<EmployeeDocumentRequirement[]>([]);
   const [readyForPayroll, setReadyForPayroll] = useState<boolean | null>(null);
@@ -104,20 +111,15 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loadSequenceRef = useRef(0);
-  const loadedEmployeeIdRef = useRef<number | null>(null);
+  const loadedDocumentScopeRef = useRef<string | null>(null);
+  const requirementBaselinesRef = useRef<Record<number, RequirementReviewDraft>>({});
+  const documentScope = `${employeeId}:${isClient}:${user?.id ?? ''}:${user?.role ?? ''}`;
+  const activeDocumentScopeRef = useRef<EmployeeDocumentScope | null>(null);
   const activeEmployeeIdRef = useRef(employeeId);
-  activeEmployeeIdRef.current = employeeId;
-
-  const api = isClient ? clientDocumentsApi : adminClientDocumentsApi;
-
-  const loadDocuments = useCallback(async () => {
-    const requestEmployeeId = employeeId;
-    if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
-
-    const requestId = loadSequenceRef.current + 1;
-    loadSequenceRef.current = requestId;
-    if (loadedEmployeeIdRef.current !== employeeId) {
-      loadedEmployeeIdRef.current = employeeId;
+  useLayoutEffect(() => {
+    if (loadedDocumentScopeRef.current !== documentScope) {
+      loadedDocumentScopeRef.current = documentScope;
+      requirementBaselinesRef.current = {};
       setDocuments([]);
       setRequirements([]);
       setReadyForPayroll(null);
@@ -134,6 +136,55 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, requirement_id: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+    activeEmployeeIdRef.current = employeeId;
+    activeDocumentScopeRef.current = { key: documentScope };
+    return () => {
+      activeDocumentScopeRef.current = null;
+      loadSequenceRef.current += 1;
+    };
+  }, [documentScope, employeeId, setError]);
+
+  const api = isClient ? clientDocumentsApi : adminClientDocumentsApi;
+  const isCurrentScope = useCallback((requestScope: EmployeeDocumentScope | null, requestEmployeeId: number) => (
+    requestScope !== null && requestScope === activeDocumentScopeRef.current
+    && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
+  ), []);
+
+
+  const reconcileReadiness = useCallback((
+    response: EmployeeDocumentReadinessResponse,
+    requestScope: EmployeeDocumentScope | null,
+    saved?: { id: number; submitted: RequirementReviewDraft },
+  ) => {
+    const previousBaselines = requirementBaselinesRef.current;
+    const nextBaselines = Object.fromEntries(response.data.map((requirement) => [requirement.id, {
+      status: requirement.status === 'missing' || !canReviewDocuments ? 'received' as const : requirement.status,
+      clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
+      reviewNote: requirement.review_note || '',
+    }]));
+    requirementBaselinesRef.current = nextBaselines;
+    setRequirements(response.data);
+    setReadyForPayroll(response.readiness.ready_for_payroll);
+    setReadinessLoadStatus('available');
+    onReadinessChange?.(response.readiness);
+    setRequirementDrafts((current) => {
+      if (requestScope !== activeDocumentScopeRef.current) return current;
+      return Object.fromEntries(response.data.map((requirement) => {
+        const draft = current[requirement.id];
+        const savedUnchanged = saved?.id === requirement.id && sameRequirementDraft(draft, saved.submitted);
+        const dirty = draft && !sameRequirementDraft(draft, previousBaselines[requirement.id]);
+        return [requirement.id, dirty && !savedUnchanged ? draft : nextBaselines[requirement.id]];
+      }));
+    });
+  }, [canReviewDocuments, onReadinessChange]);
+
+  const loadDocuments = useCallback(async () => {
+    const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
+    if (requestScope?.key !== documentScope || !isCurrentScope(requestScope, requestEmployeeId)) return;
+
+    const requestId = loadSequenceRef.current + 1;
+    loadSequenceRef.current = requestId;
 
     try {
       setLoading(true);
@@ -147,7 +198,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       ]);
       if (
         !isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)
-        || !isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
+        || !isCurrentScope(requestScope, requestEmployeeId)
       ) return;
 
       const loaded = reconcileEmployeeDocumentLoads(documentsResult, requirementsResult);
@@ -155,19 +206,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         setDocuments(loaded.documents.data);
       }
       if (loaded.readiness) {
-        const requirementsResponse = loaded.readiness;
-        setRequirements(requirementsResponse.data);
-        setReadyForPayroll(requirementsResponse.readiness.ready_for_payroll);
-        setReadinessLoadStatus('available');
-        onReadinessChange?.(requirementsResponse.readiness);
-        setRequirementDrafts(Object.fromEntries(requirementsResponse.data.map((requirement) => [
-          requirement.id,
-          {
-            status: requirement.status === 'missing' ? 'received' : requirement.status,
-            clientDocumentId: requirement.client_document_id ? String(requirement.client_document_id) : '',
-            reviewNote: requirement.review_note || '',
-          },
-        ])));
+        reconcileReadiness(loaded.readiness, requestScope);
       } else {
         setReadyForPayroll(null);
         setReadinessLoadStatus('unavailable');
@@ -177,10 +216,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
     } finally {
       if (
         isCurrentEmployeeDocumentRequest(requestId, loadSequenceRef.current)
-        && isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)
+        && isCurrentScope(requestScope, requestEmployeeId)
       ) setLoading(false);
     }
-  }, [api, employeeId, isClient, onReadinessChange, setError]);
+  }, [api, employeeId, documentScope, isClient, isCurrentScope, reconcileReadiness, onReadinessChange, setError]);
 
   useEffect(() => {
     void loadDocuments();
@@ -195,6 +234,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
   const handleUpload = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
     const uploadError = readinessUploadError(form.requirement_id, selectedFiles);
     if (uploadError) {
       setError(uploadError);
@@ -215,23 +255,24 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       if (form.notes.trim()) payload.append('notes', form.notes.trim());
 
       const response = await api.upload(payload);
-      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+      if (!isCurrentScope(requestScope, requestEmployeeId)) return;
 
       setSuccess(response.message || 'Employee document uploaded');
       setForm({ title: '', category: 'employee_onboarding', notes: '', visible_to_client: true, requirement_id: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
       await loadDocuments();
     } catch (err) {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+      if (isCurrentScope(requestScope, requestEmployeeId)) {
         setError(err instanceof Error ? err.message : 'Failed to upload employee document');
       }
     } finally {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setUploading(false);
+      if (isCurrentScope(requestScope, requestEmployeeId)) setUploading(false);
     }
   };
 
   const saveRequirement = async (requirement: EmployeeDocumentRequirement) => {
     const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
     const draft = requirementDrafts[requirement.id];
     if (!draft) return;
 
@@ -245,23 +286,23 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
         review_note: draft.reviewNote.trim() || undefined,
         lock_version: requirement.lock_version,
       });
-      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+      if (!isCurrentScope(requestScope, requestEmployeeId)) return;
 
-      setRequirements(response.data);
-      setReadyForPayroll(response.readiness.ready_for_payroll);
+      reconcileReadiness(response, requestScope, { id: requirement.id, submitted: draft });
       setSuccess(`${requirement.label} readiness updated`);
       await loadDocuments();
     } catch (err) {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+      if (isCurrentScope(requestScope, requestEmployeeId)) {
         setError(err instanceof Error ? err.message : 'Failed to update employee document readiness');
       }
     } finally {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setSavingRequirementId(null);
+      if (isCurrentScope(requestScope, requestEmployeeId)) setSavingRequirementId(null);
     }
   };
 
   const handleDownload = async (document: ClientDocument) => {
     const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
     try {
       setError(null);
       const file = await api.download(document.id);
@@ -274,7 +315,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+      if (isCurrentScope(requestScope, requestEmployeeId)) {
         setError(err instanceof Error ? err.message : 'Failed to download employee document');
       }
     }
@@ -282,6 +323,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
 
   const handlePreview = async (document: ClientDocument) => {
     const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
     try {
       setError(null);
       setPreviewDocument(document);
@@ -290,33 +332,34 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
       setPreviewPayload(null);
       const file = await api.preview(document.id);
       const payload = await prepareDocumentPreview(document, file.blob);
-      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+      if (!isCurrentScope(requestScope, requestEmployeeId)) return;
 
       setPreviewPayload(payload);
     } catch (err) {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+      if (isCurrentScope(requestScope, requestEmployeeId)) {
         setError(err instanceof Error ? err.message : 'Failed to preview employee document');
         setPreviewOpen(false);
         setPreviewDocument(null);
       }
     } finally {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) setPreviewLoading(false);
+      if (isCurrentScope(requestScope, requestEmployeeId)) setPreviewLoading(false);
     }
   };
 
   const handleDelete = async (document: ClientDocument) => {
     if (!window.confirm(`Delete "${document.title}"?`)) return;
     const requestEmployeeId = employeeId;
+    const requestScope = activeDocumentScopeRef.current;
 
     try {
       setError(null);
       await api.delete(document.id);
-      if (!isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) return;
+      if (!isCurrentScope(requestScope, requestEmployeeId)) return;
 
       setSuccess('Employee document deleted');
       await loadDocuments();
     } catch (err) {
-      if (isCurrentEmployeeDocumentScope(requestEmployeeId, activeEmployeeIdRef.current)) {
+      if (isCurrentScope(requestScope, requestEmployeeId)) {
         setError(err instanceof Error ? err.message : 'Failed to delete employee document');
       }
     }
@@ -374,9 +417,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
               Loading payroll readiness…
             </p>
           ) : readinessLoadStatus === 'unavailable' ? (
-            <p className="mt-4 rounded-xl border border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
-              Payroll readiness is unavailable. Retry before approving or processing payroll for this employee.
-            </p>
+            <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
+              <p>Payroll readiness is unavailable. Retry before approving or processing payroll for this employee.</p>
+              <Button type="button" variant="outline" className="mt-3" onClick={() => void loadDocuments()}>Retry payroll readiness</Button>
+            </div>
           ) : requirements.length === 0 ? (
             <p className="mt-4 rounded-xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-4 text-sm text-neutral-600">
               No new-hire document checklist is required for this existing employee.
@@ -406,7 +450,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                       </span>
                     </div>
 
-                    {!isClient && draft && (
+                    {!isClient && draft && (canReviewDocuments || ['missing', 'received'].includes(requirement.status)) && (
                       <>
                         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
                           <div>
@@ -427,9 +471,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                               }}
                             >
                               <option value="received">Received — review needed</option>
-                              <option value="verified">Verified</option>
-                              <option value="rejected">Rejected — replacement needed</option>
-                              <option value="waived">Waived with reason</option>
+                              {canReviewDocuments && <><option value="verified">Verified</option><option value="rejected">Rejected — replacement needed</option><option value="waived">Waived with reason</option></>}
                             </Select>
                           </div>
                           <div>
@@ -444,6 +486,9 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                               }))}
                             >
                               <option value="">Choose a document</option>
+                              {draft.clientDocumentId && !documents.some((document) => String(document.id) === draft.clientDocumentId) && (
+                                <option value={draft.clientDocumentId} disabled>Selected document is no longer available — choose another</option>
+                              )}
                               {documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
                             </Select>
                           </div>
@@ -463,7 +508,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                             type="button"
                             aria-label={`Save ${requirement.label} status`}
                             onClick={() => void saveRequirement(requirement)}
-                            disabled={savingRequirementId === requirement.id}
+                            disabled={savingRequirementId !== null || (draft.status !== 'waived' && Boolean(draft.clientDocumentId)
+                              && !documents.some((document) => String(document.id) === draft.clientDocumentId))}
                           >
                             {savingRequirementId === requirement.id ? 'Saving…' : 'Save status'}
                           </Button>

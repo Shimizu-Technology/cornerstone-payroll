@@ -30,7 +30,7 @@ class W2GuPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [36, 36, 50, 36])
+    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 36, 50, 36 ])
     render_document(pdf)
   end
 
@@ -203,7 +203,7 @@ class W2GuPdfGenerator
     else
       issues.each do |issue|
         pdf.table(
-          [[ "[!]  #{issue}" ]],
+          [ [ "[!]  #{issue}" ] ],
           width: pdf.bounds.width,
           cell_style: {
             background_color: DANGER_BG,
@@ -233,7 +233,7 @@ class W2GuPdfGenerator
 
     caveats.each do |caveat|
       pdf.table(
-        [[ "- #{caveat}" ]],
+        [ [ "- #{caveat}" ] ],
         width: pdf.bounds.width,
         cell_style: {
           background_color: ALERT_BG,

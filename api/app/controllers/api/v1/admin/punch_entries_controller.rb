@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PunchEntriesController < BaseController
-        before_action :set_punch_entry, only: [:update]
+        before_action :set_punch_entry, only: [ :update ]
 
         # POST /api/v1/admin/punch_entries
         def create
@@ -21,7 +21,7 @@ module Api
           if @punch_entry.save
             render json: punch_entry_json(@punch_entry), status: :created
           else
-            render json: { error: 'Validation failed', details: @punch_entry.errors }, status: :unprocessable_entity
+            render json: { error: "Validation failed", details: @punch_entry.errors }, status: :unprocessable_entity
           end
         end
 

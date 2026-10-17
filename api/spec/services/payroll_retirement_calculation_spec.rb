@@ -98,6 +98,43 @@ RSpec.describe PayrollRetirementCalculation do
     ).apply!
   end
 
+  describe "final available-pay explanations" do
+    [
+      [ "zero string and integer amounts", { "traditional" => "0.0", "roth" => "0.0", "non_roth_after_tax" => "0.0" }, [ 0, 0, 0 ], false ],
+      [ "missing zero buckets", {}, [ 0, 0, 0 ], false ],
+      [ "unchanged nonzero amounts with mixed representations", { "traditional" => "100.00", "roth" => 50, "non_roth_after_tax" => BigDecimal("25.0") }, [ 100, 50, 25 ], false ],
+      [ "an increase in contributions", { "traditional" => "100", "roth" => "0", "non_roth_after_tax" => "0" }, [ 125, 0, 0 ], false ],
+      [ "equal-total redistribution between contribution buckets", { "traditional" => "150", "roth" => "50" }, [ 100, 80, 20 ], false ],
+      [ "a traditional contribution reduction", { "traditional" => "125", "roth" => "0" }, [ 100, 0, 0 ], true ],
+      [ "a Roth contribution reduction", { "traditional" => "0", "roth" => "125" }, [ 0, 100, 0 ], true ],
+      [ "a non-Roth after-tax contribution reduction", { "traditional" => "0", "roth" => "0", "non_roth_after_tax" => "125" }, [ 0, 0, 100 ], true ]
+    ].each do |label, previous, final, reduced|
+      it "#{reduced ? 'explains' : 'does not claim a reduction for'} #{label}" do
+        create_election(traditional_amount: final[0], roth_amount: final[1])
+        if final[2].positive?
+          definition = create(:payroll_field_definition, company: company, name: "Non-Roth after-tax contribution",
+            kind: "deduction", tax_treatment: "post_tax_deduction", category: "retirement",
+            amount_type: "fixed", default_amount: final[2], reporting_group: "401k_non_roth_after_tax")
+          payroll_item.payroll_item_field_entries.build(payroll_field_definition: definition, label: definition.name,
+            kind: definition.kind, tax_treatment: definition.tax_treatment, category: definition.category,
+            reporting_group: definition.reporting_group, amount: final[2], active: true, employee_paid: true, source: "manual")
+        end
+        engine = described_class.new(employee: employee, payroll_item: payroll_item,
+          ytd_before: ytd_before, employee_deductions: [])
+        engine.apply!
+        payroll_item.retirement_rule_snapshot["applied"] = previous
+        original_explanations = payroll_item.retirement_rule_snapshot.fetch("explanations").dup
+
+        engine.reconcile_final!
+
+        snapshot = payroll_item.retirement_rule_snapshot
+        expect(snapshot.fetch("applied").values.sum(&:to_d)).to eq(final.sum.to_d)
+        expect(snapshot.fetch("explanations").any? { |reason| reason.include?("enough available pay") }).to eq(reduced)
+        expect(original_explanations - snapshot.fetch("explanations")).to be_empty
+      end
+    end
+  end
+
   it "applies fixed traditional and Roth elections and preserves the rule evidence" do
     election = create_election
 

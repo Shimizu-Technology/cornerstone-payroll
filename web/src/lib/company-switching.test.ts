@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { getCompanySwitchRedirect } from './company-switching';
 
 describe('getCompanySwitchRedirect', (): void => {
+  it('keeps the reusable library in the selected client and drops the previous field id', (): void => {
+    expect(getCompanySwitchRedirect('/companies/7/payroll-fields', 12, '?field_id=88')).toMatchObject({ to: '/companies/12/payroll-fields' });
+    expect(getCompanySwitchRedirect('/payroll-fields', 12)).toMatchObject({ to: '/companies/12/payroll-fields' });
+  });
   it('moves a pay-run record back to the selected company queue', (): void => {
     expect(getCompanySwitchRedirect('/companies/7/pay-runs/88/checks', 12)).toEqual({
       notice: 'Switched clients. Showing pay periods for the selected client.',

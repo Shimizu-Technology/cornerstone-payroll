@@ -13,7 +13,7 @@ RSpec.describe TimecardOcr::CardSegmentationService do
         doc.text "Page 3"
       end
 
-      file = Tempfile.new(["timecards", ".pdf"])
+      file = Tempfile.new([ "timecards", ".pdf" ])
       file.binmode
       file.write(pdf.render)
       file.close

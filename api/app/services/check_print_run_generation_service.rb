@@ -131,6 +131,7 @@ class CheckPrintRunGenerationService
   end
 
   def validate_printable_records!(payroll_items, non_employee_checks)
+    payroll_items.each(&:ensure_financial_source_payment_ready!)
     invalid_employee = payroll_items.find { |item| item.voided? || item.check_number.blank? || !item.net_pay.to_d.positive? }
     if invalid_employee
       raise InvalidSelectionError, "Employee check ##{invalid_employee.check_number.presence || invalid_employee.id} is no longer printable"

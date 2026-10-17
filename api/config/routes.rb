@@ -46,6 +46,7 @@ Rails.application.routes.draw do
       end
 
       namespace :client do
+        resource :employee_intake_settings, only: :show
         resources :employees, only: [ :index, :show, :create, :update ] do
           resources :document_requirements, only: :index, controller: :employee_document_requirements
         end
@@ -86,6 +87,8 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        patch "employees/:id/intake_exception", to: "employees#review_intake_exception"
+        resource :employee_intake_settings, only: [ :show, :update ]
         resource :pay_schedule_settings, only: [ :show, :update ]
         resource :payroll_go_live, only: [ :show ], controller: :payroll_go_live do
           post :preview_setup
@@ -248,8 +251,12 @@ Rails.application.routes.draw do
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do
               post :bulk_update
+              post :create_and_assign
               post :create_personal
               post :convert_legacy
+            end
+            member do
+              patch :pay_item
             end
           end
         end
@@ -289,6 +296,8 @@ Rails.application.routes.draw do
             get :payment_evidence
             post :payment_attestations, action: :create_payment_attestation
             post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
@@ -306,6 +315,8 @@ Rails.application.routes.draw do
             get :payment_evidence
             post :payment_attestations, action: :create_payment_attestation
             post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
             post :manual_allocations, action: :create_manual_allocation
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
@@ -323,6 +334,9 @@ Rails.application.routes.draw do
             get :client_review
             post :record_client_approval
             post :run_payroll
+            post :refresh_setup
+            get :correction_preflight
+            post :reopen_unpaid
             post :adopt_confirmed_workweek
             get :payroll_field_inputs
             get :comparison
@@ -338,6 +352,8 @@ Rails.application.routes.draw do
             post :void
             post :create_correction_run
             get  :correction_history
+            get :corrected_hours
+            post :connect_corrected_hours
             # Per-employee corrective paycheck (off-cycle supplemental period)
             post :corrective_paycheck_preview
             post :corrective_paychecks
@@ -351,6 +367,10 @@ Rails.application.routes.draw do
             post :preview_timecard_import, to: "timecard_imports#preview"
             post :apply_timecard_import, to: "timecard_imports#apply"
             post :preview_time_tracking_import, to: "time_tracking_imports#preview"
+            post :preview_time_tracking_correction, to: "time_tracking_imports#correction_preview"
+            post :confirm_time_tracking_correction, to: "time_tracking_imports#correction_confirm"
+            get :time_tracking_correction_delivery, to: "time_tracking_imports#correction_delivery"
+            post :retry_time_tracking_correction_delivery, to: "time_tracking_imports#correction_delivery_retry"
             post :apply_time_tracking_import, to: "time_tracking_imports#apply"
             post :reconcile_time_tracking_import, to: "time_tracking_imports#reconcile"
           end

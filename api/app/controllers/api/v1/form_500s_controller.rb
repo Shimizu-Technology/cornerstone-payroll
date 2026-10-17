@@ -15,7 +15,15 @@ module Api
       end
 
       def save
-        filing = persist_form500_filing!
+        filing = Form500Filing.transaction do
+          Company.lock.find(current_company_id)
+          @pay_period.lock!
+          @form500_filing = @pay_period.reload_form500_filing
+          if @pay_period.voided? && form500_params[:status].in?(%w[paid filed])
+            raise ArgumentError, "A voided payroll cannot be marked paid or filed; review its correction payroll"
+          end
+          persist_form500_filing!
+        end
 
         render json: {
           data: filing.fields.deep_symbolize_keys,
@@ -25,6 +33,8 @@ module Api
         render json: {
           error: e.record.errors.full_messages.join(", ")
         }, status: :unprocessable_entity
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       def preview

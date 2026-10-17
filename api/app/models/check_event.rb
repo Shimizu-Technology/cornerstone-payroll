@@ -16,11 +16,23 @@ class CheckEvent < ApplicationRecord
   validates :check_number, presence: true
   validates :effective_on, presence: true
   validates :evidence_type, inclusion: { in: DELIVERY_EVIDENCE_TYPES }, allow_nil: true
+  validate :financial_source_payment_ready
   validate :effective_date_is_not_in_the_future
   validate :user_belongs_to_payroll_organization
 
   before_validation :default_effective_on
+  before_create :guard_pending_payment_resolution
   before_update :prevent_mutation
+
+  def guard_pending_payment_resolution
+    return unless event_type.in?(%w[voided replaced renumbered delivered])
+
+    PayrollItem.where(id: payroll_item_id).lock.pluck(:id)
+    return unless (message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(payroll_item))
+
+    errors.add(:base, message)
+    raise ActiveRecord::RecordInvalid, self
+  end
   before_destroy :prevent_mutation
 
   scope :for_check,   ->(number) { where(check_number: number) }
@@ -36,7 +48,21 @@ class CheckEvent < ApplicationRecord
   after_create_commit :dispatch_aire_entry_lifecycle
   after_create_commit :dispatch_aire_manual_allocations
 
+  # Existing delivery proof does not authorize another instrument operation.
+  def historical_delivery_evidence_valid?
+    persisted? && event_type == "delivered" && check_number.present? && effective_on.present? && effective_on <= PayrollBusinessClock.today &&
+      (evidence_type.nil? || DELIVERY_EVIDENCE_TYPES.include?(evidence_type)) && payroll_item &&
+      (user.nil? || user.organization_id == payroll_item.company.organization_id)
+  end
+
   private
+
+  def financial_source_payment_ready
+    return unless event_type.in?(%w[prepared printed delivered reprinted batch_downloaded]) && payroll_item
+    payroll_item.ensure_financial_source_payment_ready!
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
 
   def default_effective_on
     self.effective_on ||= PayrollBusinessClock.today
@@ -44,7 +70,7 @@ class CheckEvent < ApplicationRecord
 
   def prevent_mutation
     errors.add(:base, "Check event history is append-only")
-    throw :abort
+    raise ActiveRecord::RecordInvalid, self
   end
 
   def effective_date_is_not_in_the_future

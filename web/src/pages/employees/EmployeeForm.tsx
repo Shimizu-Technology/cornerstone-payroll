@@ -10,14 +10,18 @@ import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { EmployeePayItemsPanel } from '@/components/employees/EmployeePayItemsPanel';
 import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
+import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
 import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, PaymentDeliveryMethod, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
@@ -86,20 +90,6 @@ interface LegacyCustomEarningFormRow {
   temp_id: string;
   label: string;
   amount: number;
-}
-
-interface EmployeePayrollFieldFormRow {
-  temp_id: string;
-  id?: number;
-  employee_loan_id?: number | null;
-  payroll_field_definition_id: number | '';
-  amount: number;
-  percentage: number;
-  active: boolean;
-  notes: string;
-  start_date: string;
-  end_date: string;
-  dirty?: boolean;
 }
 
 interface QuickPayrollFieldDraft {
@@ -185,49 +175,6 @@ const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; lab
   { value: 'retirement_other', label: 'Other Retirement' },
 ];
 
-const adjustmentTreatmentOptions: Array<{
-  value: PayrollAdjustmentTreatment;
-  label: string;
-  helper: string;
-  caution?: string;
-}> = [
-  {
-    value: 'taxable_addition',
-    label: 'Adds taxable pay',
-    helper: 'Use for bonuses, allowances, or extra compensation. Increases gross wages and payroll taxes.',
-  },
-  {
-    value: 'non_taxable_addition',
-    label: 'Adds non-taxable reimbursement',
-    helper: 'Use for true reimbursements or pass-through payments. Increases net pay only.',
-    caution: 'If this is compensation for work, it is usually taxable.',
-  },
-  {
-    value: 'post_tax_deduction',
-    label: 'Deducts after taxes',
-    helper: 'Use for loans, rent repayments, cash tips already paid out, or other after-tax deductions.',
-  },
-  {
-    value: 'pre_tax_deduction',
-    label: 'Deducts before taxes',
-    helper: 'Reduces taxable wages before withholding is calculated.',
-    caution: 'Use only for approved pre-tax deductions confirmed by an accountant or payroll administrator.',
-  },
-];
-
-const additionAdjustmentOptions = adjustmentTreatmentOptions.filter((option) => option.value.endsWith('_addition'));
-const deductionAdjustmentOptions = adjustmentTreatmentOptions.filter((option) => option.value.endsWith('_deduction'));
-
-const payItemGroups: Array<{ kind: PayrollFieldKind; title: string; description: string; className: string; empty: string }> = [
-  { kind: 'addition', title: 'Additions', description: 'Money added to this employee’s pay, with its tax treatment shown on each item.', className: 'border-emerald-200 bg-emerald-50/60', empty: 'No typed additions assigned.' },
-  { kind: 'deduction', title: 'Deductions', description: 'Money withheld from this employee’s pay. Each loan or other deduction remains a separate item.', className: 'border-rose-200 bg-rose-50/60', empty: 'No typed deductions assigned.' },
-  { kind: 'employer_contribution', title: 'Employer contributions', description: 'Employer-paid amounts that do not reduce the employee’s net pay.', className: 'border-indigo-200 bg-indigo-50/60', empty: 'No employer contributions assigned.' },
-];
-
-const adjustmentTreatmentCopy = (treatment: PayrollAdjustmentTreatment) => (
-  adjustmentTreatmentOptions.find((option) => option.value === treatment) || adjustmentTreatmentOptions[0]
-);
-
 const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormData => ({
   ...form,
   pay_rate: roundCurrencyValue(form.pay_rate),
@@ -244,10 +191,11 @@ export function EmployeeForm() {
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
   const { user, isClient, isSuperAdmin, isManager } = useAuth();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const intake = useEmployeeIntakeSettings(companyId, isClient);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
   const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
@@ -261,8 +209,8 @@ export function EmployeeForm() {
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
-  const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
+  const [payItemPending, setPayItemPending] = useState(false);
+  const [payItemRefreshVersion, setPayItemRefreshVersion] = useState(0);
   const [showQuickPayrollField, setShowQuickPayrollField] = useState(false);
   const [quickPayrollField, setQuickPayrollField] = useState<QuickPayrollFieldDraft>(initialQuickPayrollFieldDraft());
   const [quickPayrollFieldError, setQuickPayrollFieldError, quickPayrollFieldErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -278,6 +226,7 @@ export function EmployeeForm() {
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
   const [w4ChangeReason, setW4ChangeReason] = useState('');
+  const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -288,13 +237,12 @@ export function EmployeeForm() {
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
   const employeeRequestIdRef = useRef(0);
-  const employeePayrollFieldsRequestIdRef = useRef(0);
-  const payrollFieldsRequestIdRef = useRef(0);
   const departmentsRequestIdRef = useRef(0);
   const quickPayrollFieldRequestIdRef = useRef(0);
   const quickPayrollFieldRef = useRef<HTMLDivElement>(null);
   const submissionGenerationRef = useRef(0);
   const companyIdRef = useRef<number | null>(companyId);
+  const payFrequencyTouchedRef = useRef(false);
 
   useLayoutEffect((): (() => void) => {
     companyIdRef.current = companyId;
@@ -341,7 +289,7 @@ export function EmployeeForm() {
       if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
-      
+
       const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
         first_name: employee.first_name,
@@ -390,6 +338,7 @@ export function EmployeeForm() {
       setStoredSsnLastFour(employee.ssn_last_four || null);
       setInitialEmploymentType(employee.employment_type);
       setW4ChangeReason('');
+      setW4ElectionReceived(false);
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -397,21 +346,17 @@ export function EmployeeForm() {
         w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
-      const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
-        ...rate,
-        temp_id: crypto.randomUUID(),
-      }));
-      if (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly')) {
-        replaceWageRates(
-          fetchedWageRates.length > 0
-            ? fetchedWageRates
-            : [{
-                ...defaultHourlyWageRate(),
-                label: 'Regular',
-                rate: employee.pay_rate,
-              }]
-        );
-      }
+      const fetchedWageRates = (employee.wage_rates || [])
+        .filter((rate) => rate.active !== false)
+        .map((rate) => ({ ...rate, temp_id: crypto.randomUUID() }));
+      const usesHourlyRates = employee.employment_type === 'hourly'
+        || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+      replaceWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [{
+        ...defaultHourlyWageRate(),
+        // Preserve the existing scalar fallback for an hourly profile with an
+        // empty response. Explicit retired rows and non-hourly money are not fallback rates.
+        rate: usesHourlyRates && !employee.wage_rates?.length ? employee.pay_rate : 0,
+      }]);
       setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
         temp_id: crypto.randomUUID(),
         label: adjustment.label,
@@ -425,7 +370,7 @@ export function EmployeeForm() {
         label: earning.label,
         amount: toNumberOrZero(earning.amount),
       })));
-      
+
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
     } catch (err) {
@@ -443,51 +388,6 @@ export function EmployeeForm() {
     const expectedEmployeeId = Number(id);
     setLoadedEmployee((current) => withDocumentReadiness(current, expectedEmployeeId, readiness));
   }, [companyId, id]);
-
-  const fetchPayrollFields = useCallback(async () => {
-    if (isClient) return;
-    const requestId = ++payrollFieldsRequestIdRef.current;
-    const requestedCompanyId = companyId;
-    const isCurrentRequest = (): boolean => (
-      payrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
-    );
-
-    try {
-      const response = await payrollFieldsApi.list({ active: true, ...(id ? { employee_id: Number(id) } : {}) });
-      if (isCurrentRequest()) setPayrollFields(response.payroll_fields);
-    } catch (err) {
-      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load available payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
-    }
-  }, [companyId, id, isClient, setGeneralError]);
-
-  const fetchEmployeePayrollFields = useCallback(async () => {
-    if (!id || isClient) return;
-    const requestId = ++employeePayrollFieldsRequestIdRef.current;
-    const requestedCompanyId = companyId;
-    const isCurrentRequest = (): boolean => (
-      employeePayrollFieldsRequestIdRef.current === requestId && companyIdRef.current === requestedCompanyId
-    );
-
-    try {
-      const response = await employeePayrollFieldsApi.list(parseInt(id, 10));
-      if (!isCurrentRequest()) return;
-      setEmployeePayrollFields(response.employee_payroll_fields.map((assignment: EmployeePayrollField) => ({
-        temp_id: crypto.randomUUID(),
-        id: assignment.id,
-        employee_loan_id: assignment.employee_loan_id,
-        payroll_field_definition_id: assignment.payroll_field_definition_id,
-        amount: toNumberOrZero(assignment.amount),
-        percentage: toNumberOrZero(assignment.percentage),
-        active: assignment.active !== false,
-        notes: assignment.notes || '',
-        start_date: assignment.start_date || '',
-        end_date: assignment.end_date || '',
-        dirty: false,
-      })));
-    } catch (err) {
-      if (isCurrentRequest()) setGeneralError((current) => current || `Could not load this employee's payroll fields. Refresh before changing payroll setup. ${err instanceof Error ? err.message : ''}`);
-    }
-  }, [companyId, id, isClient, setGeneralError]);
 
   const fetchDepartments = useCallback(async () => {
     const requestId = ++departmentsRequestIdRef.current;
@@ -507,6 +407,7 @@ export function EmployeeForm() {
   }, [companyId, isClient, setGeneralError]);
 
   useEffect(() => {
+    payFrequencyTouchedRef.current = false;
     setLoadedEmployee(null);
     setForm({
       ...initialFormData,
@@ -515,8 +416,8 @@ export function EmployeeForm() {
     setInitialSsn('');
     setStoredSsnLastFour(null);
     setInitialEmploymentType('hourly');
-    setPayrollFields([]);
-    setEmployeePayrollFields([]);
+    setPayItemPending(false);
+    setPayItemRefreshVersion(0);
     setDepartments([]);
     setWageRates([defaultHourlyWageRate()]);
     setDefaultPayrollAdjustments([]);
@@ -541,19 +442,22 @@ export function EmployeeForm() {
     setStatusTransitionMode(null);
     setEmployeeDocumentsOpen(false);
     fetchDepartments();
-    fetchPayrollFields();
     if (isEditing) {
       fetchEmployee();
-      fetchEmployeePayrollFields();
     }
     return (): void => {
       employeeRequestIdRef.current += 1;
-      employeePayrollFieldsRequestIdRef.current += 1;
-      payrollFieldsRequestIdRef.current += 1;
       departmentsRequestIdRef.current += 1;
       quickPayrollFieldRequestIdRef.current += 1;
     };
-  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing, setGeneralError, setQuickPayrollFieldError]);
+  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, isEditing, setGeneralError, setQuickPayrollFieldError]);
+
+  useEffect(() => {
+    const companyFrequency = activeCompany?.pay_frequency;
+    if (isEditing || payFrequencyTouchedRef.current || activeCompany?.id !== companyId) return;
+    if (!companyFrequency || !['weekly', 'biweekly', 'semimonthly', 'monthly'].includes(companyFrequency)) return;
+    setForm((previous) => ({ ...previous, pay_frequency: companyFrequency as PayFrequency }));
+  }, [activeCompany?.id, activeCompany?.pay_frequency, companyId, isEditing]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -575,6 +479,7 @@ export function EmployeeForm() {
   };
 
   const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean | null): void => {
+    if (field === 'pay_frequency') payFrequencyTouchedRef.current = true;
     setForm((prev) => ({ ...prev, [field]: value }));
     const linkedSsnField = field === 'ssn' ? 'ssn_confirmation' : field === 'ssn_confirmation' ? 'ssn' : null;
     if (errors[field] || (linkedSsnField && errors[linkedSsnField])) {
@@ -606,12 +511,9 @@ export function EmployeeForm() {
       active: rate.active !== false,
     }));
 
+    // Hourly submission derives its scalar from these rows. Keep the separate
+    // salary/flat-fee draft intact when operators edit rates and switch back.
     setWageRates(normalized);
-
-    const primaryRate = normalized.find((rate) => rate.is_primary) || normalized[0];
-    if (primaryRate) {
-      setForm((prev) => ({ ...prev, pay_rate: roundCurrencyValue(Number(primaryRate.rate) || 0) }));
-    }
   };
 
   const updateWageRate = (tempId: string, patch: Partial<WageRateFormRow>) => {
@@ -637,54 +539,6 @@ export function EmployeeForm() {
     replaceWageRates(wageRates.filter((rate) => rate.temp_id !== tempId));
   };
 
-  const removeDefaultPayrollAdjustment = (tempId: string) => {
-    setDefaultPayrollAdjustments((prev) => prev.filter((adjustment) => adjustment.temp_id !== tempId));
-  };
-
-  const removeLegacyCustomEarning = (tempId: string) => {
-    setLegacyCustomEarnings((prev) => prev.filter((earning) => earning.temp_id !== tempId));
-  };
-
-  const availablePayrollFields = payrollFields.filter((field) => !field.owner_employee_id && !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
-
-  const defaultAssignmentValuesForField = (field?: PayrollFieldDefinition) => ({
-    amount: field?.amount_type === 'fixed' ? toNumberOrZero(field.default_amount) : 0,
-    percentage: field?.amount_type === 'percentage' ? toNumberOrZero(field.default_percentage) : 0,
-  });
-
-  const addEmployeePayrollField = (fieldOverride?: PayrollFieldDefinition) => {
-    const availableField = fieldOverride || availablePayrollFields[0];
-    if (!availableField) return;
-
-    setEmployeePayrollFields((prev) => [
-      ...prev,
-      {
-        temp_id: crypto.randomUUID(),
-        payroll_field_definition_id: availableField.id,
-        ...defaultAssignmentValuesForField(availableField),
-        active: true,
-        notes: '',
-        start_date: '',
-        end_date: '',
-        dirty: true,
-      },
-    ]);
-  };
-
-  const updateEmployeePayrollField = (tempId: string, patch: Partial<EmployeePayrollFieldFormRow>) => {
-    setEmployeePayrollFields((prev) => prev.map((row) => {
-      if (row.temp_id !== tempId) return row;
-      const selectedField = typeof patch.payroll_field_definition_id === 'number'
-        ? payrollFields.find((field) => field.id === patch.payroll_field_definition_id)
-        : undefined;
-      return { ...row, ...(selectedField ? defaultAssignmentValuesForField(selectedField) : {}), ...patch, dirty: true };
-    }));
-  };
-
-  const removeEmployeePayrollField = (tempId: string) => {
-    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false, dirty: true } : row));
-  };
-
   const closeQuickPayrollField = () => {
     setQuickPayrollField(initialQuickPayrollFieldDraft());
     setQuickPayrollFieldError(null);
@@ -706,7 +560,7 @@ export function EmployeeForm() {
       notes: source.kind === 'adjustment' ? source.row.notes : '',
     });
     setShowQuickPayrollField(true);
-    window.requestAnimationFrame(() => quickPayrollFieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    window.requestAnimationFrame(() => quickPayrollFieldRef.current?.scrollIntoView?.({ block: 'center' }));
   };
 
   const updateQuickPayrollFieldKind = (kind: PayrollFieldKind) => {
@@ -754,8 +608,8 @@ export function EmployeeForm() {
         end_date: quickPayrollField.end_date || null,
         notes: quickPayrollField.notes.trim(),
       };
-      const response = legacyPayItemSource
-        ? await employeePayrollFieldsApi.convertLegacy(Number(id), {
+      await (legacyPayItemSource
+        ? employeePayrollFieldsApi.convertLegacy(Number(id), {
           kind: legacyPayItemSource.kind,
           label: legacyPayItemSource.row.label,
           amount: legacyPayItemSource.row.amount,
@@ -764,21 +618,9 @@ export function EmployeeForm() {
             notes: legacyPayItemSource.row.notes,
           } : {}),
         }, payload, assignment, requestedCompanyId)
-        : await employeePayrollFieldsApi.createPersonal(Number(id), payload, assignment, requestedCompanyId);
+        : employeePayrollFieldsApi.createPersonal(Number(id), payload, assignment, requestedCompanyId));
       if (!isCurrentRequest()) return;
-      setPayrollFields((prev) => [...prev, response.payroll_field]);
-      setEmployeePayrollFields((prev) => [...prev, {
-        temp_id: crypto.randomUUID(),
-        id: response.employee_payroll_field.id,
-        payroll_field_definition_id: response.payroll_field.id,
-        amount: toNumberOrZero(response.employee_payroll_field.amount),
-        percentage: toNumberOrZero(response.employee_payroll_field.percentage),
-        active: true,
-        notes: response.employee_payroll_field.notes || '',
-        start_date: response.employee_payroll_field.start_date || '',
-        end_date: response.employee_payroll_field.end_date || '',
-        dirty: false,
-      }]);
+      setPayItemRefreshVersion((version) => version + 1);
       if (legacyPayItemSource?.kind === 'adjustment') {
         setDefaultPayrollAdjustments((prev) => prev.filter((row) => row.temp_id !== legacyPayItemSource.row.temp_id));
       } else if (legacyPayItemSource?.kind === 'custom_earning') {
@@ -827,11 +669,26 @@ export function EmployeeForm() {
     requestAnimationFrame(() => {
       const field = document.querySelector<HTMLElement>(`[name="${fieldName}"]`);
       field?.focus();
-      field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      field?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
     });
   };
 
-  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field);
+  const toggleReceivedWithholding = (received: boolean) => {
+    setW4ElectionReceived(received);
+    if (received) {
+      setForm((previous) => ({ ...previous, w4_effective_on: '', w4_signed_on: null, w4_source_reference: '' }));
+      return;
+    }
+    if (!loadedEmployee) return;
+    setForm((previous) => ({ ...previous,
+      w4_effective_on: loadedEmployee.w4_effective_on || '',
+      w4_signed_on: loadedEmployee.w4_signed_on || null,
+      w4_source_reference: loadedEmployee.w4_source_reference || '',
+    }));
+  };
+
+  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field)
+    || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -846,7 +703,7 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!isVariableSalary && form.pay_rate <= 0) {
+    if (!supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {
@@ -862,12 +719,12 @@ export function EmployeeForm() {
         }
       }
     }
-    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain) {
+    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain && !allowsUnverifiedBlank('ssn')) {
       newErrors.ssn = ['Social Security Number is required'];
     } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
     }
-    if (usesSsn && (!isEditing || ssnChanged)) {
+    if (usesSsn && Boolean(form.ssn?.trim()) && (!isEditing || ssnChanged)) {
       if (!form.ssn_confirmation?.trim()) {
         newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
       } else if (canonicalSsn(form.ssn_confirmation) !== canonicalSsn(form.ssn)) {
@@ -891,14 +748,11 @@ export function EmployeeForm() {
     }
     const hireDateError = !isEditing || form.hire_date !== (loadedEmployee?.hire_date || '') ? validateHireDate(form.hire_date) : null;
     if (hireDateError) newErrors.hire_date = [hireDateError];
-    if (employeePayrollFields.some((row) => row.start_date && row.end_date && row.end_date < row.start_date)) {
-      newErrors.employee_payroll_fields = ['Last payday must be on or after first payday'];
-    }
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
       if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
-      if (!form.contractor_ein?.trim()) {
+      if (!form.contractor_ein?.trim() && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
-      } else if (!/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
+      } else if (form.contractor_ein?.trim() && !/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
       }
     }
@@ -912,12 +766,14 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
-    if (form.employment_type !== 'contractor' && !form.w4_effective_on) {
+    if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
-    if (isEditing && !isClient && form.employment_type !== 'contractor' && w4HasChanged && !w4ChangeReason.trim()) {
+    if (isEditing && !isClient && form.employment_type !== 'contractor' && (w4HasChanged || w4ElectionReceived) && !w4ChangeReason.trim()) {
       newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
     }
+    if (loadedEmployee?.current_w4_election?.source === 'default_withholding' && w4HasChanged && !w4ElectionReceived) newErrors.w4_election_received = ['Confirm that the employee withholding election was received before replacing the approved default.'];
+    if (w4ElectionReceived && (!form.w4_effective_on || (!form.w4_signed_on && !form.w4_source_reference?.trim()))) newErrors.w4_election_received = ['Enter the received election effective date and its signed date or source reference.'];
     const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
     const employerRothMatch = form.employer_roth_match_rate ?? 0;
     if (form.employment_type !== 'contractor' && (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1)) {
@@ -931,12 +787,6 @@ export function EmployeeForm() {
     if (new Set(adjustmentKeys).size !== adjustmentKeys.length) {
       newErrors.default_payroll_adjustments = ['Recurring adjustment labels must be unique within the same treatment'];
     }
-    const activePayrollFieldIds = employeePayrollFields
-      .filter((row) => row.active !== false && row.payroll_field_definition_id)
-      .map((row) => row.payroll_field_definition_id);
-    if (new Set(activePayrollFieldIds).size !== activePayrollFieldIds.length) {
-      newErrors.employee_payroll_fields = ['Each assigned payroll field can only appear once per employee'];
-    }
     setErrors(newErrors);
     const firstInvalidField = Object.keys(newErrors)[0];
     focusFirstInvalidField(firstInvalidField);
@@ -945,7 +795,10 @@ export function EmployeeForm() {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    
+    if (payItemPending || showQuickPayrollField || quickPayrollFieldSaving) {
+      setGeneralError('Finish saving or cancel the open pay item before saving the employee profile.');
+      return;
+    }
     if (!validateForm()) return;
 
     const requestedCompanyId = companyId;
@@ -996,7 +849,8 @@ export function EmployeeForm() {
           label: earning.label.trim(),
           amount: roundCurrencyValue(Number(earning.amount) || 0),
         })),
-        w4_change_reason: w4HasChanged ? w4ChangeReason.trim() : undefined,
+        w4_election_received: w4ElectionReceived || undefined,
+        w4_change_reason: (w4HasChanged || w4ElectionReceived) ? w4ChangeReason.trim() : undefined,
         w4_source_reference: form.w4_source_reference?.trim() || null,
       };
 
@@ -1006,7 +860,9 @@ export function EmployeeForm() {
       let aireMappingNotice: string | null = null;
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
-        const updateData = { ...employeePayload };
+        // Recurring items save through their own endpoints. A stale profile must
+        // not restore a legacy allowance another operator has already converted.
+        const updateData = { ...employeePayload, default_payroll_adjustments: undefined, default_custom_earnings: undefined };
         if (!updateData.ssn) {
           delete updateData.ssn;
         }
@@ -1032,39 +888,24 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          if (isCurrentSubmission()) {
+            // The employee is already saved. Summary recovery must not block
+            // navigation or turn a successful create into a duplicate retry.
+            void refreshCompanies().catch(() => {});
+          }
         }
       }
       if (!isCurrentSubmission()) return;
-
-      if (!isClient && savedEmployeeId) {
-        const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
-          .filter((row): row is EmployeePayrollFieldFormRow & { payroll_field_definition_id: number } =>
-            typeof row.payroll_field_definition_id === 'number' && row.payroll_field_definition_id > 0 && (!row.id || row.dirty === true)
-          )
-          .map((row) => {
-            const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
-            return {
-              id: row.id,
-              payroll_field_definition_id: row.payroll_field_definition_id,
-              amount: field?.amount_type === 'fixed' ? roundCurrencyValue(Number(row.amount) || 0) : null,
-              percentage: field?.amount_type === 'percentage' ? Number(row.percentage) || 0 : null,
-              active: row.active !== false,
-              notes: row.notes.trim(),
-              start_date: row.start_date || null,
-              end_date: row.end_date || null,
-            };
-          });
-
-        if (payrollFieldPayload.length > 0) {
-          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload, requestedCompanyId);
-          if (!isCurrentSubmission()) return;
-        }
-      }
 
       if (!isClient && supportsMultipleHourlyRates) {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
+        const displayedSavedRateIds = new Set(
+          (loadedEmployee?.wage_rates || [])
+            .filter((rate) => rate.active !== false && rate.id)
+            .map((rate) => rate.id as number)
+        );
         const normalizedById = new Map(
           normalizedWageRates
             .filter((rate) => rate.id)
@@ -1073,7 +914,8 @@ export function EmployeeForm() {
 
         await Promise.all(
           existingRates
-            .filter((rate) => !normalizedById.has(rate.id as number))
+            // Removing a displayed row must not delete hidden or newly added definitions.
+            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
         if (!isCurrentSubmission()) return;
@@ -1138,6 +980,11 @@ export function EmployeeForm() {
       if (!isCurrentSubmission()) return;
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
+        const fieldMessages = Object.entries(err.fieldErrors).map(([field, messages]) =>
+          `${field.replaceAll('_', ' ')}: ${messages.join(' ')}`
+        ).join('; ');
+        setGeneralError(`${err.message}. ${fieldMessages}`);
+        if ((err.data as { code?: string } | undefined)?.code === 'employee_intake_expired') void intake.reload();
         focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
@@ -1154,12 +1001,21 @@ export function EmployeeForm() {
   const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
   const isW2Employee = form.employment_type !== 'contractor';
   const taxIdUsesSsn = isW2Employee || form.contractor_type !== 'business';
-  const ssnConfirmationRequired = taxIdUsesSsn
+  const ssnConfirmationRequired = taxIdUsesSsn && Boolean(form.ssn?.trim())
     && (!isEditing || canonicalSsn(form.ssn) !== canonicalSsn(initialSsn));
   const ssnDigits = (form.ssn || '').replace(/\D/g, '');
   const ssnConfirmationDigits = (form.ssn_confirmation || '').replace(/\D/g, '');
   const ssnComparisonReady = ssnDigits.length === 9 && ssnConfirmationDigits.length === 9;
   const ssnsMatch = ssnComparisonReady && ssnDigits === ssnConfirmationDigits;
+
+  if (!canWriteCompany(activeCompany)) {
+    return <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-6" aria-label="Read-only employee access">
+      <h1 className="text-xl font-semibold text-neutral-900">Employee details are read-only</h1>
+      <p className="text-sm leading-6 text-neutral-700">{companyReadOnlyMessage(activeCompany)}</p>
+      <p className="text-sm text-neutral-600">Any current draft is retained here while access is unavailable.</p>
+      <Link className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline" to={returnTo}>Back to employee records</Link>
+    </section>;
+  }
 
   if (isLoading) {
     return (
@@ -1175,12 +1031,16 @@ export function EmployeeForm() {
         title={isEditing ? `Edit ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : 'Add Employee / Contractor'}
         description={isEditing ? `Update ${form.employment_type === 'contractor' ? 'contractor' : 'employee'} information` : 'Add a new employee or 1099 contractor'}
         actions={
-          <Button variant="outline" onClick={() => navigate(returnTo)}>
+          <Button variant="outline" onClick={() => navigate(returnTo)} disabled={payItemPending || showQuickPayrollField}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
         }
       />
+
+      {(intake.settings?.enabled && !isEditing) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Incomplete employee entry is enabled for this client.</p><p>Enter the name and valid pay setup. Unknown personal details may stay blank and will remain on a follow-up checklist. Payroll setup and documents need separate review.</p></div>}
+      {loadedEmployee?.intake_readiness?.profile_incomplete && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Complete this profile as information arrives</p><p>Still missing: {loadedEmployee.intake_readiness.missing_fields.map((field) => intakeFieldLabels[field] || field).join(', ')}. You can save the approved missing fields incrementally.</p></div>}
+      {intake.error && <div className="mx-4 mt-4 sm:mx-6 lg:mx-8"><ActionFeedback tone="error" message="Employee entry settings could not be loaded. Full details are required for new entries." /><Button variant="outline" onClick={() => void intake.reload()}>Retry entry settings</Button></div>}
 
       <nav aria-label="Employee form sections" className="overflow-x-auto border-b border-neutral-200 bg-white px-4 py-2 sm:hidden">
         <div className="flex w-max gap-2 text-xs font-semibold">
@@ -1251,10 +1111,10 @@ export function EmployeeForm() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-1">
                   First Name <span className="text-danger-600">*</span>
                 </label>
-                <Input
+                <Input id="employee-field-1"
                   name="first_name"
                   required
                   value={form.first_name}
@@ -1263,19 +1123,19 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-2">
                   Middle Name
                 </label>
-                <Input
+                <Input id="employee-field-2"
                   value={form.middle_name}
                   onChange={(e) => handleChange('middle_name', e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-3">
                   Last Name <span className="text-danger-600">*</span>
                 </label>
-                <Input
+                <Input id="employee-field-3"
                   name="last_name"
                   required
                   value={form.last_name}
@@ -1289,12 +1149,12 @@ export function EmployeeForm() {
               {taxIdUsesSsn && (
                 <>
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
-                      Social Security Number <span className="text-danger-600">*</span>
+                    <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="employee-field-4">
+                      Social Security Number {!allowsUnverifiedBlank('ssn') && <span className="text-danger-600">*</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-4"
                       name="ssn"
-                      required={!(isClient && storedSsnLastFour && !form.ssn)}
+                      required={!allowsUnverifiedBlank('ssn') && !(isClient && storedSsnLastFour && !form.ssn)}
                       placeholder={isClient && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
                       value={form.ssn || ''}
                       onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
@@ -1309,11 +1169,11 @@ export function EmployeeForm() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                    <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="employee-field-5">
                       Re-enter Social Security Number
                       {ssnConfirmationRequired && <span className="text-danger-600"> *</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-5"
                       name="ssn_confirmation"
                       required={ssnConfirmationRequired}
                       placeholder="XXX-XX-XXXX"
@@ -1340,10 +1200,10 @@ export function EmployeeForm() {
                 </>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-6">
                   Date of Birth
                 </label>
-                <Input
+                <Input id="employee-field-6"
                   type="date"
                   value={form.date_of_birth || ''}
                   onChange={(e) => handleChange('date_of_birth', e.target.value)}
@@ -1369,10 +1229,10 @@ export function EmployeeForm() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Hire Date <span className="text-danger-600">*</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-7">
+                  Hire Date {!allowsUnverifiedBlank('hire_date') && <span className="text-danger-600">*</span>}
                 </label>
-                <Input
+                <Input id="employee-field-7"
                   name="hire_date"
                   required={!allowsUnverifiedBlank('hire_date')}
                   type="date"
@@ -1382,10 +1242,10 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-29">
                   Department
                 </label>
-                <Select
+                <Select id="employee-field-29"
                   value={form.department_id?.toString() || ''}
                   onChange={(e) => handleChange('department_id', e.target.value ? parseInt(e.target.value, 10) : '')}
                 >
@@ -1413,10 +1273,10 @@ export function EmployeeForm() {
 
             <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-4' : form.employment_type === 'salary' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mt-4`}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-30">
                   Employment Type <span className="text-danger-600">*</span>
                 </label>
-                <Select
+                <Select id="employee-field-30"
                   name="employment_type"
                   required
                   value={form.employment_type}
@@ -1436,10 +1296,10 @@ export function EmployeeForm() {
               </div>
               {form.employment_type === 'salary' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-31">
                     Salary Type <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-31"
                     name="salary_type"
                     required
                     value={form.salary_type || 'annual'}
@@ -1453,10 +1313,10 @@ export function EmployeeForm() {
               )}
               {form.employment_type === 'contractor' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-32">
                     Pay Structure <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-32"
                     name="contractor_pay_type"
                     required
                     value={form.contractor_pay_type || 'flat_fee'}
@@ -1469,12 +1329,12 @@ export function EmployeeForm() {
               )}
               {!supportsMultipleHourlyRates && !(form.employment_type === 'salary' && form.salary_type === 'variable') && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-8">
                     {form.employment_type === 'contractor'
                       ? (form.contractor_pay_type === 'hourly' ? 'Hourly Rate' : 'Flat Fee per Period')
                       : 'Pay Rate'} <span className="text-danger-600">*</span>
                   </label>
-                  <NumericInput
+                  <NumericInput id="employee-field-8"
                     name="pay_rate"
                     required
                     aria-invalid={Boolean(getFieldError('pay_rate'))}
@@ -1500,10 +1360,10 @@ export function EmployeeForm() {
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-33">
                   Pay Frequency <span className="text-danger-600">*</span>
                 </label>
-                <Select
+                <Select id="employee-field-33"
                   name="pay_frequency"
                   required
                   value={form.pay_frequency}
@@ -1614,10 +1474,10 @@ export function EmployeeForm() {
                   {wageRates.map((rate, index) => (
                     <div key={rate.temp_id} className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto_auto] gap-3 items-end rounded-lg border border-gray-200 p-3">
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor={`employee-field-9-${rate.temp_id}`}>
                           Rate Label <span className="text-danger-600">*</span>
                         </label>
-                        <Input
+                        <Input id={`employee-field-9-${rate.temp_id}`}
                           name="wage_rates"
                           required
                           value={rate.label}
@@ -1626,10 +1486,10 @@ export function EmployeeForm() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor={`employee-field-10-${rate.temp_id}`}>
                           Hourly Rate <span className="text-danger-600">*</span>
                         </label>
-                        <NumericInput
+                        <NumericInput id={`employee-field-10-${rate.temp_id}`}
                           required
                           value={rate.rate}
                           onValueChange={(value) => updateWageRate(rate.temp_id, { rate: value ?? 0 })}
@@ -1651,6 +1511,7 @@ export function EmployeeForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => removeWageRate(rate.temp_id)}
+                        aria-label={`Remove hourly rate ${rate.label.trim() || index + 1}`}
                         disabled={wageRates.length === 1}
                       >
                         <X className="w-4 h-4" />
@@ -1705,149 +1566,29 @@ export function EmployeeForm() {
           </Card>
         )}
 
-        {!isClient && isEditing && (
-          <Card id="employee-pay-items" className="mb-6 scroll-mt-28 border-neutral-200">
-            <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle>Additions and deductions</CardTitle>
-                  <CardDescription>
-                    One setup for every employee. Add an employee-only item or assign a reusable client-wide field; each item has its own tax treatment and payday range.
-                  </CardDescription>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
-                  Manage client-wide fields
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {getFieldError('employee_payroll_fields') && (
-                <div className="mb-3 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
-                  {getFieldError('employee_payroll_fields')}
-                </div>
-              )}
-              {payrollFields.length === 0 && (
-                <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800 sm:flex-row sm:items-center sm:justify-between">
-                  <span>No client-wide payroll fields exist yet. You can still add an employee-only item below.</span>
-                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
-                    Create payroll fields
-                  </Button>
-                </div>
-              )}
-              <div className="space-y-4">
-                {payItemGroups.map((group) => {
-                  const groupRows = employeePayrollFields.filter((row) => row.active !== false &&
-                    payrollFields.find((field) => field.id === row.payroll_field_definition_id)?.kind === group.kind);
-                  return <section key={group.kind} className={`rounded-2xl border p-4 ${group.className}`}>
-                    <div className="mb-3">
-                      <h3 className="text-base font-semibold text-neutral-950">{group.title} <span className="text-sm font-medium text-neutral-600">({groupRows.length})</span></h3>
-                      <p className="mt-1 text-sm text-neutral-700">{group.description}</p>
-                    </div>
-                    <div className="space-y-3">
-                  {groupRows.map((row) => {
-                    const selectedField = payrollFields.find((field) => field.id === row.payroll_field_definition_id);
-                    const rowAvailablePayrollFields = payrollFields.filter((field) =>
-                      field.id === row.payroll_field_definition_id ||
-                      (!field.owner_employee_id && !employeePayrollFields.some((candidate) => candidate.temp_id !== row.temp_id && candidate.active !== false && candidate.payroll_field_definition_id === field.id))
-                    );
-                    return (
-                      <div key={row.temp_id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1.5fr)_10rem_10rem_auto]">
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Payroll field</label>
-                            <Select
-                              value={row.payroll_field_definition_id || ''}
-                              onChange={(event) => updateEmployeePayrollField(row.temp_id, { payroll_field_definition_id: Number(event.target.value) })}
-                            >
-                              <option value="">Select field</option>
-                              {rowAvailablePayrollFields.map((field) => (
-                                <option key={field.id} value={field.id}>{field.name} · {field.tax_treatment.replace(/_/g, ' ')}</option>
-                              ))}
-                            </Select>
-                          </div>
-                          {selectedField?.amount_type === 'percentage' ? (
-                            <div>
-                              <label className="mb-1 block text-xs font-medium text-gray-600">Employee %</label>
-                              <NumericInput
-                                value={row.percentage}
-                                onValueChange={(value) => updateEmployeePayrollField(row.temp_id, { percentage: value ?? 0 })}
-                                min={0}
-                              />
-                            </div>
-                          ) : selectedField?.amount_type === 'manual' ? (
-                            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                              Manual each payroll
-                            </div>
-                          ) : (
-                            <div>
-                              <label className="mb-1 block text-xs font-medium text-gray-600">Employee amount</label>
-                              <NumericInput
-                                value={row.amount}
-                                disabled={Boolean(row.employee_loan_id)}
-                                onValueChange={(value) => updateEmployeePayrollField(row.temp_id, { amount: value ?? 0 })}
-                                min={0}
-                                fixedDecimalsOnBlur={2}
-                              />
-                            </div>
-                          )}
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Notes (reference only)</label>
-                            <Input
-                              value={row.notes}
-                              onChange={(event) => updateEmployeePayrollField(row.temp_id, { notes: event.target.value })}
-                              placeholder="Optional source or setup note"
-                            />
-                          </div>
-                          <Button type="button" variant="outline" size="sm" onClick={() => removeEmployeePayrollField(row.temp_id)}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <label className="text-xs font-medium text-gray-600">First payday (optional)
-                            <Input type="date" value={row.start_date} onChange={(event) => updateEmployeePayrollField(row.temp_id, { start_date: event.target.value })} />
-                          </label>
-                          <label className="text-xs font-medium text-gray-600">Last payday (optional)
-                            <Input type="date" min={row.start_date || undefined} value={row.end_date} onChange={(event) => updateEmployeePayrollField(row.temp_id, { end_date: event.target.value })} />
-                          </label>
-                        </div>
-                        <p className="mt-2 text-xs text-gray-600">
-                          {row.active ? `Applies every payday ${row.start_date ? `from ${row.start_date}` : 'from the first eligible payroll'} ${row.end_date ? `through ${row.end_date}, inclusive` : 'until stopped'}.` : 'Inactive: does not apply to payroll.'}
-                          {row.employee_loan_id && ' Linked loan: its payment amount and remaining balance control the deduction. Edit repayment amounts in Loans.'}
-                          {row.dirty && ' Save employee to apply these settings.'} Notes do not change the amount or schedule.
-                          {selectedField?.category === 'loan' && ' Use the employee’s Loans section to repay a verified balance and stop automatically at payoff.'}
-                        </p>
-                        {selectedField && (
-                          <p className="mt-2 text-xs text-blue-800">
-                            {selectedField.owner_employee_id ? 'Employee-only' : 'Client-wide'} · {selectedField.kind.replace(/_/g, ' ')} · {selectedField.tax_treatment.replace(/_/g, ' ')} · {selectedField.category.replace(/_/g, ' ')}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {groupRows.length === 0 && <p className="rounded-xl border border-dashed border-neutral-300 bg-white/75 px-4 py-3 text-sm text-neutral-600">{group.empty}</p>}
-                    </div>
-                  </section>;
-                })}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => addEmployeePayrollField()} disabled={availablePayrollFields.length === 0}>
-                  <Plus className="mr-1 h-4 w-4" />
-                  Assign Payroll Field
-                </Button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => { setLegacyPayItemSource(null); setQuickPayrollField(initialQuickPayrollFieldDraft()); setQuickPayrollFieldError(null); setShowQuickPayrollField(true); }}>
-                  <Plus className="mr-1 h-4 w-4" />
-                  Add employee-only item
-                </Button>
-              </div>
-
+        {!isClient && isEditing && loadedEmployee && (
+          <EmployeePayItemsPanel
+            key={`${companyId}:${id}`}
+            employeeId={Number(id)} companyId={companyId}
+            employeeName={`${loadedEmployee.first_name} ${loadedEmployee.last_name}`.trim()}
+            companyName={activeCompany?.name || user?.company_name || 'this client'}
+            refreshVersion={payItemRefreshVersion} onPendingChange={setPayItemPending} disabled={isSaving || showQuickPayrollField || quickPayrollFieldSaving}
+            existingRecurringItems={[
+              ...defaultPayrollAdjustments.map((row) => ({ name: row.label, kind: row.treatment.endsWith('_addition') ? 'addition' as const : 'deduction' as const, amount: row.amount, treatment: row.treatment, active: row.active, notes: row.notes, onUpdateSetup: row.active ? () => startLegacyPayItemMove({ kind: 'adjustment', row }) : undefined })),
+              ...legacyCustomEarnings.map((row) => ({ name: row.label, kind: 'addition' as const, amount: row.amount, treatment: 'taxable_addition' as const, active: true, onUpdateSetup: () => startLegacyPayItemMove({ kind: 'custom_earning', row }) })),
+            ]}
+          />
+        )}
+        {!isClient && isEditing && showQuickPayrollField && (
+          <Card className="mb-6"><CardContent>
               {showQuickPayrollField && (
                 <div ref={quickPayrollFieldRef} className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">{legacyPayItemSource ? 'Move legacy item to typed setup' : 'Add an employee-only pay item'}</h3>
+                      <h3 className="text-base font-semibold text-slate-950">{legacyPayItemSource ? 'Update recurring item setup' : 'Add an employee-only pay item'}</h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600">
                         {legacyPayItemSource
-                          ? 'This replaces the old recurring item in one save, so the amount is never applied twice. Confirm its category and payday dates. Existing calculated runs must be recalculated to pick up setup changes.'
+                          ? 'This updates one existing item without adding it twice. Its amount and tax treatment stay the same. Choose its category and payday dates; you can edit the saved item afterward.'
                           : 'This item belongs only to this employee. It saves immediately; save the employee form separately for any other changes.'}
                       </p>
                     </div>
@@ -1857,20 +1598,20 @@ export function EmployeeForm() {
                   </div>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                     <div className="md:col-span-2 xl:col-span-1">
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Field name</label>
-                      <Input value={quickPayrollField.name} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, name: event.target.value }))} placeholder="Auto loan, 401(k), phone allowance" />
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-11">Field name</label>
+                      <Input id="employee-field-11" value={quickPayrollField.name} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, name: event.target.value }))} placeholder="Auto loan, 401(k), phone allowance" />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Type</label>
-                      <Select value={quickPayrollField.kind} disabled={Boolean(legacyPayItemSource)} onChange={(event) => updateQuickPayrollFieldKind(event.target.value as PayrollFieldKind)}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-34">Type</label>
+                      <Select id="employee-field-34" value={quickPayrollField.kind} disabled={Boolean(legacyPayItemSource)} onChange={(event) => updateQuickPayrollFieldKind(event.target.value as PayrollFieldKind)}>
                         <option value="addition">Addition</option>
                         <option value="deduction">Deduction</option>
                         <option value="employer_contribution">Employer contribution</option>
                       </Select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Treatment</label>
-                      <Select value={quickPayrollField.tax_treatment} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, tax_treatment: event.target.value as PayrollFieldTaxTreatment }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-35">Treatment</label>
+                      <Select id="employee-field-35" value={quickPayrollField.tax_treatment} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, tax_treatment: event.target.value as PayrollFieldTaxTreatment }))}>
                         {quickPayrollField.kind === 'addition' && <>
                           <option value="taxable_addition">Taxable addition</option>
                           <option value="non_taxable_addition">Non-taxable addition</option>
@@ -1883,8 +1624,8 @@ export function EmployeeForm() {
                       </Select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Category</label>
-                      <Select value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory, reporting_group: null }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-36">Category</label>
+                      <Select id="employee-field-36" value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory, reporting_group: null }))}>
                         {legacyPayItemSource && <option value="">Choose a category</option>}
                         {['loan', 'retirement', 'insurance', 'rent', 'allotment', 'reimbursement', 'garnishment', 'child_support', 'phone', 'benefit', 'other'].map((category) => (
                           <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>
@@ -1892,8 +1633,8 @@ export function EmployeeForm() {
                       </Select>
                     </div>
                     {quickPayrollField.category === 'retirement' && <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Report group</label>
-                      <Select value={quickPayrollField.reporting_group || ''} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, reporting_group: event.target.value ? event.target.value as PayrollFieldReportingGroup : null }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-37">Report group</label>
+                      <Select id="employee-field-37" value={quickPayrollField.reporting_group || ''} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, reporting_group: event.target.value ? event.target.value as PayrollFieldReportingGroup : null }))}>
                         {reportingGroupOptions.map((option) => (
                           <option key={option.value || 'none'} value={option.value}>{option.label}</option>
                         ))}
@@ -1901,8 +1642,8 @@ export function EmployeeForm() {
                       <p className="mt-3 rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900">Enable catch-up in Pay setup → Retirement plan. Adding a field creates another contribution; it does not split or replace an existing deduction. Confirm existing manual paycheck entries before adding a replacement.</p>
                     </div>}
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Default</label>
-                      <Select value={quickPayrollField.amount_type} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, amount_type: event.target.value as PayrollFieldAmountType }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-38">Default</label>
+                      <Select id="employee-field-38" value={quickPayrollField.amount_type} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, amount_type: event.target.value as PayrollFieldAmountType }))}>
                         <option value="fixed">Fixed amount</option>
                         <option value="percentage">Percentage</option>
                         <option value="manual">Set during payroll</option>
@@ -1910,13 +1651,13 @@ export function EmployeeForm() {
                     </div>
                     {quickPayrollField.amount_type === 'percentage' ? (
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Default %</label>
-                        <NumericInput value={quickPayrollField.default_percentage} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_percentage: value ?? 0 }))} min={0} />
+                        <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-12">Default %</label>
+                        <NumericInput id="employee-field-12" value={quickPayrollField.default_percentage} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_percentage: value ?? 0 }))} min={0} />
                       </div>
                     ) : quickPayrollField.amount_type === 'fixed' ? (
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Default amount</label>
-                        <NumericInput value={quickPayrollField.default_amount} disabled={Boolean(legacyPayItemSource)} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_amount: value ?? 0 }))} min={0} fixedDecimalsOnBlur={2} />
+                        <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-13">Default amount</label>
+                        <NumericInput id="employee-field-13" value={quickPayrollField.default_amount} disabled={Boolean(legacyPayItemSource)} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_amount: value ?? 0 }))} min={0} fixedDecimalsOnBlur={2} />
                       </div>
                     ) : (
                       <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -1947,7 +1688,7 @@ export function EmployeeForm() {
                   {quickPayrollFieldError && <ActionFeedback retryKey={quickPayrollFieldErrorFeedbackAttempt} tone="error" message={quickPayrollFieldError} />}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim() || !quickPayrollField.category}>
-                      {quickPayrollFieldSaving ? 'Saving…' : legacyPayItemSource ? 'Move to typed setup' : 'Create and assign'}
+                      {quickPayrollFieldSaving ? 'Saving…' : legacyPayItemSource ? 'Save setup' : 'Create and assign'}
                     </Button>
                     <Button type="button" variant="outline" size="sm" onClick={closeQuickPayrollField}>
                       Cancel
@@ -1955,156 +1696,7 @@ export function EmployeeForm() {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        )}
-
-        {(defaultPayrollAdjustments.length > 0 || legacyCustomEarnings.length > 0) && (
-        <Card className="mb-4 border-amber-200 bg-amber-50/40">
-          <CardHeader>
-            <CardTitle>Legacy recurring items</CardTitle>
-            <CardDescription>
-              Older items still calculate. Move each one into the typed additions and deductions above so its tax treatment, category, and payday range are clear.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div role="note" className="mb-4 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
-              <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <div className="text-sm leading-6">
-                <p className="font-semibold">Move these before cutover.</p>
-                <p className="text-amber-900">
-                  “Move to typed setup” replaces one old item atomically; it does not add a second deduction or earning. Review dates and category before saving. Remove is only for an item that should stop entirely.
-                </p>
-              </div>
-            </div>
-            {getFieldError('default_payroll_adjustments') && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {getFieldError('default_payroll_adjustments')}
-              </div>
-            )}
-
-            <div className="grid gap-5 2xl:grid-cols-2">
-              <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
-                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-emerald-950">Recurring additions</h3>
-                    <p className="mt-1 text-sm leading-6 text-emerald-800">
-                      Use this side when money should be added to the employee's check.
-                    </p>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>Manage typed fields</Button>
-                </div>
-                <div className="space-y-3">
-                  {legacyCustomEarnings.map((earning) => (
-                    <div key={earning.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-                      <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                          <Input value={earning.label} disabled />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(earning.amount)}</div>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Legacy type</label>
-                          <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">Taxable earning</div>
-                        </div>
-                        <div className="flex flex-wrap gap-2 md:justify-self-end md:self-end">
-                          <Button type="button" size="sm" onClick={() => startLegacyPayItemMove({ kind: 'custom_earning', row: earning })}>Move to typed setup</Button>
-                          <Button type="button" variant="outline" size="sm" aria-label={`Remove legacy item ${earning.label}`} onClick={() => removeLegacyCustomEarning(earning.temp_id)}>Remove</Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {defaultPayrollAdjustments.filter((adjustment) => adjustment.treatment.endsWith('_addition')).map((adjustment) => {
-                    const treatment = adjustmentTreatmentCopy(adjustment.treatment);
-                    return (
-                      <div key={adjustment.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                            <Input value={adjustment.label} disabled />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
-                          </div>
-                          <div className="min-w-0">
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Addition type</label>
-                            <Select value={adjustment.treatment} disabled>
-                              {additionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                            </Select>
-                          </div>
-                          <div className="flex flex-wrap gap-2 md:justify-self-end md:self-end">
-                            {adjustment.active && <Button type="button" size="sm" onClick={() => startLegacyPayItemMove({ kind: 'adjustment', row: adjustment })}>Move to typed setup</Button>}
-                            <Button type="button" variant="outline" size="sm" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>Remove</Button>
-                          </div>
-                        </div>
-                        <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
-                        <div className="mt-3">
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
-                          <Input value={adjustment.notes} disabled />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {legacyCustomEarnings.length === 0 && defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_addition')) && (
-                    <div className="rounded-xl border border-dashed border-emerald-200 bg-white/70 px-4 py-6 text-sm text-emerald-800">No recurring additions set.</div>
-                  )}
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-rose-100 bg-rose-50/50 p-4">
-                <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-rose-950">Recurring deductions</h3>
-                    <p className="mt-1 text-sm leading-6 text-rose-800">
-                      Use this side only when money should be subtracted from the employee's check.
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {defaultPayrollAdjustments.filter((adjustment) => adjustment.treatment.endsWith('_deduction')).map((adjustment) => {
-                    const treatment = adjustmentTreatmentCopy(adjustment.treatment);
-                    return (
-                      <div key={adjustment.temp_id} className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-2">
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                            <Input value={adjustment.label} disabled />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                            <div className="flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-800">{formatCurrency(adjustment.amount)}</div>
-                          </div>
-                          <div className="min-w-0">
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Deduction type</label>
-                            <Select value={adjustment.treatment} disabled>
-                              {deductionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                            </Select>
-                          </div>
-                          <div className="flex flex-wrap gap-2 md:justify-self-end md:self-end">
-                            {adjustment.active && <Button type="button" size="sm" onClick={() => startLegacyPayItemMove({ kind: 'adjustment', row: adjustment })}>Move to typed setup</Button>}
-                            <Button type="button" variant="outline" size="sm" aria-label={`Remove legacy item ${adjustment.label}`} onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>Remove</Button>
-                          </div>
-                        </div>
-                        <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
-                        <div className="mt-3">
-                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes (reference only)</label>
-                          <Input value={adjustment.notes} disabled />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_deduction')) && (
-                    <div className="rounded-xl border border-dashed border-rose-200 bg-white/70 px-4 py-6 text-sm text-rose-800">No recurring deductions set.</div>
-                  )}
-                </div>
-              </section>
-            </div>
-          </CardContent>
-        </Card>
+          </CardContent></Card>
         )}
 
         {/* Contractor Information — only shown for 1099 contractors */}
@@ -2119,10 +1711,10 @@ export function EmployeeForm() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-39">
                     Contractor Type <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-39"
                     name="contractor_type"
                     required
                     value={form.contractor_type || 'individual'}
@@ -2148,10 +1740,10 @@ export function EmployeeForm() {
               {form.contractor_type === 'business' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-14">
                       Legal Business Name <span className="text-danger-600">*</span>
                     </label>
-                    <Input
+                    <Input id="employee-field-14"
                       name="business_name"
                       required
                       value={form.business_name || ''}
@@ -2161,12 +1753,12 @@ export function EmployeeForm() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      EIN (Employer Identification Number) <span className="text-danger-600">*</span>
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-15">
+                      EIN (Employer Identification Number) {!allowsUnverifiedBlank('contractor_ein') && <span className="text-danger-600">*</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-15"
                       name="contractor_ein"
-                      required
+                      required={!allowsUnverifiedBlank('contractor_ein')}
                       value={form.contractor_ein || ''}
                       onChange={(e) => handleChange('contractor_ein', formatEIN(e.target.value))}
                       placeholder="XX-XXXXXXX"
@@ -2192,7 +1784,7 @@ export function EmployeeForm() {
             <CardHeader>
               <CardTitle>W-4 Tax Withholding</CardTitle>
               <p className="text-sm text-gray-500 mt-1">
-                Based on IRS Form W-4 (2020+). Each saved change becomes a dated, read-only election in the employee&apos;s history.
+                {allowsUnverifiedBlank('withholding_election') ? 'The employee withholding election is outstanding. Payroll requires an explicitly reviewed withholding decision.' : <>Based on IRS Form W-4 (2020+). Each saved change becomes a dated, read-only election in the employee&apos;s history.</>}
               </p>
             </CardHeader>
             <CardContent>
@@ -2200,7 +1792,7 @@ export function EmployeeForm() {
                 <div className="mb-5 rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-primary-950">Current election</p>
+                      <p className="text-sm font-semibold text-primary-950">{loadedEmployee.current_w4_election.source === 'default_withholding' ? 'Approved default withholding' : 'Current employee election'}</p>
                       <p className="mt-1 text-sm text-primary-800">
                         Effective {new Date(`${loadedEmployee.current_w4_election.effective_on}T00:00:00`).toLocaleDateString()} · Form {loadedEmployee.current_w4_election.w4_form_version}
                       </p>
@@ -2212,14 +1804,19 @@ export function EmployeeForm() {
               )}
 
               {/* Step 1: Filing Status */}
+              {loadedEmployee?.intake_readiness?.missing_fields.includes('withholding_election') && <div className="mb-4 rounded-lg border border-warning-200 bg-warning-50 p-3">
+                <label className="flex items-start gap-2 text-sm leading-6 text-warning-900"><input name="w4_election_received" type="checkbox" checked={w4ElectionReceived} onChange={(event) => toggleReceivedWithholding(event.target.checked)} className="mt-1 h-4 w-4" />Record a received employee withholding election</label>
+                <p className="mt-1 text-xs leading-5 text-warning-900">Use the received form's effective date and signed date or source reference. Ordinary profile edits preserve the approved default treatment.</p>
+                {getFieldError('w4_election_received') && <p className="mt-2 text-sm text-danger-700">{getFieldError('w4_election_received')}</p>}
+              </div>}
               <div className="mb-4">
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 1: Filing Status</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-40">
                       Filing Status <span className="text-danger-600">*</span>
                     </label>
-                    <Select
+                    <Select id="employee-field-40"
                       required
                       value={form.filing_status}
                       onChange={(e) => handleChange('filing_status', e.target.value as FilingStatus)}
@@ -2230,10 +1827,10 @@ export function EmployeeForm() {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-16">
                       Form revision year
                     </label>
-                    <Input
+                    <Input id="employee-field-16"
                       type="number"
                       min="1987"
                       max={new Date().getFullYear() + 1}
@@ -2243,17 +1840,17 @@ export function EmployeeForm() {
                     <p className="mt-1 text-xs text-gray-500">Pre-2020 forms are recorded but blocked from the 2020+ calculation engine.</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-17">
                       Effective date
                     </label>
-                    <Input
+                    <Input id="employee-field-17"
                       name="w4_effective_on"
                       type="date"
                       value={form.w4_effective_on || ''}
                       onChange={(e) => handleChange('w4_effective_on', e.target.value || null)}
                       aria-invalid={Boolean(getFieldError('w4_effective_on'))}
                     />
-                    <p className="mt-1 text-xs text-gray-500">Record the date this withholding election became effective.</p>
+                    <p className="mt-1 text-xs text-gray-500">{allowsUnverifiedBlank('withholding_election') ? 'Leave blank if the employee withholding election has not been received. Payroll needs a separate reviewed withholding decision.' : 'Record the date this withholding election became effective.'}</p>
                     {getFieldError('w4_effective_on') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_effective_on')}</p>}
                   </div>
                 </div>
@@ -2293,10 +1890,10 @@ export function EmployeeForm() {
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 3: Dependent and Other Credits</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-18">
                       Total Annual Step 3 Credit ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-18"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_dependent_credit}
@@ -2315,10 +1912,10 @@ export function EmployeeForm() {
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 4: Other Adjustments (optional)</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-19">
                       4(a) Other Income ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-19"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_step4a_other_income}
@@ -2330,10 +1927,10 @@ export function EmployeeForm() {
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-20">
                       4(b) Deductions ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-20"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_step4b_deductions}
@@ -2345,10 +1942,10 @@ export function EmployeeForm() {
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-21">
                       4(c) Extra Withholding ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-21"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.additional_withholding}
@@ -2362,7 +1959,7 @@ export function EmployeeForm() {
                 </div>
               </div>
 
-              {isEditing && !isClient && w4HasChanged && (
+              {isEditing && !isClient && (w4HasChanged || w4ElectionReceived) && (
                 <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                   <label htmlFor="w4-change-reason" className="block text-sm font-semibold text-amber-950">
                     Reason for this W-4 change <span className="text-danger-600">*</span>
@@ -2413,10 +2010,10 @@ export function EmployeeForm() {
                 <p className="mb-3 text-xs leading-5 text-gray-500">Basic percentage setup for a new employee. After saving, use Pay setup for fixed amounts, catch-up rules, caps, and employer match formulas.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-22">
                       Pre-Tax 401(k) (%)
                     </label>
-                    <NumericInput
+                    <NumericInput id="employee-field-22"
                       value={form.retirement_rate * 100}
                       onValueChange={(value) => handleChange('retirement_rate', (value ?? 0) / 100)}
                       min={0}
@@ -2425,10 +2022,10 @@ export function EmployeeForm() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-23">
                       Roth 401(k) (%)
                     </label>
-                    <NumericInput
+                    <NumericInput id="employee-field-23"
                       value={form.roth_retirement_rate * 100}
                       onValueChange={(value) => handleChange('roth_retirement_rate', (value ?? 0) / 100)}
                       min={0}
@@ -2484,16 +2081,16 @@ export function EmployeeForm() {
           <CardHeader>
             <CardTitle>Address</CardTitle>
             <CardDescription>
-              Required for payroll checks and W-2/1099 filing. Address line 2 remains optional.
+              Used on payroll checks and required for W-2/1099 filing. Missing address lines are omitted from checks when incomplete entry is authorized.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1 <span className="text-danger-600">*</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-24">
+                  Address Line 1 {!allowsUnverifiedBlank('address_line1') && <span className="text-danger-600">*</span>}
                 </label>
-                <Input
+                <Input id="employee-field-24"
                   name="address_line1"
                   required={!allowsUnverifiedBlank('address_line1')}
                   value={form.address_line1 || ''}
@@ -2503,10 +2100,10 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-25">
                   Address Line 2
                 </label>
-                <Input
+                <Input id="employee-field-25"
                   value={form.address_line2 || ''}
                   onChange={(e) => handleChange('address_line2', e.target.value)}
                   placeholder="Apt, suite, etc."
@@ -2514,10 +2111,10 @@ export function EmployeeForm() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City <span className="text-danger-600">*</span>
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-26">
+                    City {!allowsUnverifiedBlank('city') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-26"
                     name="city"
                     required={!allowsUnverifiedBlank('city')}
                     value={form.city || ''}
@@ -2526,10 +2123,10 @@ export function EmployeeForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State <span className="text-danger-600">*</span>
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-27">
+                    State {!allowsUnverifiedBlank('state') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-27"
                     name="state"
                     required={!allowsUnverifiedBlank('state')}
                     value={form.state || ''}
@@ -2540,10 +2137,10 @@ export function EmployeeForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code <span className="text-danger-600">*</span>
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-28">
+                    ZIP Code {!allowsUnverifiedBlank('zip') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-28"
                     name="zip"
                     required={!allowsUnverifiedBlank('zip')}
                     value={form.zip || ''}
@@ -2582,10 +2179,10 @@ export function EmployeeForm() {
             Required fields are marked <span className="font-semibold text-danger-600">*</span>
           </p>
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 sm:flex sm:justify-end">
-            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate(returnTo)} disabled={isSaving}>
+            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate(returnTo)} disabled={isSaving || payItemPending || showQuickPayrollField}>
               Cancel
             </Button>
-            <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving}>
+            <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving || payItemPending || showQuickPayrollField || quickPayrollFieldSaving}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? 'Saving...' : isEditing ? `Update ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : `Create ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>

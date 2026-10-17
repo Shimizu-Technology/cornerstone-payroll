@@ -27,7 +27,12 @@ module TimeTracking
     end
 
     def self.blocker_for(item, check_activity: nil)
+      pending_resolution = resolution_blocker_for(item)
+      return pending_resolution if pending_resolution
       return unless item.pay_period.committed?
+      if item.source_accounting_correction_linked?
+        return "This payment has an exact source accounting correction. Payment cancellation is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
+      end
       if item.time_tracking_manual_allocations.where.not(status: "voided").where.not(payment_cancellation_intent: {}).exists?
         return "Finish syncing the earlier check cancellation before changing this payment method again."
       end
@@ -36,7 +41,7 @@ module TimeTracking
       check_activity = PayrollPaymentMethodEligibility.new(item).check_has_activity? if check_activity.nil?
       return unless check_activity
 
-      direct = item.time_tracking_entry_allocations.to_a
+      direct = item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)
       manual = item.time_tracking_manual_allocations.where.not(status: "voided").to_a
       sources = (direct + manual).map(&:time_tracking_source).uniq(&:id)
       return if sources.empty?
@@ -55,6 +60,12 @@ module TimeTracking
       nil
     end
 
+    def self.resolution_blocker_for(item)
+      if item.time_tracking_manual_allocations.pending_payment_resolution.exists?
+        "Reconcile the saved reported-payment match before changing or voiding this payment. Its hours remain reserved."
+      end
+    end
+
     def self.original_receipt(item, row, number)
       AirePayrollEntryAcknowledgement.where(payroll_item_id: item.id,
         time_tracking_import_id: row.time_tracking_import_id,
@@ -71,7 +82,7 @@ module TimeTracking
     end
 
     def self.validate_original_receipts!(item)
-      item.time_tracking_entry_allocations.each do |row|
+      (item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)).each do |row|
         unless valid_original_receipt?(item, row)
           raise PayrollPaymentMethodService::Error, "The original check's exact source receipt is missing. Review the connected payment before cancelling it."
         end

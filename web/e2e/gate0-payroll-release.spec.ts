@@ -904,7 +904,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     let releaseQuickField: (() => void) | undefined;
     const quickFieldStarted = new Promise<void>((resolve): void => { markQuickFieldStarted = resolve; });
     const quickFieldReleased = new Promise<void>((resolve): void => { releaseQuickField = resolve; });
-    const createPersonalPath = `/api/v1/admin/employees/${fixture.employee_id}/payroll_fields/create_personal`;
+    const createPersonalPath = `/api/v1/admin/employees/${fixture.employee_id}/payroll_fields/create_and_assign`;
     await page.route(`**${createPersonalPath}`, async (route): Promise<void> => {
       if (route.request().method() !== 'POST' || route.request().headers()['x-company-id'] !== String(fixture.company_id)) {
         await route.continue();
@@ -918,14 +918,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/edit`);
     await expect(page.getByRole('heading', { name: 'Edit Employee' })).toBeVisible();
-    const addEmployeeItemButton = page.getByRole('button', { name: 'Add employee-only item' });
+    const addEmployeeItemButton = page.getByRole('button', { name: 'Add addition', exact: true });
     await expect(addEmployeeItemButton).toBeVisible();
     await waitForUiCommit(page);
     await addEmployeeItemButton.click();
-    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toBeVisible();
+    const quickItemDialog = page.getByRole('dialog', { name: 'Add addition', exact: true });
+    await expect(quickItemDialog).toBeVisible();
     const delayedFieldName = `Delayed primary field ${randomUUID()}`;
-    await page.getByPlaceholder('Auto loan, 401(k), phone allowance').fill(delayedFieldName);
-    await page.getByRole('button', { name: 'Create and assign' }).click();
+    await quickItemDialog.getByLabel('Name', { exact: true }).fill(delayedFieldName);
+    await quickItemDialog.getByLabel(/^Amount(?! type)/).fill('1');
+    await quickItemDialog.getByRole('button', { name: 'Save addition', exact: true }).click();
     await quickFieldStarted;
     await page.evaluate((path): void => {
       window.history.pushState({}, '', path);
@@ -944,7 +946,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(createdFieldResponse.ok()).toBe(true);
     await waitForUiCommit(page);
     await expect(page.getByText(delayedFieldName, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Add an employee-only pay item' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Add addition', exact: true })).toHaveCount(0);
     await context.close();
   });
 
@@ -1360,8 +1362,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const crossCompanyEmployee = await clientApi.get(`client/employees/${fixture.other_employee_id}`, {
       headers: { 'X-Company-Id': String(fixture.other_company_id) },
     });
-    expect(crossCompanyEmployee.status()).toBe(404);
-    expect(JSON.stringify(await responseJson(crossCompanyEmployee))).not.toContain('Jordan Boundary');
+    expect(crossCompanyEmployee.status()).toBe(403);
+    const crossCompanyBody = await responseJson(crossCompanyEmployee);
+    expect(crossCompanyBody.code).toBe('company_context_unavailable');
+    expect(JSON.stringify(crossCompanyBody)).not.toContain('Jordan Boundary');
   });
 
   test('keeps SSNs masked and routes client payroll changes to staff approval', async (): Promise<void> => {
@@ -1971,7 +1975,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     if (payPeriod.correction_status !== 'voided') {
       const voidResponse = await adminApi.post(
         `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
-        { data: { reason: 'Verify filtered correction navigation' } },
+        { data: { reason: 'Verify filtered correction navigation', unpaid_acknowledgement: true } },
       );
       expect(voidResponse.ok()).toBeTruthy();
     }
@@ -2387,4 +2391,69 @@ test('calculates two variable-pay owners with distinct recurring retirement fund
     await context.close();
     await api.dispose();
   }
+
 });
+
+
+test('admits an incomplete employee through the real operator UI and preserves its gaps after strict entry returns', async ({ browser }): Promise<void> => {
+    const fixture = loadFixture();
+    const apiBaseUrl = process.env.E2E_API_URL || `http://127.0.0.1:${process.env.E2E_API_PORT || '4317'}/api/v1/`;
+    const adminApi = await playwrightRequest.newContext({ baseURL: apiBaseUrl, extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const accountantApi = await playwrightRequest.newContext({ baseURL: apiBaseUrl, extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const enabled = await adminApi.patch('admin/employee_intake_settings', { data: { employee_intake_settings: {
+      enabled: true, reason: 'Synthetic employer details outstanding', expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    } } });
+    expect(enabled.ok(), await enabled.text()).toBeTruthy();
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, extraHTTPHeaders: {
+      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+    } });
+    const page = await context.newPage();
+    try {
+      await page.goto(`/companies/${fixture.company_id}/employees/new`);
+      await expect(page.getByText('Incomplete employee entry is enabled for this client.')).toBeVisible();
+      await page.locator('[name="first_name"]').fill('Intake');
+      await page.locator('[name="last_name"]').fill('Synthetic');
+      await page.locator('[name="employment_type"]').selectOption('salary');
+      await page.locator('[name="salary_type"]').selectOption('per_period');
+      await page.locator('[name="pay_rate"]').fill('1000');
+      await page.getByRole('button', { name: 'Create Employee', exact: true }).click();
+      await expect(page).toHaveURL(/employees\/\d+\/overview/);
+      const employeeId = Number(new URL(page.url()).pathname.match(/employees\/(\d+)/)?.[1]);
+      await expect(page.getByRole('heading', { name: 'Profile incomplete', exact: true })).toBeVisible();
+      await expect(page.getByText('Employee withholding election', { exact: true })).toBeVisible();
+      const strict = await adminApi.patch('admin/employee_intake_settings', { data: { employee_intake_settings: { enabled: false } } });
+      expect(strict.ok(), await strict.text()).toBeTruthy();
+      await page.getByRole('link', { name: 'Edit employee', exact: true }).click();
+      await page.locator('[name="city"]').fill('Hagatna');
+      await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
+      await expect(page).toHaveURL((url) => url.pathname === `/companies/${fixture.company_id}/employees/${employeeId}/overview`);
+      const confirmation = await adminApi.patch(`admin/employees/${employeeId}/intake_exception`, { data: { intake_exception: {
+        confirm_payroll_setup: true, payroll_eligible_from: '2026-10-09', reason: 'Synthetic pay setup reviewed', acknowledge_default_withholding: true,
+      } } });
+      expect(confirmation.ok(), await confirmation.text()).toBeTruthy();
+      await page.reload();
+      await page.getByRole('link', { name: 'Edit employee', exact: true }).click();
+      await expect(page.getByText('Approved default withholding', { exact: true })).toBeVisible();
+      await page.locator('[name="city"]').fill('Tamuning');
+      await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
+      await expect(page).toHaveURL((url) => url.pathname === `/companies/${fixture.company_id}/employees/${employeeId}/overview`);
+      const employee = (await (await adminApi.get(`admin/employees/${employeeId}`)).json()).data;
+      expect(employee.city).toBe('Tamuning');
+      expect(employee.current_w4_election.source).toBe('default_withholding');
+      expect(employee.intake_readiness.missing_fields).toContain('withholding_election');
+      expect(employee.intake_readiness.exception.payroll_setup_confirmed_at).toBeTruthy();
+      const rejected = await accountantApi.post('admin/employees', { data: { employee: {
+        first_name: 'Must', last_name: 'Reject', employment_type: 'hourly', pay_rate: 20, pay_frequency: 'biweekly',
+      } } });
+      expect(rejected.status()).toBe(422);
+    } finally {
+      await adminApi.patch('admin/employee_intake_settings', { data: { employee_intake_settings: { enabled: false } } });
+      await context.close();
+      await adminApi.dispose();
+      await accountantApi.dispose();
+    }
+  });

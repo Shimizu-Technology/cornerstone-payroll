@@ -1,0 +1,229 @@
+{
+  "request": {
+    "command_id": "33333333-3333-4333-8333-333333333333",
+    "expected_version": 0,
+    "reason": "Verified physical original check delivery",
+    "occurred_at": "2026-10-11T08:00:00.123456Z",
+    "payment_method": "paper_check",
+    "payment_reference": "ISSUE-91",
+    "payment_effective_on": "2026-10-11"
+  },
+  "fresh_response": {
+    "manual_allocation": {
+      "id": "901",
+      "version": 1,
+      "source_time_entry_id": "801",
+      "source_time_entry_version": 2,
+      "source_user_uuid": "11111111-1111-4111-8111-111111111111",
+      "work_date": "2026-10-01",
+      "pay_date": "2026-10-15",
+      "time_category_id": "3",
+      "regular_hours": 8.0,
+      "overtime_hours": 0.0,
+      "total_hours": 8.0,
+      "external_pay_period_id": "67",
+      "external_payroll_item_id": "91",
+      "status": "issued",
+      "payment_method": "paper_check",
+      "payment_reference": "ISSUE-91",
+      "payment_effective_on": "2026-10-11",
+      "issued_at": "2026-10-11T08:00:00.123456Z",
+      "issued_payment": {
+        "event_id": "902",
+        "event_type": "issued",
+        "occurred_at": "2026-10-11T08:00:00.123456Z",
+        "payment_method": "paper_check",
+        "payment_reference": "ISSUE-91",
+        "payment_effective_on": "2026-10-11",
+        "reason": "Verified physical original check delivery"
+      }
+    },
+    "integration": {
+      "protocol": "shimizu_time_payroll",
+      "protocol_version": "1.0",
+      "source_type": "aire_services",
+      "source_instance_id": "22222222-2222-4222-8222-222222222222",
+      "capabilities": [
+        "time_summary_v1",
+        "finalized_batch_v2",
+        "payroll_calendar_v2",
+        "exact_line_receipts_v2",
+        "payroll_obligation_correction_v1",
+        "payment_cancellation_v1",
+        "employee_period_evidence_v1",
+        "employee_directory",
+        "payroll_cockpit",
+        "account_linking",
+        "manual_allocations",
+        "payment_attestations"
+      ]
+    },
+    "command_result": {
+      "manual_allocation_id": 901,
+      "result_version": 1,
+      "status": "issued",
+      "manual_allocation": {
+        "id": "901",
+        "version": 1,
+        "source_time_entry_id": "801",
+        "source_time_entry_version": 2,
+        "source_user_uuid": "11111111-1111-4111-8111-111111111111",
+        "work_date": "2026-10-01",
+        "pay_date": "2026-10-15",
+        "time_category_id": "3",
+        "regular_hours": 8.0,
+        "overtime_hours": 0.0,
+        "total_hours": 8.0,
+        "external_pay_period_id": "67",
+        "external_payroll_item_id": "91",
+        "status": "issued",
+        "payment_method": "paper_check",
+        "payment_reference": "ISSUE-91",
+        "payment_effective_on": "2026-10-11",
+        "issued_at": "2026-10-11T08:00:00.123456Z",
+        "issued_payment": {
+          "event_id": "902",
+          "event_type": "issued",
+          "occurred_at": "2026-10-11T08:00:00.123456Z",
+          "payment_method": "paper_check",
+          "payment_reference": "ISSUE-91",
+          "payment_effective_on": "2026-10-11"
+        }
+      },
+      "integration": {
+        "protocol": "shimizu_time_payroll",
+        "protocol_version": "1.0",
+        "source_type": "aire_services",
+        "source_instance_id": "22222222-2222-4222-8222-222222222222",
+        "capabilities": [
+          "time_summary_v1",
+          "finalized_batch_v2",
+          "payroll_calendar_v2",
+          "exact_line_receipts_v2",
+          "payroll_obligation_correction_v1",
+          "payment_cancellation_v1",
+          "employee_period_evidence_v1",
+          "employee_directory",
+          "payroll_cockpit",
+          "account_linking",
+          "manual_allocations",
+          "payment_attestations"
+        ]
+      },
+      "expected_version": 0
+    },
+    "command": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "replayed": false
+    }
+  },
+  "replay_response": {
+    "manual_allocation": {
+      "id": "901",
+      "version": 1,
+      "source_time_entry_id": "801",
+      "source_time_entry_version": 2,
+      "source_user_uuid": "11111111-1111-4111-8111-111111111111",
+      "work_date": "2026-10-01",
+      "pay_date": "2026-10-15",
+      "time_category_id": "3",
+      "regular_hours": 8.0,
+      "overtime_hours": 0.0,
+      "total_hours": 8.0,
+      "external_pay_period_id": "67",
+      "external_payroll_item_id": "91",
+      "status": "issued",
+      "payment_method": "paper_check",
+      "payment_reference": "ISSUE-91",
+      "payment_effective_on": "2026-10-11",
+      "issued_at": "2026-10-11T08:00:00.123456Z",
+      "issued_payment": {
+        "event_id": "902",
+        "event_type": "issued",
+        "occurred_at": "2026-10-11T08:00:00.123456Z",
+        "payment_method": "paper_check",
+        "payment_reference": "ISSUE-91",
+        "payment_effective_on": "2026-10-11",
+        "reason": "Verified physical original check delivery"
+      }
+    },
+    "integration": {
+      "protocol": "shimizu_time_payroll",
+      "protocol_version": "1.0",
+      "source_type": "aire_services",
+      "source_instance_id": "22222222-2222-4222-8222-222222222222",
+      "capabilities": [
+        "time_summary_v1",
+        "finalized_batch_v2",
+        "payroll_calendar_v2",
+        "exact_line_receipts_v2",
+        "payroll_obligation_correction_v1",
+        "payment_cancellation_v1",
+        "employee_period_evidence_v1",
+        "employee_directory",
+        "payroll_cockpit",
+        "account_linking",
+        "manual_allocations",
+        "payment_attestations"
+      ]
+    },
+    "command_result": {
+      "manual_allocation_id": 901,
+      "result_version": 1,
+      "status": "issued",
+      "manual_allocation": {
+        "id": "901",
+        "version": 1,
+        "source_time_entry_id": "801",
+        "source_time_entry_version": 2,
+        "source_user_uuid": "11111111-1111-4111-8111-111111111111",
+        "work_date": "2026-10-01",
+        "pay_date": "2026-10-15",
+        "time_category_id": "3",
+        "regular_hours": 8.0,
+        "overtime_hours": 0.0,
+        "total_hours": 8.0,
+        "external_pay_period_id": "67",
+        "external_payroll_item_id": "91",
+        "status": "issued",
+        "payment_method": "paper_check",
+        "payment_reference": "ISSUE-91",
+        "payment_effective_on": "2026-10-11",
+        "issued_at": "2026-10-11T08:00:00.123456Z",
+        "issued_payment": {
+          "event_id": "902",
+          "event_type": "issued",
+          "occurred_at": "2026-10-11T08:00:00.123456Z",
+          "payment_method": "paper_check",
+          "payment_reference": "ISSUE-91",
+          "payment_effective_on": "2026-10-11"
+        }
+      },
+      "integration": {
+        "protocol": "shimizu_time_payroll",
+        "protocol_version": "1.0",
+        "source_type": "aire_services",
+        "source_instance_id": "22222222-2222-4222-8222-222222222222",
+        "capabilities": [
+          "time_summary_v1",
+          "finalized_batch_v2",
+          "payroll_calendar_v2",
+          "exact_line_receipts_v2",
+          "payroll_obligation_correction_v1",
+          "payment_cancellation_v1",
+          "employee_period_evidence_v1",
+          "employee_directory",
+          "payroll_cockpit",
+          "account_linking",
+          "manual_allocations",
+          "payment_attestations"
+        ]
+      },
+      "expected_version": 0
+    },
+    "command": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "replayed": true
+    }
+  }
+}

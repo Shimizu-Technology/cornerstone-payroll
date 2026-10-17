@@ -75,7 +75,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       data = response.parsed_body.fetch("data")
       managed_payload = data.find { |row| row.fetch("id") == managed_user.id }
 
-      expect(managed_payload).to include("assigned_company_ids" => [client_company.id])
+      expect(managed_payload).to include("assigned_company_ids" => [ client_company.id ])
       expect(managed_payload.fetch("assigned_companies")).to include(
         include(
           "id" => client_company.id,
@@ -133,7 +133,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
               email: "new-accountant@example.com",
               name: "New Accountant",
               role: "accountant",
-              company_ids: [client_company.id, other_company.id]
+              company_ids: [ client_company.id, other_company.id ]
             }
           }
       }.to change(User, :count).by(1)
@@ -143,8 +143,8 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       payload = response.parsed_body.fetch("data")
       created_user = User.find(payload.fetch("id"))
 
-      expect(created_user.company_assignments.order(:company_id).pluck(:company_id)).to eq([client_company.id, other_company.id])
-      expect(payload.fetch("assigned_company_ids")).to match_array([client_company.id, other_company.id])
+      expect(created_user.company_assignments.order(:company_id).pluck(:company_id)).to eq([ client_company.id, other_company.id ])
+      expect(payload.fetch("assigned_company_ids")).to match_array([ client_company.id, other_company.id ])
       expect(payload.fetch("assigned_companies")).to match_array([
         include("id" => client_company.id, "name" => client_company.name),
         include("id" => other_company.id, "name" => other_company.name)
@@ -162,7 +162,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
               email: "",
               name: "Invalid User",
               role: "accountant",
-              company_ids: [client_company.id]
+              company_ids: [ client_company.id ]
             }
           }
       }.not_to change(User, :count)
@@ -208,7 +208,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           user: {
             name: "Updated Accountant",
             role: "manager",
-            company_ids: [other_company.id]
+            company_ids: [ other_company.id ]
           }
         }
 
@@ -216,10 +216,10 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       managed_user.reload
       expect(managed_user.name).to eq("Updated Accountant")
       expect(managed_user.role).to eq("manager")
-      expect(managed_user.company_assignments.pluck(:company_id)).to eq([other_company.id])
+      expect(managed_user.company_assignments.pluck(:company_id)).to eq([ other_company.id ])
 
       payload = response.parsed_body.fetch("data")
-      expect(payload.fetch("assigned_company_ids")).to eq([other_company.id])
+      expect(payload.fetch("assigned_company_ids")).to eq([ other_company.id ])
       expect(payload.fetch("assigned_companies")).to eq([
         {
           "id" => other_company.id,
@@ -265,7 +265,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Renamed Other Company User")
       expect(switched_company_user.role).to eq("accountant")
-      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
+      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([ client_company.id ])
     end
 
     it "allows assignment changes for users in another staff workspace" do
@@ -274,14 +274,14 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           user: {
             name: "Renamed Other Company User",
             role: "accountant",
-            company_ids: [client_company.id]
+            company_ids: [ client_company.id ]
           }
         }
 
       expect(response).to have_http_status(:ok)
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Renamed Other Company User")
-      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
+      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([ client_company.id ])
     end
 
     it "allows role changes for users in another staff workspace when the change would clear assignments" do
@@ -332,13 +332,13 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         params: {
           user: {
             role: "accountant",
-            company_ids: [foreign_company.id]
+            company_ids: [ foreign_company.id ]
           }
         }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("One or more companies are not accessible")
-      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
+      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([ client_company.id ])
     end
 
     it "prevents super admins from saving cross-organization client assignments" do
@@ -349,13 +349,13 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         params: {
           user: {
             role: "accountant",
-            company_ids: [foreign_company.id]
+            company_ids: [ foreign_company.id ]
           }
         }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Company must belong to the user's organization")
-      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
+      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([ client_company.id ])
     end
   end
 

@@ -27,6 +27,7 @@ class PayrollItemDisclosure
 
         { label: entry.description, amount: entry.company_amount, source: entry.source }
       end,
+      w4_provenance: PayrollItemW4Provenance.call(@item),
       reconciliation: {
         gross_pay: @item.gross_pay.to_f,
         other_pay: other_pay.sum { |line| line.amount.to_d }.round(2).to_f,

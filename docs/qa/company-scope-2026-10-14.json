@@ -1,0 +1,83 @@
+{
+  "source_base": "a0a8d8002d2dcf956f5d16cee7664e3483fefdf2",
+  "tested_product_commit": "c69dc7976ce6cfcb7ec36c09f89410205ef0ef4e",
+  "tested_browser_contract_commit": "fc892a2f6bfd03bf9959c5477d49b6b3ed7a09bf",
+  "environment": "Local Rails test/private synthetic PostgreSQL/desktop and390x844 CSS viewport; synthetic authentication; no real Clerk/provider/physical-device acceptance",
+  "scenarios": [
+    {
+      "case": "explicit malformed or inaccessible company header",
+      "result": "passed",
+      "method": "request regressions",
+      "expected": "403 company_context_unavailable; no other-client read/save"
+    },
+    {
+      "case": "expired/revoked/archived workspace form",
+      "result": "passed",
+      "method": "request regressions; browser expiry scenario",
+      "expected": "403; no Employee/WageRate/W4/Audit mutation"
+    },
+    {
+      "case": "conflicting accessible form/request company",
+      "result": "passed",
+      "method": "request regression",
+      "expected": "409 company_context_mismatch; no saved effects"
+    },
+    {
+      "case": "grant revoked after initial authorization",
+      "result": "passed",
+      "method": "request injection before locked persistence",
+      "expected": "fresh actor/assignment recheck rejects; no business mutation"
+    },
+    {
+      "case": "role removed after initial authorization",
+      "result": "passed",
+      "method": "request injection before locked persistence",
+      "expected": "staff/capability recheck rejects live-client save; no business mutation"
+    },
+    {
+      "case": "desktop create after expiry",
+      "result": "passed",
+      "method": "actual computer use",
+      "expected": "clear403, all entered fields retained; zerohome records"
+    },
+    {
+      "case": "390px retained creation retry after same synthetic grant restored",
+      "result": "passed",
+      "method": "actual computer use plus saved-state reconciliation",
+      "expected": "employee and W4 election saved only in workspace2"
+    },
+    {
+      "case": "latest390px update after expiry then restored grant",
+      "result": "passed",
+      "method": "fresh runtime computer use plus saved-state SQL",
+      "expected": "stored city unchanged on403; retained edit saved into sameworkspace2 after restoredgrant;2employeesworkspace2/0home1"
+    }
+  ],
+  "gates": {
+    "full_rspec": {
+      "examples": 4531,
+      "failures": 0
+    },
+    "public_browser": {
+      "passed": 129
+    },
+    "release_browser": {
+      "passed": 45
+    },
+    "refresh_browser": {
+      "passed": 10
+    },
+    "pay_items_browser": {
+      "passed": 24,
+      "environment": "canonical API/Vite independently supervised; managed-host transport failures retained locally, no weakened assertions"
+    },
+    "frontend": "types/strict lint/all unit tests/build passed",
+    "security": "RuboCop1423files/Brakeman0/bundler-audit0/npm-audit0"
+  },
+  "limits": [
+    "Actual physical phone/printer/assistive technology/real identity provider not certified",
+    "Final paired integrated build and staging deployment remain independent gates",
+    "Does not serialize every organization lifecycle update",
+    "No production financial/history change"
+  ]
+}

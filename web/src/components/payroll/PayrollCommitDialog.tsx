@@ -35,9 +35,9 @@ export function PayrollCommitDialog({ open, payPeriod, companyName, itemCount, t
         <ul className="mt-2 list-disc space-y-1 pl-5">{payPeriod.compliance_warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
       </div>}
       <p className="text-sm leading-6 text-neutral-600">Review this run before confirming. Later payroll changes must use the corrections workflow.</p>
-      <DialogFooter>
-        <Button type="button" variant="outline" disabled={processing} onClick={onCancel}>Keep reviewing</Button>
-        <Button type="button" disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(payPeriod.id); }}>{processing ? 'Committing…' : 'Confirm commit'}</Button>
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button className="max-sm:min-h-[44px]" type="button" variant="outline" disabled={processing} onClick={onCancel}>Keep reviewing</Button>
+        <Button className="max-sm:min-h-[44px]" type="button" disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(payPeriod.id); }}>{processing ? 'Committing…' : 'Confirm commit'}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;

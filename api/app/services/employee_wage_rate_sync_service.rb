@@ -12,8 +12,10 @@ class EmployeeWageRateSyncService
   end
 
   def sync!
-    employee.with_lock do
-      sync_under_employee_lock!
+    employee.company.with_lock do
+      employee.with_lock do
+        sync_under_employee_lock!
+      end
     end
   end
 

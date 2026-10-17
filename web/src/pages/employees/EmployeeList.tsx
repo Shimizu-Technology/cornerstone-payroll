@@ -36,8 +36,10 @@ import {
 } from '@/lib/utils';
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
+import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
@@ -61,8 +63,7 @@ export function EmployeeList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
@@ -105,6 +106,7 @@ export function EmployeeList() {
   const status = searchParams.get('status') ?? 'active';
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
+  const intakeStatus = searchParams.get('intake_status') || '';
   const configurationReviewStatus = searchParams.get('configuration_review_status') || '';
   const sortBy = (searchParams.get('sort_by') as 'name' | 'department' | 'rate' | 'status' | null) ?? 'name';
   const sortDirection = (searchParams.get('sort_direction') as 'asc' | 'desc' | null) ?? 'asc';
@@ -143,6 +145,7 @@ export function EmployeeList() {
             status: status === 'all' ? undefined : (status || undefined),
             department_id: departmentId ? parseInt(departmentId, 10) : undefined,
             employment_type: employmentType || undefined,
+            intake_status: intakeStatus === 'incomplete' ? 'incomplete' : undefined,
             configuration_review_status: configurationReviewStatus === 'needs_review' ? 'needs_review' : undefined,
             page,
             per_page: 500,
@@ -163,7 +166,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
+  }, [companyId, intakeStatus, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -284,7 +287,7 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [companyEmployees]);
 
-  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || status !== 'active');
+  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || intakeStatus || status !== 'active');
 
   return (
     <div>
@@ -310,9 +313,10 @@ export function EmployeeList() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        <EmployeeIntakeSettingsPanel key={companyId} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
         {/* Filters */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row">
-          <div className="relative flex-1 sm:max-w-md">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
+          <div className="relative w-full sm:w-72 sm:shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               type="text"
@@ -323,7 +327,7 @@ export function EmployeeList() {
             />
           </div>
           
-          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
             <Select
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
@@ -359,6 +363,7 @@ export function EmployeeList() {
               ))}
             </Select>
 
+            {!isClient && <Select value={intakeStatus} onChange={(event) => updateFilter('intake_status', event.target.value)} className="w-full sm:w-44" aria-label="Profile completeness"><option value="">All profiles</option><option value="incomplete">Incomplete profiles</option></Select>}
             {!isClient && (
               <Select
                 value={configurationReviewStatus}
@@ -413,7 +418,7 @@ export function EmployeeList() {
               {hasActiveFilters
                 ? 'Try adjusting your filters.'
                 : readOnlyWorkspace
-                  ? 'No employees were preserved in this backup.'
+                  ? 'No employees are available in this workspace.'
                 : 'Get started by adding your first employee.'}
             </p>
             {!hasActiveFilters && !readOnlyWorkspace && (
@@ -552,6 +557,7 @@ export function EmployeeList() {
 
       <EmployeeBulkImportModal
         key={companyId}
+        readOnly={readOnlyWorkspace}
         open={!isClient && showBulkImport}
         onClose={() => setShowBulkImport(false)}
         onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}
@@ -612,6 +618,7 @@ function EmployeeMobileCard({
               >
                 {statusConfig.label}
               </Badge>
+              {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
               {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
             </div>
           </div>
@@ -732,7 +739,8 @@ function EmployeeTableRow({
           >
             {statusConfig.label}
           </Badge>
-          {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
+          {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
+              {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
         </div>
       </TableCell>
       <TableCell className="text-right">

@@ -164,9 +164,21 @@ class PayPeriod < ApplicationRecord
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
+  before_update :guard_pending_payment_resolution
   before_update :prevent_training_baseline_mutation
+
+  def guard_pending_payment_resolution
+    return unless (changes_to_save.keys & %w[status correction_status voided_at pay_date start_date end_date superseded_by_id]).any?
+
+    self.class.where(id: id).lock.pluck(:id)
+    return unless time_tracking_manual_allocations.pending_payment_resolution.exists?
+
+    errors.add(:base, "Reconcile the saved reported-payment match before revising or voiding this payroll. Its hours remain reserved.")
+    throw :abort
+  end
   before_destroy :prevent_training_baseline_mutation
 
+  scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
@@ -282,7 +294,7 @@ class PayPeriod < ApplicationRecord
   def invalidate_later_rehearsal_calculations!
     return unless test_workspace?
 
-    company.pay_periods
+    company.pay_periods.without_training_baselines
       .where(status: %w[calculated approved])
       .where("pay_date > :date OR (pay_date = :date AND id > :id)", date: pay_date, id: id)
       .find_each do |later|

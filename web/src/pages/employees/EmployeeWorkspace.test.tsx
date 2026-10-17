@@ -198,6 +198,48 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(screen.queryByText('Paper check · not assigned')).toBeNull();
   });
 
+  it('changes year and source filters without losing the selected employee or return context', async () => {
+    const native = {
+      key: 'native:4', record_type: 'native', payroll_item_id: 4, pay_period_id: 5,
+      pay_date: '2026-09-19', period_description: 'Current native payroll',
+      source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+      gross_pay: 900, total_deductions: 100, net_pay: 800, check_number: '30000',
+    };
+    apiMocks.employeePayHistory.mockResolvedValue({ report: { summary: {}, history: [
+      native,
+      { ...native, key: 'native:6', payroll_item_id: 6, pay_period_id: 7,
+        pay_date: '2025-09-19', period_description: 'Prior native payroll' },
+      { ...native, key: 'imported:9', record_type: 'imported', payroll_item_id: null,
+        pay_period_id: null, historical_pay_period_id: 9, pay_date: '2025-08-19',
+        period_description: 'Prior imported payroll',
+        source: { system: 'quickbooks_online', label: 'QuickBooks', locked: true } },
+    ] } });
+    const returnTo = '/companies/1/pay-runs/5/work';
+    render(<MemoryRouter initialEntries={[`/companies/1/employees/2/pay-history?history_year=2026&history_source=cornerstone&return_to=${encodeURIComponent(returnTo)}`]}>
+      <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+    </MemoryRouter>);
+
+    const year = await screen.findByRole('combobox', { name: 'Year' });
+    const source = screen.getByRole('combobox', { name: 'Source' });
+    expect(year).toHaveProperty('value', '2026');
+    expect(source).toHaveProperty('value', 'cornerstone');
+    expect(screen.getByRole('group', { name: 'Pay history for Sep 19, 2026' })).toBeTruthy();
+    fireEvent.change(year, { target: { value: '2025' } });
+    expect(screen.getByRole('group', { name: 'Pay history for Sep 19, 2025' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Pay history for Sep 19, 2026' })).toBeNull();
+    expect(source).toHaveProperty('value', 'cornerstone');
+    fireEvent.change(source, { target: { value: 'quickbooks' } });
+    expect(screen.getByRole('group', { name: 'Pay history for Aug 19, 2025' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Pay history for Sep 19, 2025' })).toBeNull();
+    expect(year).toHaveProperty('value', '2025');
+    const href = screen.getByRole('link', { name: 'Overview' }).getAttribute('href')!;
+    const destination = new URL(href, 'https://payroll.example');
+    expect(destination.pathname).toBe('/companies/1/employees/2/overview');
+    expect(destination.searchParams.get('history_year')).toBe('2025');
+    expect(destination.searchParams.get('history_source')).toBe('quickbooks');
+    expect(destination.searchParams.get('return_to')).toBe(returnTo);
+  });
+
   it('previews a Cornerstone stub from history and offers no stub for imported history', async () => {
     apiMocks.batchPdf.mockResolvedValue({ blob: new Blob(['%PDF']), filename: 'paystub.pdf' });
     apiMocks.employeePayHistory.mockResolvedValue({ report: { summary: {}, history: [

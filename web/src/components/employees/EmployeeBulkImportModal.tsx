@@ -2,6 +2,8 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useCompany } from '@/contexts/CompanyContext';
+import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { employeeBulkImportApi } from '@/services/api';
 import type { BulkImportEmployeeData, BulkImportPreviewResult, BulkImportApplyResult } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
@@ -36,11 +38,15 @@ const EMPTY_EMPLOYEE: BulkImportEmployeeData = {
 
 interface Props {
   open: boolean;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => void;
 }
 
-export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
+export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onComplete }: Props) {
+  const { activeCompanyId } = useCompany();
+  const intake = useEmployeeIntakeSettings(activeCompanyId || 0, false, open && Boolean(activeCompanyId));
+  const allowIncomplete = Boolean(intake.settings?.enabled);
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
@@ -89,6 +95,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   };
 
   const handlePreview = async () => {
+    if (readOnly) return;
     if (!file) return;
     setLoading(true);
     setError(null);
@@ -125,10 +132,10 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
       // When user edits the SSN field, clear the server-side token so
       // handleApply sends the user's value instead of the original file value.
       if (field === 'ssn') newData._ssn_token = undefined;
-      const errors = validateRowData(newData);
+      const errors = validateRowData(newData, allowIncomplete);
       return { ...r, data: newData, errors, included: errors.length === 0 ? r.included : false };
     }));
-  }, []);
+  }, [allowIncomplete]);
 
   const addEmployee = useCallback(() => {
     const id = `new-${Date.now()}`;
@@ -136,14 +143,14 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
       id,
       data: { ...EMPTY_EMPLOYEE },
       included: true,
-      errors: validateRowData(EMPTY_EMPLOYEE),
+      errors: validateRowData(EMPTY_EMPLOYEE, allowIncomplete),
       duplicate: false,
       new_department: false,
       isNew: true,
     };
     setRows(prev => [...prev, newRow]);
     setExpandedId(id);
-  }, []);
+  }, [allowIncomplete]);
 
   const removeRow = useCallback((id: string) => {
     setRows(prev => prev.filter(r => r.id !== id));
@@ -165,6 +172,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   [rows]);
 
   const handleApply = async () => {
+    if (readOnly) return;
     const toImport = rows.filter(r => r.included && r.errors.length === 0);
     if (toImport.length === 0) return;
 
@@ -435,7 +443,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
               </Button>
             )}
             {step === 'upload' && (
-              <Button onClick={handlePreview} disabled={!file || loading}>
+              <Button onClick={handlePreview} disabled={readOnly || !file || loading}>
                 {loading ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -447,7 +455,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
               </Button>
             )}
             {step === 'preview' && (
-              <Button onClick={handleApply} disabled={includedCount === 0}>
+              <Button onClick={handleApply} disabled={readOnly || includedCount === 0}>
                 Import {includedCount} Employee{includedCount !== 1 ? 's' : ''}
               </Button>
             )}
@@ -465,7 +473,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
 
 // --- Validation (client-side mirror of backend) ---
 
-function validateRowData(data: BulkImportEmployeeData): string[] {
+function validateRowData(data: BulkImportEmployeeData, allowIncomplete = false): string[] {
   const errors: string[] = [];
   if (!data.first_name?.trim()) errors.push('first_name is required');
   if (!data.last_name?.trim()) errors.push('last_name is required');
@@ -479,19 +487,22 @@ function validateRowData(data: BulkImportEmployeeData): string[] {
     errors.push('employment_type must be hourly, salary, or contractor');
   }
   if (!data.pay_frequency?.trim()) errors.push('pay_frequency is required');
-  if (!data.hire_date?.trim()) errors.push('hire_date is required');
-  if (!data.address_line1?.trim()) errors.push('address_line1 is required');
-  if (!data.city?.trim()) errors.push('city is required');
-  if (!data.state?.trim()) errors.push('state is required');
-  if (!data.zip?.trim()) errors.push('zip is required');
+  if (!allowIncomplete && data.employment_type !== 'contractor' && !data.w4_effective_on?.trim()) {
+    errors.push('w4_effective_on is required for W-2 employees');
+  }
+  if (!allowIncomplete && !data.hire_date?.trim()) errors.push('hire_date is required');
+  if (!allowIncomplete && !data.address_line1?.trim()) errors.push('address_line1 is required');
+  if (!allowIncomplete && !data.city?.trim()) errors.push('city is required');
+  if (!allowIncomplete && !data.state?.trim()) errors.push('state is required');
+  if (!allowIncomplete && !data.zip?.trim()) errors.push('zip is required');
 
   const businessContractor = data.employment_type === 'contractor' && data.contractor_type === 'business';
   if (businessContractor) {
     if (!data.business_name?.trim()) errors.push('business_name is required for business contractors');
     const einDigits = data.contractor_ein?.replace(/\D/g, '') || '';
-    if (!einDigits) errors.push('contractor_ein is required for business contractors');
-    else if (einDigits.length !== 9) errors.push('contractor_ein must be exactly 9 digits');
-  } else if (!data.ssn && !data._ssn_token) {
+    if (!einDigits && !allowIncomplete) errors.push('contractor_ein is required for business contractors');
+    else if (einDigits && einDigits.length !== 9) errors.push('contractor_ein must be exactly 9 digits');
+  } else if (!allowIncomplete && !data.ssn && !data._ssn_token) {
     errors.push('ssn is required for W-2 employees and individual contractors');
   }
 

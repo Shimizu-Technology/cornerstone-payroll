@@ -19,13 +19,15 @@ class PayrollTaxSyncService
 
   def sync!
     validate_configuration!
-    validate_pay_period!
-
-    @pay_period.generate_idempotency_key!
-    @pay_period.save! if @pay_period.tax_sync_idempotency_key_changed?
-    @pay_period.mark_syncing!
-
-    payload = PayrollTaxSyncPayloadBuilder.new(@pay_period).build
+    payload = @pay_period.with_lock do
+      @sync_idempotency_key = @pay_period.tax_sync_idempotency_key
+      validate_pay_period!
+      @pay_period.generate_idempotency_key!
+      @pay_period.save! if @pay_period.tax_sync_idempotency_key_changed?
+      @sync_idempotency_key = @pay_period.tax_sync_idempotency_key
+      @pay_period.mark_syncing!
+      PayrollTaxSyncPayloadBuilder.new(@pay_period).build
+    end
     response = post_to_cst(payload)
 
     handle_response(response)
@@ -33,14 +35,22 @@ class PayrollTaxSyncService
     @pay_period.update!(@pay_period.tax_sync_disabled_attributes)
     raise
   rescue SyncError => e
-    @pay_period.mark_sync_failed!(e.message)
+    update_current_sync { @pay_period.mark_sync_failed!(e.message) }
     raise
   rescue StandardError => e
-    @pay_period.mark_sync_failed!("Unexpected error: #{e.message}")
+    update_current_sync { @pay_period.mark_sync_failed!("Unexpected error: #{e.message}") }
     raise SyncError, e.message
   end
 
   private
+
+  # An older HTTP request must not complete or fail a newer void revision's sync.
+  # The network call deliberately runs outside the lock used to capture its payload.
+  def update_current_sync
+    @pay_period.with_lock do
+      yield if @pay_period.tax_sync_idempotency_key == @sync_idempotency_key
+    end
+  end
 
   def validate_configuration!
     raise ConfigurationError, "CST_INGEST_URL is not configured" unless self.class.configured?
@@ -48,7 +58,7 @@ class PayrollTaxSyncService
 
   def validate_pay_period!
     raise SyncError, "Pay period is not committed" unless @pay_period.committed?
-    raise SyncError, "Pay period has no reportable payroll items" unless @pay_period.payroll_items.not_voided.reportable.exists?
+    raise SyncError, "Pay period has no reportable payroll items" unless PayrollTaxSyncPayloadBuilder.reportable_items(@pay_period).exists?
   end
 
   def post_to_cst(payload)
@@ -60,7 +70,7 @@ class PayrollTaxSyncService
 
     request = Net::HTTP::Post.new(uri.path)
     request["Content-Type"] = "application/json"
-    request["Idempotency-Key"] = @pay_period.tax_sync_idempotency_key
+    request["Idempotency-Key"] = @sync_idempotency_key
     request["Authorization"] = "Bearer #{api_token}" if api_token.present?
     request["X-Shared-Secret"] = shared_secret if shared_secret.present?
     request["X-Source"] = "cornerstone-payroll"
@@ -72,10 +82,16 @@ class PayrollTaxSyncService
   def handle_response(response)
     case response.code.to_i
     when 200, 201, 204
-      @pay_period.mark_synced!
+      unless response.code.to_i == 204 || response.body.to_s.strip.empty?
+        parsed = JSON.parse(response.body)
+        if parsed.dig("payroll_import_batch", "status") == "failed"
+          raise SyncError, "CST accepted the audit event but its reconciliation failed"
+        end
+      end
+      update_current_sync { @pay_period.mark_synced! }
     when 409
       # Idempotent duplicate — treat as success
-      @pay_period.mark_synced!
+      update_current_sync { @pay_period.mark_synced! }
     when 400..499
       raise SyncError, "CST rejected payload (#{response.code}): #{response.body.to_s.truncate(500)}"
     when 500..599

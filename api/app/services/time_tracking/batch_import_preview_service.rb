@@ -178,52 +178,7 @@ module TimeTracking
     end
 
     def category_buckets(adjustments)
-      buckets = {}
-      Array(adjustments).each do |adjustment|
-        category = adjustment["category"] || {}
-        key = category_bucket_key(adjustment)
-        bucket = buckets[key] ||= {
-          source_category_id: adjustment["source_category_id"].to_s.presence,
-          key: category["key"].to_s.presence,
-          name: category["name"].presence || "Uncategorized",
-          total_hours: 0.to_d,
-          regular_hours: 0.to_d,
-          overtime_hours: 0.to_d,
-          source_kinds: Set.new,
-          source_time_entry_ids: Set.new,
-          original_work_dates: Set.new
-        }
-        bucket[:total_hours] += decimal(adjustment.fetch("total_hours"))
-        bucket[:regular_hours] += decimal(adjustment.fetch("regular_hours"))
-        bucket[:overtime_hours] += decimal(adjustment.fetch("overtime_hours"))
-        bucket[:source_kinds] << adjustment.fetch("source_kind")
-        bucket[:source_time_entry_ids] << adjustment.fetch("source_time_entry_id")
-        bucket[:original_work_dates] << adjustment.fetch("original_work_date")
-      end
-
-      buckets.values.map do |bucket|
-        bucket.merge(
-          total_hours: number(bucket[:total_hours]),
-          hours: number(bucket[:total_hours]),
-          regular_hours: number(bucket[:regular_hours]),
-          overtime_hours: number(bucket[:overtime_hours]),
-          source_kinds: bucket[:source_kinds].to_a.sort,
-          source_time_entry_ids: bucket[:source_time_entry_ids].to_a.sort,
-          original_work_dates: bucket[:original_work_dates].to_a.sort
-        )
-      end.sort_by do |bucket|
-        [ bucket[:name].to_s, bucket[:key].to_s, bucket[:source_category_id].to_s, bucket[:source_kinds].join(",") ]
-      end
-    end
-
-    def category_bucket_key(adjustment)
-      category = adjustment["category"] || {}
-      [
-        adjustment["source_category_id"],
-        category["key"],
-        category["name"],
-        adjustment["source_kind"]
-      ].map(&:to_s).map(&:strip).join("|")
+      SourceCategoryBuckets.call(adjustments)
     end
 
     def match_wage_rate_buckets(categories, employee_id)

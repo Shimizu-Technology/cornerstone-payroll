@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,7 @@ import { formatCurrency } from '@/lib/utils';
 import type {
   CorrectivePaycheckInputs,
   CorrectivePaycheckPreview,
+  CorrectivePaycheckSnapshot,
   PayPeriod,
   PayrollItem,
 } from '@/types';
@@ -56,6 +57,46 @@ function num(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function recordedFormInputs(recorded: CorrectivePaycheckSnapshot) {
+  return { hours_worked: toStr(recorded.hours_worked), overtime_hours: toStr(recorded.overtime_hours),
+    holiday_hours: toStr(recorded.holiday_hours), pto_hours: toStr(recorded.pto_hours), bonus: toStr(recorded.bonus),
+    reported_tips: toStr(recorded.reported_tips), tips_paid_out: toStr(recorded.tips_paid_out) };
+}
+
+const HOUR_FIELDS = ['hours_worked', 'overtime_hours', 'holiday_hours', 'pto_hours'] as const;
+
+function baselineFormInputs(result: CorrectivePaycheckPreview) {
+  const recorded = result.recorded ?? result.original;
+  const inputs = recordedFormInputs(recorded);
+  for (const field of HOUR_FIELDS) {
+    if ((recorded[field] ?? 0) >= 0) continue;
+    const original = result.original[field];
+    if (typeof original !== 'number' || !Number.isFinite(original) || original < 0) {
+      throw new Error('The original absolute hours could not be verified. Review the original payroll before correcting it.');
+    }
+    inputs[field] = toStr(original);
+  }
+  return inputs;
+}
+
+async function fetchRecordedBaseline(periodId: number, originalItem: PayrollItem) {
+  const employee_id = originalItem.employee_id;
+  try {
+    return await payPeriodsApi.correctivePaycheckPreview(periodId, { employee_id, corrected_inputs: {} });
+  } catch (error) {
+    if (!(error instanceof Error) || !/the corrected absolute hours must be nonnegative/i.test(error.message)) throw error;
+    const originalHours: CorrectivePaycheckInputs = {};
+    for (const field of HOUR_FIELDS) {
+      const value = originalItem[field];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        throw new Error('The original absolute hours could not be verified. Review the original payroll before correcting it.');
+      }
+      originalHours[field] = value;
+    }
+    return payPeriodsApi.correctivePaycheckPreview(periodId, { employee_id, corrected_inputs: originalHours });
+  }
+}
+
 function todayIsoDate(): string {
   const d = new Date();
   const year = d.getFullYear();
@@ -84,6 +125,10 @@ export function CorrectivePaycheckModal({
     notes: '',
   }));
   const [preview, setPreview] = useState<CorrectivePaycheckPreview | null>(null);
+  const [baseline, setBaseline] = useState<CorrectivePaycheckSnapshot | null>(null);
+  const [baselinePreview, setBaselinePreview] = useState<CorrectivePaycheckPreview | null>(null);
+  const previewGeneration = useRef(0);
+  const baselineLoaded = useRef(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError, previewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -92,6 +137,10 @@ export function CorrectivePaycheckModal({
   // When the modal re-opens for a different item, reset the form.
   useEffect(() => {
     if (!open) return;
+    const generation = ++previewGeneration.current;
+    baselineLoaded.current = false;
+    setBaseline(null);
+    setBaselinePreview(null);
     setForm({
       hours_worked: toStr(originalItem.hours_worked),
       overtime_hours: toStr(originalItem.overtime_hours),
@@ -107,7 +156,28 @@ export function CorrectivePaycheckModal({
     setPreview(null);
     setPreviewError(null);
     setIssueError(null);
-  }, [open, originalItem.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+    setPreviewLoading(true);
+    void fetchRecordedBaseline(originalPayPeriod.id, originalItem)
+      .then(result => {
+        if (generation !== previewGeneration.current) return;
+        const recorded = result.recorded ?? result.original;
+        const inputs = baselineFormInputs(result);
+        baselineLoaded.current = true;
+        setBaseline(recorded);
+        setBaselinePreview(result);
+        setForm(current => ({ ...current, ...inputs }));
+        setPreview(result);
+      }).catch(err => {
+        if (generation === previewGeneration.current) setPreviewError(err instanceof Error ? err.message : 'Could not verify the recorded correction baseline');
+      }).finally(() => {
+        if (generation === previewGeneration.current) setPreviewLoading(false);
+      });
+    return () => { previewGeneration.current += 1; baselineLoaded.current = false; };
+  }, [open, originalItem.id, originalItem.employee_id, originalPayPeriod.id, setIssueError, setPreviewError]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const precisionError = Object.entries(form).filter(([key]) => !['pay_date', 'reason', 'notes'].includes(key))
+    .some(([, value]) => value !== '' && (!Number.isFinite(Number(value)) || !/^-?\d+(?:\.\d{1,2})?$/.test(value)))
+    ? 'Hours and money must use no more than two decimal places. Review the value before requesting a preview or issuing.' : null;
 
   const correctedInputs: CorrectivePaycheckInputs = useMemo(
     () => ({
@@ -125,7 +195,8 @@ export function CorrectivePaycheckModal({
   // Did the operator actually change anything? (Cheap local diff so we
   // don't fire a preview request for an unchanged form.)
   const inputsChanged = useMemo(() => {
-    const o = originalItem;
+    if (!baseline) return false;
+    const o = baseline;
     return (
       Math.abs(num(form.hours_worked) - (o.hours_worked ?? 0)) > 0.001 ||
       Math.abs(num(form.overtime_hours) - (o.overtime_hours ?? 0)) > 0.001 ||
@@ -135,52 +206,85 @@ export function CorrectivePaycheckModal({
       Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005 ||
       Math.abs(num(form.tips_paid_out) - (o.tips_paid_out ?? 0)) > 0.005
     );
-  }, [form, originalItem]);
+  }, [form, baseline]);
 
   // Debounced preview fetch when corrected inputs change.
-  const fetchPreview = useCallback(async () => {
-    if (!inputsChanged) {
+  const fetchPreview = useCallback(async (force = false) => {
+    if (precisionError) return;
+    if ((!baseline || !inputsChanged) && !force) {
       setPreview(null);
       setPreviewError(null);
       return;
     }
     setPreviewLoading(true);
     setPreviewError(null);
+    const generation = ++previewGeneration.current;
     try {
-      const result = await payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, {
+      const result = baseline ? await payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, {
         employee_id: originalItem.employee_id,
         corrected_inputs: correctedInputs,
-      });
-      setPreview(result);
+      }) : await fetchRecordedBaseline(originalPayPeriod.id, originalItem);
+      if (generation === previewGeneration.current) {
+        setPreview(result);
+        if (!baseline) {
+          const recorded = result.recorded ?? result.original;
+          const inputs = baselineFormInputs(result);
+          baselineLoaded.current = true;
+          setBaseline(recorded); setBaselinePreview(result);
+          setForm(current => ({ ...current, ...inputs }));
+        }
+      }
     } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : 'Preview failed');
-      setPreview(null);
+      if (generation === previewGeneration.current) {
+        setPreviewError(err instanceof Error ? err.message : 'Preview failed');
+        setPreview(null);
+      }
     } finally {
-      setPreviewLoading(false);
+      if (generation === previewGeneration.current) setPreviewLoading(false);
     }
-  }, [inputsChanged, setPreviewError, originalPayPeriod.id, originalItem.employee_id, correctedInputs]);
+  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs, precisionError]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !baseline || !baselineLoaded.current) return;
+    if (precisionError) {
+      previewGeneration.current += 1;
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+    previewGeneration.current += 1;
+    if (!inputsChanged) {
+      setPreview(baselinePreview);
+      setPreviewLoading(false);
+      return;
+    }
+    setPreview(null);
+    setPreviewLoading(inputsChanged);
     const handle = setTimeout(fetchPreview, 350);
     return () => clearTimeout(handle);
-  }, [open, fetchPreview]);
+  }, [open, baseline, baselinePreview, inputsChanged, fetchPreview, precisionError]);
 
   const canSubmit =
-    inputsChanged &&
+    !!baseline &&
+    !precisionError &&
     !!preview &&
+    /^[0-9a-f]{64}$/.test(preview.meta.review_digest ?? '') &&
+    Object.entries(correctedInputs).every(([key, value]) => preview.corrected[key as keyof CorrectivePaycheckSnapshot] === value) &&
+    !previewLoading && !previewError &&
     !preview.meta.is_zero_change &&
     form.reason.trim().length > 0 &&
     form.pay_date.length > 0 &&
     !issuing;
 
   const handleSubmit = async () => {
+    if (!canSubmit || !preview?.meta.review_digest) return;
     setIssuing(true);
     setIssueError(null);
     try {
       const result = await payPeriodsApi.issueCorrectivePaycheck(originalPayPeriod.id, {
         employee_id: originalItem.employee_id,
         corrected_inputs: correctedInputs,
+        expected_review_digest: preview!.meta.review_digest!,
         pay_date: form.pay_date,
         reason: form.reason.trim(),
         notes: form.notes.trim() || undefined,
@@ -192,6 +296,7 @@ export function CorrectivePaycheckModal({
       onOpenChange(false);
     } catch (err) {
       setIssueError(err instanceof Error ? err.message : 'Failed to issue corrective paycheck');
+      setPreview(null);
     } finally {
       setIssuing(false);
     }
@@ -201,7 +306,7 @@ export function CorrectivePaycheckModal({
   const reportedTipsDelta = deltas?.reported_tips_delta ?? deltas?.reported_tips ?? 0;
   const tipsPaidOutDelta = deltas?.tips_paid_out_delta ?? deltas?.tips_paid_out ?? 0;
   const corrected = preview?.corrected;
-  const original = preview?.original;
+  const recorded = preview?.recorded ?? preview?.original;
   const willGenerateCheck = preview?.meta.will_generate_check ?? false;
   const employeeName = originalItem.employee_name ?? 'this employee';
   const handleDialogOpenChange = (nextOpen: boolean): void => {
@@ -229,12 +334,21 @@ export function CorrectivePaycheckModal({
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">Corrected inputs</h3>
             <p className="text-xs text-gray-500">
-              Enter what the values <em>should have been</em>. The delta against
-              the original will become the corrective check.
+              Enter the corrected absolute values. The remaining delta against
+              the original plus active corrections will be recorded separately.
             </p>
+            {baseline && HOUR_FIELDS.some(field => (baseline[field] ?? 0) < 0) && (
+              <p className="text-sm text-gray-700" role="status">
+                Voided corrections left a signed recorded balance. Negative hour components start at the verified original hours.
+                Review the desired absolute hours before issuing this correction.
+              </p>
+            )}
+
+            {precisionError && <p role="alert" className="text-sm text-red-700">{precisionError}</p>}
 
             <FieldRow label="Regular hours" original={originalItem.hours_worked}>
               <NumericInput
+                aria-label="Regular hours" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.hours_worked === '' ? null : Number(form.hours_worked)}
@@ -243,6 +357,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="Overtime hours" original={originalItem.overtime_hours}>
               <NumericInput
+                aria-label="Overtime hours" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.overtime_hours === '' ? null : Number(form.overtime_hours)}
@@ -251,6 +366,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="Holiday hours" original={originalItem.holiday_hours}>
               <NumericInput
+                aria-label="Holiday hours" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.holiday_hours === '' ? null : Number(form.holiday_hours)}
@@ -259,6 +375,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="PTO hours" original={originalItem.pto_hours}>
               <NumericInput
+                aria-label="PTO hours" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.pto_hours === '' ? null : Number(form.pto_hours)}
@@ -267,6 +384,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="Bonus" original={originalItem.bonus} prefix="$">
               <NumericInput
+                aria-label="Bonus" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.bonus === '' ? null : Number(form.bonus)}
@@ -275,6 +393,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="Reported tips" original={originalItem.reported_tips} prefix="$">
               <NumericInput
+                aria-label="Reported tips" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.reported_tips === '' ? null : Number(form.reported_tips)}
@@ -283,6 +402,7 @@ export function CorrectivePaycheckModal({
             </FieldRow>
             <FieldRow label="Tips paid out" original={originalItem.tips_paid_out} prefix="$">
               <NumericInput
+                aria-label="Tips paid out" disabled={!baseline || issuing}
                 min={0}
                 inputMode="decimal"
                 value={form.tips_paid_out === '' ? null : Number(form.tips_paid_out)}
@@ -293,14 +413,16 @@ export function CorrectivePaycheckModal({
 
           {/* Preview */}
           <div className="space-y-3 rounded-lg border bg-gray-50 p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-gray-900">Computed delta</h3>
+              <Button type="button" size="sm" variant="outline" disabled={issuing || previewLoading}
+                onClick={() => void fetchPreview(true)}>Refresh correction preview</Button>
               {previewLoading && (
                 <span className="text-xs text-gray-500">Calculating…</span>
               )}
             </div>
 
-            {!inputsChanged && (
+            {!inputsChanged && (!preview || preview.meta.is_zero_change) && (
               <p className="text-sm italic text-gray-500">
                 No changes yet — adjust an input above to see the delta.
               </p>
@@ -309,23 +431,28 @@ export function CorrectivePaycheckModal({
             {previewError && (
               <ActionFeedback retryKey={previewErrorFeedbackAttempt} tone="error" message={previewError} />
             )}
+            {preview && !/^[0-9a-f]{64}$/.test(preview.meta.review_digest ?? '') && (
+              <p role="alert" className="text-sm text-red-700">A verified preview is required. Refresh the correction preview before issuing.</p>
+            )}
 
             {preview?.meta.is_zero_change && (
               <p className="text-sm text-gray-600">
-                The corrected inputs match the original — nothing to issue.
+                The corrected inputs match the recorded amounts — nothing to issue.
               </p>
             )}
 
-            {preview && !preview.meta.is_zero_change && deltas && original && corrected && (
+            {preview && !preview.meta.is_zero_change && deltas && recorded && corrected && (
               <div className="space-y-2 text-sm">
-                <DeltaLine label="Gross pay" original={original.gross_pay} corrected={corrected.gross_pay} delta={deltas.gross_pay} />
-                <DeltaLine label="Federal income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
-                <DeltaLine label="Social Security" original={original.social_security_tax} corrected={corrected.social_security_tax} delta={deltas.social_security_tax} />
-                <DeltaLine label="Medicare" original={original.medicare_tax} corrected={corrected.medicare_tax} delta={deltas.medicare_tax} />
-                <DeltaLine label="Reported tips" original={original.reported_tips} corrected={corrected.reported_tips} delta={reportedTipsDelta} />
-                <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} delta={tipsPaidOutDelta} />
+                <p className="text-xs text-gray-600">Recorded amounts include the frozen original and {preview.meta.active_corrective_count ?? 0} active corrections. Arrows show recorded → corrected target.</p>
+                <p className="text-xs text-gray-600">Frozen original: gross {formatCurrency(preview.original.gross_pay)} · net {formatCurrency(preview.original.net_pay)}.</p>
+                <DeltaLine label="Gross pay" original={recorded.gross_pay} corrected={corrected.gross_pay} delta={deltas.gross_pay} />
+                <DeltaLine label="Federal income tax" original={recorded.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
+                <DeltaLine label="Social Security" original={recorded.social_security_tax} corrected={corrected.social_security_tax} delta={deltas.social_security_tax} />
+                <DeltaLine label="Medicare" original={recorded.medicare_tax} corrected={corrected.medicare_tax} delta={deltas.medicare_tax} />
+                <DeltaLine label="Reported tips" original={recorded.reported_tips} corrected={corrected.reported_tips} delta={reportedTipsDelta} />
+                <DeltaLine label="Tips paid out" original={recorded.tips_paid_out} corrected={corrected.tips_paid_out} delta={tipsPaidOutDelta} />
                 <hr />
-                <DeltaLine label="Net pay" original={original.net_pay} corrected={corrected.net_pay} delta={deltas.net_pay} bold />
+                <DeltaLine label="Net pay" original={recorded.net_pay} corrected={corrected.net_pay} delta={deltas.net_pay} bold />
                 <div className="mt-2 rounded border-l-4 border-blue-400 bg-blue-50 p-3 text-xs text-blue-900">
                   {willGenerateCheck ? (
                     <>
@@ -405,7 +532,7 @@ function FieldRow({ label, original, prefix, children }: FieldRowProps) {
       <Label className="text-sm sm:col-span-5">{label}</Label>
       <div className="sm:col-span-4">{children}</div>
       <div className="text-xs text-gray-500 sm:col-span-3 sm:text-right">
-        was {prefix === '$' ? formatCurrency(original ?? 0) : (original ?? 0)}
+        original {prefix === '$' ? formatCurrency(original ?? 0) : (original ?? 0)}
       </div>
     </div>
   );

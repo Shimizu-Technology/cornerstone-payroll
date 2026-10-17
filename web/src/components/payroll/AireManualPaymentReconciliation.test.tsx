@@ -50,6 +50,41 @@ async function choose() {
 }
 
 describe('AireManualPaymentReconciliation', () => {
+  it('shows a saved pending payment on a fresh offline load without offering new links or claiming source confirmation', async () => {
+    mocks.review.mockResolvedValue({ ...review, source_available: false, source_error: 'Time source unavailable',
+      employees: [], exclusions: [], issues: null, summary: null, command_access: { can_manage_manual_allocations: false },
+      cornerstone_manual_allocations: [{ ...allocation, payment_issue_pending: true, payroll_item_check_status: 'delivered' }] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByText('Payment saved in Payroll; time tracking confirmation pending')).toBeTruthy();
+    expect(screen.getByText(/Manual Employee.*source entry 40/)).toBeTruthy();
+    expect(screen.getByText(/5.10 regular.*1.00 OT/)).toBeTruthy();
+    expect(screen.getByText(/Time tracking is unavailable. Your saved Payroll links/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Link hours to payroll item' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry sync for entry 40' })).toBeNull();
+    expect(screen.queryByText('Payment recorded in time tracking')).toBeNull();
+    expect(screen.queryByText(/Time tracking issued receipt/)).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it('refreshes an offline pending link to its actual issued receipt without repeating payment or linking', async () => {
+    mocks.review.mockResolvedValueOnce({ ...review, source_available: false, employees: [], issues: null, summary: null,
+      command_access: { can_manage_manual_allocations: false }, cornerstone_manual_allocations: [{ ...allocation, payment_issue_pending: true }] })
+      .mockResolvedValue({ ...review, source_available: true, cornerstone_manual_allocations: [{ ...allocation, status: 'issued',
+        payment_issue_pending: false, payment_evidence: { reference: '0012', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' } }] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    await screen.findByText('Payment saved in Payroll; time tracking confirmation pending');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh reconciliation' }));
+    expect(await screen.findByText('Payment recorded in time tracking')).toBeTruthy();
+    expect(screen.getByText(/Time tracking issued receipt.*0012/)).toBeTruthy();
+    expect(screen.queryByText(/Your saved Payroll links are shown below/)).toBeNull();
+    expect(screen.queryByText('Payment saved in Payroll; time tracking confirmation pending')).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
   it('sends the exact source identity, version, original date and decimal hours; prepared is unpaid', async () => {
     mocks.create.mockResolvedValue({ manual_allocation: allocation });
     mocks.review.mockResolvedValueOnce(review).mockResolvedValue({ ...review, cornerstone_manual_allocations: [allocation] });
@@ -87,6 +122,32 @@ describe('AireManualPaymentReconciliation', () => {
     expect(mocks.review).toHaveBeenCalledTimes(3);
     expect(mocks.retry).not.toHaveBeenCalled();
     expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it('labels a successful issued sync as Refresh status while using the same saved allocation action', async () => {
+    const issued = { ...allocation, status: 'issued' as const,
+      payment_evidence: { reference: '0012', effective_on: '2026-08-19', provenance: 'aire_issued_receipt' as const } };
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [issued] });
+    mocks.retry.mockResolvedValue({ manual_allocation: issued });
+    render(<AireManualPaymentReconciliation {...props} />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Refresh status for entry 40' }));
+    await waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
+    expect(mocks.retry).toHaveBeenCalledExactlyOnceWith(67, 9);
+    expect(screen.getByRole('button', { name: 'Refresh status for entry 40' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry sync for entry 40' })).toBeNull();
+    expect(screen.getByText(/Time tracking issued receipt · reference 0012/)).toBeTruthy();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.money).not.toHaveBeenCalled();
+  });
+
+  it('keeps Retry sync for an issued allocation with a sync error', async () => {
+    mocks.review.mockResolvedValue({ ...review, cornerstone_manual_allocations: [
+      { ...allocation, status: 'issued', last_sync_error: 'Source confirmation needs review' },
+    ] });
+    render(<AireManualPaymentReconciliation {...props} />);
+    expect(await screen.findByRole('button', { name: 'Retry sync for entry 40' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh status for entry 40' })).toBeNull();
+    expect(screen.getByRole('alert')).toHaveProperty('textContent', 'Source confirmation needs review');
   });
 
   it.each([
@@ -362,4 +423,19 @@ it('ignores older same-period reviews and clears drafts when the period changes'
   await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh reconciliation' }).hasAttribute('disabled')).toBe(false));
   expect((screen.getByLabelText('Evidence and reconciliation reason') as HTMLTextAreaElement).value).toBe('');
   expect((screen.getByLabelText('Regular hours to link') as HTMLInputElement).value).toBe('');
+});
+
+
+it('recovers a cross-period reported-payment match from its actual issued run without starting a new payment', async () => {
+  const pending = { ...allocation, status: 'pending_commit', source_payment_attestation_id: '501', payment_resolution_pending: true };
+  mocks.review.mockResolvedValue({ ...review, employees: [], cornerstone_manual_allocations: [pending] });
+  mocks.retry.mockResolvedValue({ manual_allocation: { ...pending, status: 'issued', payment_resolution_pending: false } });
+  render(<AireManualPaymentReconciliation {...props} />);
+  expect(await screen.findByText('Existing payment match receipt pending')).toBeTruthy();
+  expect(screen.getByText(/Retry sync reconciles that same command; it creates no new payment/)).toBeTruthy();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'Retry sync for entry 40' }));
+  expect(mocks.retry).toHaveBeenCalledWith(67, 9);
+  expect(mocks.money).not.toHaveBeenCalled();
+  expect(mocks.create).not.toHaveBeenCalled();
 });

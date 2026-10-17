@@ -658,6 +658,22 @@ RSpec.describe PayrollCalculator do
       expect(restored.metadata).not_to have_key("uncapped_amount")
     end
 
+    it "saves zero retirement contributions without claiming an available-pay reduction" do
+      described_class.for(employee, payroll_item).calculate
+      payroll_item.save!
+
+      snapshot = payroll_item.reload.retirement_rule_snapshot
+      expect(snapshot.fetch("requested").values.sum(&:to_d)).to eq(0)
+      expect(snapshot.fetch("applied").values.sum(&:to_d)).to eq(0)
+      expect(snapshot.fetch("explanations")).not_to include(/enough available pay/)
+      expect(payroll_item.gross_pay).to eq(1_000)
+      expect(payroll_item.retirement_payment).to eq(0)
+      expect(payroll_item.roth_retirement_payment).to eq(0)
+      expect(payroll_item.ytd_retirement).to eq(0)
+      expect(payroll_item.ytd_roth_retirement).to eq(0)
+      expect(payroll_item.net_pay).to eq(payroll_item.gross_pay - payroll_item.total_deductions)
+    end
+
     it "updates retirement evidence when insufficient pay reduces the calculated election" do
       employee.employee_retirement_elections.create!(
         company: company,

@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SavedHours } from './SavedHours';
+import { coverageStateLabel, evidenceSourceLabel, historicalReasonLabel, identityStateLabel, payRunStatusLabel, receiptScopeLabel, settlementStatusLabel } from '@/lib/employeeEvidenceLabels';
 
 export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }: {
   employeeId: number; companyId: number; report: EmployeePayHistoryReport | null; returnTo: string;
@@ -85,17 +86,17 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
             </div>)}</div> : <p className="text-sm text-neutral-600">No current entries. Retained coverage may still exist.</p>}
             <h4 className="font-semibold">Retained source coverage</h4>
             {period.coverage_lines?.length ? <div className="divide-y rounded-xl border border-neutral-200">{period.coverage_lines.map((line) => <div key={line.id} className="space-y-1 p-4 text-sm">
-              <p className="font-semibold">Entry #{line.source_time_entry_id} · Receipt {line.coverage_state}</p>
-              {line.identity_state && line.identity_state !== 'verified' && <p className="font-semibold text-amber-800">Employee identity needs review: {line.identity_state.replaceAll('_', ' ')}</p>}
+              <p className="font-semibold">Entry #{line.source_time_entry_id} · {coverageStateLabel(line.coverage_state, line.identity_state, line.receipt_scope, line.source_kind, line.provenance)}</p>
+              {line.identity_state && line.identity_state !== 'verified' && <p className="font-semibold text-amber-800">{identityStateLabel(line.identity_state)}</p>}
               {line.source_category_id === null && <p className="font-semibold text-amber-800">Frozen work category unknown · Needs review</p>}
-              {line.receipt_scope && <p className="text-neutral-600">Receipt scope: {line.receipt_scope.replaceAll('_', ' ')}</p>}
+              {line.receipt_scope && <p className="text-neutral-600">Receipt scope: {receiptScopeLabel(line.receipt_scope)}</p>}
               <p>Source REG {hours(line.regular_hours)} · OT {hours(line.overtime_hours)}{line.batch_id ? ` · Frozen batch ${line.batch_id}` : ''}</p>
-              <p>{line.provenance}{line.payment_reference ? ` · Payment ${line.payment_reference}` : ''}</p>{line.reason && <p>{line.reason}</p>}
+              <p>{evidenceSourceLabel(line.provenance, line.receipt_scope, line.identity_state)}{line.payment_reference ? ` · Payment ${line.payment_reference}` : ''}</p>{line.reason && <p>{line.reason}</p>}
             </div>)}</div> : <p className="text-sm text-neutral-600">No retained coverage recorded for this period.</p>}
-            {!!period.settlement_cases?.length && <><h4 className="font-semibold">Settlement review</h4>{period.settlement_cases.map((item) => <p key={item.public_id} className="rounded-xl border p-3 text-sm">Entry #{item.source_time_entry_id} · {item.status} · {item.origin_reason} · {item.held_total_hours} held hours</p>)}</>}
+            {!!period.settlement_cases?.length && <><h4 className="font-semibold">Settlement review</h4>{period.settlement_cases.map((item) => <p key={item.public_id} className="rounded-xl border p-3 text-sm">Entry #{item.source_time_entry_id} · {settlementStatusLabel(item.status)} · Historical reason: {historicalReasonLabel(item.origin_reason)} · {item.held_total_hours} held hours</p>)}</>}
             {period.detail_pagination && <div className="flex flex-wrap items-center gap-3 text-sm"><p>{period.detail_pagination.counts.entries} entries · {period.detail_pagination.counts.coverage_lines} retained coverage lines · {period.detail_pagination.counts.settlement_cases} settlement cases</p>{detailCursor && <Button variant="outline" onClick={() => update('detail_cursor', undefined)}>First detail page</Button>}{period.detail_pagination.next_cursor && <Button variant="outline" onClick={() => update('detail_cursor', period.detail_pagination?.next_cursor || undefined)}>Next detail page</Button>}</div>}
             {!!result.payroll_records?.length && <><h4 className="font-semibold">Exact linked payroll results</h4>{result.payroll_records.map((record) => <div key={record.payroll_item_id} className="space-y-2 rounded-xl border p-4 text-sm">
-              <p className="font-semibold">{record.period_description} · Pay date {formatDate(record.pay_date)} · Pay run status: {record.pay_period_status || 'Unknown'}</p>
+              <p className="font-semibold">{record.period_description} · Pay date {formatDate(record.pay_date)} · Pay run status: {payRunStatusLabel(record.pay_period_status)}</p>
               <p>Saved REG {hours(record.regular_hours)} · OT {hours(record.overtime_hours)} · Holiday {hours(record.holiday_hours)} · PTO {hours(record.pto_hours)}</p>
               <p>{record.payment_evidence.label}{record.check_number ? ` · Check #${record.check_number}` : ''} · {record.net_pay == null ? 'Net unavailable' : `${formatCurrency(record.net_pay)} net`}</p>
               <Link className="inline-flex min-h-11 items-center font-semibold text-primary-700" to={payrollItemPath(companyId, record.pay_period_id, record.payroll_item_id, { returnTo })}>Open exact payroll item <ArrowRight className="ml-2 h-4 w-4" /></Link>

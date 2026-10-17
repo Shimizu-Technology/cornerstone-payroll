@@ -30,8 +30,9 @@ class ClientPortalThreadChannel < ApplicationCable::Channel
   # the final delivery boundary prevents a stale socket from receiving payroll
   # data even if both the queue and Cable adapter are temporarily unavailable.
   def transmit_if_authorized(message)
-    current_user.reload
-    if current_user.payroll_access_allowed? && current_user.can_access_company?(current_company.id)
+    # Reloading the connection's user retains its memoized company access.
+    user = User.find(current_user.id)
+    if user.payroll_access_allowed? && user.can_access_company?(current_company.id)
       transmit(message)
     else
       revoke_subscription

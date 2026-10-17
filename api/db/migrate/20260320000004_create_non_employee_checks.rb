@@ -22,7 +22,7 @@ class CreateNonEmployeeChecks < ActiveRecord::Migration[8.0]
     end
 
     add_index :non_employee_checks,
-              [:company_id, :check_number],
+              [ :company_id, :check_number ],
               unique: true,
               where: "check_number IS NOT NULL",
               name: "idx_ne_checks_on_company_check_num"

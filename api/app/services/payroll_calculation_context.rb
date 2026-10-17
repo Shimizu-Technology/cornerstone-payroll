@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 # Captures the mutable employee configuration that influenced a payroll
 # calculation. Committed payroll items use this immutable snapshot when a
 # later corrective paycheck is recomputed, so profile edits cannot rewrite
@@ -52,11 +54,36 @@ class PayrollCalculationContext
     def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, retirement_election: nil)
       {
         "version" => VERSION,
+        "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee) : nil,
         "employee" => employee_snapshot(employee, w4_election: w4_election),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
         "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
       }
+    end
+
+    # For new intake exceptions only. This guards a calculation against later
+    # manager reconfirmation of different compensation/configuration without
+    # rewriting the immutable evidence on committed payroll items.
+    def intake_setup_fingerprint(employee:)
+      scalar_fields = SCALAR_ATTRIBUTES + %w[
+        pay_rate hire_date intake_payroll_eligible_from contractor_type default_custom_earnings default_payroll_adjustments
+      ]
+      stable_rows = lambda do |association|
+        association.reorder(:id).map { |row| row.attributes.except("created_at", "updated_at") }
+      end
+      setup = {
+        "employee" => employee.attributes.slice(*scalar_fields),
+        "wage_rates" => stable_rows.call(employee.employee_wage_rates),
+        "deductions" => deduction_snapshots(employee.employee_deductions.includes(:deduction_type).reorder(:id)),
+        "deduction_assignments" => stable_rows.call(employee.employee_deductions),
+        "payroll_fields" => payroll_field_snapshots(employee.employee_payroll_fields.includes(:payroll_field_definition).reorder(:id)),
+        "payroll_field_assignments" => stable_rows.call(employee.employee_payroll_fields),
+        "retirement_elections" => stable_rows.call(employee.employee_retirement_elections),
+        "retirement_year_inputs" => stable_rows.call(employee.employee_retirement_year_inputs),
+        "loans" => stable_rows.call(employee.employee_loans)
+      }
+      Digest::SHA256.hexdigest(JSON.generate(canonicalize(setup)))
     end
 
     def valid_for_correction?(snapshot)
@@ -111,6 +138,21 @@ class PayrollCalculationContext
     end
 
     private
+
+    def canonicalize(value)
+      case value
+      when Hash
+        value.keys.map(&:to_s).sort.to_h { |key| [ key, canonicalize(value[key]) ] }
+      when Array
+        value.map { |entry| canonicalize(entry) }
+      when BigDecimal
+        value.to_s("F")
+      when Date, Time, ActiveSupport::TimeWithZone
+        value.iso8601
+      else
+        value
+      end
+    end
 
     def employee_snapshot(employee, w4_election:)
       SCALAR_ATTRIBUTES.index_with do |attribute|

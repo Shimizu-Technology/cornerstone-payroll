@@ -12,8 +12,9 @@ interface DepositItem {
   net_pay: number;
 }
 
-export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: {
+export function RecordDirectDepositPaymentDialog({ item, readOnly = false, onClose, onComplete }: {
   item: DepositItem;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => Promise<void>;
 }) {
@@ -26,6 +27,7 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
   const { notify } = useFeedback();
 
   const submit = async () => {
+    if (readOnly) return;
     setSaving(true);
     setError(null);
     try {
@@ -61,10 +63,11 @@ export function RecordDirectDepositPaymentDialog({ item, onClose, onComplete }: 
         <input className="mt-1 h-4 w-4" type="checkbox" checked={attested} onChange={(event) => setAttested(event.target.checked)} />
         <span>I verified this transfer completed at the bank. Recording it will mark any linked time tracking hours paid.</span>
       </label>
-      {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button onClick={() => void submit()} disabled={saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>
+      {readOnly && <p role="status" className="text-sm text-amber-800">Changes are unavailable with your current workspace access. Your entered details remain here; Cancel is available.</p>}
+        {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button className="max-sm:min-h-[44px]" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button className="max-sm:min-h-[44px]" onClick={() => void submit()} disabled={readOnly || saving || !settledOn || !bankReference.trim() || !attested}>{saving ? 'Recording…' : 'Confirm payment'}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>;

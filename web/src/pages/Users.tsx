@@ -42,7 +42,7 @@ const allRoleOptions: RoleOption[] = [
   { value: 'org_admin', label: 'Organization Admin', scope: 'Every client in their organization', can: 'Manage users, clients, tax configuration, audit history, client check controls, and payroll operations.', cannot: 'Cannot manage other organizations or platform-wide settings.', assignment: 'Automatically receives all organization clients.' },
   { value: 'admin', label: 'Organization Admin (legacy)', scope: 'Every client in their organization', can: 'Same access as Organization Admin.', cannot: 'Legacy role name retained for existing accounts; use Organization Admin for new invitations.', assignment: 'Automatically receives all organization clients.', legacy: true },
   { value: 'manager', label: 'Manager', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, configure client settings, and manage the shared printer-profile library.', cannot: 'Cannot manage users, organization tax configuration, or organization-wide audit history.', assignment: 'At least one payroll client should be assigned.' },
-  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Cannot change client-wide settings, manage users, or edit another person’s printer profile.', assignment: 'At least one payroll client should be assigned.' },
+  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Cannot change other client-wide settings, manage users, or edit another person’s printer profile.', assignment: 'At least one payroll client should be assigned.' },
   { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'Maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
   { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
@@ -478,7 +478,7 @@ export function Users() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
+              <Select aria-label="Role" value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
                 {invitationRoleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
@@ -530,8 +530,8 @@ export function Users() {
                     <div className="min-w-0 flex-1">
                       {editingId === user.id ? (
                         <div className="space-y-3">
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -547,7 +547,7 @@ export function Users() {
                               <Check className="mr-1 h-4 w-4" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="outline" onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
+                            <Button size="sm" variant="outline" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
                           </MobileCardActions>
                         </div>
                       ) : (
@@ -587,7 +587,7 @@ export function Users() {
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {user.active === false ? 'Activate' : 'Deactivate'}
                                 </Button>
-                                <Button size="sm" variant="ghost" className="text-danger-700" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" className="text-danger-700" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   Delete
                                 </Button>
                               </>
@@ -618,7 +618,7 @@ export function Users() {
                     <TableRow>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
                         ) : (
                           <span className="flex items-center gap-2">
                             {user.name}
@@ -635,7 +635,7 @@ export function Users() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -666,7 +666,7 @@ export function Users() {
                               <Check className="w-4 h-4 mr-1" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                            <Button size="sm" variant="ghost" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>
                               <X className="w-4 h-4" />
                             </Button>
                           </div>
@@ -696,7 +696,7 @@ export function Users() {
                                     <span className="flex items-center text-danger-700"><UserX className="w-4 h-4 mr-1" />Deactivate</span>
                                   )}
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   {deletingId === user.id ? (
                                     <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
                                   ) : (

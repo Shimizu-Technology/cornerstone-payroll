@@ -15,7 +15,7 @@ module TimecardOcr
         data = r2.download("timecards/#{key}")
         raise Errno::ENOENT, "File not found in R2: #{key}" unless data
 
-        tmp = Tempfile.new(["timecard", File.extname(key).presence || ".jpg"])
+        tmp = Tempfile.new([ "timecard", File.extname(key).presence || ".jpg" ])
         tmp.binmode
         tmp.write(data)
         tmp.rewind

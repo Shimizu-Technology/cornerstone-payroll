@@ -32,6 +32,8 @@ class PayrollFieldDefinition < ApplicationRecord
   validates :default_percentage, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :kind_matches_tax_treatment
   validate :owner_belongs_to_company
+  validate :linked_loan_treatment_is_preserved
+  validate :scope_is_immutable
 
   scope :active, -> { where(active: true) }
   scope :client_wide, -> { where(owner_employee_id: nil) }
@@ -87,6 +89,20 @@ class PayrollFieldDefinition < ApplicationRecord
     end
 
     errors.add(:tax_treatment, "does not match field type") unless valid
+  end
+
+  def scope_is_immutable
+    return unless persisted?
+    return unless will_save_change_to_company_id? || will_save_change_to_owner_employee_id?
+
+    errors.add(:base, "A payroll field's client and employee scope cannot be changed")
+  end
+
+  def linked_loan_treatment_is_preserved
+    return unless persisted? && employee_payroll_fields.where.not(employee_loan_id: nil).exists?
+    return if kind == "deduction" && tax_treatment == "post_tax_deduction" && category == "loan" && amount_type == "fixed"
+
+    errors.add(:base, "A linked loan must remain a fixed post-tax loan deduction")
   end
 
   def owner_belongs_to_company

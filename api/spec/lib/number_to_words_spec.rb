@@ -21,7 +21,7 @@ RSpec.describe NumberToWords do
       10_000.00   => "Ten thousand and 00/100",
       52_000.00   => "Fifty-two thousand and 00/100",
       100_000.00  => "One hundred thousand and 00/100",
-      1_000_000   => "One million and 00/100",
+      1_000_000   => "One million and 00/100"
     }.each do |amount, expected|
       it "converts #{amount} correctly" do
         expect(described_class.convert(amount)).to eq(expected)
