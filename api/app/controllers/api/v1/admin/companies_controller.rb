@@ -86,6 +86,7 @@ module Api
           end
 
           company.organization.save_company_within_client_limit!(company)
+          @created_company_for_audit = company
           render json: { company: company_payload(company, detailed: true) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -295,6 +296,13 @@ module Api
         end
 
         private
+
+        # A newly created client is not the client selected before the request.
+        def audit_company_id
+          return @created_company_for_audit.id if action_name == "create" && @created_company_for_audit
+
+          super
+        end
 
         def company_params
           params.require(:company).permit(
