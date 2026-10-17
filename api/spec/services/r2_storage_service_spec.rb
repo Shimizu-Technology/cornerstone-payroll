@@ -1,20 +1,24 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "tmpdir"
 
-RSpec.describe R2StorageService do
-  let(:service) { described_class.new }
-
-  before do
-    FileUtils.rm_rf(described_class::LOCAL_STORAGE_ROOT)
-    allow(service).to receive(:configured?).and_return(false)
-  end
-
-  after { FileUtils.rm_rf(described_class::LOCAL_STORAGE_ROOT) }
-
+RSpec.describe R2StorageService, "default local storage configuration" do
   it "isolates local objects by Rails environment" do
     expect(described_class::LOCAL_STORAGE_ROOT).to eq(Rails.root.join("tmp", "local_r2_storage", "test"))
   end
+end
+
+RSpec.describe R2StorageService do
+  let(:service) { described_class.new }
+  let(:local_storage_root) { Pathname(Dir.mktmpdir("r2-storage-service-")) }
+
+  before do
+    stub_const("R2StorageService::LOCAL_STORAGE_ROOT", local_storage_root)
+    allow(service).to receive(:configured?).and_return(false)
+  end
+
+  after { FileUtils.remove_entry(local_storage_root) }
 
   it "rejects traversal keys for local uploads" do
     expect do

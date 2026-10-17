@@ -31,6 +31,40 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     next_period.payroll_items.find_by!(employee: employee)
   end
 
+  context "a zero-total REG/OT correction alongside current overtime" do
+    let(:next_import) do
+      make_import(next_period, 3, "current", "RECLASS", daily_lines: [
+        { source_time_entry_id: "101", line_key: "reclassified-line", source_kind: "correction", source_time_entry_version: 1,
+          original_work_date: "2026-10-10", total_hours: 0, regular_hours: 2, overtime_hours: -2 },
+        { source_time_entry_id: "104", line_key: "current-line", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 3, regular_hours: 0, overtime_hours: 3 }
+      ])
+    end
+
+    it "retains both signed components through apply, calculation, approval and commitment" do
+      item = apply!(same_rate: true, source_kinds: %w[correction current], signed_acknowledgement: true)
+      expect(item.reload.wage_rate_hours).to contain_exactly(
+        include("regular_hours" => 2, "overtime_hours" => -2, "source_lines" => [ include("line_key" => "reclassified-line") ]),
+        include("regular_hours" => 0, "overtime_hours" => 3)
+      )
+      item.calculate!
+      expect(item.reload.gross_pay).to eq(87.50) # 2*25 - 2*37.50 + 3*37.50
+      expect(item.hours_worked).to eq(2)
+      expect(item.overtime_hours).to eq(1)
+      expect(item.time_tracking_entry_allocations.count).to eq(2)
+      expect(described_class.validate!(item, calculated: true)).to eq(true)
+      item.payroll_item_earnings.find_by!(category: "other").update_columns(amount: -74)
+      expect { described_class.validate!(item, calculated: true) }.to raise_error(ArgumentError, /Imported source hours/)
+      item.calculate!
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.gross_pay).to eq(87.50)
+      expect(next_period.reload.status).to eq("committed")
+    end
+  end
+
   it "rejects incomplete and unknown explicit mapping dimensions without partial imports" do
     [ { employee_wage_rate_id: nil }, { source_category_id: "invented" }, { source_kind: nil } ].each do |change|
       expect { apply!(mapping_change: change) }.to raise_error(ArgumentError, /earning|source kind/)
@@ -100,6 +134,72 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     expect(normalized.first["rate"]).to eq(entry["rate"])
     item.calculate!
     expect(item.reload.gross_pay).to eq(90)
+  end
+
+  describe "readonly source basis metadata", type: :request do
+    def assert_source_hold(item, expected_reason)
+      original = item.reload.attributes
+      earnings = item.payroll_item_earnings.order(:id).map(&:attributes)
+      allocations = item.time_tracking_entry_allocations.order(:id).map(&:attributes)
+      expect(TimeTracking::Client).not_to receive(:new)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(actor)
+      hold = described_class.hold_reason(item)
+      expect(hold).to include(reason: include(expected_reason))
+      get "/api/v1/admin/pay_periods/#{next_period.id}", headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("pay_period", "payroll_items").sole.fetch("correction_pay_basis_hold"))
+        .to eq("reason" => hold[:reason])
+      get "/api/v1/admin/pay_periods/#{next_period.id}/payroll_items/#{item.id}", headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("payroll_item", "correction_pay_basis_hold")).to eq("reason" => hold[:reason])
+      expect(item.reload.attributes).to eq(original)
+      expect(item.payroll_item_earnings.reload.order(:id).map(&:attributes)).to eq(earnings)
+      expect(item.time_tracking_entry_allocations.reload.order(:id).map(&:attributes)).to eq(allocations)
+    end
+
+    it "shows captured hourly versus current salary incompatibility without mutations or a source client" do
+      item = apply!
+      item.calculate!
+      item.employee # A loaded old association cannot hide the changed setup.
+      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      assert_source_hold(item, "captured pay basis")
+    end
+
+    it "returns no hold for compatible imported and ordinary rows or accepted committed history" do
+      item = apply!
+      item.calculate!
+      expect(described_class.hold_reason(item)).to be_nil
+      expect(described_class.hold_reason(original_item)).to be_nil
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      saved = item.reload.attributes
+      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      expect(described_class.hold_reason(item)).to be_nil
+      expect(item.reload.attributes).to eq(saved)
+    end
+
+    context "a normally captured hourly contractor" do
+      let(:employee) { create(:employee, :contractor, company: company, contractor_pay_type: "hourly", pay_rate: 25) }
+      let(:original_item) do
+        item = create(:payroll_item, company: company, employee: employee, pay_period: original_period,
+          employment_type: "contractor", pay_rate: 25, hours_worked: 4)
+        item.calculate!
+        original_period.update!(status: "committed", committed_at: Time.current)
+        item
+      end
+
+      it "exposes the recorded hourly to current flat-fee incompatibility while preserving the captured source" do
+        item = apply!
+        item.calculate!
+        expect(item.time_tracking_entry_allocations.map(&:earning_snapshot))
+          .to all(include("employment_type" => "contractor", "contractor_pay_type" => "hourly"))
+        employee.update!(contractor_pay_type: "flat_fee", pay_rate: 500)
+        assert_source_hold(item, "captured pay basis")
+      end
+    end
   end
 
   it "rejects changed frozen batch provenance even when the employee's hours still match" do

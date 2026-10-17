@@ -8,6 +8,33 @@ module TimeTracking
     PAY_BASIS_MESSAGE = "This imported payroll retains its captured pay basis. The employee's pay basis changed; review the saved source import before recalculating. Captured source earnings cannot be replaced with current salary or fee pay."
     LINE_KEYS = %w[source_time_entry_id line_key source_time_entry_version source_kind original_work_date total_hours regular_hours overtime_hours].freeze
 
+    # Presentation shares the financial basis check, without validating remote
+    # provenance or changing already accepted historical payroll.
+    def self.hold_reason(item)
+      return nil unless item.persisted? && item.import_source.to_s.start_with?("time_tracking:")
+      return nil if item.pay_period.committed?
+
+      captured = item.time_tracking_entry_allocations.select { |row| row.earning_snapshot.present? }
+      return nil if captured.empty?
+      if captured.any? { |row| row.earning_snapshot["employment_type"].blank? ||
+        (row.earning_snapshot["employment_type"] == "contractor" && row.earning_snapshot["contractor_pay_type"].blank?) }
+        return { reason: "This imported payroll's original pay basis is unavailable. Review retained source earnings and original pay setup before recalculating; current setup cannot establish captured pay basis." }
+      end
+      pay_basis_changed?(item, captured) ? { reason: PAY_BASIS_MESSAGE } : nil
+    end
+
+    def self.pay_basis_changed?(item, captured)
+      current = Employee.where(id: item.employee_id, company_id: item.company_id).pick(:employment_type, :contractor_pay_type)
+      return true unless current
+
+      captured.any? do |row|
+        basis = row.earning_snapshot["employment_type"] || item.employment_type_in_database
+        basis != item.employment_type || basis != current.first ||
+          (basis == "contractor" && row.earning_snapshot["contractor_pay_type"].present? &&
+            row.earning_snapshot["contractor_pay_type"] != current.last)
+      end
+    end
+
     def self.validate!(item, calculated: false)
       return true unless item.persisted?
       rows = item.time_tracking_entry_allocations.includes(:time_tracking_import).to_a
@@ -23,13 +50,7 @@ module TimeTracking
       # history and enforce exact frozen hours; do not manufacture rate evidence.
       return true if captured.empty?
       raise ArgumentError, MESSAGE unless captured.size == rows.size
-      pay_basis_changed = captured.any? do |row|
-        basis = row.earning_snapshot["employment_type"] || item.employment_type_in_database
-        basis != item.employment_type || basis != item.employee.employment_type ||
-          (basis == "contractor" && row.earning_snapshot["contractor_pay_type"].present? &&
-            row.earning_snapshot["contractor_pay_type"] != item.employee.contractor_pay_type)
-      end
-      raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed
+      raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed?(item, captured)
       captured.map(&:time_tracking_import).uniq(&:id).each do |import|
         raw = import.raw_payload
         source = import.time_tracking_source

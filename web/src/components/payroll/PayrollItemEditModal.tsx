@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useState, useLayoutEffect } from 'react';
+import { useState, useLayoutEffect, useId } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -104,6 +104,7 @@ export function PayrollItemEditModal({
   contractorPayType,
   wageRates = EMPTY_WAGE_RATES,
 }: PayrollItemEditModalProps) {
+  const inputId = useId();
   const [fields, setFields] = useState<EditableFields>({
     hours_worked: 0,
     overtime_hours: 0,
@@ -412,7 +413,7 @@ export function PayrollItemEditModal({
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
           <DialogDescription>
-            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} pay rates` : `Rate: ${formatCurrency(Number(item.pay_rate))}`}
+            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} earning entries` : `Rate: ${formatCurrency(Number(item.pay_rate))}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -443,10 +444,12 @@ export function PayrollItemEditModal({
               <h4 className="text-sm font-medium text-gray-700 mb-2">Contract Payment</h4>
               <div className="grid grid-cols-1 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">
+                  <label htmlFor={`${inputId}-salary_override`} className="block text-xs text-gray-500 mb-1">
                     Payment Amount Override
                   </label>
                   <NumericInput
+                    id={`${inputId}-salary_override`}
+                    emptyValue={null}
                     placeholder={`Default: ${formatCurrency(Number(item.pay_rate))}/period`}
                     value={fields.salary_override === '' ? null : Number(fields.salary_override)}
                     onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
@@ -472,37 +475,45 @@ export function PayrollItemEditModal({
                   {fields.wage_rate_hours.map((rateEntry, index) => (
                     <div key={`${rateEntry.label}-${index}`} className="rounded-lg border border-gray-200 p-3">
                       <div className="mb-2 flex items-center justify-between">
-                        <div className="text-sm font-medium text-gray-900">{rateEntry.label}</div>
+                        <div id={`${inputId}-rate-${index}-name`} className="text-sm font-medium text-gray-900">{rateEntry.label}</div>
                         <div className="text-xs text-gray-500">{formatCurrency(Number(rateEntry.rate))}/hr</div>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Regular</label>
+                          <label htmlFor={`${inputId}-rate-${index}-regular_hours`} id={`${inputId}-rate-${index}-regular_hours-label`} className="block text-xs text-gray-500 mb-1">Regular</label>
                           <NumericInput
+                            id={`${inputId}-rate-${index}-regular_hours`}
+                            aria-labelledby={`${inputId}-rate-${index}-name ${inputId}-rate-${index}-regular_hours-label`}
                             disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={rateEntry.regular_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'regular_hours', String(value ?? 0))}
                             min={0}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Overtime</label>
+                          <label htmlFor={`${inputId}-rate-${index}-overtime_hours`} id={`${inputId}-rate-${index}-overtime_hours-label`} className="block text-xs text-gray-500 mb-1">Overtime</label>
                           <NumericInput
+                            id={`${inputId}-rate-${index}-overtime_hours`}
+                            aria-labelledby={`${inputId}-rate-${index}-name ${inputId}-rate-${index}-overtime_hours-label`}
                             disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={rateEntry.overtime_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'overtime_hours', String(value ?? 0))}
                             min={0}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">Holiday</label>
+                          <label htmlFor={`${inputId}-rate-${index}-holiday_hours`} id={`${inputId}-rate-${index}-holiday_hours-label`} className="block text-xs text-gray-500 mb-1">Holiday</label>
                           <NumericInput
+                            id={`${inputId}-rate-${index}-holiday_hours`}
+                            aria-labelledby={`${inputId}-rate-${index}-name ${inputId}-rate-${index}-holiday_hours-label`}
                             value={rateEntry.holiday_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'holiday_hours', String(value ?? 0))}
                             min={0}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">PTO</label>
+                          <label htmlFor={`${inputId}-rate-${index}-pto_hours`} id={`${inputId}-rate-${index}-pto_hours-label`} className="block text-xs text-gray-500 mb-1">PTO</label>
                           <NumericInput
+                            id={`${inputId}-rate-${index}-pto_hours`}
+                            aria-labelledby={`${inputId}-rate-${index}-name ${inputId}-rate-${index}-pto_hours-label`}
                             value={rateEntry.pto_hours}
                             onValueChange={(value) => handleWageRateHourChange(index, 'pto_hours', String(value ?? 0))}
                             min={0}
@@ -515,32 +526,36 @@ export function PayrollItemEditModal({
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Regular</label>
+                    <label htmlFor={`${inputId}-hours_worked`} className="block text-xs text-gray-500 mb-1">Regular</label>
                     <NumericInput
+                      id={`${inputId}-hours_worked`}
                       disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={fields.hours_worked}
                       onValueChange={(value) => handleNumberFieldChange('hours_worked', value)}
                       min={0}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Overtime</label>
+                    <label htmlFor={`${inputId}-overtime_hours`} className="block text-xs text-gray-500 mb-1">Overtime</label>
                     <NumericInput
+                      id={`${inputId}-overtime_hours`}
                       disabled={Boolean(item.wage_rate_hours?.some(entry => entry.source_bucket_key))} value={fields.overtime_hours}
                       onValueChange={(value) => handleNumberFieldChange('overtime_hours', value)}
                       min={0}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Holiday</label>
+                    <label htmlFor={`${inputId}-holiday_hours`} className="block text-xs text-gray-500 mb-1">Holiday</label>
                     <NumericInput
+                      id={`${inputId}-holiday_hours`}
                       value={fields.holiday_hours}
                       onValueChange={(value) => handleNumberFieldChange('holiday_hours', value)}
                       min={0}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">PTO</label>
+                    <label htmlFor={`${inputId}-pto_hours`} className="block text-xs text-gray-500 mb-1">PTO</label>
                     <NumericInput
+                      id={`${inputId}-pto_hours`}
                       value={fields.pto_hours}
                       onValueChange={(value) => handleNumberFieldChange('pto_hours', value)}
                       min={0}
@@ -557,10 +572,12 @@ export function PayrollItemEditModal({
               <h4 className="text-sm font-medium text-gray-700 mb-2">Salary</h4>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">
+                  <label htmlFor={`${inputId}-salary_override`} className="block text-xs text-gray-500 mb-1">
                     Salary Override (per period)
                   </label>
                   <NumericInput
+                    id={`${inputId}-salary_override`}
+                    emptyValue={null}
                     placeholder="Leave blank for default"
                     value={fields.salary_override === '' ? null : Number(fields.salary_override)}
                     onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
@@ -572,8 +589,9 @@ export function PayrollItemEditModal({
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">PTO Hours</label>
+                  <label htmlFor={`${inputId}-pto_hours`} className="block text-xs text-gray-500 mb-1">PTO Hours</label>
                   <NumericInput
+                    id={`${inputId}-pto_hours`}
                     value={fields.pto_hours}
                     onValueChange={(value) => handleNumberFieldChange('pto_hours', value)}
                     min={0}
@@ -588,8 +606,9 @@ export function PayrollItemEditModal({
             <h4 className="text-sm font-medium text-gray-700 mb-2">Additional Earnings</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">One-Time Bonus</label>
+                <label htmlFor={`${inputId}-bonus`} className="block text-xs text-gray-500 mb-1">One-Time Bonus</label>
                 <NumericInput
+                  id={`${inputId}-bonus`}
                   value={fields.bonus}
                   onValueChange={(value) => handleNumberFieldChange('bonus', value)}
                   min={0}
@@ -600,8 +619,9 @@ export function PayrollItemEditModal({
                 </p>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Reported Tips</label>
+                <label htmlFor={`${inputId}-reported_tips`} className="block text-xs text-gray-500 mb-1">Reported Tips</label>
                 <NumericInput
+                  id={`${inputId}-reported_tips`}
                   value={fields.reported_tips}
                   onValueChange={(value) => handleNumberFieldChange('reported_tips', value)}
                   min={0}
@@ -614,8 +634,9 @@ export function PayrollItemEditModal({
                 ) : null}
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Non-Taxable Pay</label>
+                <label htmlFor={`${inputId}-non_taxable_pay`} className="block text-xs text-gray-500 mb-1">Non-Taxable Pay</label>
                 <NumericInput
+                  id={`${inputId}-non_taxable_pay`}
                   value={fields.non_taxable_pay}
                   onValueChange={(value) => handleNumberFieldChange('non_taxable_pay', value)}
                   min={0}
@@ -626,8 +647,9 @@ export function PayrollItemEditModal({
                 </p>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Mandatory Service Charges</label>
+                <label htmlFor={`${inputId}-service_charge_wages`} className="block text-xs text-gray-500 mb-1">Mandatory Service Charges</label>
                 <NumericInput
+                  id={`${inputId}-service_charge_wages`}
                   value={fields.service_charge_wages}
                   onValueChange={(value) => handleNumberFieldChange('service_charge_wages', value)}
                   min={0}
@@ -638,8 +660,9 @@ export function PayrollItemEditModal({
                 </p>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Qualified Overtime Premium</label>
+                <label htmlFor={`${inputId}-qualified_overtime_compensation`} className="block text-xs text-gray-500 mb-1">Qualified Overtime Premium</label>
                 <Input
+                  id={`${inputId}-qualified_overtime_compensation`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -652,8 +675,9 @@ export function PayrollItemEditModal({
                 </p>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Tips Paid Out</label>
+                <label htmlFor={`${inputId}-tips_paid_out`} className="block text-xs text-gray-500 mb-1">Tips Paid Out</label>
                 <NumericInput
+                  id={`${inputId}-tips_paid_out`}
                   value={fields.tips_paid_out}
                   onValueChange={(value) => handleNumberFieldChange('tips_paid_out', value)}
                   min={0}
@@ -794,7 +818,9 @@ export function PayrollItemEditModal({
                         value={adjustment.label}
                         onChange={(e) => handlePayrollAdjustmentChange(idx, { label: e.target.value })}
                       />
+                      <label htmlFor={`${inputId}-adjustment-${idx}-amount`} className="sr-only">Payroll adjustment {idx + 1} amount</label>
                       <NumericInput
+                        id={`${inputId}-adjustment-${idx}-amount`}
                         placeholder="Amount"
                         value={adjustment.amount === '' ? null : Number(adjustment.amount)}
                         onValueChange={(value) => handlePayrollAdjustmentChange(idx, { amount: value == null ? '' : String(value) })}
@@ -837,10 +863,12 @@ export function PayrollItemEditModal({
               <h4 className="text-sm font-medium text-gray-700 mb-2">Tax Adjustments</h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
+                  <label htmlFor={`${inputId}-additional_withholding_override`} className="block text-xs text-gray-500 mb-1 min-h-4">
                     W-4 4(c) Extra W/H
                   </label>
                   <NumericInput
+                    id={`${inputId}-additional_withholding_override`}
+                    emptyValue={null}
                     placeholder={employeeAdditionalWithholding > 0 ? employeeAdditionalWithholding.toFixed(2) : 'Use employee default'}
                     value={fields.additional_withholding_override === '' ? null : Number(fields.additional_withholding_override)}
                     onValueChange={(value) => handleChange('additional_withholding_override', value == null ? '' : String(value))}
@@ -852,10 +880,12 @@ export function PayrollItemEditModal({
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
+                  <label htmlFor={`${inputId}-withholding_tax_adjustment`} className="block text-xs text-gray-500 mb-1 min-h-4">
                     FIT Adjustment
                   </label>
                   <NumericInput
+                    id={`${inputId}-withholding_tax_adjustment`}
+                    emptyValue={null}
                     placeholder="0.00"
                     value={fields.withholding_tax_adjustment === '' ? null : Number(fields.withholding_tax_adjustment)}
                     onValueChange={(value) => handleChange('withholding_tax_adjustment', value == null ? '' : String(value))}
@@ -866,10 +896,12 @@ export function PayrollItemEditModal({
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
+                  <label htmlFor={`${inputId}-withholding_tax_override`} className="block text-xs text-gray-500 mb-1 min-h-4">
                     Final FIT Override
                   </label>
                   <NumericInput
+                    id={`${inputId}-withholding_tax_override`}
+                    emptyValue={null}
                     placeholder="Auto-calculated"
                     value={fields.withholding_tax_override === '' ? null : Number(fields.withholding_tax_override)}
                     onValueChange={(value) => handleChange('withholding_tax_override', value == null ? '' : String(value))}
@@ -892,8 +924,9 @@ export function PayrollItemEditModal({
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Check Date</label>
+                <label htmlFor={`${inputId}-check_date`} className="block text-xs text-gray-500 mb-1">Check Date</label>
                 <Input
+                  id={`${inputId}-check_date`}
                   type="date"
                   value={fields.check_date}
                   onChange={(e) => handleChange('check_date', e.target.value)}
@@ -903,8 +936,9 @@ export function PayrollItemEditModal({
                 </p>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Check Memo</label>
+                <label htmlFor={`${inputId}-check_memo`} className="block text-xs text-gray-500 mb-1">Check Memo</label>
                 <Input
+                  id={`${inputId}-check_memo`}
                   type="text"
                   placeholder="Default memo"
                   value={fields.check_memo}

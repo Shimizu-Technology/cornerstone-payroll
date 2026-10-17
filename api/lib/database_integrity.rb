@@ -70,8 +70,13 @@ module DatabaseIntegrity
 
   module SchemaDefinition
     def define(*args, **options, &block)
+      # Rails temporarily selects the schema target pool while loading each
+      # database. Secondary Solid Cache/Queue/Cable schemas have no payroll tables.
+      schema_pool = connection_pool
       result = super
-      DatabaseIntegrity.install!
+      if schema_pool.db_config.primary?
+        schema_pool.with_connection { |connection| DatabaseIntegrity.install!(connection) }
+      end
       result
     end
   end

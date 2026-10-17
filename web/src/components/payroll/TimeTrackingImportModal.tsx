@@ -17,7 +17,7 @@ interface Props {
   onClose: () => void;
   payPeriod: PayPeriod;
   employees: Employee[];
-  onImportComplete: () => void;
+  onImportComplete: () => Promise<boolean>;
   onCorrectionRecorded?: () => void;
   initialSourceId?: number;
   autoPreview?: boolean;
@@ -133,6 +133,7 @@ export function TimeTrackingImportModal({
   const [appliedCount, setAppliedCount] = useState(0);
   const [roundingExceptionCount, setRoundingExceptionCount] = useState(0);
   const [appliedThisSession, setAppliedThisSession] = useState(false);
+  const [savedImportRefreshFailed, setSavedImportRefreshFailed] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -151,6 +152,7 @@ export function TimeTrackingImportModal({
     setCorrection(null);
     setPreview(null);
     setStep('select');
+    setSavedImportRefreshFailed(false);
     setCorrectionReason('');
     setCorrectionAcknowledged(false);
     setCorrectionBusy(false);
@@ -250,6 +252,7 @@ export function TimeTrackingImportModal({
     setAppliedCount(0);
     setRoundingExceptionCount(0);
     setAppliedThisSession(false);
+    setSavedImportRefreshFailed(false);
     autoPreviewAttemptedRef.current = false;
     setSources([]);
     setSourceId('');
@@ -318,7 +321,9 @@ export function TimeTrackingImportModal({
   };
 
   const rowCategories = (row: TimeTrackingPreviewRow) => (row.categories || []).filter((category) => (
-    isFinalizedBatch ? categoryHours(category) !== 0 : categoryHours(category) > 0
+    isFinalizedBatch
+      ? [categoryHours(category), category.regular_hours ?? 0, category.overtime_hours ?? 0].some(hours => hours !== 0)
+      : categoryHours(category) > 0
   ));
 
   const rowWageRateMappingsComplete = (row: TimeTrackingPreviewRow) => {
@@ -502,6 +507,18 @@ export function TimeTrackingImportModal({
     } finally { if (isCurrentRequest()) setCorrectionBusy(false); }
   };
 
+  const reloadSavedImport = async (isCurrentRequest = beginScopedRequest()) => {
+    setLoading(true);
+    try {
+      const loaded = await onImportComplete();
+      if (isCurrentRequest()) setSavedImportRefreshFailed(!loaded);
+    } catch {
+      if (isCurrentRequest()) setSavedImportRefreshFailed(true);
+    } finally {
+      if (isCurrentRequest()) setLoading(false);
+    }
+  };
+
   const handleApply = async () => {
     if (loading || correctionBusy || !preview) return;
     const isCurrentRequest = beginScopedRequest();
@@ -515,7 +532,7 @@ export function TimeTrackingImportModal({
           source_user_id: row.source_user_id,
           employee_id: employeeId,
           include: includedRows.has(row.source_user_id) && Boolean(employeeId),
-          wage_rate_mappings: (row.categories || []).map((category) => ({
+          wage_rate_mappings: (isFinalizedBatch ? rowCategories(row) : (row.categories || [])).map((category) => ({
             source_category_id: category.source_category_id,
             source_category_key: category.key,
             source_category_name: category.name,
@@ -554,7 +571,7 @@ export function TimeTrackingImportModal({
       setAppliedThisSession(true);
       setPreview(res.import);
       setStep('done');
-      onImportComplete();
+      await reloadSavedImport(isCurrentRequest);
     } catch (err) {
       if (!isCurrentRequest()) return;
       const message = err instanceof Error ? err.message : 'Failed to apply time tracking import';
@@ -701,8 +718,8 @@ export function TimeTrackingImportModal({
               {!isHistoricalReconciliation && (preview.correction_lines || []).filter((line) => !(preview.correction_dispositions || []).some((done) => done.source_user_id === line.source_user_id && done.source_time_entry_id === line.source_time_entry_id && done.line_key === line.line_key)).map((line) => (
                 <section key={`${line.source_user_id}:${line.source_time_entry_id}:${line.line_key}`} aria-label="Source accounting correction" className="rounded-xl border border-warning-200 bg-warning-50 p-4">
                   <p className="text-sm font-semibold">Review source correction: {formatHours(line.regular_hours)} REG / {formatHours(line.overtime_hours)} OT</p>
-                  <p className="mt-2 text-sm">Record the correction against the original payroll before adding the remaining ordinary hours.</p>
-                  <Button className="mt-3" variant="outline" disabled={loading || correctionBusy} onClick={() => void reviewCorrection(line)}>Review correction</Button>
+                  <p className="mt-2 text-sm">Use this review for an accounting-only adjustment against a verified paid payroll. To add signed earnings here, review each employee's combined totals, which must remain nonnegative, and acknowledge the negative corrections below. Adding them keeps separate earning lines and does not replace the original payroll or record a payment or recovery.</p>
+                  <Button className="mt-3" variant="outline" disabled={loading || correctionBusy} onClick={() => void reviewCorrection(line)}>Review paid payroll correction</Button>
                 </section>
               ))}
               {correction && (
@@ -1098,7 +1115,7 @@ export function TimeTrackingImportModal({
                 {!appliedThisSession && alreadyApplied ? 'These time tracking hours are already linked' : isHistoricalReconciliation ? 'Historical payroll linked' : isFinalizedBatch ? 'Time tracking hours added to payroll' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
-                {!appliedThisSession && alreadyApplied
+                {loading ? 'Loading the saved payroll before review…' : savedImportRefreshFailed ? 'The source import is saved. Payroll review is waiting for a current screen reload.' : !appliedThisSession && alreadyApplied
                   ? `Cornerstone recorded this batch on ${formatTimestamp(preview?.applied_at)}. Its hours were not imported again.`
                   : isHistoricalReconciliation
                   ? `${appliedCount} employee record${appliedCount === 1 ? '' : 's'} reconciled. No payroll amounts were changed.${roundingExceptionCount > 0 ? ` ${roundingExceptionCount} documented legacy rounding exception${roundingExceptionCount === 1 ? ' was' : 's were'} recorded.` : ''}`
@@ -1108,6 +1125,13 @@ export function TimeTrackingImportModal({
                     : 'No employee rows were applied. This can be valid when every ordinary import row was skipped.'
                   : `${appliedCount} employee row${appliedCount === 1 ? '' : 's'} applied. Run payroll to calculate taxes and deductions.`}
               </p>
+              {savedImportRefreshFailed && (
+                <div role="alert" className="mx-auto mt-5 max-w-xl rounded-xl border border-warning-300 bg-warning-50 p-4 text-left text-sm text-warning-950">
+                  <p className="font-semibold">The import was saved, but payroll could not refresh.</p>
+                  <p className="mt-1">Reload the saved payroll before calculating, approving or committing. These source hours are already recorded; do not import them again.</p>
+                  <Button className="mt-3 min-h-11" variant="outline" disabled={loading} onClick={() => void reloadSavedImport()}>{loading ? 'Reloading…' : 'Reload saved payroll'}</Button>
+                </div>
+              )}
               {isFinalizedBatch && (
                 <div className="mx-auto mt-5 max-w-xl rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-left text-sm leading-6 text-primary-900">
                   <div className="font-semibold">What happens next</div>

@@ -89,7 +89,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Live time tracking readiness')).toBeTruthy();
-    expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
+    expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
     expect(screen.getByText(/carries its exact entry links through calculation/i)).toBeTruthy();
