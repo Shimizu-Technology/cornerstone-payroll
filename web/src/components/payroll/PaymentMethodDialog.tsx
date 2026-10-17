@@ -14,11 +14,12 @@ import type { PayPeriod, PayrollItem, PaymentDeliveryMethod } from '@/types';
 interface Props {
   payPeriod: PayPeriod;
   item: PayrollItem | null;
+  readOnly?: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }
 
-export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props): ReactElement {
+export function PaymentMethodDialog({ payPeriod, item, readOnly = false, onClose, onSaved }: Props): ReactElement {
   const { notify } = useFeedback();
   const [record, setRecord] = useState<PayrollItem | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,8 +66,12 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
   const methodChanges = method !== currentMethod;
   const committed = eligibility?.requires_unpaid_confirmation ?? payPeriod.status === 'committed';
   const retiresCheck = committed && methodChanges && eligibility?.mode === 'retire_check';
+  const checkActivity = record?.check_status === 'delivered' ? 'issued'
+    : record?.check_status === 'printed' || record?.check_printed_at ? 'printed'
+    : record?.check_status === 'prepared' || record?.check_prepared_at ? 'prepared'
+    : null;
   const blocked = !eligibility || !eligibility.eligible;
-  const ready = Boolean(record && !loading && !saving && !blocked && (methodChanges || futureDefault) &&
+  const ready = Boolean(record && !readOnly && !loading && !saving && !blocked && (methodChanges || futureDefault) &&
     (!committed || (reason.trim().length >= 10 && unpaid)) && (!retiresCheck || (cancelled && evidence.trim())));
 
   const save = async (): Promise<void> => {
@@ -105,6 +110,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
       {loading && <p role="status" className="text-sm text-neutral-600">Checking the payment and its check history…</p>}
       {error && <ActionFeedback tone="error" message={error} retryKey={errorAttempt} />}
       {!loading && !record && <Button className="max-sm:min-h-[44px]" variant="outline" onClick={() => setReload(value => value + 1)}>Try again</Button>}
+      {readOnly && <p role="status" className="text-sm text-amber-800">Changes are unavailable with your current workspace access. Your entered details remain here; Cancel is available.</p>}
       {record && <fieldset disabled={saving} className="space-y-4">
         <p className="text-sm text-neutral-600">Current method: <strong>{paymentMethodLabel(currentMethod)}</strong></p>
         {blocked ? <p role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">{eligibility?.reason || 'This payment cannot be changed until its eligibility has been verified. Refresh and try again.'}</p> : <>
@@ -116,7 +122,7 @@ export function PaymentMethodDialog({ payPeriod, item, onClose, onSaved }: Props
             <Input label="Reason for changing this payment (at least 10 characters)" value={reason} onChange={event => setReason(event.target.value)} />
             <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={unpaid} onChange={event => setUnpaid(event.target.checked)} />I verified that this payment has not been paid by check or bank transfer.</label>
             {retiresCheck ? <>
-              <p className="rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">Check #{record.check_number} was prepared or printed. Cancel that check before changing delivery. This records cancellation of the check only; the employee’s earned wages remain payable.</p>
+              <p className="rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">Check #{record.check_number} {checkActivity ? `is recorded as ${checkActivity}` : 'has recorded check activity'}. Cancel that check before changing delivery. This records cancellation of the check only; the employee’s earned wages remain payable.</p>
               <Input label="Check cancellation evidence reference" helperText="Reference the returned/destroyed check or the bank’s stop-payment confirmation. Do not enter bank account numbers." value={evidence} onChange={event => setEvidence(event.target.value)} />
               <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={cancelled} onChange={event => setCancelled(event.target.checked)} />I verified that the original check is cancelled and cannot be used for payment.</label>
             </> : methodChanges && <p className="text-sm text-neutral-600">{method === 'direct_deposit' ? 'The unissued check number will be retired.' : 'A new paper-check number will be assigned.'}</p>}

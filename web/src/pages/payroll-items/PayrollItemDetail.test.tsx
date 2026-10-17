@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { PayrollItemDetail } from './PayrollItemDetail';
 
-const apiMocks = vi.hoisted(() => ({ employee: vi.fn(), payPeriod: vi.fn(), payrollItem: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ employee: vi.fn(), payPeriod: vi.fn(), payrollItem: vi.fn(), activeCompany: { id: 1, name: 'Synthetic Payroll' } as Record<string, unknown> }));
 vi.mock('@/services/api', () => ({
   employeesApi: { get: apiMocks.employee },
   payPeriodsApi: { get: apiMocks.payPeriod },
   payrollItemsApi: { get: apiMocks.payrollItem },
 }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, name: 'Synthetic Payroll' } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: apiMocks.activeCompany }) }));
 vi.mock('@/components/payroll/PayrollResultBreakdown', () => ({
   PayrollResultBreakdown: () => null,
   PaycheckWithholdingContext: () => null,
@@ -35,7 +35,17 @@ function renderDetail(item: PayrollItem, status: PayPeriod['status'] = 'committe
 
 describe('PayrollItemDetail payment labels', () => {
   afterEach(cleanup);
-  beforeEach(() => { vi.clearAllMocks(); apiMocks.employee.mockResolvedValue({ data: employee }); });
+  beforeEach(() => { apiMocks.activeCompany = { id: 1, name: 'Synthetic Payroll' }; vi.clearAllMocks(); apiMocks.employee.mockResolvedValue({ data: employee }); });
+
+  it('keeps the direct payroll-item route readable for a workspace reviewer', async () => {
+    apiMocks.activeCompany = { id: 1, name: 'Synthetic Payroll', payroll_environment: 'migration_rehearsal', workspace_can_write: false };
+    renderDetail({ ...baseItem, check_number: '8111', check_status: 'delivered' });
+    expect(await screen.findByText(/You have read-only access to this workspace/)).toBeTruthy();
+    expect(screen.getByText('Issued')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Employee workspace' })).toBeTruthy();
+    expect(screen.getByText('Payment context')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Save|Void|Reissue|Record Issued/ })).toBeNull();
+  });
 
   it.each(['calculated', 'approved', 'committed'] as const)('shows earned zero-net %s rows as statement only', async (status) => {
     renderDetail({ ...baseItem, net_pay: 0, total_deductions: 100, check_number: null, check_status: null }, status);

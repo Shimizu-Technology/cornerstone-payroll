@@ -118,8 +118,6 @@ COMPANY_ID="$(json_value "$CORNERSTONE_FIXTURE" company_id)"
 PAY_PERIOD_ID="$(json_value "$CORNERSTONE_FIXTURE" pay_period_id)"
 NEXT_PAY_PERIOD_ID="$(json_value "$CORNERSTONE_FIXTURE" next_pay_period_id)"
 SOURCE_ID="$(json_value "$CORNERSTONE_FIXTURE" source_id)"
-EMPLOYEE_ID="$(json_value "$CORNERSTONE_FIXTURE" employee_id)"
-WAGE_RATE_ID="$(json_value "$CORNERSTONE_FIXTURE" employee_wage_rate_id)"
 ADMIN_EMAIL="$(json_value "$CORNERSTONE_FIXTURE" admin_email)"
 START_DATE="$(json_value "$CORNERSTONE_FIXTURE" start_date)"
 END_DATE="$(json_value "$CORNERSTONE_FIXTURE" end_date)"
@@ -127,10 +125,6 @@ PAY_DATE="$(json_value "$CORNERSTONE_FIXTURE" pay_date)"
 PREVIOUS_REGULAR_PAY_DATE="$(json_value "$CORNERSTONE_FIXTURE" previous_regular_pay_date)"
 MANUAL_APPROVE_ID="$(json_value "$AIRE_FIXTURE" approved_manual_entry_id)"
 MANUAL_HOLD_ID="$(json_value "$AIRE_FIXTURE" held_manual_entry_id)"
-AIRE_EMPLOYEE_ID="$(json_value "$AIRE_FIXTURE" employee_id)"
-AIRE_CATEGORY_ID="$(json_value "$AIRE_FIXTURE" category_id)"
-AIRE_CATEGORY_KEY="$(json_value "$AIRE_FIXTURE" category_key)"
-AIRE_CATEGORY_NAME="$(json_value "$AIRE_FIXTURE" category_name)"
 CUTOFF_AT="$(json_value "$AIRE_FIXTURE" cutoff_at)"
 
 echo "Starting isolated AIRE and Cornerstone APIs..."
@@ -344,21 +338,10 @@ PREVIEW_RESPONSE="$TEMP_DIR/preview-response.json"
 api_call 200 "preview the verified AIRE batch for payroll" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/preview_time_tracking_import" \
   "$PREVIEW_RESPONSE" "$PREVIEW_BODY"
-IMPORT_ID="$(ruby -rjson -e 'print JSON.parse(File.read(ARGV[0])).dig("import", "id")' "$PREVIEW_RESPONSE")"
 
 APPLY_BODY="$TEMP_DIR/apply-body.json"
-ruby -rjson -e '
-  File.write(ARGV[0], JSON.generate(
-    import_id: ARGV[1].to_i,
-    mappings: [{
-      source_user_id: ARGV[2], employee_id: ARGV[3].to_i, include: true,
-      wage_rate_mappings: [{
-        source_category_id: ARGV[4], source_category_key: ARGV[5], source_category_name: ARGV[6],
-        source_effective_rate_cents: 2500, employee_wage_rate_id: ARGV[7].to_i
-      }]
-    }]
-  ))
-' "$APPLY_BODY" "$IMPORT_ID" "$AIRE_EMPLOYEE_ID" "$EMPLOYEE_ID" "$AIRE_CATEGORY_ID" "$AIRE_CATEGORY_KEY" "$AIRE_CATEGORY_NAME" "$WAGE_RATE_ID"
+ruby "$ROOT_DIR/scripts/local_certification/finalized_wage_mapping.rb" \
+  "$PREVIEW_RESPONSE" "$AIRE_FIXTURE" "$CORNERSTONE_FIXTURE" "$APPLY_BODY" 14 0
 APPLY_RESPONSE="$TEMP_DIR/apply-response.json"
 api_call 200 "apply the finalized AIRE batch to Cornerstone payroll" POST \
   "$CORNERSTONE_BASE_URL/api/v1/admin/pay_periods/$PAY_PERIOD_ID/apply_time_tracking_import" \

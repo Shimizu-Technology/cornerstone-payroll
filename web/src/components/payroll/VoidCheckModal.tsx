@@ -13,11 +13,12 @@ import { Label } from '@/components/ui/label';
 
 interface VoidCheckModalProps {
   item: CheckItem;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => Promise<void>;
 }
 
-export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProps) {
+export function VoidCheckModal({ item, readOnly = false, onClose, onComplete }: VoidCheckModalProps) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -25,7 +26,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
   const valid = reason.trim().length >= 10;
 
   const handleVoid = async () => {
-    if (!valid) return;
+    if (readOnly || !valid) return;
     setLoading(true);
     setError(null);
     try {
@@ -75,6 +76,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
           <p className="text-xs text-gray-500">{reason.trim().length} / 10 characters minimum</p>
         </div>
 
+        {readOnly && <p role="status" className="text-sm text-amber-800">Changes are unavailable with your current workspace access. Your entered details remain here; Cancel is available.</p>}
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
@@ -85,7 +87,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
           </Button>
           <Button
             onClick={handleVoid}
-            disabled={!valid || loading}
+            disabled={readOnly || !valid || loading}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
             {loading ? 'Voiding…' : 'Void Check'}

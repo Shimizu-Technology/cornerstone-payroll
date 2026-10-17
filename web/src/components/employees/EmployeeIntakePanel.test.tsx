@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeIntakePanel } from './EmployeeIntakePanel';
 import type { Employee } from '@/types';
 
-const mocks = vi.hoisted(() => ({ update: vi.fn(), canReview: true }));
+const mocks = vi.hoisted(() => ({ update: vi.fn(), canReview: true, activeCompany: null as import('@/services/api').CompanyListItem | null }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
 vi.mock('@/services/employee-intake-api', () => ({ employeeIntakeApi: { updateException: mocks.update } }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => mocks.canReview }) }));
 
@@ -18,8 +19,17 @@ const employee = {
 
 describe('Incomplete employee payroll review', () => {
   afterEach(cleanup);
-  beforeEach(() => { vi.clearAllMocks(); mocks.canReview = true; mocks.update.mockResolvedValue({ data: employee }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.activeCompany = null; mocks.canReview = true; mocks.update.mockResolvedValue({ data: employee }); });
 
+  it('hides configuration review actions for a manager workspace operator while retaining the checklist', () => {
+    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_client_configuration: false } } as unknown as import('@/services/api').CompanyListItem;
+    const view = render(<EmployeeIntakePanel companyId={1} employee={employee} onUpdated={vi.fn()} />);
+    expect(screen.getByText('Social Security Number')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm payroll setup' })).toBeNull();
+    mocks.activeCompany = { ...mocks.activeCompany, workspace_write_permissions: { manage_client_configuration: true } };
+    view.rerender(<EmployeeIntakePanel companyId={1} employee={employee} onUpdated={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Confirm payroll setup' })).toBeTruthy();
+  });
   it('requires a participation date, reason and explicit default-withholding acknowledgement', async () => {
     const onUpdated = vi.fn();
     render(<EmployeeIntakePanel companyId={1} employee={employee} onUpdated={onUpdated} />);

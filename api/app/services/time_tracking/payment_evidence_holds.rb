@@ -1,15 +1,23 @@
 # frozen_string_literal: true
 
+require "timeout"
+
 module TimeTracking
   # Reported payment only suspends source hours; it never verifies a check or pays payroll.
   class PaymentEvidenceHolds
-    def initialize(pay_period:, source:, client:)
+    MAX_LIST_PAGES = 10
+    MAX_REVIEW_LIST_REQUESTS = 20
+    REVIEW_TIMEOUT_SECONDS = 30
+
+    def initialize(pay_period:, source:, client:, monotonic_clock: nil)
       @pay_period, @source, @client = pay_period, source, client
+      @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
     end
 
     def review
       payload = @client.payroll_cockpit_manual_review(start_date: @pay_period.start_date.iso8601,
         end_date: @pay_period.end_date.iso8601, external_pay_period_id: @pay_period.id)
+      prime_period_attestations! if @source.supports?(:payment_attestation_resolution_v1)
       candidates = payload.fetch("employees", []).flat_map do |employee|
         mapping = mappings[employee["source_user_uuid"] || employee["payroll_integration_id"]]
         next [] unless mapping
@@ -62,6 +70,83 @@ module TimeTracking
 
     private
 
+    # The verified resolution contract supports a period-scoped list without an
+    # employee filter. Include held-only workers as well as ordinary candidates;
+    # reading only the manual review's positive rows would hide those holds.
+    def prime_period_attestations!
+      return if @period_attestations_loaded
+      @list_requests = 0
+      @review_deadline = @monotonic_clock.call + REVIEW_TIMEOUT_SECONDS
+      accumulated = mappings.keys.index_with { [] }
+      total_pages = nil
+      1.upto(MAX_LIST_PAGES) do |page|
+        payload = review_list!(page: page, **period_query)
+        pages = pagination_pages!(payload, page: page, expected: total_pages)
+        if page == 1 && pages > MAX_LIST_PAGES
+          # Only a verified, well-formed size response can select the fallback.
+          # Never publish partial bulk evidence or reuse it through ||= caches.
+          conflict!("Payment evidence review exceeds its request budget; review this mapped scope with your administrator") if
+            @list_requests + mappings.size > MAX_REVIEW_LIST_REQUESTS
+          accumulated = mappings.keys.index_with do |uuid|
+            scoped_attestations_for(uuid, bounded_review: true)
+          end
+          break
+        end
+        total_pages = pages
+        payload.fetch("payment_attestations").each do |row|
+          next unless mappings.key?(row["source_user_uuid"]) && in_period?(row["work_date"])
+          accumulated.fetch(row["source_user_uuid"]) << row
+        end
+        break if page >= total_pages
+      end
+      @attestations = accumulated.transform_values { |rows| unique_attestations!(rows) }
+      @period_attestations_loaded = true
+    rescue StandardError
+      @attestations = {}
+      @period_attestations_loaded = false
+      raise
+    end
+
+    def period_query
+      { start_date: @pay_period.start_date.iso8601, end_date: @pay_period.end_date.iso8601 }
+    end
+
+    def review_list!(**query)
+      conflict!("Payment evidence review exceeds its request budget; review this mapped scope with your administrator") if
+        @list_requests >= MAX_REVIEW_LIST_REQUESTS
+      remaining = @review_deadline - @monotonic_clock.call
+      conflict!("Payment evidence review timed out; retry before reviewing payroll") unless remaining.positive?
+      @list_requests += 1
+      # A total deadline also bounds a slow in-flight read, not just the gaps
+      # between requests. These are read-only requests; no command is retried.
+      payload = Timeout.timeout(remaining) { @client.payroll_payment_attestations(**query) }
+      conflict!("Payment evidence review timed out; retry before reviewing payroll") if @monotonic_clock.call >= @review_deadline
+      payload
+    rescue Timeout::Error
+      conflict!("Payment evidence review timed out; retry before reviewing payroll")
+    end
+
+    def pagination_pages!(payload, page:, expected: nil)
+      pagination = payload.fetch("pagination")
+      value = pagination.fetch("total_pages")
+      pages = Integer(value.to_s, 10)
+      unless pages.positive? && payload.fetch("payment_attestations").is_a?(Array) &&
+          (!expected || expected == pages) &&
+          (!pagination.key?("current_page") || pagination["current_page"].to_s == page.to_s)
+        conflict!("Payment evidence pagination changed or is invalid; refresh the source before reviewing payroll")
+      end
+      pages
+    rescue KeyError, TypeError, ArgumentError
+      conflict!("Payment evidence pagination changed or is invalid; refresh the source before reviewing payroll")
+    end
+
+    def unique_attestations!(rows)
+      rows.group_by { |row| row.fetch("id").to_s }.map do |_id, duplicates|
+        conflict!("Payment evidence changed while loading; refresh the source before reviewing payroll") unless duplicates.uniq.one?
+        duplicates.first
+      end
+    end
+
     def mappings
       @mappings ||= @source.time_tracking_employee_mappings.includes(:employee)
         .where(company_id: @pay_period.company_id).where.not(source_user_uuid: nil)
@@ -80,23 +165,26 @@ module TimeTracking
 
     def attestations_for(uuid)
       @attestations ||= {}
-      @attestations[uuid] ||= begin
-        accumulated = []
-        1.upto(10) do |page|
-          query = { source_user_uuid: uuid, page: page }
-          if @source.supports?(:payment_attestation_resolution_v1)
-            query.merge!(start_date: @pay_period.start_date.iso8601, end_date: @pay_period.end_date.iso8601)
-          end
-          payload = @client.payroll_payment_attestations(**query)
-          rows = payload.fetch("payment_attestations")
-          # A producer response cannot assign another employee's holds to this query.
-          accumulated.concat(rows.select { |row| row["source_user_uuid"] == uuid })
-          total_pages = Integer(payload.fetch("pagination").fetch("total_pages"))
-          break if page >= total_pages
-          conflict!("Payment evidence history is too large for this view; review it with your administrator") if page == 10
-        end
-        accumulated
+      @attestations[uuid] ||= scoped_attestations_for(uuid)
+    end
+
+    def scoped_attestations_for(uuid, bounded_review: false)
+      accumulated = []
+      total_pages = nil
+      1.upto(MAX_LIST_PAGES) do |page|
+        query = { source_user_uuid: uuid, page: page }
+        modern = @source.supports?(:payment_attestation_resolution_v1)
+        query.merge!(period_query) if modern
+        payload = bounded_review ? review_list!(**query) : @client.payroll_payment_attestations(**query)
+        pages = pagination_pages!(payload, page: page, expected: total_pages)
+        total_pages = pages
+        accumulated.concat(payload.fetch("payment_attestations").select do |row|
+          row["source_user_uuid"] == uuid && (!modern || in_period?(row["work_date"]))
+        end)
+        break if page >= total_pages
+        conflict!("Payment evidence history is too large for this view; review it with your administrator") if page == MAX_LIST_PAGES
       end
+      unique_attestations!(accumulated)
     end
 
     def in_period?(value)

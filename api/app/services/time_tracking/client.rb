@@ -289,18 +289,29 @@ module TimeTracking
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
-    def payroll_payment_attestations(source_user_uuid:, page: 1, start_date: nil, end_date: nil)
+    def payroll_payment_attestations(source_user_uuid: nil, page: 1, start_date: nil, end_date: nil)
       require_capability!(:payment_attestations)
-      query = { source_user_uuid: source_user_uuid, page: page, per_page: 250 }
+      query = { source_user_uuid: source_user_uuid, page: page, per_page: 250 }.compact
       if start_date.present? || end_date.present?
         require_capability!(:payment_attestation_resolution_v1)
         raise Error, "Both work-period dates are required for payment evidence review" if start_date.blank? || end_date.blank?
 
         query.merge!(start_date: start_date, end_date: end_date)
       end
+      if source_user_uuid.blank? && (start_date.blank? || end_date.blank?)
+        raise Error, "A scoped employee or both work-period dates are required for payment evidence review"
+      end
       uri = payroll_cockpit_uri("/payment_attestations", query)
       require_secure_payroll_transport!(uri)
-      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      result = request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      if start_date.present? || end_date.present?
+        identity = ConnectionIdentity.validate!(source: @source, payload: result)
+        raise Error, "Verify this source installation before reviewing period payment evidence" if identity.legacy || !@source.remote_identity_pinned?
+        validate_integration_response!(result)
+      end
+      result
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
     end
 
     def create_payroll_payment_attestation(source_time_entry_id:, source_user_uuid:, command_id:, expected_version:, reason:)

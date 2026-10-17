@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -8,6 +10,8 @@ import { employeeIntakeApi } from '@/services/employee-intake-api';
 import { formatGuamDateTime } from '@/lib/utils';
 
 export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = false }: { companyId: number; isClient: boolean; readOnly?: boolean }) {
+  const { activeCompany } = useCompany();
+  const effectiveReadOnly = readOnly || !canWriteCompany(activeCompany, 'manage_organization');
   const { settings, loading, error, reload } = useEmployeeIntakeSettings(companyId, isClient);
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState('1');
@@ -19,6 +23,7 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
   const saving = savingScope === companyId;
 
   const save = async (enabled: boolean) => {
+    if (effectiveReadOnly || !settings?.can_manage) return;
     const requestedCompany = companyId;
     setSavingScope(requestedCompany);
     setFeedback(null);
@@ -50,7 +55,7 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
         ? `Enabled by ${settings.enabled_by_name || 'an administrator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
         : 'An administrator can temporarily allow missing personal details for this client.'}</p>
       {settings.enabled && <p className="mt-2 text-sm text-warning-800">Missing information stays on the employee checklist. Payroll documents and filing requirements still apply.</p>}
-      {settings.can_manage && !readOnly && (
+      {settings.can_manage && !effectiveReadOnly && (
         settings.enabled ? <Button className="mt-3" variant="outline" disabled={saving} onClick={() => void save(false)}>Require full details again</Button>
           : <div className="mt-3">
             <Button variant="outline" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>Allow incomplete entry temporarily</Button>

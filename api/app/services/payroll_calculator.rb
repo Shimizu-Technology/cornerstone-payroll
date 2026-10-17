@@ -19,6 +19,7 @@ class PayrollCalculator
   attr_reader :employee, :payroll_item
 
   def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+    TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
       HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
