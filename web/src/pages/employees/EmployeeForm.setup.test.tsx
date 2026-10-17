@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   enabled: false, create: vi.fn(), reload: vi.fn(), departments: vi.fn(), fields: vi.fn(),
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: false, isSuperAdmin: true, isManager: true }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1, activeCompany: mocks.company }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: mocks.company }) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: mocks.enabled }, loading: false, reload: mocks.reload }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/services/api', async (importOriginal) => {

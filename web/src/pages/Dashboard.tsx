@@ -10,6 +10,7 @@ import { formatCurrency, payPeriodStatusConfig } from '@/lib/utils';
 import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { employeesPath, importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 interface StatCardProps {
@@ -53,8 +54,7 @@ function StatCard({
 export function Dashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId, activeCompany } = useCompany();
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const [loading, setLoading] = useState(true);
   const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -115,7 +115,7 @@ export function Dashboard(): ReactElement {
       <Header
         title="Home"
         description="Your payroll command center"
-        actions={<Button onClick={() => navigate(payRunsHref)}>Manage Pay Periods</Button>}
+        actions={<Button onClick={() => navigate(payRunsHref)}>{readOnlyWorkspace ? 'Browse Pay Periods' : 'Manage Pay Periods'}</Button>}
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
@@ -168,7 +168,7 @@ export function Dashboard(): ReactElement {
                     </p>
                     <p className="mt-1 text-sm leading-6 text-neutral-500">
                       {readOnlyWorkspace
-                        ? 'Browse employees, prior payrolls, and reports without changing the backup.'
+                        ? 'Browse employees, prior payrolls, and reports without changing this workspace.'
                         : currentPayPeriod
                         ? `${currentPayPeriod.employee_count} employees, ${formatCurrency(currentPayPeriod.total_net)} net pay currently in view.`
                         : 'Create the period first, then add or import employee payroll items.'}
@@ -276,7 +276,7 @@ export function Dashboard(): ReactElement {
                   </div>
                   <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
                     <Button size="sm" onClick={() => navigate(payRunHref(currentPayPeriod.id))}>Open period</Button>
-                    {currentPayPeriod.status === 'draft' && (
+                    {!readOnlyWorkspace && currentPayPeriod.status === 'draft' && (
                       <Button size="sm" variant="secondary" onClick={() => navigate(payRunHref(currentPayPeriod.id, 'work'))}>Process payroll</Button>
                     )}
                   </div>
@@ -288,7 +288,7 @@ export function Dashboard(): ReactElement {
                 <p className="font-display text-lg font-bold text-neutral-900">No active pay period</p>
                 <p className="mt-1 max-w-md text-sm text-neutral-500">
                   {readOnlyWorkspace
-                    ? 'This backup does not contain an active pay period.'
+                    ? 'This workspace does not contain an active pay period.'
                     : 'Create a pay period to start collecting hours, deductions, checks, and reports.'}
                 </p>
                 <Button className="mt-5" onClick={() => navigate(payRunsHref)}>
@@ -334,7 +334,7 @@ export function Dashboard(): ReactElement {
           {[
             {
               title: readOnlyWorkspace ? 'Browse Employees' : 'Add Employee',
-              body: readOnlyWorkspace ? 'Review the workers preserved in this backup.' : 'Register a worker before the next run.',
+              body: readOnlyWorkspace ? 'Review the workers in this workspace.' : 'Register a worker before the next run.',
               icon: <UserPlus2 className="h-5 w-5" />,
               href: readOnlyWorkspace && activeCompanyId ? employeesPath(activeCompanyId) : newEmployeeHref,
               tone: 'primary',

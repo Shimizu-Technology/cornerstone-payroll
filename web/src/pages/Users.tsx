@@ -478,7 +478,7 @@ export function Users() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
+              <Select aria-label="Role" value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
                 {invitationRoleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
@@ -530,8 +530,8 @@ export function Users() {
                     <div className="min-w-0 flex-1">
                       {editingId === user.id ? (
                         <div className="space-y-3">
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -547,7 +547,7 @@ export function Users() {
                               <Check className="mr-1 h-4 w-4" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="outline" onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
+                            <Button size="sm" variant="outline" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
                           </MobileCardActions>
                         </div>
                       ) : (
@@ -587,7 +587,7 @@ export function Users() {
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {user.active === false ? 'Activate' : 'Deactivate'}
                                 </Button>
-                                <Button size="sm" variant="ghost" className="text-danger-700" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" className="text-danger-700" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   Delete
                                 </Button>
                               </>
@@ -618,7 +618,7 @@ export function Users() {
                     <TableRow>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
                         ) : (
                           <span className="flex items-center gap-2">
                             {user.name}
@@ -635,7 +635,7 @@ export function Users() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -666,7 +666,7 @@ export function Users() {
                               <Check className="w-4 h-4 mr-1" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                            <Button size="sm" variant="ghost" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>
                               <X className="w-4 h-4" />
                             </Button>
                           </div>
@@ -696,7 +696,7 @@ export function Users() {
                                     <span className="flex items-center text-danger-700"><UserX className="w-4 h-4 mr-1" />Deactivate</span>
                                   )}
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   {deletingId === user.id ? (
                                     <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
                                   ) : (
