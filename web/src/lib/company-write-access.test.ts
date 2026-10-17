@@ -12,6 +12,10 @@ describe('effective company write access', () => {
   });
   it.each(['test_workspace_expired', 'test_workspace_read_only', 'test_workspace_archived_at', 'test_workspace_sealed_at'])('does not treat %s as writable', key => {
     expect(canWriteCompany({ ...sandbox, workspace_can_write: true, [key]: key.endsWith('_at') ? '2026-10-14T00:00:00Z' : true })).toBe(false);
+    expect(canWriteCompany({ ...live, [key]: key.endsWith('_at') ? '2026-10-14T00:00:00Z' : true })).toBe(false);
+  });
+  it('keeps an explicit backup read-only when optional workspace metadata is absent', () => {
+    expect(canWriteCompany({ id: 1, test_workspace_purpose: 'backup_snapshot' } as CompanyListItem)).toBe(false);
   });
 });
 

@@ -325,7 +325,7 @@ module PayrollIntake
       payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.clear_wage_rate_hours!
       payroll_item.employment_type = employee.employment_type
-      payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+      payroll_item.pay_rate = employee.default_payroll_rate
     end
 
     def reset_stale_intake_item_fields!(payroll_item, employee)

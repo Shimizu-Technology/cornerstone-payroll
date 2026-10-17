@@ -238,6 +238,17 @@ class Employee < ApplicationRecord
     end
   end
 
+  # Profile wage-rate rows describe hourly work. Keep them as history when the
+  # worker changes pay basis, but never use an old hourly amount as annual salary
+  # or a flat contractor fee when preparing a new/current payroll calculation.
+  def default_payroll_rate
+    hourly_pay_basis? ? (primary_wage_rate&.rate || pay_rate) : pay_rate
+  end
+
+  def hourly_pay_basis?
+    hourly? || (contractor? && contractor_pay_type == "hourly")
+  end
+
   def primary_wage_rate
     rates = active_wage_rates
     rates.find(&:is_primary) || rates.first
