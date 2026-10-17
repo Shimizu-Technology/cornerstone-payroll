@@ -2684,7 +2684,14 @@ export interface AnnualPayrollSummaryReport {
   };
 }
 
+export interface OfficialFormTemplateStatus {
+  available: boolean;
+  supported_tax_years: number[];
+  message: string | null;
+}
+
 export interface Form941GuReport {
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_id: number;
@@ -2750,6 +2757,22 @@ export interface Form941GuReport {
     total_employee_taxes: number;
     total_employer_taxes: number;
   };
+  withholding_reconciliation?: {
+    method: string;
+    rounding: string;
+    expected_employee_ss: number;
+    expected_employee_base_medicare: number;
+    expected_employee_additional_medicare: number;
+    expected_employee_total: number;
+    recorded_employee_total: number;
+    employee_difference: number;
+    line7_suggestion: number | null;
+    recorded_employer_total: number;
+    recorded_total_liability: number;
+    recorded_liability_residual: number;
+    requires_review: boolean;
+    explanation: string;
+  };
   monthly_liability: {
     month: string;
     month_start: string;
@@ -2765,6 +2788,7 @@ export interface Form941GuReport {
 }
 
 export interface QuarterlyCompliancePacketReport {
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_name: string;
@@ -3229,8 +3253,8 @@ export const reportsApi = {
     api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
   w2GuFilingReadiness: (year: number) =>
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
-  w2GuMarkReady: (year: number, notes?: string) =>
-    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
+  w2GuMarkReady: (year: number, notes?: string, preflightFingerprint?: string | null) =>
+    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes, preflight_fingerprint: preflightFingerprint }),
   payrollFilingResponsibilities: (taxYear: number, quarter?: number) =>
     api.get<PayrollFilingResponsibilityResponse>('/admin/payroll_filing_responsibilities', {
       tax_year: taxYear,
