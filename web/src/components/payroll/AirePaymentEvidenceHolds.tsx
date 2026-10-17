@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { payPeriodsApi } from '@/services/api';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatGuamDateTime } from '@/lib/utils';
 import type { AirePaymentEvidenceHold, AirePaymentEvidenceReview } from '@/types';
 
 export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken = 0 }: { payPeriodId: number; onChanged: () => void; refreshToken?: number }) {
@@ -153,7 +153,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
           <p>Payroll item {match.payroll_item_id} · pay run {match.pay_period_id} · current source allocation: {match.allocation_status}</p>
           <p className="whitespace-pre-wrap">Match reason: {match.note}</p>
           {match.original_report && <details className="mt-2"><summary className="min-h-11 cursor-pointer py-2 font-medium">Original reported-payment evidence</summary>
-            <p>Reported {formatDate(match.original_report.attested_at)} · {match.original_report.hours.toFixed(2)} hours</p>
+            <p>Reported {formatGuamDateTime(match.original_report.attested_at)} · {match.original_report.hours.toFixed(2)} hours</p>
             <p className="whitespace-pre-wrap">{match.original_report.reason}</p>
             <p>This records the historical match. Current payment coverage follows the source allocation status above.</p>
           </details>}
@@ -165,7 +165,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
       </ul>}
       {review.payment_attestations.filter(hold => hold.status === 'resolved' && !review.payment_resolutions?.some(match => match.source_payment_attestation_id === hold.id)).map(hold => <details key={hold.id} className="rounded-lg bg-green-50 p-3 text-sm">
         <summary className="min-h-11 cursor-pointer py-2">{hold.employee_name} · {formatDate(hold.work_date)} · reported payment matched to source allocation {hold.resolved_manual_allocation_id}. Original report retained.</summary>
-        <p className="whitespace-pre-wrap">{hold.reason}</p><p>Historical report match · resolved {hold.resolved_at ? formatDate(hold.resolved_at) : 'previously'}. Review the current source allocation payment status.</p>
+        <p className="whitespace-pre-wrap">{hold.reason}</p><p>Historical report match · resolved {hold.resolved_at ? formatGuamDateTime(hold.resolved_at) : 'previously'}. Review the current source allocation payment status.</p>
       </details>)}
       <form onSubmit={event => void submit(event)} className="space-y-3 border-t border-neutral-200 pt-4">
         <h3 className="text-sm font-semibold">{matching ? `Match existing payment for source entry ${matching.source_time_entry_id}` : retracting ? `Retract hold for source entry ${retracting.source_time_entry_id}` : 'Record an owner-reported payment hold'}</h3>
@@ -178,7 +178,7 @@ export function AirePaymentEvidenceHolds({ payPeriodId, onChanged, refreshToken 
           </Select>
           {selectedPayment && <div className="rounded-lg bg-neutral-50 p-3 text-sm">
             <p>Original payroll: {selectedPayment.regular_hours.toFixed(2)} REG + {selectedPayment.overtime_hours.toFixed(2)} OT · gross ${selectedPayment.gross_pay.toFixed(2)} · net ${selectedPayment.net_pay.toFixed(2)}</p>
-            <p>Scheduled pay date {formatDate(selectedPayment.pay_date)} · payment date {formatDate(selectedPayment.payment_effective_on)} · evidence recorded {formatDate(selectedPayment.payment_recorded_at)}</p>
+            <p>Scheduled pay date {formatDate(selectedPayment.pay_date)} · payment date {formatDate(selectedPayment.payment_effective_on)} · evidence recorded {formatGuamDateTime(selectedPayment.payment_recorded_at)}</p>
           </div>}
           {!currentMatch && <p role="alert" className="text-sm">This report has changed or already has a saved match. Review the current evidence and retry its saved command when pending.</p>}
           {currentMatch && !currentMatch.payment_options?.length && <p>No existing issued payroll item is available for this employee. Verify native delivery or bank evidence first.</p>}

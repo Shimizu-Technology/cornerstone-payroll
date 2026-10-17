@@ -106,6 +106,7 @@ module Api
           @payroll_item.reload
 
           attrs = payroll_item_params
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
@@ -158,6 +159,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.employment_type = @payroll_item.employee.employment_type
@@ -214,8 +216,10 @@ module Api
             :qualified_overtime_compensation,
             :check_date, :check_memo,
             wage_rate_hours: [
+              :source_bucket_key,
               :employee_wage_rate_id, :label, :rate, :regular_hours,
-              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
+              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active,
+              { source_lines: [ :source_time_entry_id, :line_key, :source_time_entry_version, :source_kind, :original_work_date, :total_hours, :regular_hours, :overtime_hours ] }
             ],
             custom_earnings: [ :label, :amount ],
             custom_deductions: [ :label, :amount ],
@@ -345,6 +349,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             total_hours: item.total_hours,
             bonus: item.bonus,
@@ -435,6 +440,7 @@ module Api
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
+          return if payroll_item.timekeeping_source == "correction_reference"
           return if payroll_item.wage_rate_hours.present?
 
           payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
