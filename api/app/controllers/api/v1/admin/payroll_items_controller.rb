@@ -424,6 +424,9 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+            raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
+          end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
           payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
@@ -432,13 +435,16 @@ module Api
           payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
-          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          unless payroll_item.timekeeping_source == "correction_reference"
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          end
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
-          return if payroll_item.wage_rate_hours.present?
+          return if payroll_item.timekeeping_source == "correction_reference"
+          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          payroll_item.pay_rate = employee.default_payroll_rate
         end
       end
     end

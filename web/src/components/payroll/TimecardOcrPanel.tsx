@@ -513,12 +513,14 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
 }
 
 // ──── Inline-editable time input ───────────────────────
-function TimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function TimeInput({ value, onChange, label, disabled }: { value: string; onChange: (v: string) => void; label: string; disabled?: boolean }) {
   return (
     <input
       className="w-[5.5rem] text-xs border border-gray-200 rounded px-1.5 py-1 font-mono focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      disabled={disabled}
       placeholder="—"
     />
   );
@@ -652,12 +654,13 @@ function ZoomableImage({
 }
 
 // ──── Employee Selector ─────────────────────────────────
-function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName }: {
+function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName, disabled = false }: {
   currentName: string;
   employees: Employee[];
   selectedEmployeeId: number | '';
   onSelectEmployee: (id: number | '') => void;
   onSaveName: (name: string) => Promise<void>;
+  disabled?: boolean;
 }) {
   const [mode, setMode] = useState<'dropdown' | 'custom'>(employees.length > 0 ? 'dropdown' : 'custom');
   const [customName, setCustomName] = useState(currentName);
@@ -672,27 +675,29 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
 
   if (mode === 'custom') {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <input
-          className="border rounded px-2 py-1.5 text-sm w-64 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+          className="min-w-0 max-w-full border rounded px-2 py-1.5 text-sm w-64 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+          disabled={disabled || savingCustom}
           value={customName}
           onChange={(e) => setCustomName(e.target.value)}
           placeholder="Enter employee name..."
         />
-        <Button size="sm" onClick={handleSaveCustom} disabled={savingCustom || !customName.trim()}>
+        <Button size="sm" onClick={handleSaveCustom} disabled={disabled || savingCustom || !customName.trim()}>
           {savingCustom ? <><Spinner size="sm" /> Saving...</> : 'Save'}
         </Button>
         {employees.length > 0 && (
-          <Button size="sm" variant="outline" onClick={() => setMode('dropdown')}>Use Dropdown</Button>
+          <Button size="sm" variant="outline" disabled={disabled || savingCustom} onClick={() => setMode('dropdown')}>Use Dropdown</Button>
         )}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <Select
-        className="max-w-xs py-1.5"
+        className="min-w-0 max-w-full sm:max-w-xs py-1.5"
+        disabled={disabled}
         value={selectedEmployeeId}
         onChange={(e) => onSelectEmployee(e.target.value ? Number(e.target.value) : '')}
       >
@@ -705,6 +710,7 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
       </Select>
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+        disabled={disabled}
         onClick={() => setMode('custom')}
       >
         Edit name
@@ -863,6 +869,8 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [selectedWageRateId, setSelectedWageRateId] = useState<number | ''>('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState('');
   const [imageCollapsed, setImageCollapsed] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const busy = saving || reprocessing || reviewing || applying || savingName;
   const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
   const wageRateChoices = activeHourlyWageRates(selectedEmployee);
   const needsWageRateChoice = employeeNeedsWageRateChoice(selectedEmployee);
@@ -905,6 +913,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveAll = async () => {
+    if (busy) return;
     setSaving(true);
     setError('');
     try {
@@ -958,6 +967,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleApproveAll = async () => {
+    if (busy || dirty) return;
     setSaving(true);
     try {
       const needsApproval = tc.punch_entries.filter(
@@ -976,6 +986,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleReprocess = async () => {
+    if (busy || dirty) return;
     setReprocessing(true);
     setError('');
     try {
@@ -991,6 +1002,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleReview = async () => {
+    if (busy || dirty) return;
     setReviewing(true);
     setError('');
     try {
@@ -1004,7 +1016,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleApplyToPayroll = async () => {
-    if (!payPeriodId || !onApplied) return;
+    if (busy || dirty || !payPeriodId || !onApplied) return;
     setApplying(true);
     setError('');
     try {
@@ -1026,17 +1038,19 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveName = async (name: string) => {
+    if (busy) return;
+    setSavingName(true);
     try {
       const updated = await timecardsApi.update(tc.id, { employee_name: name });
       setTc(updated);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally { setSavingName(false); }
   };
 
   return (
     <div className="space-y-4">
       {/* Header with back, status, and confidence */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
+        <Button variant="outline" size="sm" onClick={onBack} disabled={busy}>Back</Button>
         <div className="flex-1" />
         {statusBadge(tc.ocr_status)}
         {tc.overall_confidence !== null && (
@@ -1047,7 +1061,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       </div>
 
       {/* Employee assignment section */}
-      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
+      <div className="flex min-w-0 flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg border">
         <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Employee:</span>
         {payPeriodId ? (
           <EmployeeSelector
@@ -1058,6 +1072,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               setSelectedEmployeeId(employeeId);
               setSelectedWageRateId('');
             }}
+            disabled={busy}
             onSaveName={handleSaveName}
           />
         ) : (
@@ -1068,30 +1083,25 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
 
       {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
-      {/* Image + Table side by side */}
-      <div className="flex gap-4">
-        {/* Image panel — collapsible */}
-        <div className={`shrink-0 transition-all duration-200 ${imageCollapsed ? 'w-0 overflow-hidden' : 'w-80'}`}>
-          {!imageCollapsed && (
-            <ZoomableImage
-              originalSrc={tc.image_url}
-              enhancedSrc={tc.preprocessed_image_url}
-              alt="Timecard"
-            />
-          )}
-        </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-h-11"
+        onClick={() => setImageCollapsed(!imageCollapsed)}
+        aria-expanded={!imageCollapsed}
+      >
+        {imageCollapsed ? 'Show image' : 'Hide image'}
+      </Button>
 
-        {/* Collapse/expand toggle */}
-        <button
-          className="self-start px-1 py-2 text-gray-400 hover:text-gray-700 transition-colors"
-          onClick={() => setImageCollapsed(!imageCollapsed)}
-          title={imageCollapsed ? 'Show image' : 'Hide image'}
-        >
-          {imageCollapsed ? '▶' : '◀'}
-        </button>
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+        {!imageCollapsed && (
+          <div className="w-full shrink-0 lg:w-80">
+            <ZoomableImage originalSrc={tc.image_url} enhancedSrc={tc.preprocessed_image_url} alt="Timecard" />
+          </div>
+        )}
 
-        {/* Punch table */}
-        <div className="flex-1 overflow-x-auto">
+        <div className="min-w-0 flex-1">
+          <div role="region" aria-label="Punch times" tabIndex={0} className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="text-xs text-gray-500 border-b">
@@ -1130,19 +1140,21 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                     <td className="px-1 py-1 font-mono text-xs text-gray-500">{entry.card_day}</td>
                     <td className="px-1 py-1">
                       <input
+                        disabled={busy}
                         type="date"
+                        aria-label={`Work date for day ${entry.card_day}`}
                         className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[7rem] focus:border-indigo-400 outline-none"
                         value={entry.date}
                         onChange={(e) => updateField(rowKey, 'date', e.target.value)}
                       />
                     </td>
                     <td className="px-1 py-1 text-xs text-gray-500">{dow}</td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_in} onChange={(v) => updateField(rowKey, 'clock_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_out} onChange={(v) => updateField(rowKey, 'lunch_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_in} onChange={(v) => updateField(rowKey, 'lunch_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_out} onChange={(v) => updateField(rowKey, 'clock_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock in on ${entry.date || `day ${entry.card_day}`}`} value={entry.clock_in} onChange={(v) => updateField(rowKey, 'clock_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock out before lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.lunch_out} onChange={(v) => updateField(rowKey, 'lunch_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock in after lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.lunch_in} onChange={(v) => updateField(rowKey, 'lunch_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock out after lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.clock_out} onChange={(v) => updateField(rowKey, 'clock_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Third clock in on ${entry.date || `day ${entry.card_day}`}`} value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Third clock out on ${entry.date || `day ${entry.card_day}`}`} value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
                     <td className="px-1 py-1 text-xs text-right font-mono">
                       {rowHours != null ? rowHours.toFixed(2) : isBlank ? '—' : '-'}
                     </td>
@@ -1175,12 +1187,13 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               </tr>
             </tfoot>
           </table>
+          </div>
 
-          {/* Save bar */}
+          {/* Save bar stays outside the horizontally scrolling punch table. */}
           {dirty && (
-            <div className="flex items-center gap-2 mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+            <div className="mt-3 flex flex-col gap-3 rounded border border-yellow-200 bg-yellow-50 p-3 sm:flex-row sm:items-center">
               <span className="text-sm text-yellow-800 flex-1">You have unsaved changes</span>
-              <Button size="sm" onClick={handleSaveAll} disabled={saving}>
+              <Button size="sm" className="min-h-11 w-full sm:w-auto" onClick={handleSaveAll} disabled={busy}>
                 {saving ? <><Spinner size="sm" /> Saving...</> : 'Save All Changes'}
               </Button>
             </div>
@@ -1191,7 +1204,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
         {(tc.ocr_status === 'complete' || tc.ocr_status === 'failed') && (
-          <Button variant="outline" onClick={handleReprocess} disabled={reprocessing}>
+          <Button variant="outline" onClick={handleReprocess} disabled={busy || dirty}>
             {reprocessing ? <><Spinner size="sm" /> Re-running OCR...</> : 'Re-run OCR'}
           </Button>
         )}
@@ -1201,20 +1214,20 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
             <p className="text-sm text-orange-600">
               {tc.review_summary.attention_count} punch entries need attention
             </p>
-            <Button size="sm" variant="outline" onClick={handleApproveAll} disabled={saving}>
+            <Button size="sm" variant="outline" onClick={handleApproveAll} disabled={busy || dirty}>
               Approve All Flagged
             </Button>
           </>
         )}
 
         {tc.ocr_status === 'complete' && tc.review_summary.attention_count === 0 && (
-          <Button onClick={handleReview} disabled={reviewing}>
+          <Button onClick={handleReview} disabled={busy || dirty}>
             {reviewing ? <><Spinner size="sm" /> Marking...</> : 'Mark Reviewed'}
           </Button>
         )}
 
         {tc.ocr_status === 'reviewed' && payPeriodId && (
-          <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
+          <div className="flex w-full flex-wrap items-center gap-2 border-t pt-3 mt-1">
             {needsWageRateChoice && (
               <>
                 <span className="text-xs font-medium text-gray-600">Apply hours to:</span>
@@ -1222,7 +1235,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                   className="max-w-[240px] py-1.5"
                   value={selectedWageRateId}
                   onChange={(e) => setSelectedWageRateId(e.target.value ? Number(e.target.value) : '')}
-                  disabled={applying}
+                  disabled={busy}
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
@@ -1232,7 +1245,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 </Select>
               </>
             )}
-            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying || (needsWageRateChoice && !selectedWageRateId)}>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={busy || dirty || (needsWageRateChoice && !selectedWageRateId)}>
               {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply Hours to Payroll'}
             </Button>
             {tc.applied_to_payroll_at && (
@@ -1248,7 +1261,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           </div>
         )}
         {tc.ocr_status === 'reviewed' && !payPeriodId && (
-          <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
+          <div className="flex w-full flex-wrap items-center gap-2 border-t pt-3 mt-1">
             <Badge className="bg-green-100 text-green-800">Reviewed</Badge>
             <span className="text-sm text-gray-600">
               Total hours: <strong className="font-mono">{editableTotalHours.toFixed(2)}</strong>

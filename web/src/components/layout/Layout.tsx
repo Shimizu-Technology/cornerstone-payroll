@@ -226,7 +226,7 @@ export function Layout() {
       />
 
       {mobileNavOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation" tabIndex={-1}>
           <button
             type="button"
             className="absolute inset-0 bg-neutral-950/35"
