@@ -849,6 +849,8 @@ export interface AirePayrollReadiness {
   eligible_hours: number;
   held_entries?: number;
   held_hours?: number;
+  payment_attested_pending_evidence_entries?: number;
+  payment_attested_pending_evidence_hours?: number;
   pending_approvals: number;
   denied_entries: number;
   missing_punches: number;
@@ -1483,6 +1485,7 @@ export interface PayrollItem {
   pto_hours?: number;
   total_hours?: number;
   timekeeping_source?: 'schedule' | 'import' | 'manual' | 'correction_reference' | 'production_backfill' | null;
+  correction_pay_basis_hold?: { reason: string } | null;
   timekeeping_context_snapshot?: Record<string, unknown>;
   // Additional earnings
   reported_tips?: number;
@@ -1754,6 +1757,17 @@ export interface SupplementalPayPeriodSummary {
 }
 
 export interface PayrollItemWageRateHours {
+  source_bucket_key?: string;
+  source_lines?: Array<{
+    source_time_entry_id: string;
+    line_key: string;
+    source_time_entry_version?: number;
+    source_kind: string;
+    original_work_date: string;
+    total_hours: number;
+    regular_hours: number;
+    overtime_hours: number;
+  }>;
   employee_wage_rate_id?: number;
   label: string;
   rate: number;

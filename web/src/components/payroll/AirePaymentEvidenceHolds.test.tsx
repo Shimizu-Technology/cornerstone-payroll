@@ -124,6 +124,30 @@ const savedMatch = { id: 99, source_payment_attestation_id: hold.id, payroll_ite
   payment_effective_on: '2026-09-18', note: 'Verified unchanged hours and the existing delivered check', original_report: { reason: hold.reason, attested_at: '2026-09-10T10:00:00Z', hours: 4 },
   last_sync_error: 'Lost Source receipt', can_retry: true, hours_reserved: true };
 
+it('shows lifecycle instants in Guam across a non-Guam midnight boundary while retaining business dates', async () => {
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = 'America/Los_Angeles';
+  try {
+    const instant = '2026-09-18T15:30:00Z'; // Sep19 01:30 Guam, Sep18 08:30 Los Angeles.
+    expect(new Date(instant).getDate()).toBe(18);
+    mocks.read.mockResolvedValue({ candidates: [], resolution_access: true,
+      payment_attestations: [{ ...resolvableHold, id: '503', payment_options: [{ ...paymentOption, payment_recorded_at: instant }] },
+        { ...hold, id: '502', status: 'resolved', resolved_manual_allocation_id: 10, resolved_at: instant }],
+      payment_resolutions: [{ ...savedMatch, status: 'matched', original_report: { ...savedMatch.original_report, attested_at: instant } }] });
+    const user = userEvent.setup();
+    render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+    await screen.findByText(/Reported Sep 19, 2026, 1:30:00 AM GMT\+10/);
+    expect(screen.getByText(/resolved Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Match existing payment' }));
+    await user.selectOptions(screen.getByLabelText('Existing issued payroll payment'), '88');
+    expect(screen.getByText(/Scheduled pay date Sep 18, 2026 · payment date Sep 18, 2026 · evidence recorded Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    expect(screen.getByText(/Synthetic Worker · Sep 3, 2026 · 4.00 hours/)).toBeTruthy();
+  } finally {
+    if (originalTimezone == null) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
+});
+
 it('matches exact existing payment with complete hours, useful evidence preview and no new payment', async () => {
   const user = userEvent.setup();
   mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true, payment_resolutions: [] });

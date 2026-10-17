@@ -13,7 +13,8 @@ class PayrollWageRateInput
         source.payroll_items.find_by(employee_id: employee.id, company_id: payroll_item.company_id)
       end
     end
-    saved_entries = Array(source_item&.wage_rate_hours)
+    imported_source = payroll_item.import_source.to_s.start_with?("time_tracking:") && payroll_item.time_tracking_entry_allocations.exists?
+    saved_entries = imported_source ? payroll_item.wage_rate_hours : Array(source_item&.wage_rate_hours)
     Array(entries).map do |raw|
       data = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
       raise ArgumentError, "Wage-rate hours must contain objects" unless data.is_a?(Hash)
@@ -35,7 +36,10 @@ class PayrollWageRateInput
         next data.merge(saved.slice("employee_wage_rate_id", "rate", "label", "is_primary", "active"))
       end
       raise ArgumentError, "Wage-rate ID is invalid" unless id.to_s.match?(/\A[1-9]\d*\z/)
-      saved = saved_entries.find { |entry| entry["employee_wage_rate_id"].to_s == id.to_s }
+      saved = saved_entries.find do |entry|
+        entry["employee_wage_rate_id"].to_s == id.to_s &&
+          (!imported_source || entry["source_bucket_key"].to_s == data["source_bucket_key"].to_s)
+      end
       rate = employee.employee_wage_rates.find_by(id: id)
       raise ArgumentError, "Wage rate does not belong to this employee" unless saved || rate
       unless saved || rate.active?
@@ -44,7 +48,7 @@ class PayrollWageRateInput
       if saved && BigDecimal(data["rate"].to_s) != saved["rate"].to_d
         raise ArgumentError, "Retain this payroll's saved original wage rates; a rate change requires a reviewed wage-rate correction"
       end
-      saved ? data.merge(saved.slice("rate", "label", "is_primary", "active")) : data
+      saved ? data.merge(saved.slice("rate", "label", "is_primary", "active", "source_bucket_key", "source_lines")) : data
     end
   end
 end
