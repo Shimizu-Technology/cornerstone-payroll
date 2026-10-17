@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -20,6 +20,7 @@ import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -141,6 +142,7 @@ export function GeneralTransmittals() {
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const autoOpenedRef = useRef<string | null>(null);
 
   const loadLists = useCallback(async () => {
@@ -169,8 +171,11 @@ export function GeneralTransmittals() {
     loadLists();
   }, [activeCompanyId, loadLists]);
 
-  useEffect(() => () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  useEffect(() => {
+    if (previewUrl) return () => URL.revokeObjectURL(previewUrl);
+    // Preview can disable its opener while loading. Restore it after the shared
+    // dialog has released its background focus guard, even if loading blurred it.
+    if (previewTriggerRef.current?.isConnected) previewTriggerRef.current.focus();
   }, [previewUrl]);
 
   const loadTransmittal = useCallback(async (id: number) => {
@@ -262,7 +267,8 @@ export function GeneralTransmittals() {
     }
   };
 
-  const previewCurrent = async () => {
+  const previewCurrent = async (event: MouseEvent<HTMLButtonElement>) => {
+    previewTriggerRef.current = event.currentTarget;
     if (!includedItems.length) {
       setError('Include at least one item before previewing.');
       return;
@@ -272,7 +278,6 @@ export function GeneralTransmittals() {
     setBusy(true);
     try {
       const blobData = await generalTransmittalsApi.previewPdf(id);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(blobData.blob));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to preview the PDF');
@@ -317,12 +322,12 @@ export function GeneralTransmittals() {
     }
   };
 
-  const previewArtifact = async (artifact: GeneralTransmittalArtifact) => {
+  const previewArtifact = async (artifact: GeneralTransmittalArtifact, trigger: HTMLButtonElement) => {
     if (!form.id) return;
+    previewTriggerRef.current = trigger;
     setBusy(true);
     try {
       const blobData = await generalTransmittalsApi.artifactPdf(form.id, artifact.id);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(blobData.blob));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to open the generated version');
@@ -630,7 +635,7 @@ export function GeneralTransmittals() {
                       </div>
                       <p className="mt-2 truncate font-mono text-[10px] text-neutral-400" title={artifact.sha256}>SHA-256 {artifact.sha256}</p>
                       <div className="mt-3 flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1" onClick={() => previewArtifact(artifact)}><Eye className="mr-1.5 h-3.5 w-3.5" />View</Button>
+                        <Button size="sm" variant="outline" className="flex-1" onClick={(event) => previewArtifact(artifact, event.currentTarget)}><Eye className="mr-1.5 h-3.5 w-3.5" />View</Button>
                         <Button size="sm" variant="outline" className="flex-1" onClick={() => downloadArtifact(artifact)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>
                       </div>
                     </div>
@@ -643,14 +648,15 @@ export function GeneralTransmittals() {
         </div>
       </main>
 
-      {previewUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/70 p-4 backdrop-blur-sm">
-          <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-4"><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary-600" /><h3 className="font-semibold">Transmittal preview</h3></div><Button variant="outline" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>Close</Button></div>
-            <iframe title="Transmittal PDF preview" src={previewUrl} className="h-full w-full bg-neutral-100" />
+      <Dialog open={Boolean(previewUrl)} onOpenChange={(open) => { if (!open) setPreviewUrl(null); }}>
+        <DialogContent className="dialog-wide dialog-center-mobile !mx-auto flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden !rounded-2xl !p-0">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4">
+            <div className="flex items-center gap-2"><FileText className="h-5 w-5 shrink-0 text-primary-600" /><DialogTitle>Transmittal preview</DialogTitle></div>
+            <Button type="button" variant="outline" className="min-h-11 sm:min-h-11 shrink-0" onClick={() => setPreviewUrl(null)}>Close</Button>
           </div>
-        </div>
-      )}
+          {previewUrl && <iframe title="Transmittal PDF preview" src={previewUrl} className="min-h-0 w-full flex-1 bg-neutral-100" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

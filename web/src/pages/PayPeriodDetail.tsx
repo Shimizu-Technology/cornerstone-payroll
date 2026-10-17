@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
+import { capturedSourceContext, capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
@@ -60,6 +61,11 @@ import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDi
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, NamedLoanOption } from '@/types';
+
+const payrollHoursInputLabel = (employee: Employee, kind: 'Regular' | 'Overtime', rate?: PayrollItemWageRateHours) => (
+  [`${kind} hours for ${employee.first_name} ${employee.last_name}`, rate?.label, rate && capturedSourceContext(rate)]
+    .filter(Boolean).join(' · ')
+);
 
 interface HoursEntry {
   regular: number;
@@ -138,9 +144,10 @@ function formatSignedNumber(value: number) {
   return '0';
 }
 
-function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
+function templateWageRates(employee: Employee | undefined, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
-  if (payrollItem?.timekeeping_source === 'correction_reference' && existing?.length) {
+  if ((payrollItem?.correction_pay_basis_hold || payrollItem?.import_source?.startsWith('time_tracking:')) && !existing?.length) return [];
+  if ((payrollItem?.timekeeping_source === 'correction_reference' || payrollItem?.import_source?.startsWith('time_tracking:')) && existing?.length) {
     return existing.map(entry => ({
       ...entry,
       rate: toNumber(entry.rate),
@@ -152,7 +159,7 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
       active: entry.active ?? true,
     }));
   }
-  const configuredRates = employee.wage_rates || [];
+  const configuredRates = employee?.wage_rates || [];
   if (configuredRates.length > 0) {
     const existingById = new Map(
       (existing || []).flatMap((entry) => (
@@ -217,12 +224,14 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
   payrollItems.forEach((item) => {
     const employee = employeeMap.get(item.employee_id);
     const noHours = employee?.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly';
-    const wageRates = employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
+    const wageRates = (capturedSourceHoursLocked(item) || item.correction_pay_basis_hold)
+      ? templateWageRates(employee, item)
+      : employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
       ? templateWageRates(employee, item)
       : [];
     hours[String(item.employee_id)] = {
-      regular: noHours ? 0 : (item.hours_worked || 0),
-      overtime: noHours ? 0 : (item.overtime_hours || 0),
+      regular: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.hours_worked || 0),
+      overtime: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.overtime_hours || 0),
       wage_rates: wageRates.length > 0 ? wageRates : undefined,
     };
   });
@@ -378,6 +387,8 @@ export function PayPeriodDetail({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [savedImportReloadRequired, setSavedImportReloadRequired] = useState(false);
+  const savedImportReloadRequiredRef = useRef(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
   const commitRouteGenerationRef = useRef(0);
@@ -402,6 +413,14 @@ export function PayPeriodDetail({
   const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
+  const [finalRecordRefreshToken, setFinalRecordRefreshToken] = useState(0);
+  const handleNonEmployeeChecksLoaded = useCallback((checks: NonEmployeeCheck[]) => {
+    setNonEmployeeChecks(checks);
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
+  const handleNonEmployeeChecksChanged = useCallback(() => {
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
   const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
   const invalidateAireSource = useCallback(() => {
     setAireSourceRefreshToken(token => token + 1);
@@ -503,8 +522,13 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<void> => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
+    // Saved check, correction and payment changes invalidate the final record
+    // even if the surrounding pay-run reload subsequently fails.
+    setFinalRecordRefreshToken(token => token + 1);
+    const requiresSavedSourceWorksheet = savedImportReloadRequiredRef.current;
+    const retainInputs = preserveInputs && !requiresSavedSourceWorksheet;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
     try {
@@ -530,18 +554,21 @@ export function PayPeriodDetail({
           return null;
         }),
         payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
+          if (requiresSavedSourceWorksheet) {
+            throw new Error(`Saved payroll worksheet could not load: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
           console.warn('Failed to load payroll field worksheet', err);
           return { payroll_field_inputs: { fields: [], assignments: [] } };
         }),
       ]);
 
-      if (!isCurrentRequest()) return;
+      if (!isCurrentRequest()) return 'superseded';
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
-      if (!preserveInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
+      if (!retainInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
-      if (!preserveInputs) {
+      if (!retainInputs) {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
         // Canonical reloads after import, commit, or saved check changes must
@@ -549,10 +576,13 @@ export function PayPeriodDetail({
         if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
       loadedPeriodIdRef.current = periodId;
+      savedImportReloadRequiredRef.current = false;
+      setSavedImportReloadRequired(false);
+      return 'loaded';
     } catch (err) {
-      if (isCurrentRequest()) {
-        setError(err instanceof Error ? err.message : 'Failed to load pay period');
-      }
+      if (!isCurrentRequest()) return 'superseded';
+      setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      return 'failed';
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
@@ -575,6 +605,8 @@ export function PayPeriodDetail({
     setCalculationFailures([]);
     setCalculationNotice(null);
     setWorksheetRefreshWarning(null);
+    savedImportReloadRequiredRef.current = false;
+    setSavedImportReloadRequired(false);
     setTimeTrackingImportOpen(false);
     setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
@@ -664,6 +696,7 @@ export function PayPeriodDetail({
   }, [payPeriod, loadSupplementals]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => ({
       ...prev,
@@ -686,6 +719,7 @@ export function PayPeriodDetail({
     field: 'regular_hours' | 'overtime_hours',
     value: number
   ) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => {
       const current = prev[String(employeeId)];
@@ -789,7 +823,7 @@ export function PayPeriodDetail({
   };
 
   const handleRunPayroll = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
     try {
       setProcessing(true);
       setError(null);
@@ -797,22 +831,14 @@ export function PayPeriodDetail({
       setCalculationNotice(null);
       setWorksheetRefreshWarning(null);
 
-      const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
-        const rateEntryInvalid = (entry.wage_rates || []).some((rate) => (
-          toNumber(rate.regular_hours) < 0 ||
-          toNumber(rate.overtime_hours) < 0 ||
-          toNumber(rate.regular_hours) > MAX_HOURS_PER_PERIOD ||
-          toNumber(rate.overtime_hours) > MAX_HOURS_PER_PERIOD
-        ));
-
-        return (
-          entry.regular < 0 ||
-          entry.overtime < 0 ||
-          entry.regular > MAX_HOURS_PER_PERIOD ||
-          entry.overtime > MAX_HOURS_PER_PERIOD ||
-          rateEntryInvalid
-        );
-      });
+      const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+      if (heldItem) {
+        setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason);
+        return;
+      }
+      const invalidHours = Object.entries(hoursMap).find(([employeeId, entry]) => worksheetHoursInvalid(
+        entry, payrollItems.find(item => item.employee_id === Number(employeeId)), MAX_HOURS_PER_PERIOD,
+      ));
       if (invalidHours) {
         setError(`Hours must be between 0 and ${MAX_HOURS_PER_PERIOD} per period`);
         return;
@@ -854,7 +880,7 @@ export function PayPeriodDetail({
       Object.entries(hoursMap).forEach(([empId, entry]) => {
         if (!selectedEmployeeIds.has(Number(empId))) return;
         const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
-          && item.timekeeping_source === 'correction_reference');
+          && (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')));
         hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
           && (entry.wage_rates.length > 1 || preservesSourceRates)
           ? {
@@ -992,7 +1018,7 @@ export function PayPeriodDetail({
   };
 
   const handleRefreshSetup = async () => {
-    if (!payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
     const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
@@ -1005,8 +1031,15 @@ export function PayPeriodDetail({
       const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
       if (!isCurrentRoute()) return;
       setRefreshSetupOpen(false);
-      await loadPayPeriod(scope.payRunId, true);
+      const reloaded = await loadPayPeriod(scope.payRunId, true);
       if (!isCurrentRoute()) return;
+      if (reloaded === 'superseded') return;
+      if (reloaded === 'failed') {
+        setPayPeriod(null);
+        setPayrollItems([]);
+        setError('Setup changed, but the updated payroll could not load. Your inputs are retained. Try again before reviewing or committing payroll.');
+        return;
+      }
       setCalculationFailures(response.results.errors);
       const failureCount = response.results.errors.length;
       if (failureCount > 0) {
@@ -1040,7 +1073,9 @@ export function PayPeriodDetail({
   };
 
   const handleApprove = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
+    const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+    if (heldItem) { setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason); return; }
     try {
       setProcessing(true);
       setError(null);
@@ -1118,7 +1153,7 @@ export function PayPeriodDetail({
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
   const handleCommit = async (confirmedPeriodId: number) => {
-    if (!payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
@@ -1195,6 +1230,22 @@ export function PayPeriodDetail({
     } finally {
       setPayDateCorrectionSubmitting(false);
     }
+  };
+
+  const reloadSavedSourceImport = async (): Promise<boolean> => {
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    if (!isCurrentRoute() || !payPeriod || payPeriod.id !== payRunId) return false;
+    savedImportReloadRequiredRef.current = true;
+    setSavedImportReloadRequired(true);
+    setCalculationNotice(null);
+    const result = await loadPayPeriod(scope.payRunId, true);
+    if (!isCurrentRoute()) return false;
+    if (result === 'failed') {
+      setError('Source hours were saved, but the current payroll could not load. Reload saved payroll before calculating, approving or committing; do not import the hours again.');
+    }
+    return result === 'loaded' || (result === 'superseded' && !savedImportReloadRequiredRef.current);
   };
 
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
@@ -1279,7 +1330,7 @@ export function PayPeriodDetail({
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const canEditPayPeriod = !isCommitted && !isVoided;
+  const canEditPayPeriod = !isCommitted && !isVoided && !savedImportReloadRequired;
   const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
   const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
@@ -1293,6 +1344,9 @@ export function PayPeriodDetail({
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const hasCorrectionPayBasisHold = reportablePayrollItems.some(item => worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+  const correctionCalculationHeld = !isCommitted && hasCorrectionPayBasisHold;
+  const financialActionsHeld = correctionCalculationHeld || savedImportReloadRequired;
   const hasLinkedAireRecord = linkedAireRecords.length > 0;
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
@@ -1715,7 +1769,7 @@ export function PayPeriodDetail({
         <div>
           <Button
             variant="outline"
-            disabled={processing || hasStagedWorksheetChanges}
+            disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges}
             title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}
             onClick={() => {
               setRefreshRecurring(payPeriod.includes_recurring_items);
@@ -1730,20 +1784,21 @@ export function PayPeriodDetail({
       )}
       {isDraft && (
         <>
-          <Button onClick={handleRunPayroll} disabled={processing}>
+          <Button onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
       )}
       {isCalculated && (
         <>
-          <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
+          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             Recalculate
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={calculationFailures.length > 0
+            disabled={processing || financialActionsHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={savedImportReloadRequired ? 'Reload the saved source import before approval' : correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval'
+              : calculationFailures.length > 0
               ? 'Resolve the employee calculation errors and calculate again before approval'
               : payrollItems.length === 0
               ? 'Enter pay for at least one employee before approval'
@@ -1764,7 +1819,7 @@ export function PayPeriodDetail({
           </Button>
           {payPeriod.parallel_run
             ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
-            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
+            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing || financialActionsHeld}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>
@@ -1802,7 +1857,7 @@ export function PayPeriodDetail({
             if (hoursSortBy === 'gross') {
               const estimateGross = (employee: Employee) => {
                 const calculatedItem = payrollItemByEmployeeId.get(employee.id);
-                if (isCalculated && calculatedItem) return toNumber(calculatedItem.gross_pay);
+                if ((isCalculated || worksheetPayBasisHold(calculatedItem, employee)) && calculatedItem) return toNumber(calculatedItem.gross_pay);
 
                 const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
                 const rate = toNumber(calculatedItem?.timekeeping_source === 'correction_reference' ? calculatedItem.pay_rate : employee.pay_rate);
@@ -1856,7 +1911,10 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={() => loadPayPeriod(payPeriod.id, true)} />
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => {
+        const result = await loadPayPeriod(payPeriod.id, true);
+        if (result === 'failed') throw new Error('Saved payment method could not refresh.');
+      }} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -1902,6 +1960,10 @@ export function PayPeriodDetail({
         }}>Review affected employees</Button>}
       </ActionFeedback>}
       {calculationNotice && <ActionFeedback tone="success" message={calculationNotice} />}
+      {savedImportReloadRequired && <ActionFeedback tone="warning" message="Saved source hours need a current payroll reload before processing.">
+        <p>Saved source hours need a current payroll reload before processing. The last saved payroll remains visible for context.</p>
+        <Button className="mt-3 min-h-11" variant="outline" disabled={processing || timeTrackingImportOpen} onClick={() => void reloadSavedSourceImport()}>Reload saved payroll</Button>
+      </ActionFeedback>}
       {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
       {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
         ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
@@ -2030,8 +2092,7 @@ export function PayPeriodDetail({
             onSourceChanged={invalidateAireSource}
             onRefresh={async () => {
               invalidateAireSource();
-              await loadPayPeriod(payPeriod.id, true, true);
-              return true;
+              return (await loadPayPeriod(payPeriod.id, true, true)) !== 'failed';
             }}
             onReviewFinalizedBatch={() => {
               setTimeTrackingAutoPreview(true);
@@ -2248,6 +2309,7 @@ export function PayPeriodDetail({
           </section>
         )}
 
+        {hasCorrectionPayBasisHold && <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Saved payroll amounts are retained. Review the source evidence and pay setup for held correction records before recalculating or approving. These totals are saved amounts, not a new-pay forecast.</div>}
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
@@ -2259,25 +2321,25 @@ export function PayPeriodDetail({
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved gross pay' : 'Gross Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Deductions</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved deductions' : 'Total Deductions'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved net pay' : 'Net Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
               </CardContent>
             </Card>
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">DRT Deposit</p>
+                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved DRT deposit' : 'DRT Deposit'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
               </CardContent>
             </Card>
@@ -2466,8 +2528,8 @@ export function PayPeriodDetail({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" className="min-h-11" variant="outline" onClick={handleRunPayroll} disabled={processing}>
-                      {isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added
+                  <Button size="sm" className="min-h-11" variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+                    {isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added
                   </Button>
                 )}
               </div>
@@ -2617,9 +2679,11 @@ export function PayPeriodDetail({
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
                 const savedItem = payrollItemByEmployeeId.get(emp.id);
-                const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
+                const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                const correctionHold = worksheetPayBasisHold(savedItem, emp);
+                const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
-                const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
+                const rateLabel = correctionHold ? 'Retained pay basis · review required' : sourceHoursLocked && activeRates.length ? 'Retained Source rates' : isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
                   ? `${formatCurrency(payRate / periodsPerYear)}/period`
                   : `${formatCurrency(payRate)}${hasHours ? '/hr' : '/period'}`;
                 return <section key={emp.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll entry for ${name}`}>
@@ -2627,11 +2691,14 @@ export function PayPeriodDetail({
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
+                  {correctionHold && <div role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold">Retained saved gross {formatCurrency(toNumber(savedItem?.gross_pay))}</p><p className="mt-1">{correctionHold.reason}</p></div>}
+                  {!hasMultiRate && activeRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
+                  {sourceHoursLocked && <p className="text-xs text-neutral-600">Imported work is read-only. Use Source review and the correction workflow to change work.</p>}
                   {additionalEmployeeIds.has(emp.id) && <p className="text-xs font-medium text-blue-700">New to this payroll</p>}
                   {isFlatContractor && payPeriod.run_purpose === 'off_cycle_tips' && <p className="text-xs font-medium text-primary-700">Flat fee excluded from this tips-only run</p>}
-                  {isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
+                  {correctionHold ? <p className="text-xs text-amber-800">Review retained source evidence and pay setup before entering new pay.</p> : isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
                     <NumericInput className="mt-1 min-h-11 w-full" value={salaryOverrideMap[String(emp.id)] || null} onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} aria-label={`Pay this period for ${name}`} />
-                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
+                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p>{capturedSourceContext(rate) && <p className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>}<div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
                   <label className="block text-xs font-medium text-neutral-600">Bonus this payroll
                     <NumericInput className="mt-1 min-h-11 w-full" aria-label={`Bonus this payroll for ${name}`} value={bonusMap[String(emp.id)] ?? 0} onValueChange={(value) => { const amount = value ?? 0; if (amount === (bonusMap[String(emp.id)] ?? 0)) return; setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount })); setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount })); }} min={0} max={99999999.99} fixedDecimalsOnBlur={2} />
                   </label>
@@ -2692,7 +2759,9 @@ export function PayPeriodDetail({
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                       const savedItem = payrollItemByEmployeeId.get(emp.id);
-                      const payRate = toNumber(savedItem && (isCalculated || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
+                      const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                      const correctionHold = worksheetPayBasisHold(savedItem, emp);
+                      const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                       const activeWageRates = (hours.wage_rates || []).map((rate, index) => ({ rate, index })).filter(({ rate }) => rate.active !== false);
@@ -2727,7 +2796,7 @@ export function PayPeriodDetail({
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
                       const grossBeforeFields = baseEstGross + reportedTipGross + toNumber(bonusMap[String(emp.id)]) + recurringTaxableAdditions(emp);
                       const calculatedItem = payrollItemByEmployeeId.get(emp.id);
-                      const estGross = isCalculated && calculatedItem
+                      const estGross = (isCalculated || correctionHold) && calculatedItem
                         ? toNumber(calculatedItem.gross_pay)
                         : grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
                       return (
@@ -2751,6 +2820,8 @@ export function PayPeriodDetail({
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
                             </div>
+                            {correctionHold && <p className="mt-2 text-xs text-amber-800">{correctionHold.reason}</p>}
+                            {sourceHoursLocked && <p className="mt-2 text-xs text-neutral-600">Imported work retained. Use source review and corrections to change hours.</p>}
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
                               {emp.department?.name ? ` · ${emp.department.name}` : ''}
@@ -2758,7 +2829,11 @@ export function PayPeriodDetail({
                           </div>
                         </TableCell>
                         <TableCell className={`text-gray-700 ${rowTone}`}>
-                          {isVariableSalary ? (
+                          {correctionHold ? (
+                            <span className="text-xs font-medium text-amber-800">Retained pay basis · review required</span>
+                          ) : sourceHoursLocked && activeWageRates.length ? (
+                            <div className="space-y-1 text-left">{activeWageRates.map(({ rate, index }) => <div key={rate.source_bucket_key || index} className="text-xs"><span className="font-medium">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</span>{capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}</div>)}</div>
+                          ) : isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
                           ) : isPerPeriodSalary ? (
                             `${formatCurrency(payRate)}/period`
@@ -2771,15 +2846,17 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-1 text-left">
                               {activeWageRates.map(({ rate }) => (
-                                <div key={`${emp.id}-${rate.label}`} className="text-xs">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}`} className="text-xs">
                                   <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                   <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
+                                  {capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}
                                 </div>
                               ))}
                             </div>
                           ) : (
                             `${formatCurrency(payRate)}/hr`
                           )}
+                          {!hasMultiRate && activeWageRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
                         </TableCell>
                         <TableCell className={`text-center align-top ${rowTone}`} colSpan={isVariableSalary ? 2 : 1}>
                           {isVariableSalary ? (
@@ -2787,6 +2864,7 @@ export function PayPeriodDetail({
                               <span className="text-xs text-gray-500">Pay this period: $</span>
                               <NumericInput
                                 value={salaryOverride || null}
+                                disabled={Boolean(correctionHold)}
                                 aria-label={`Pay this period for ${emp.first_name} ${emp.last_name}`}
                                 onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)}
                                 placeholder="0.00"
@@ -2798,14 +2876,17 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Regular', rate)}
                                     value={toNumber(rate.regular_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2817,12 +2898,13 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Regular')}
                               value={hours.regular}
                               onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -2831,14 +2913,17 @@ export function PayPeriodDetail({
                           {hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)}
                                     value={toNumber(rate.overtime_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2850,12 +2935,13 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Overtime')}
                               value={hours.overtime}
                               onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -3024,7 +3110,7 @@ export function PayPeriodDetail({
                         <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
                           <p className="mt-1 text-[11px] font-normal text-gray-500">
-                            {isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
+                            {correctionHold ? 'Retained saved gross · pay setup review required' : isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
                           </p>
                         </TableCell>
                       </TableRow>
@@ -3134,6 +3220,8 @@ export function PayPeriodDetail({
                     <div><dt className="text-xs text-neutral-500">Total deductions</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.total_deductions))}</dd></div>
                     <div className="col-span-2 border-t border-neutral-100 pt-2"><dt className="text-xs text-neutral-500">Net pay</dt><dd className="text-lg font-bold tabular-nums text-green-700">{formatCurrency(toNumber(item.net_pay))}</dd></div>
                   </dl>
+                  {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {toNumber(rate.regular_hours)} REG / {toNumber(rate.overtime_hours)} OT{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
+                  {item.correction_pay_basis_hold && <p className="text-xs text-amber-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
                   {item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}
                   <div className="grid grid-cols-2 gap-2">
                     <Link className="inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700" to={payrollItemPath(companyId, payPeriod.id, item.id, { returnTo: currentPath })}>View details</Link>
@@ -3249,7 +3337,7 @@ export function PayPeriodDetail({
                                   )}
                                   {hasMultiRateResults && (
                                     <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
-                                      Multi-rate
+                                      Multiple earnings
                                     </span>
                                   )}
                                   {item.time_tracking_provenance && (
@@ -3328,7 +3416,7 @@ export function PayPeriodDetail({
                                 {itemWageRates.map((rate) => {
                                   const totalHours = toNumber(rate.regular_hours) + toNumber(rate.overtime_hours);
                                   return (
-                                    <div key={`${item.id}-${rate.label}-hours`} className="text-xs">
+                                    <div key={`${item.id}-${rate.source_bucket_key || rate.label}-hours`} className="text-xs">
                                       <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                       <span className="text-gray-600">{totalHours}</span>
                                       {toNumber(rate.overtime_hours) > 0 && (
@@ -3349,6 +3437,7 @@ export function PayPeriodDetail({
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
                             {(() => {
+                              if (item.correction_pay_basis_hold) return <span className="text-xs text-amber-800">Retained pay basis · {item.correction_pay_basis_hold.reason}</span>;
                               if (isSalary) {
                                 if (!payPeriod.includes_base_salary) return <span className="font-medium text-primary-700">Excluded from this run</span>;
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
@@ -3372,7 +3461,7 @@ export function PayPeriodDetail({
                                 return (
                                   <div className="space-y-1 text-left inline-block">
                                     {itemWageRates.map((rate) => (
-                                      <div key={`${item.id}-${rate.label}-rate`} className="text-xs">
+                                      <div key={`${item.id}-${rate.source_bucket_key || rate.label}-rate`} className="text-xs">
                                         <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                         <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                       </div>
@@ -3826,7 +3915,10 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
+              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={async () => {
+                const result = await loadPayPeriod(payPeriod.id, true);
+                if (result === 'failed') throw new Error('Saved checks could not refresh.');
+              }} />
             </div>
           </Card>
         )}
@@ -3845,9 +3937,11 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
+            payPeriodVoided={isVoided}
             payDate={payPeriod.pay_date}
             refreshToken={checkPrintRefreshToken}
-            onChecksLoaded={setNonEmployeeChecks}
+            onChecksLoaded={handleNonEmployeeChecksLoaded}
+            onChecksChanged={handleNonEmployeeChecksChanged}
           />
         )}
 
@@ -3863,7 +3957,7 @@ export function PayPeriodDetail({
           />
         )}
 
-        {isCommitted && <PayrollFinalRecordPanel payPeriodId={payPeriod.id} />}
+        {isCommitted && <PayrollFinalRecordPanel companyId={companyId} payPeriodId={payRunId} refreshToken={finalRecordRefreshToken} />}
 
         {/* Reports Download Panel — for calculated/approved/committed */}
         {!isDraft && payrollItems.length > 0 && (
@@ -3937,7 +4031,7 @@ export function PayPeriodDetail({
         }}
         payPeriod={payPeriod}
         employees={employees}
-        onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+        onImportComplete={reloadSavedSourceImport}
         onCorrectionRecorded={() => {
           invalidateAireSource();
           void loadPayPeriod(payPeriod.id, true, true);

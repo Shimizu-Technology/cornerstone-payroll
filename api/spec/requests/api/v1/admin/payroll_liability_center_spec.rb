@@ -115,10 +115,9 @@ RSpec.describe "Api::V1::Admin::PayrollLiabilityCenter", type: :request do
 
     get "/api/v1/admin/payroll_liability_center", headers: foreign_headers, as: :json
 
-    expect(response).to have_http_status(:ok)
-    body = response.parsed_body.fetch("payroll_liability_center")
-    expect(body.fetch("company_id")).to eq(company.id)
-    expect(body.dig("totals", "calculated_amount")).to eq(224.0)
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+    expect(response.parsed_body).not_to have_key("payroll_liability_center")
 
     expect {
       post "/api/v1/admin/payroll_liability_center/due_date", headers: foreign_headers, params: {
@@ -129,6 +128,6 @@ RSpec.describe "Api::V1::Admin::PayrollLiabilityCenter", type: :request do
         }
       }, as: :json
     }.not_to change(PayrollLiabilityObligationDueDate, :count)
-    expect(response).to have_http_status(:not_found)
+    expect(response).to have_http_status(:forbidden)
   end
 end

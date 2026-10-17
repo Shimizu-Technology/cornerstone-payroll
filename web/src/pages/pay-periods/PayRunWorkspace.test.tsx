@@ -126,6 +126,18 @@ describe('PayRunWorkspace rehearsal checks', () => {
     });
   });
 
+  it('labels held correction totals as saved amounts without dropping their retained money', async () => {
+    apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, payroll_items: [{ ...payrollItem,
+      correction_pay_basis_hold: { reason: 'Review retained original frequency before recalculation.' } }] } });
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/overview']}><Routes>
+      <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+    </Routes></MemoryRouter>);
+    const label = await screen.findByText('Saved gross payroll');
+    expect(within(label.parentElement!).getByText('$700.00')).toBeTruthy();
+    expect(screen.getByText('Saved net payroll')).toBeTruthy();
+    expect(screen.getByText('Saved amounts, not a new-pay forecast')).toBeTruthy();
+  });
+
   it('describes and previews rehearsal checks with only the VOID marking', async () => {
     render(
       <MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}>

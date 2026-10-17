@@ -120,7 +120,7 @@ type ReviewKind = 'time' | 'overtime';
 type Review = { entry: AirePayrollTimeEntry; decision: 'approve' | 'deny'; kind: ReviewKind; commandId: string };
 type ReviewTarget = Omit<Review, 'commandId'>;
 type FinalizeCommand = { commandId: string; version: number };
-type CorrectionBreak = { start_time: string; end_time: string };
+type CorrectionBreak = { sourceId?: string; start_time: string; end_time: string };
 type Correction = {
   entry: AirePayrollTimeEntry;
   commandId: string;
@@ -219,7 +219,7 @@ const toTimeInput = (value?: string | null) => {
 
 const startCorrection = (entry: AirePayrollTimeEntry): Correction => {
   const breaks = (entry.breaks || [])
-    .map((breakRow) => ({ start_time: toTimeInput(breakRow.start_time), end_time: toTimeInput(breakRow.end_time) }));
+    .map((breakRow) => ({ sourceId: breakRow.id, start_time: toTimeInput(breakRow.start_time), end_time: toTimeInput(breakRow.end_time) }));
 
   return {
     entry,
@@ -235,12 +235,45 @@ const startCorrection = (entry: AirePayrollTimeEntry): Correction => {
   };
 };
 
+// Omitted fields are retained by AIRE at database precision. Displaying a clock
+// as HH:MM must not turn an unrelated edit into a rounded punch correction.
+const correctionFields = (correction: Correction) => {
+  const { entry } = correction;
+  const originalBreaks = entry.breaks || [];
+  const breaksChanged = correction.breaks.length !== originalBreaks.length
+    || correction.breaks.some((row, index) => {
+      const original = originalBreaks[index];
+      return !original || row.sourceId !== original.id
+        || row.start_time !== toTimeInput(original.start_time)
+        || row.end_time !== toTimeInput(original.end_time);
+    });
+
+  return {
+    ...(correction.workDate !== entry.work_date ? { work_date: correction.workDate } : {}),
+    ...(correction.startTime !== toTimeInput(entry.start_time) ? { start_time: correction.startTime } : {}),
+    ...(correction.endTime !== toTimeInput(entry.end_time) ? { end_time: correction.endTime } : {}),
+    ...(correction.timeCategoryId !== (entry.category?.id || '') ? { time_category_id: correction.timeCategoryId } : {}),
+    ...(correction.description.trim() !== (entry.description || '').trim() ? { description: correction.description.trim() } : {}),
+    ...(breaksChanged ? {
+      breaks: correction.breaks.map((row) => {
+        const original = originalBreaks.find((candidate) => candidate.id === row.sourceId);
+        return {
+          // Break replacement is atomic: preserve raw ISO precision on every
+          // unchanged endpoint, including siblings of an edited/removed break.
+          start_time: original && row.start_time === toTimeInput(original.start_time) ? original.start_time : row.start_time,
+          end_time: original?.end_time && row.end_time === toTimeInput(original.end_time) ? original.end_time : row.end_time,
+        };
+      }),
+    } : {}),
+  };
+};
+
 function Metric({ label, value, detail, tone = 'neutral' }: { label: string; value: string | number; detail: string; tone?: 'neutral' | 'success' | 'warning' }) {
   const toneClass = tone === 'success'
     ? 'border-success-200 bg-success-50/70'
     : tone === 'warning' ? 'border-warning-200 bg-warning-50/70' : 'border-neutral-200 bg-white';
   return (
-    <div className={`rounded-xl border p-4 ${toneClass}`}>
+    <div role="group" aria-label={label} className={`rounded-xl border p-4 ${toneClass}`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
       <p className="mt-2 font-display text-2xl font-bold tracking-tight text-neutral-950">{value}</p>
       <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
@@ -275,7 +308,7 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
   onCorrect: (entry: AirePayrollTimeEntry) => void;
 }) {
   const pending = entry.state.approval_status === 'pending';
-  const needsTimeReview = pending && !entry.capture.ordinary;
+  const needsTimeReview = pending;
   const needsOvertimeReview = entry.state.overtime_status === 'pending'
     && !['pending', 'denied'].includes(entry.state.approval_status);
   const statusLabel = dispositionLabel(entry);
@@ -321,7 +354,7 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         )}
       </div>
       <div className="flex flex-wrap gap-2 lg:justify-end">
-        {(entry.state.missing_punch || !entry.capture.ordinary) && (
+        {(entry.state.status === 'completed' || entry.state.missing_punch || !entry.capture.ordinary) && (
           <Button type="button" size="sm" variant="outline" disabled={!canCommand} onClick={() => onCorrect(entry)}>
             <FilePenLine className="mr-1 h-3.5 w-3.5" /> Correct
           </Button>
@@ -497,9 +530,10 @@ function AirePayrollCockpitWorkspace({
     [overview]
   );
   const unmappedCount = employeesRequiringMapping.filter((employee) => employee.cornerstone.status !== 'mapped').length;
-  const heldHours = overview
-    ? overview.readiness.held_hours ?? Math.max(0, overview.readiness.total_hours - overview.readiness.eligible_hours)
-    : 0;
+  const heldHours = overview?.readiness.held_hours;
+  const heldEntries = overview?.readiness.held_entries;
+  const reportedPaymentHours = overview?.readiness.payment_attested_pending_evidence_hours;
+  const reportedPaymentEntries = overview?.readiness.payment_attested_pending_evidence_entries;
   const paymentHistory = useMemo(
     () => groupPaymentHistory(overview?.entry_processing_history || []),
     [overview?.entry_processing_history]
@@ -607,25 +641,18 @@ function AirePayrollCockpitWorkspace({
   const submitCorrection = async () => {
     if (!canCommand || !correction || correction.reason.trim().length < 3 || !correction.workDate
       || !correction.startTime || !correction.endTime || !correction.timeCategoryId
-      || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)) return;
+      || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)
+      || Object.keys(correctionFields(correction)).length === 0) return;
     const current = ++actionGeneration.current;
     setBusy(true);
     setCommandError(null);
     setCommandSuccess(null);
     try {
-      const detailedBreaks = correction.breaks.length > 0 || !correction.preservesLegacyBreakMinutes
-        ? { breaks: correction.breaks }
-        : {};
       await payPeriodsApi.correctAireTimeEntry(payPeriodId, correction.entry.id, {
         command_id: correction.commandId,
         expected_version: correction.entry.version,
         reason: correction.reason.trim(),
-        work_date: correction.workDate,
-        start_time: correction.startTime,
-        end_time: correction.endTime,
-        time_category_id: correction.timeCategoryId,
-        description: correction.description.trim(),
-        ...detailedBreaks,
+        ...correctionFields(correction),
       });
       if (current !== actionGeneration.current) return;
       setCorrection(null);
@@ -819,10 +846,11 @@ function AirePayrollCockpitWorkspace({
               </div>
             ) : overview && (
               <>
-                <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5 sm:p-6">
+                <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-6">
                   <Metric label="Total time" value={`${Number(overview.readiness.total_hours).toFixed(2)} hrs`} detail={`${overview.readiness.total_entries} timecards in time tracking`} />
                   <Metric label="Ready this payroll" value={`${Number(overview.readiness.eligible_hours).toFixed(2)} hrs`} detail={`${overview.readiness.eligible_entries} eligible timecards`} tone="success" />
-                  <Metric label="Held or unresolved" value={`${heldHours.toFixed(2)} hrs`} detail={`${overview.readiness.held_entries ?? '—'} held timecard${overview.readiness.held_entries === 1 ? '' : 's'} · not included`} tone={heldHours > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Other held time" value={heldHours == null ? '—' : `${heldHours.toFixed(2)} hrs`} detail={`${heldEntries == null ? 'Timecard count unavailable' : `${heldEntries} held timecard${heldEntries === 1 ? '' : 's'}`} · ${heldHours == null ? 'hours unavailable · ' : ''}not included`} tone={heldHours != null && heldHours > 0 ? 'warning' : 'neutral'} />
+                  <Metric label="Payment reported" value={reportedPaymentHours == null ? '—' : `${reportedPaymentHours.toFixed(2)} hrs`} detail={`${reportedPaymentEntries == null ? 'Timecard count unavailable' : `${reportedPaymentEntries} timecard${reportedPaymentEntries === 1 ? '' : 's'}`} · ${reportedPaymentHours == null ? 'hours unavailable · ' : ''}evidence pending · not included`} tone={reportedPaymentHours != null && reportedPaymentHours > 0 ? 'warning' : 'neutral'} />
                   <Metric label="Approvals needed" value={overview.readiness.pending_approvals + overview.readiness.pending_overtime} detail={`${overview.readiness.missing_punches} missing punch${overview.readiness.missing_punches === 1 ? '' : 'es'}`} tone={overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'warning' : 'neutral'} />
                   <Metric
                     label="Visible mapping"
@@ -1207,7 +1235,7 @@ function AirePayrollCockpitWorkspace({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">
-                {review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'manual time'}
+                {review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}
               </DialogTitle>
               <DialogDescription className="leading-6 text-neutral-600">
                 {review.entry.employee.name} · {formatDate(review.entry.work_date)} · {Number(review.entry.hours).toFixed(2)} hours
@@ -1263,7 +1291,7 @@ function AirePayrollCockpitWorkspace({
             </div>
             <label className="mt-5 block text-sm font-semibold text-neutral-800">Correction reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Correction reason" value={correction.reason} onChange={(event) => setCorrection({ ...correction, reason: event.target.value })} rows={3} placeholder="What did you verify and why was this changed?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
             <button type="button" onClick={() => setCorrection(null)} disabled={busy} aria-label="Close correction" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
-            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || !canCommand || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
+            <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || !canCommand || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time) || Object.keys(correctionFields(correction)).length === 0}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
           </DialogContent>
         )}
       </Dialog>
@@ -1312,7 +1340,7 @@ function AirePayrollCockpitWorkspace({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">Lock the time tracking cutoff</DialogTitle>
-              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours.toFixed(2)} hours will remain held or unresolved and stay visible for a later payroll.</DialogDescription>
+              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours == null ? 'Other held hours are unavailable; review source details separately.' : `${heldHours.toFixed(2)} other held hours remain outside this payroll for review.`} {reportedPaymentHours == null ? 'Reported-payment hours are unavailable; review payment evidence separately.' : `${reportedPaymentHours.toFixed(2)} reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it.`}</DialogDescription>
             </DialogHeader>
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
             <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>

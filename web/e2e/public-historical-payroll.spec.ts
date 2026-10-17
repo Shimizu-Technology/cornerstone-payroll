@@ -1151,16 +1151,19 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   };
   let pollingEnabled = false;
   let heldRefresh = false;
-  let fulfilledListResponseCount = 0;
+  let fulfilledInitialDetailResponseCount = 0;
   let releasePoll: (() => void) | undefined;
   let markPollStarted: (() => void) | undefined;
+  let markHeldRefreshCompleted: (() => void) | undefined;
   const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
   const pollStarted = new Promise<void>((resolve) => { markPollStarted = resolve; });
+  const heldRefreshCompleted = new Promise<void>((resolve) => { markHeldRefreshCompleted = resolve; });
 
   await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
     // Gate the actual verification refresh after initial loading, rather than
     // assuming its ordinal among StrictMode/startup requests.
-    if (pollingEnabled && !heldRefresh) {
+    const shouldHold = pollingEnabled && !heldRefresh;
+    if (shouldHold) {
       heldRefresh = true;
       markPollStarted?.();
       await pollGate;
@@ -1169,14 +1172,16 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
       data: [withoutCutoverEvidence(heldRefresh ? verifiedBatch : pendingBatch), withoutDetailCollections(otherBatch)],
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
     });
-    fulfilledListResponseCount += 1;
+    if (shouldHold) markHeldRefreshCompleted?.();
   });
   await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    const isInitialPendingDetail = id === 1 && !pollingEnabled;
     await fulfillJson(route, {
       data: id === 1 ? (pollingEnabled ? verifiedBatch : pendingBatch) : otherBatch,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
+    if (isInitialPendingDetail) fulfilledInitialDetailResponseCount += 1;
   });
 
   await page.goto('/historical-payroll');
@@ -1186,6 +1191,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   // the pending detail before enabling the verified polling response so that
   // an initial request cannot consume it and prevent the poll from starting.
   await expect(page.getByText('Comparing the retained source with the archive', { exact: true })).toBeVisible();
+  await expect.poll(() => fulfilledInitialDetailResponseCount).toBeGreaterThanOrEqual(1);
   pollingEnabled = true;
   await pollStarted;
 
@@ -1193,7 +1199,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
   releasePoll?.();
 
-  await expect.poll(() => fulfilledListResponseCount).toBeGreaterThanOrEqual(2);
+  await heldRefreshCompleted;
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
