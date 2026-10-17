@@ -32,6 +32,7 @@ import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
@@ -144,8 +145,7 @@ export function PayPeriods() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
   const trainingReplayWorkspace = activeCompany?.test_workspace_purpose === 'training_replay';
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId
@@ -363,6 +363,7 @@ export function PayPeriods() {
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (readOnlyWorkspace) return;
     const startingCheckNumber = formData.starting_check_number.trim();
 
     if (formData.end_date <= formData.start_date) {
@@ -401,6 +402,7 @@ export function PayPeriods() {
   };
 
   const handleRunPayroll = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`run-${id}`);
@@ -422,6 +424,7 @@ export function PayPeriods() {
   };
 
   const openEditModal = (period: PayPeriod) => {
+    if (readOnlyWorkspace) return;
     setEditingPayPeriod(period);
     setEditError(null);
     setError(null);
@@ -439,6 +442,7 @@ export function PayPeriods() {
 
   const handleEdit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (readOnlyWorkspace) return;
     if (!editingPayPeriod) return;
 
     if (editFormData.end_date <= editFormData.start_date) {
@@ -489,6 +493,7 @@ export function PayPeriods() {
   };
 
   const handleApprove = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`approve-${id}`);
@@ -505,6 +510,7 @@ export function PayPeriods() {
   };
 
   const handleCommit = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const period = payPeriodCompanyId === activeCompanyId
       ? payPeriods.find((candidate) => candidate.record_type === 'native' && candidate.id === id)
       : undefined;
@@ -530,6 +536,7 @@ export function PayPeriods() {
   };
 
   const handleDelete = async (id: number) => {
+    if (readOnlyWorkspace) return;
     if (!confirm('Are you sure you want to delete this pay period?')) {
       return;
     }
@@ -675,6 +682,7 @@ export function PayPeriods() {
   };
 
   const openCreateModal = () => {
+    if (readOnlyWorkspace) return;
     createDatesEditedRef.current = false;
     setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
     void setDefaultDates();
@@ -862,7 +870,7 @@ export function PayPeriods() {
               {searchTerm
                 ? 'No pay periods match the current filters.'
                 : readOnlyWorkspace
-                  ? 'No pay periods were preserved in this backup.'
+                  ? 'This workspace has no pay periods to review.'
                   : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
@@ -897,7 +905,7 @@ export function PayPeriods() {
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Processed</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-slate-200 bg-gray-50 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -982,8 +990,8 @@ export function PayPeriods() {
                           <span className="text-sm text-gray-400">Not processed</span>
                         )}
                       </TableCell>
-                      <TableCell className={`text-right ${rowTone}`}>
-                        <div className="flex items-center justify-end gap-3">
+                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-slate-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
+                        <div className="flex max-w-[232px] flex-wrap items-center justify-end gap-2 [&_button]:min-h-11">
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"
@@ -1107,7 +1115,7 @@ export function PayPeriods() {
       </div>
 
       {/* Create Pay Period Modal */}
-      <Dialog open={isCreateOpen} onOpenChange={handleCreateOpenChange}>
+      <Dialog open={isCreateOpen && !readOnlyWorkspace} onOpenChange={handleCreateOpenChange}>
         <DialogContent>
           <form onSubmit={handleCreate}>
             <DialogHeader>
@@ -1278,7 +1286,7 @@ export function PayPeriods() {
       </Dialog>
 
       {/* Edit Pay Period Modal */}
-      <Dialog open={isEditOpen} onOpenChange={handleEditOpenChange}>
+      <Dialog open={isEditOpen && !readOnlyWorkspace} onOpenChange={handleEditOpenChange}>
         <DialogContent>
           <form onSubmit={handleEdit}>
             <DialogHeader>

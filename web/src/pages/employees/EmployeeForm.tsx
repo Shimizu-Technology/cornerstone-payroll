@@ -191,7 +191,7 @@ export function EmployeeForm() {
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
   const { user, isClient, isSuperAdmin, isManager } = useAuth();
-  const { activeCompanyId, activeCompany } = useCompany();
+  const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
@@ -346,21 +346,17 @@ export function EmployeeForm() {
         w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
-      const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
-        ...rate,
-        temp_id: crypto.randomUUID(),
-      }));
-      if (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly')) {
-        replaceWageRates(
-          fetchedWageRates.length > 0
-            ? fetchedWageRates
-            : [{
-                ...defaultHourlyWageRate(),
-                label: 'Regular',
-                rate: employee.pay_rate,
-              }]
-        );
-      }
+      const fetchedWageRates = (employee.wage_rates || [])
+        .filter((rate) => rate.active !== false)
+        .map((rate) => ({ ...rate, temp_id: crypto.randomUUID() }));
+      const usesHourlyRates = employee.employment_type === 'hourly'
+        || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+      replaceWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [{
+        ...defaultHourlyWageRate(),
+        // Preserve the existing scalar fallback for an hourly profile with an
+        // empty response. Explicit retired rows and non-hourly money are not fallback rates.
+        rate: usesHourlyRates && !employee.wage_rates?.length ? employee.pay_rate : 0,
+      }]);
       setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
         temp_id: crypto.randomUUID(),
         label: adjustment.label,
@@ -515,12 +511,9 @@ export function EmployeeForm() {
       active: rate.active !== false,
     }));
 
+    // Hourly submission derives its scalar from these rows. Keep the separate
+    // salary/flat-fee draft intact when operators edit rates and switch back.
     setWageRates(normalized);
-
-    const primaryRate = normalized.find((rate) => rate.is_primary) || normalized[0];
-    if (primaryRate) {
-      setForm((prev) => ({ ...prev, pay_rate: roundCurrencyValue(Number(primaryRate.rate) || 0) }));
-    }
   };
 
   const updateWageRate = (tempId: string, patch: Partial<WageRateFormRow>) => {
@@ -710,7 +703,7 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!isVariableSalary && form.pay_rate <= 0) {
+    if (!supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {
@@ -895,6 +888,11 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          if (isCurrentSubmission()) {
+            // The employee is already saved. Summary recovery must not block
+            // navigation or turn a successful create into a duplicate retry.
+            void refreshCompanies().catch(() => {});
+          }
         }
       }
       if (!isCurrentSubmission()) return;
@@ -903,6 +901,11 @@ export function EmployeeForm() {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
+        const displayedSavedRateIds = new Set(
+          (loadedEmployee?.wage_rates || [])
+            .filter((rate) => rate.active !== false && rate.id)
+            .map((rate) => rate.id as number)
+        );
         const normalizedById = new Map(
           normalizedWageRates
             .filter((rate) => rate.id)
@@ -911,7 +914,8 @@ export function EmployeeForm() {
 
         await Promise.all(
           existingRates
-            .filter((rate) => !normalizedById.has(rate.id as number))
+            // Removing a displayed row must not delete hidden or newly added definitions.
+            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
         if (!isCurrentSubmission()) return;
@@ -1507,6 +1511,7 @@ export function EmployeeForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => removeWageRate(rate.temp_id)}
+                        aria-label={`Remove hourly rate ${rate.label.trim() || index + 1}`}
                         disabled={wageRates.length === 1}
                       >
                         <X className="w-4 h-4" />

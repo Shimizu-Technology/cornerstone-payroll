@@ -350,6 +350,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
   }, [isAdmin, payRun.id, recordOnlyPromoted, setPaymentPreviewError]);
 
   const previewMockChecks = async () => {
+    if (!canPreviewMockChecks || mockPreviewEligible === 0 || mockPreviewBusy) return;
     setMockPreviewBusy(true);
     setMockPreviewError(null);
     try {
@@ -538,7 +539,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
             {printRefreshError && <ActionFeedback retryKey={printRefreshErrorFeedbackAttempt} tone="error" message={printRefreshError} />}
             {mockPreviewError && <ActionFeedback retryKey={mockPreviewErrorFeedbackAttempt} tone="error" message={mockPreviewError} />}
           </div>
-          {!readOnly && canPreviewMockChecks && (
+          {canPreviewMockChecks && (
             <Button onClick={() => void previewMockChecks()} disabled={mockPreviewBusy || mockPreviewEligible === 0}>
               <Printer className="mr-2 h-4 w-4" />{mockPreviewBusy ? 'Preparing…' : 'Preview rehearsal checks'}
             </Button>
