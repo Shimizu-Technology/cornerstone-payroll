@@ -284,6 +284,7 @@ module Api
 
           company = Company.find(current_company_id)
           report  = Form941GuAggregator.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.new(
             company: company,
             tax_year: year,
@@ -322,7 +323,7 @@ module Api
         end
 
         def form_941_gu_pdf
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
           send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data).generate,
@@ -351,6 +352,7 @@ module Api
             user: current_user
           )
           report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
             tax_year: year,
@@ -374,7 +376,7 @@ module Api
         end
 
         def quarterly_compliance_packet_pdf
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
           generator = QuarterlyCompliancePacketPdfGenerator.new(report_data)
@@ -478,14 +480,14 @@ module Api
         end
 
         def quarterly_compliance_packet_official_form_defaults
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: params[:form_type].to_s == "form_941")
           return error_response if error_response
 
           render json: {
             data: quarterly_compliance_official_form_defaults(report_data, params[:form_type]),
             filing_gate: report_data[:filing_gate]
           }
-        rescue ArgumentError => e
+        rescue OfficialPdfOverlay::TemplateUnavailableError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -645,36 +647,18 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          preflight = W2GuPreflightValidator.new(company: company, year: year).run
-
-          filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-          apply_preflight_to_filing!(
-            filing,
-            preflight,
-            update_preflight_run_at: true
-          )
-
-          attempts = 0
-          begin
-            attempts += 1
-            filing.save!
-          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
-            raise if attempts >= 2
-
+          company.with_lock do
+            preflight = W2GuPreflightValidator.new(company: company, year: year).run
             filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-            apply_preflight_to_filing!(
-              filing,
-              preflight,
-              update_preflight_run_at: true
-            )
-            retry
+            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year).call
+            apply_preflight_to_filing!(filing, preflight, update_preflight_run_at: true, fingerprint: fingerprint)
+            filing.save!
+            render json: {
+              preflight: preflight,
+              filing: filing_readiness_payload(filing, fingerprint: fingerprint),
+              filing_gate: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
+            }
           end
-
-          render json: {
-            preflight: preflight,
-            filing: filing_readiness_payload(filing),
-            filing_gate: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
-          }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
@@ -720,52 +704,59 @@ module Api
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
-          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
-          unless filing
-            return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
-          end
-
           company = Company.find(current_company_id)
-          filing_gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
-          unless filing_gate.dig(:capabilities, :all_filing_ready_exports_allowed)
-            return render json: {
-              error: "Resolve payroll filing responsibility before marking W-2GU filing ready",
-              filing: filing_readiness_payload(filing),
-              filing_gate: filing_gate
-            }, status: :unprocessable_entity
-          end
+          company.with_lock do
+            filing = W2FilingReadiness.find_by(company_id: company.id, year: year)
+            unless filing
+              return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
+            end
 
-          if filing.status == "filing_ready"
-            return render json: { filing: filing_readiness_payload(filing), filing_gate: filing_gate }
-          end
+            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year).call
+            filing_gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
+            fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
+            unless filing_gate.dig(:capabilities, :all_filing_ready_exports_allowed)
+              return render json: {
+                error: "Resolve payroll filing responsibility before marking W-2GU filing ready",
+                filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate
+              }, status: :unprocessable_entity
+            end
 
-          fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
-          apply_preflight_to_filing!(
-            filing,
-            fresh_preflight,
-            update_preflight_run_at: false
-          )
+            if fresh_preflight[:blocking_count].positive?
+              apply_preflight_to_filing!(filing, fresh_preflight, update_preflight_run_at: false, fingerprint: fingerprint)
+              filing.save!
+              return render json: {
+                error: "Cannot mark filing ready with blocking findings",
+                filing: filing_readiness_payload(filing, fingerprint: fingerprint),
+                revalidation: revalidation_payload(fresh_preflight)
+              }, status: :unprocessable_entity
+            end
 
-          if filing.blocking_count.to_i > 0
+            unless filing.preflight_current?(fingerprint) &&
+                (params[:preflight_fingerprint].blank? || params[:preflight_fingerprint] == fingerprint)
+              return render json: {
+                error: "W-2 filing inputs changed. Run preflight again, review the current report, then explicitly mark it ready.",
+                filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate
+              }, status: :conflict
+            end
+            if filing.current?(fingerprint)
+              return render json: { filing: filing_readiness_payload(filing, fingerprint: fingerprint), filing_gate: filing_gate }
+            end
+
+            filing.status = "filing_ready"
+            filing.ready_fingerprint = fingerprint
+            filing.marked_ready_at = Time.current
+            filing.marked_ready_by_id = current_user&.id
+            filing.notes = params.key?(:notes) ? params[:notes].presence : filing.notes
+            filing.attestation_history += [ {
+              "source_fingerprint" => fingerprint, "marked_ready_at" => filing.marked_ready_at.iso8601,
+              "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
+            } ]
             filing.save!
-            return render json: {
-              error: "Cannot mark filing ready with blocking findings",
-              filing: filing_readiness_payload(filing),
-              revalidation: revalidation_payload(fresh_preflight)
-            }, status: :unprocessable_entity
+            render json: {
+              filing: filing_readiness_payload(filing, fingerprint: fingerprint),
+              revalidation: revalidation_payload(fresh_preflight), filing_gate: filing_gate
+            }
           end
-
-          filing.status = "filing_ready"
-          filing.marked_ready_at = Time.current
-          filing.marked_ready_by_id = current_user&.id
-          filing.notes = params.key?(:notes) ? params[:notes].presence : filing.notes
-          filing.save!
-
-          render json: {
-            filing: filing_readiness_payload(filing),
-            revalidation: revalidation_payload(fresh_preflight),
-            filing_gate: filing_gate
-          }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid
@@ -1573,7 +1564,7 @@ module Api
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
         end
 
-        def build_quarterly_compliance_packet_data
+        def build_quarterly_compliance_packet_data(official_form_941: false)
           raw_year = params[:year]
           year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
           quarter = params[:quarter]&.to_i
@@ -1586,8 +1577,16 @@ module Api
             return [ nil, render(json: { error: "quarter is required and must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
           end
 
+          if official_form_941
+            template_status = QuarterlyComplianceOfficialForms::Form941.template_status(raw_year.presence || year)
+            unless template_status[:available]
+              return [ nil, render(json: { error: template_status[:message], official_form_template: template_status }, status: :unprocessable_entity) ]
+            end
+          end
+
           company = Company.find(current_company_id)
           report = QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate
+          report[:official_form_template] = QuarterlyComplianceOfficialForms::Form941.template_status(year)
           report[:filing_gate] = PayrollFilingResponsibilityGate.quarterly(
             company: company,
             tax_year: year,
@@ -1637,7 +1636,7 @@ module Api
         end
 
         def send_quarterly_compliance_official_form!(generator:, filename_prefix:)
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: generator == QuarterlyComplianceOfficialForms::Form941)
           return error_response if error_response
 
           send_data generator.new(report: report_data).generate,
@@ -1649,7 +1648,7 @@ module Api
         end
 
         def send_quarterly_compliance_official_form_from_params!(disposition:)
-          report_data, error_response = build_quarterly_compliance_packet_data
+          report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: params[:form_type].to_s == "form_941")
           return error_response if error_response
 
           config = quarterly_compliance_official_form_config(params[:form_type])
@@ -1812,9 +1811,14 @@ module Api
           end
 
           company     = Company.find(current_company_id)
-          report_data = W2GuAggregator.new(company, year).generate
-          report_data[:filing_gate] = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
-          [ report_data, nil ]
+          company.with_lock do
+            report_data = W2GuAggregator.new(company, year).generate
+            report_data[:filing_gate] = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
+            readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
+            fingerprint = W2FilingInputsFingerprint.new(company: company, year: year).call if readiness
+            report_data[:filing_readiness] = readiness ? filing_readiness_payload(readiness, fingerprint: fingerprint) : nil
+            [ report_data, nil ]
+          end
         end
 
         def current_pay_period_summary
@@ -2135,7 +2139,7 @@ module Api
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
             health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
-            withholding_tax: items.sum { |item| item.withholding_tax.to_f },
+            withholding_tax: items.sum(0.to_d) { |item| item.total_income_tax_withheld.to_d }.round(2).to_f,
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: items.sum { |item| item.medicare_tax.to_f },
             retirement: retirement_totals[:retirement].to_f,
@@ -4134,9 +4138,13 @@ module Api
               rows: [ [ "Category", "Amount" ] ] + tax_detail.map { |key, value| [ key.to_s.humanize, value ] }
             },
             {
-              name: "Monthly Liability",
-              rows: [ [ "Month", "Guam Withholding For W-1", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Federal Liability Total" ] ] +
+              name: "Monthly Wage Base Reference",
+              rows: [ [ "Month", "Guam Withholding For W-1", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Tax On Monthly Wage Bases" ] ] +
                 monthly.map { |row| [ row[:month], row[:guam_withholding_for_w1], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability] ] }
+            },
+            {
+              name: "Withholding Reconciliation",
+              rows: [ [ "Field", "Value" ] ] + (report[:withholding_reconciliation] || {}).map { |key, value| [ key.to_s.humanize, value ] }
             },
             report_info_sheet(report, title: "Federal Form 941", description: REPORT_DESCRIPTIONS[:form_941_gu])
           ]
@@ -4344,14 +4352,16 @@ module Api
           ]
         end
 
-        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
-          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, fingerprint: nil)
+          fingerprint ||= W2FilingInputsFingerprint.new(company: filing.company, year: filing.year).call
+          was_filing_ready = !filing.new_record? && filing.current?(fingerprint)
 
           filing.blocking_count = preflight[:blocking_count]
           if update_preflight_run_at
             filing.warning_count = preflight[:warning_count]
             filing.findings = preflight[:findings]
             filing.preflight_run_at = Time.current
+            filing.preflight_fingerprint = fingerprint
           end
 
           if preflight[:blocking_count].zero?
@@ -4364,10 +4374,18 @@ module Api
           end
         end
 
-        def filing_readiness_payload(filing)
+        def filing_readiness_payload(filing, fingerprint: nil)
+          fingerprint ||= W2FilingInputsFingerprint.new(company: filing.company, year: filing.year).call
+          stale = filing.status.in?(%w[filing_ready preflight_passed]) &&
+            !(filing.status == "filing_ready" ? filing.current?(fingerprint) : filing.preflight_current?(fingerprint))
           {
             year: filing.year,
-            status: filing.status,
+            status: stale ? "stale" : filing.status,
+            stale: stale,
+            preflight_current: filing.preflight_current?(fingerprint),
+            preflight_fingerprint: filing.preflight_fingerprint,
+            ready_fingerprint: filing.ready_fingerprint,
+            attestation_history: filing.attestation_history,
             blocking_count: filing.blocking_count,
             warning_count: filing.warning_count,
             preflight_run_at: filing.preflight_run_at,

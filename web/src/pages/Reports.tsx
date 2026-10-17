@@ -623,7 +623,7 @@ function TaxSummaryPanel() {
 
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
-function W2GuPanel() {
+export function W2GuPanel() {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
@@ -680,6 +680,7 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2Gu(year);
       setReport(res.report);
+      if (res.report.filing_readiness !== undefined) setFiling(res.report.filing_readiness);
       setFilingGate(res.report.filing_gate);
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
@@ -708,7 +709,7 @@ function W2GuPanel() {
     setMarkingReady(true);
     setMarkReadyError(null);
     try {
-      const res = await reportsApi.w2GuMarkReady(year, filingNotes);
+      const res = await reportsApi.w2GuMarkReady(year, filingNotes, filing?.preflight_fingerprint);
       setFiling(res.filing);
       setFilingGate(res.filing_gate);
       const revalidatedPreflight = buildRevalidationPreflight(res.revalidation);
@@ -860,10 +861,12 @@ function W2GuPanel() {
             </Button>
             <Button
               onClick={markFilingReady}
-              disabled={busy || !filing || filing.blocking_count > 0 || filing.status === 'filing_ready' || !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready}
+              disabled={busy || !filing || filing.preflight_current === false || filing.blocking_count > 0 || filing.status === 'filing_ready' || !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready}
               title={
                 !filing
                   ? 'Run preflight first'
+                  : filing.preflight_current === false
+                    ? 'Filing inputs changed. Run preflight and review again'
                   : filing.status === 'filing_ready'
                     ? 'Already marked filing ready'
                     : !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready
@@ -907,7 +910,7 @@ function W2GuPanel() {
         <FilingResponsibilityPanel
           gate={filingGate}
           canRecord={canRecordFilingResponsibility}
-          onUpdated={setFilingGate}
+          onUpdated={(gate) => { setFilingGate(gate); void loadPersistedFilingReadiness(); }}
         />
       )}
 
@@ -931,8 +934,11 @@ function W2GuPanel() {
           <CardHeader>
             <CardTitle className="text-base">Filing Readiness</CardTitle>
             <CardDescription>
-              Status: <span className="font-medium">{filing.status}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
+              Status: <span className="font-medium">{filing.status === 'stale' ? 'Review needed — inputs changed' : filing.status.replaceAll('_', ' ')}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
             </CardDescription>
+            {filing.stale && (
+              <p role="status" className="mt-2 text-sm text-amber-900">Payroll, employee details, filing rules or responsibility changed after the previous review. Run Preflight, review the current report, then mark it ready again. Previous approval remains in the review history.</p>
+            )}
             {filing.preflight_run_at && (
               <p className="text-xs text-gray-500">
                 Last explicit preflight: {new Date(filing.preflight_run_at).toLocaleString()}
@@ -940,11 +946,24 @@ function W2GuPanel() {
             )}
             {filing.marked_ready_at && (
               <p className="text-xs text-gray-500">
-                Marked ready: {new Date(filing.marked_ready_at).toLocaleString()}
+                {filing.status === 'filing_ready' ? 'Marked ready' : 'Previous review'}: {new Date(filing.marked_ready_at).toLocaleString()}
                 {typeof filing.marked_ready_by_id === 'number' ? ` (user #${filing.marked_ready_by_id})` : ''}
               </p>
             )}
             {filing.notes && <p className="text-sm text-gray-600">Notes: {filing.notes}</p>}
+            {!!filing.attestation_history?.length && (
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer font-medium">Previous filing reviews ({filing.attestation_history.length})</summary>
+                <ul className="mt-2 space-y-2">
+                  {filing.attestation_history.map((review, index) => (
+                    <li key={`${review.marked_ready_at}-${index}`} className="rounded-lg border border-gray-200 p-3">
+                      <p>{new Date(review.marked_ready_at).toLocaleString()} — user #{review.marked_ready_by_id ?? 'unknown'}{review.legacy ? ' (before source verification)' : ''}</p>
+                      {review.notes && <p className="break-words">{review.notes}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </CardHeader>
         </Card>
       )}
@@ -2482,16 +2501,20 @@ export function QuarterlyCompliancePacketPanel() {
     }
   }
 
+  const form941Available = report?.meta.year === year && report.official_form_template?.available === true;
+  const templateMessage = report?.official_form_template?.message || (!form941Available
+    ? 'View the packet to check official Form 941 PDF availability. If availability remains unknown, reload the report.'
+    : null);
   const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
   const exportFormats: ReportDownloadFormat[] = [
-    {
+    ...(form941Available ? [{
       key: 'pdf',
       label: 'Preview draft PDF packet',
       description: 'Summary and draft forms marked not filed; not proof of submission.',
-      kind: 'pdf',
+      kind: 'pdf' as const,
       loading: exportingPdf,
       onSelect: downloadPdf,
-    },
+    }] : []),
     {
       key: 'xlsx',
       label: 'Reconciliation workbook (.xlsx)',
@@ -2553,6 +2576,7 @@ export function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
+          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>
             {bridgeRecoveryPath && <div className="mt-2">
               <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
@@ -2706,6 +2730,7 @@ export function QuarterlyCompliancePacketPanel() {
                 <Button
                   variant="outline"
                   onClick={() => setReviewFormType('form_941')}
+                  disabled={!form941Available}
                 >
                   Review 941
                 </Button>
@@ -3135,7 +3160,7 @@ function QuarterlyOfficialFormModal({
 
 // ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
-function Form941GuPanel() {
+export function Form941GuPanel() {
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
@@ -3188,8 +3213,12 @@ function Form941GuPanel() {
     }
   }
 
+  const form941Available = report?.meta.year === year && report.official_form_template?.available === true;
+  const templateMessage = report?.official_form_template?.message || (!form941Available
+    ? 'View the worksheet to check official Form 941 PDF availability. If availability remains unknown, reload the report.'
+    : null);
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'Preview draft Form 941', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    ...(form941Available ? [{ key: 'pdf', label: 'Preview draft Form 941', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf' as const, loading: exportingPdf, onSelect: downloadPdf }] : []),
     { key: 'xlsx', label: '941 worksheet (.xlsx)', description: 'Supporting calculations and liability schedules.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
   ];
 
@@ -3240,6 +3269,7 @@ function Form941GuPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
+          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
@@ -3253,6 +3283,30 @@ function Form941GuPanel() {
               {report.filing_readiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
             </ul>
           </div>
+          {report.withholding_reconciliation && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Withholding reconciliation</CardTitle>
+                <CardDescription>Line 7 compares employee withholding with the quarter statutory employee share. Employer rounding and deposits are reviewed separately.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {[
+                    ['Employee share on quarter wages', report.withholding_reconciliation.expected_employee_total],
+                    ['Recorded employee withholding', report.withholding_reconciliation.recorded_employee_total],
+                    ['Employee rounding difference', report.withholding_reconciliation.employee_difference],
+                    ['Suggested line 7 adjustment', report.withholding_reconciliation.line7_suggestion ?? (report.withholding_reconciliation.employee_difference === 0 ? 0 : null)],
+                    ['Recorded employee + employer liability', report.withholding_reconciliation.recorded_total_liability],
+                    ['Remaining liability difference', report.withholding_reconciliation.recorded_liability_residual],
+                  ].map(([label, amount]) => (
+                    <div key={String(label)}><dt className="text-sm text-gray-600">{label}</dt><dd className="font-medium tabular-nums">{fmtOrPlaceholder(amount as number | null)}</dd></div>
+                  ))}
+                </dl>
+                <p className="mt-4 text-sm">{report.withholding_reconciliation.explanation}</p>
+                {report.withholding_reconciliation.requires_review && <p role="status" className="mt-2 font-medium text-amber-900">Accountant review required before filing.</p>}
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Federal Form 941 — {report.meta.quarter_label}</CardTitle>
@@ -3381,10 +3435,10 @@ function Form941GuPanel() {
                   </table>
                 </div>
 
-                {/* Monthly Liability Breakdown */}
+                {/* Monthly Wage-base Reference */}
                 {report.monthly_liability && report.monthly_liability.length > 0 && (
                   <div className="mt-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Monthly Tax Liability (Schedule B)</h4>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Monthly Wage-base Reference</h4>
                     <div className="rounded-md border overflow-hidden">
                       <table className="w-full text-sm">
                         <thead>
