@@ -21,13 +21,16 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   const path = `/companies/${fixture.company_id}/pay-runs/${periodId}/work`;
   await page.goto(path);
   await expect(page.getByRole('heading', { name: 'Processing Timeline', exact: true })).toBeVisible({ timeout: 30_000 });
-  const row = page.getByRole('row').filter({ hasText: fixture.manual_employee_name }).filter({ has: page.getByRole('textbox') });
-  await expect(row).toBeVisible();
-  const inputs = row.getByRole('textbox');
-  await inputs.nth(0).fill('4');
-  await inputs.nth(0).press('Tab');
-  await inputs.nth(1).fill('0');
-  await inputs.nth(1).press('Tab');
+  const selection = page.getByRole('listitem').filter({ has: page.getByText(fixture.manual_employee_name, { exact: true }) });
+  await expect(selection).toHaveCount(1);
+  await selection.getByRole('button', { name: 'Enter pay', exact: true }).click();
+  const regularHours = page.getByRole('textbox', { name: `Regular hours for ${fixture.manual_employee_name}`, exact: true });
+  const overtimeHours = page.getByRole('textbox', { name: `Overtime hours for ${fixture.manual_employee_name}`, exact: true });
+  await expect(regularHours).toBeVisible();
+  await regularHours.fill('4');
+  await regularHours.press('Tab');
+  await overtimeHours.fill('0');
+  await overtimeHours.press('Tab');
   await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
   await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).click();
@@ -39,6 +42,8 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
   await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
   const before = await (await request.get(`${apiBase}/admin/pay_periods/${periodId}`)).json();
+  expect(before.pay_period.payroll_items.map((value: { employee_id: number }) => value.employee_id))
+    .toEqual([fixture.manual_employee_id]);
   const item = before.pay_period.payroll_items.find((value: { employee_id: number }) => value.employee_id === fixture.manual_employee_id);
   expect(item).toBeTruthy();
   expect(Number(item.hours_worked)).toBe(4);
