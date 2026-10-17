@@ -36,6 +36,7 @@ import {
 } from '@/lib/utils';
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
@@ -62,8 +63,7 @@ export function EmployeeList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
@@ -418,7 +418,7 @@ export function EmployeeList() {
               {hasActiveFilters
                 ? 'Try adjusting your filters.'
                 : readOnlyWorkspace
-                  ? 'No employees were preserved in this backup.'
+                  ? 'No employees are available in this workspace.'
                 : 'Get started by adding your first employee.'}
             </p>
             {!hasActiveFilters && !readOnlyWorkspace && (
@@ -557,6 +557,7 @@ export function EmployeeList() {
 
       <EmployeeBulkImportModal
         key={companyId}
+        readOnly={readOnlyWorkspace}
         open={!isClient && showBulkImport}
         onClose={() => setShowBulkImport(false)}
         onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}

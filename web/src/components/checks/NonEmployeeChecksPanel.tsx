@@ -1,5 +1,5 @@
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useId, useMemo, useRef } from 'react';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -21,6 +21,7 @@ interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
+  payPeriodVoided?: boolean;
   payDate?: string;
   refreshToken?: number;
   /**
@@ -31,6 +32,8 @@ interface NonEmployeeChecksPanelProps {
    * value derived from PayrollItems.
    */
   onChecksLoaded?: (checks: NonEmployeeCheck[]) => void;
+  /** A mutation was saved, independently of whether the subsequent list reload succeeds. */
+  onChecksChanged?: () => void;
 }
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -86,10 +89,22 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodVoided = false, payDate, refreshToken = 0, onChecksLoaded, onChecksChanged }: NonEmployeeChecksPanelProps) {
   const { notify } = useFeedback();
+  const formId = useId();
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError, loadErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const listScope = useMemo(() => ({ companyId, payPeriodId }), [companyId, payPeriodId]);
+  const currentListScope = useRef<typeof listScope | null>(listScope);
+  const listRequest = useRef(0);
+  const [loadedScope, setLoadedScope] = useState<typeof listScope | null>(null);
+  useLayoutEffect(() => {
+    currentListScope.current = listScope;
+    listRequest.current++;
+    return () => { currentListScope.current = null; };
+  }, [listScope]);
+  const listUnavailable = loading || Boolean(loadError) || loadedScope !== listScope;
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -157,17 +172,23 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   }, [onChecksLoaded]);
 
   const loadChecks = useCallback(async () => {
+    if (currentListScope.current !== listScope) return;
+    const request = ++listRequest.current;
+    const isCurrent = () => request === listRequest.current && currentListScope.current === listScope;
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
+      if (!isCurrent()) return;
       setChecks(res.non_employee_checks);
       setCheckNumberDrafts(Object.fromEntries(res.non_employee_checks.map((check) => [check.id, check.check_number || ''])));
+      setLoadedScope(listScope);
     } catch {
-      // ignore
+      if (isCurrent()) setLoadError('Could not reload non-employee checks. Saved changes are retained. Reload the checks before continuing.');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [payPeriodId]);
+  }, [payPeriodId, listScope, setLoadError]);
 
   useEffect(() => { loadChecks(); }, [loadChecks, refreshToken]);
 
@@ -188,6 +209,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
 
   const handleCreate = async () => {
+    if (payPeriodVoided || listUnavailable || creating) return;
     setFormError(null);
     if (!formData.payable_to || !formData.amount) {
       setFormError('Payable To and Amount are required');
@@ -205,6 +227,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         reference_number: formData.reference_number || undefined,
         check_number: formData.check_number || undefined,
       });
+      onChecksChanged?.();
       setShowForm(false);
       setFormData({ payable_to: '', amount: '', check_type: 'other', memo: '', description: '', reference_number: '', check_number: '' });
       loadChecks();
@@ -220,6 +243,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     setVoidConfirming(true);
     try {
       await nonEmployeeChecksApi.voidCheck(id, voidReason);
+      onChecksChanged?.();
       setVoidingId(null);
       setVoidReason('');
       loadChecks();
@@ -235,6 +259,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     setDeletingId(id);
     try {
       await nonEmployeeChecksApi.delete(id);
+      onChecksChanged?.();
       loadChecks();
     } catch {
       // ignore
@@ -338,6 +363,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         })),
         'Saved from the non-employee Checks worksheet'
       );
+      onChecksChanged?.();
       await loadChecks();
     } catch (err) {
       setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
@@ -359,10 +385,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const showGenerateFit = payPeriodStatus === 'committed' && (!fitCheck || fitCheckNeedsNumber);
 
   const handleGenerateFitCheck = async () => {
+    if (payPeriodVoided) return;
     setGeneratingFit(true);
     setFitError(null);
     try {
       await payPeriodsApi.generateFitCheck(payPeriodId);
+      onChecksChanged?.();
       await loadChecks();
     } catch (err) {
       setFitError(err instanceof Error ? err.message : 'Failed to generate FIT check');
@@ -405,7 +433,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit}
+                disabled={payPeriodVoided || generatingFit || listUnavailable}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit
@@ -413,14 +441,20 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   : fitCheckNeedsNumber ? 'Assign FIT number' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={!showForm && (payPeriodVoided || listUnavailable)}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>
         </div>
       </div>
 
-      {checkNumberChanges.length > 0 && (
+      {payPeriodVoided && (
+        <p role="status" className="mx-4 mt-4 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+          This payroll is voided. New payments and FIT checks cannot be created. Saved payment records remain available for review.
+        </p>
+      )}
+
+      {!listUnavailable && checkNumberChanges.length > 0 && (
         <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-amber-950">
@@ -442,26 +476,36 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         <div className="p-4 border-b bg-blue-50/30">
           {formError && <ActionFeedback retryKey={formErrorFeedbackAttempt} tone="error" message={formError} />}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
-            <NumericInput
-              className="px-3 py-2 text-sm"
-              placeholder="Amount *"
-              min={0.01}
-              fixedDecimalsOnBlur={2}
-              inputMode="decimal"
-              value={formData.amount === '' ? null : Number(formData.amount)}
-              onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
-            />
-            <select className="border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
-              {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-            <Input className="px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
-            <Input className="px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
-            <Input className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
+            <Input id={`${formId}-payable-to`} label="Payable To *" className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
+            <div className="space-y-1.5">
+              <label htmlFor={`${formId}-amount`} className="block text-sm font-medium text-neutral-700">Amount *</label>
+              <NumericInput
+                id={`${formId}-amount`}
+                className="px-3 py-2 text-sm"
+                placeholder="Amount *"
+                min={0.01}
+                fixedDecimalsOnBlur={2}
+                inputMode="decimal"
+                value={formData.amount === '' ? null : Number(formData.amount)}
+                onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor={`${formId}-check-type`} className="block text-sm font-medium text-neutral-700">Check Type</label>
+              <select id={`${formId}-check-type`} className="w-full border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
+                {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <Input id={`${formId}-check-number`} label="Check #" className="px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
+            <Input id={`${formId}-memo`} label="Memo" className="px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
+            <Input id={`${formId}-reference-number`} label="Reference #" className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
           </div>
-          <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
+          <div className="mt-2 space-y-1.5">
+            <label htmlFor={`${formId}-description`} className="block text-sm font-medium text-neutral-700">Description</label>
+            <textarea id={`${formId}-description`} className="w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
+          </div>
           {formData.check_type === 'grt' && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -476,7 +520,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             </div>
           )}
           <div className="mt-3 flex gap-2">
-            <Button size="sm" onClick={handleCreate} disabled={creating}>
+            <Button size="sm" onClick={handleCreate} disabled={payPeriodVoided || creating || listUnavailable}>
               {creating ? 'Creating...' : 'Create Check'}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
@@ -492,7 +536,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           auto-FIT check or changing its check_type via the Edit modal doesn't
           silently hide the quick-fill helper. Falls back to legacy payee
           matching for pre-marker rows. */}
-      {!loading && checks.some(c =>
+      {!listUnavailable && checks.some(c =>
         !c.voided &&
         (c.auto_generated_type === 'fit_deposit' ||
           (c.check_type === 'tax_deposit' &&
@@ -571,15 +615,20 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         </div>
       )}
 
-      {isFirstHawaiian4Up && printableChecks.length > 0 && (
+      {!listUnavailable && isFirstHawaiian4Up && printableChecks.length > 0 && (
         <div className="mx-4 mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
           Batch printing packs non-employee checks together in check-number order, starting at the selected slot, so multiple pay-period payments can share one First Hawaiian 4-Up sheet.
         </div>
       )}
 
       <div className="p-4">
-        {loading ? (
+        {loading || (!loadError && loadedScope !== listScope) ? (
           <p className="text-sm text-gray-500">Loading...</p>
+        ) : loadError ? (
+          <div className="space-y-2">
+            <ActionFeedback retryKey={loadErrorFeedbackAttempt} tone="error" message={loadError} />
+            <Button size="sm" variant="outline" onClick={() => void loadChecks()}>Reload checks</Button>
+          </div>
         ) : checks.length === 0 ? (
           <p className="text-sm text-gray-500 italic">No non-employee checks for this pay period.</p>
         ) : (

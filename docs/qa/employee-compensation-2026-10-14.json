@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-14",
+  "executor": "root computer use",
+  "environment": "Private PostgreSQL, Rails test, loopback development frontend with built-in synthetic admin authentication",
+  "viewports": [
+    "390x844",
+    "1440x900"
+  ],
+  "passed": [
+    "F02 hourly-to-annual conversion: salary52000/biweekly gross2000; old hourly25 retained",
+    "F03 selected-client semimonthly UI default and saved explicit weekly override",
+    "F04 choose/remove/re-add clears bonus; selected-only bonus25 and base-salary2166.67 saved",
+    "F05 all visible field labels associated; desktop FirstName click focuses field",
+    "F09 permission expires while drafting: clear422, no employee, same draft completed and saved after required fields filled"
+  ],
+  "pending": [
+    "F13 combined reviewer/manager/workspace-admin actual browser acceptance",
+    "PR331 retained-reference source compatibility and forecast disclosure",
+    "Combined exact-head full gate and staging-v2 delivery"
+  ],
+  "limits": [
+    "No external Clerk/OCR/email acceptance",
+    "No real payments or financial-history repair",
+    "No physical mobile/printer tests",
+    "No confirmed legal overtime workweek in this fixture; no overtime compliance claim"
+  ],
+  "gates": {
+    "backend_examples": 4526,
+    "frontend_tests": 790,
+    "public_browser_scenarios": 129,
+    "types_lint_build_security": "passed"
+  },
+  "test_arrangement_fix": "Historical cancelled-poll test waits for initial pending detail; all original cancellation assertions retained"
+}

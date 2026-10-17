@@ -144,10 +144,10 @@ module TimeTracking
       end
       employee = Array(@import.raw_payload["employees"]).find { |row| row["source_user_id"].to_s == @identity[0] }
       line = Array(employee&.dig("adjustments")).find { |row| row["source_time_entry_id"].to_s == @identity[1] && row["line_key"].to_s == @identity[2] }
-      unless line && employee["source_user_uuid"].present? && Array(employee["adjustments"]).one? &&
+      unless line && employee["source_user_uuid"].present? &&
         line["source_kind"] == "correction" && line["total_hours"].to_d.negative? &&
         line["regular_hours"].to_d <= 0 && line["overtime_hours"].to_d <= 0
-        raise ArgumentError, "Review requires one exact negative correction line for this employee; mixed corrections need manual review"
+        raise ArgumentError, "Review requires the exact negative correction line for this employee"
       end
       allocations = TimeTrackingEntryAllocation.where(company_id: @source.company_id, time_tracking_source_id: @source.id,
         source_user_id: @identity[0], source_user_uuid: employee["source_user_uuid"], source_time_entry_id: @identity[1], line_key: @identity[2]).to_a

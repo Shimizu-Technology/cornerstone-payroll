@@ -137,6 +137,7 @@ export function Clients() {
   const rehearsalNameId = useId();
   const workspaceNameId = useId();
   const renameNameId = useId();
+  const clientFormId = useId();
   const { refreshCompanies, switchCompany, activeOrganizationId, activeCompanyId } = useCompany();
   const { user, isAdmin: canManageClients, isAccountant, isManager } = useAuth();
   const { notify } = useFeedback();
@@ -1154,10 +1155,11 @@ export function Clients() {
               <h4 className="text-sm font-medium text-gray-700 border-b pb-1">Basic Information</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor={`${clientFormId}-name`} className="block text-sm font-medium text-gray-700 mb-1">
                     Client Name <span className="text-red-500">*</span>
                   </label>
                   <Input
+                    id={`${clientFormId}-name`}
                     value={form.name}
                     onChange={(e) => updateField('name', e.target.value)}
                     placeholder="e.g. MoSa's Hotbox, Inc."
@@ -1166,8 +1168,9 @@ export function Clients() {
                   <p className="mt-1 text-xs text-neutral-500">Shown on reports and earnings statements.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">EIN</label>
+                  <label htmlFor={`${clientFormId}-ein`} className="block text-sm font-medium text-gray-700 mb-1">EIN</label>
                   <Input
+                    id={`${clientFormId}-ein`}
                     value={form.ein || ''}
                     onChange={(e) => updateField('ein', formatEIN(e.target.value))}
                     placeholder="XX-XXXXXXX"
@@ -1175,8 +1178,9 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pay Frequency</label>
+                  <label htmlFor={`${clientFormId}-pay_frequency`} className="block text-sm font-medium text-gray-700 mb-1">Pay Frequency</label>
                   <Select
+                    id={`${clientFormId}-pay_frequency`}
                     value={form.pay_frequency}
                     onChange={(e) => updateField('pay_frequency', e.target.value)}
                     disabled={!canManageClients}
@@ -1192,16 +1196,18 @@ export function Clients() {
               <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Contact</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <label htmlFor={`${clientFormId}-phone`} className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <Input
+                    id={`${clientFormId}-phone`}
                     value={form.phone || ''}
                     onChange={(e) => updateField('phone', e.target.value)}
                     placeholder="(671) 555-1234"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <label htmlFor={`${clientFormId}-email`} className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <Input
+                    id={`${clientFormId}-email`}
                     type="email"
                     value={form.email || ''}
                     onChange={(e) => updateField('email', e.target.value)}
@@ -1214,16 +1220,18 @@ export function Clients() {
               <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Address</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
+                  <label htmlFor={`${clientFormId}-address_line1`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
                   <Input
+                    id={`${clientFormId}-address_line1`}
                     value={form.address_line1 || ''}
                     onChange={(e) => updateField('address_line1', e.target.value)}
                     placeholder="123 Main St"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
+                  <label htmlFor={`${clientFormId}-address_line2`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
                   <Input
+                    id={`${clientFormId}-address_line2`}
                     value={form.address_line2 || ''}
                     onChange={(e) => updateField('address_line2', e.target.value)}
                     placeholder="Suite 100"
@@ -1232,24 +1240,27 @@ export function Clients() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  <label htmlFor={`${clientFormId}-city`} className="block text-sm font-medium text-gray-700 mb-1">City</label>
                   <Input
+                    id={`${clientFormId}-city`}
                     value={form.city || ''}
                     onChange={(e) => updateField('city', e.target.value)}
                     placeholder="Tamuning"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                  <label htmlFor={`${clientFormId}-state`} className="block text-sm font-medium text-gray-700 mb-1">State</label>
                   <Input
+                    id={`${clientFormId}-state`}
                     value={form.state || ''}
                     onChange={(e) => updateField('state', e.target.value)}
                     placeholder="GU"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
+                  <label htmlFor={`${clientFormId}-zip`} className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
                   <Input
+                    id={`${clientFormId}-zip`}
                     value={form.zip || ''}
                     onChange={(e) => updateField('zip', e.target.value)}
                     placeholder="96913"
@@ -1263,16 +1274,18 @@ export function Clients() {
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
+                      <label htmlFor={`${clientFormId}-bank_name`} className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
                       <Input
+                        id={`${clientFormId}-bank_name`}
                         value={form.bank_name || ''}
                         onChange={(e) => updateField('bank_name', e.target.value)}
                         placeholder="Bank of Guam"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
+                      <label htmlFor={`${clientFormId}-bank_address`} className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
                       <Input
+                        id={`${clientFormId}-bank_address`}
                         value={form.bank_address || ''}
                         onChange={(e) => updateField('bank_address', e.target.value)}
                         placeholder="111 Chalan Santo Papa"
@@ -1307,8 +1320,9 @@ export function Clients() {
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
+                      <label htmlFor={`${clientFormId}-check_stock_type`} className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
                       <Select
+                        id={`${clientFormId}-check_stock_type`}
                         value={form.check_stock_type || 'bottom_check'}
                         onChange={(e) => updateField('check_stock_type', e.target.value)}
                       >
@@ -1318,8 +1332,9 @@ export function Clients() {
                       </Select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
+                      <label htmlFor={`${clientFormId}-next_check_number`} className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
                       <NumericInput
+                        id={`${clientFormId}-next_check_number`}
                         value={form.next_check_number ?? 1001}
                         onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
                         min={1}

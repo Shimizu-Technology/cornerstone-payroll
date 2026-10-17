@@ -1,3 +1,5 @@
+import { isTestWorkspaceCompany } from '@/lib/company-write-access';
+import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
@@ -259,7 +261,9 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 
 export function InvoiceMaker() {
   const location = useLocation();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany, activeOrganizationId } = useCompany();
+  const financeScopeId = activeOrganizationId ?? activeCompanyId;
+  const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [billingProfiles, setBillingProfiles] = useState<InvoiceBillingProfile[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
@@ -293,7 +297,7 @@ export function InvoiceMaker() {
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
   const scopeGenerationRef = useRef(0);
-  const requestedCompanyIdRef = useRef<number | null>(null);
+  const requestedFinanceScopeRef = useRef<number | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -329,8 +333,8 @@ export function InvoiceMaker() {
 
   useEffect(() => {
     const generation = ++scopeGenerationRef.current;
-    if (requestedCompanyIdRef.current !== activeCompanyId) {
-      requestedCompanyIdRef.current = activeCompanyId;
+    if (requestedFinanceScopeRef.current !== financeScopeId) {
+      requestedFinanceScopeRef.current = financeScopeId;
       setInvoices([]);
       setRecipients([]);
       setBillingProfiles([]);
@@ -347,7 +351,7 @@ export function InvoiceMaker() {
       savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
     }
     void loadData(generation);
-  }, [loadData, activeCompanyId, setChatError]);
+  }, [loadData, financeScopeId, setChatError]);
 
   useEffect(() => {
     return () => {
@@ -688,6 +692,7 @@ export function InvoiceMaker() {
     reloadAfterSave = true,
     successMessage = 'Invoice saved.',
   } = {}) => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return null; }
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -745,7 +750,7 @@ export function InvoiceMaker() {
     if (!confirmDraftResetForFinalizedEdits('preview the updated PDF')) return;
 
     const shouldMarkDraft = Boolean(invoiceForm.status && invoiceForm.status !== 'draft' && hasUnsavedInvoiceChanges());
-    const id = invoiceForm.status && invoiceForm.status !== 'draft' && invoiceForm.id && !shouldMarkDraft
+    const id = invoiceForm.id && !hasUnsavedInvoiceChanges()
       ? invoiceForm.id
       : await saveInvoice({ markDraft: shouldMarkDraft, successMessage: shouldMarkDraft ? 'Invoice saved as draft for preview.' : undefined });
     if (!id) return;
@@ -764,6 +769,7 @@ export function InvoiceMaker() {
   };
 
   const handleGenerate = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     if (!ensureReadyForPdf()) return;
     if (!confirmDraftResetForFinalizedEdits('regenerate the PDF')) return;
 
@@ -794,6 +800,7 @@ export function InvoiceMaker() {
   };
 
   const handleDeleteInvoice = async (id: number) => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     if (!window.confirm('Delete this draft invoice?')) return;
     setDeletingId(id);
     setError(null);
@@ -809,6 +816,7 @@ export function InvoiceMaker() {
   };
 
   const startChatSession = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
@@ -886,6 +894,7 @@ export function InvoiceMaker() {
   };
 
   const archiveChatSession = async (sessionId: number) => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
@@ -908,6 +917,7 @@ export function InvoiceMaker() {
   };
 
   const restoreChatSession = async (sessionId: number) => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     const generation = scopeGenerationRef.current;
     setChatBusy(true);
     setError(null);
@@ -925,6 +935,7 @@ export function InvoiceMaker() {
   };
 
   const restoreChatPreview = async (messageId: number) => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     if (!activeChatSession) return;
     const generation = scopeGenerationRef.current;
     setChatBusy(true);
@@ -947,6 +958,7 @@ export function InvoiceMaker() {
   };
 
   const sendChatMessage = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     const content = chatInput.trim() || (chatImages.length > 0 ? 'Please create an invoice from the attached file.' : '');
     if (!content) return;
     const generation = scopeGenerationRef.current;
@@ -1063,6 +1075,7 @@ export function InvoiceMaker() {
   };
 
   const createInvoiceFromPreview = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     if (!activeChatSession) return;
     const generation = scopeGenerationRef.current;
 
@@ -1203,6 +1216,7 @@ export function InvoiceMaker() {
   };
 
   const saveBillingProfile = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     setBillingProfileSaving(true);
     setError(null);
     try {
@@ -1232,6 +1246,7 @@ export function InvoiceMaker() {
   };
 
   const removeBillingLogo = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     if (!billingProfileForm.id) return;
     setBillingProfileSaving(true);
     setError(null);
@@ -1264,6 +1279,7 @@ export function InvoiceMaker() {
   };
 
   const saveRecipient = async () => {
+    if (financeReadOnly) { setError(financeWriteBlockedMessage); return; }
     setRecipientSaving(true);
     setError(null);
     try {
@@ -1293,7 +1309,7 @@ export function InvoiceMaker() {
             <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
             <p className="text-sm text-neutral-500">Saved invoices for this book</p>
           </div>
-          <Button size="sm" variant="outline" onClick={handleNewInvoice}>
+          <Button size="sm" variant="outline" disabled={financeReadOnly} onClick={handleNewInvoice}>
             <Plus className="mr-1.5 h-4 w-4" />
             New
           </Button>
@@ -1405,7 +1421,7 @@ export function InvoiceMaker() {
             <Textarea value={recipientForm.payment_terms} onChange={(event) => setRecipientForm((current) => ({ ...current, payment_terms: event.target.value }))} placeholder="Payment terms" rows={2} />
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button size="sm" variant="ghost" onClick={() => setShowRecipientForm(false)}>Cancel</Button>
-              <Button size="sm" onClick={saveRecipient} disabled={recipientSaving}>
+              <Button size="sm" onClick={saveRecipient} disabled={financeReadOnly || recipientSaving}>
                 {recipientSaving ? 'Saving...' : 'Save Recipient'}
               </Button>
             </div>
@@ -1497,7 +1513,7 @@ export function InvoiceMaker() {
             </label>
             <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button size="sm" variant="ghost" onClick={() => setShowBillingProfileForm(false)}>Cancel</Button>
-              <Button size="sm" onClick={saveBillingProfile} disabled={billingProfileSaving}>
+              <Button size="sm" onClick={saveBillingProfile} disabled={financeReadOnly || billingProfileSaving}>
                 {billingProfileSaving ? 'Saving...' : 'Save Profile'}
               </Button>
             </div>
@@ -1632,7 +1648,7 @@ export function InvoiceMaker() {
                       size="sm"
                       className="text-red-600 hover:text-red-700"
                       onClick={() => handleDeleteInvoice(invoiceForm.id!)}
-                      disabled={deletingId === invoiceForm.id}
+                      disabled={financeReadOnly || deletingId === invoiceForm.id}
                     >
                       <Trash2 className="mr-1.5 h-4 w-4" />
                       Delete
@@ -1874,15 +1890,15 @@ export function InvoiceMaker() {
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
+                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={financeReadOnly || saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>
-                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
+                <Button type="button" variant="secondary" onClick={handlePreview} disabled={(financeReadOnly && (!invoiceForm.id || hasUnsavedInvoiceChanges())) || saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Eye className="mr-1.5 h-4 w-4" />
                   Preview PDF
                 </Button>
-                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
+                <Button type="button" onClick={handleGenerate} disabled={financeReadOnly || saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Download className="mr-1.5 h-4 w-4" />
                   Generate PDF
                 </Button>
@@ -2003,6 +2019,7 @@ export function InvoiceMaker() {
                                     <button
                                       type="button"
                                       onClick={createInvoiceFromPreview}
+                                      disabled={financeReadOnly}
                                       className="inline-flex items-center gap-1 rounded-full bg-primary-600 px-2 py-1 text-xs font-medium text-white hover:bg-primary-700"
                                     >
                                       <ReceiptText className="h-3 w-3" />
@@ -2022,6 +2039,7 @@ export function InvoiceMaker() {
                                   <button
                                     type="button"
                                     onClick={() => restoreChatPreview(message.id)}
+                                      disabled={financeReadOnly}
                                     className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
                                   >
                                     <RotateCcw className="h-3 w-3" />
@@ -2099,7 +2117,7 @@ export function InvoiceMaker() {
                     type="button"
                     className="h-12 shrink-0 px-4"
                     onClick={sendChatMessage}
-                    disabled={chatBusy || (!chatInput.trim() && chatImages.length === 0) || !chatCanAcceptMessages}
+                    disabled={financeReadOnly || chatBusy || (!chatInput.trim() && chatImages.length === 0) || !chatCanAcceptMessages}
                   >
                     <Send className="mr-1.5 h-4 w-4" />
                     Send
@@ -2141,7 +2159,7 @@ export function InvoiceMaker() {
                         <Eye className="mr-1.5 h-4 w-4" />
                         Preview PDF
                       </Button>
-                      <Button type="button" onClick={generateCreatedChatInvoice} disabled={pdfBusy}>
+                      <Button type="button" onClick={generateCreatedChatInvoice} disabled={financeReadOnly || pdfBusy}>
                         <Download className="mr-1.5 h-4 w-4" />
                         {createdChatInvoice.status === 'generated' ? 'Download PDF' : 'Generate PDF'}
                       </Button>
@@ -2203,7 +2221,7 @@ export function InvoiceMaker() {
                     )}
 
                     <div className="grid gap-2">
-                      <Button type="button" onClick={createInvoiceFromPreview} disabled={chatBusy}>
+                      <Button type="button" onClick={createInvoiceFromPreview} disabled={financeReadOnly || chatBusy}>
                         <ReceiptText className="mr-1.5 h-4 w-4" />
                         Create Invoice
                       </Button>
@@ -2232,7 +2250,7 @@ export function InvoiceMaker() {
                     <h2 className="text-base font-semibold text-neutral-900">Assistant Sessions</h2>
                     <p className="text-sm text-neutral-500">Draft invoices from chat</p>
                   </div>
-                  <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
+                  <Button size="sm" variant="outline" onClick={startChatSession} disabled={financeReadOnly || chatBusy}>
                     <Plus className="mr-1.5 h-4 w-4" />
                     New
                   </Button>
@@ -2283,6 +2301,7 @@ export function InvoiceMaker() {
                             <button
                               type="button"
                               onClick={() => restoreChatSession(session.id)}
+                                      disabled={financeReadOnly}
                               className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-primary-700 hover:bg-primary-50"
                             >
                               <RotateCcw className="h-3 w-3" />
@@ -2292,6 +2311,7 @@ export function InvoiceMaker() {
                             <button
                               type="button"
                               onClick={() => archiveChatSession(session.id)}
+                                      disabled={financeReadOnly}
                               className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
                             >
                               <Archive className="h-3 w-3" />

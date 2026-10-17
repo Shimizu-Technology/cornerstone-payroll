@@ -1434,11 +1434,11 @@ export const payPeriodsApi = {
       command_id: string;
       expected_version: number;
       reason: string;
-      work_date: string;
-      start_time: string;
-      end_time: string;
-      time_category_id: string;
-      description: string;
+      work_date?: string;
+      start_time?: string;
+      end_time?: string;
+      time_category_id?: string;
+      description?: string;
       breaks?: Array<{ start_time: string; end_time: string }>;
     }
   ) => api.post<import('@/types').AirePayrollCommandResponse>(
@@ -3776,6 +3776,8 @@ export interface CompanyListItem {
   test_workspace_sealed_at?: string | null;
   test_workspace_expired?: boolean;
   test_workspace_read_only?: boolean;
+  workspace_can_write?: boolean;
+  workspace_write_permissions?: Record<string, boolean> | null;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;
@@ -3978,8 +3980,8 @@ interface AuthApiUser {
   role: string;
   organization_id?: number;
   organization_name?: string;
-  company_id: number;
-  company_name: string;
+  company_id: number | null;
+  company_name: string | null;
   home_company_id: number;
   assigned_company_ids: number[];
   capabilities: string[];

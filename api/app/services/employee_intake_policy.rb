@@ -8,6 +8,10 @@ class EmployeeIntakePolicy
     company.employee_intake_expires_at.present? && company.employee_intake_expires_at > Time.current
   end
 
+  def self.expired?(company)
+    company.employee_intake_expires_at.present? && company.employee_intake_expires_at <= Time.current
+  end
+
   def self.settings(company, actor)
     {
       enabled: enabled?(company), expires_at: company.employee_intake_expires_at,

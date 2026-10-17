@@ -390,6 +390,37 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     end
   end
 
+  context "a correction and ordinary work for the same employee" do
+    let(:next_import) do
+      make_import(next_period, -1, "correction", "NEXT", daily_lines: [
+        { source_time_entry_id: "101", total_hours: -1, regular_hours: -1, overtime_hours: 0 },
+        { source_time_entry_id: "102", line_key: "ordinary-next", source_kind: "current", source_time_entry_version: 0,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 2.5, regular_hours: 2.5, overtime_hours: 0 }
+      ])
+    end
+
+    it "reviews only the selected negative line, preserves ordinary work and posts one accounting-only receipt" do
+      frozen = next_import.raw_payload.deep_dup
+      original = original_item.attributes
+      preview = service.preview
+      expect(preview[:deltas][:gross_pay]).to eq(-25)
+      disposition = confirm(preview)
+      expect(confirm(preview).id).to eq(disposition.id)
+      expect(TimeTrackingCorrectionReceipt.where(time_tracking_correction_disposition: disposition).count).to eq(1)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).ordinary_employees.sole["regular_hours"]).to eq(2.5)
+      result = TimeTracking::ApplyImportService.new(import: next_import, mappings: [], applied_by: actor).call
+      expect(result[:errors]).to eq([])
+      item = next_period.payroll_items.find_by!(employee: employee)
+      item.calculate!
+      expect(item.reload.gross_pay).to eq(62.5)
+      expect(item.hours_worked).to eq(2.5)
+      expect(TimeTracking::CorrectionCoverage.new(next_import).verify_complete!).to eq(true)
+      expect(next_import.reload.raw_payload).to eq(frozen)
+      expect(original_item.reload.attributes).to eq(original)
+      expect(disposition.corrective_payroll_item.check_number).to be_nil
+    end
+  end
+
   it 'requires reason, acknowledgment and the same operator' do
     preview = service.preview
     expect { confirm(preview, reason: 'short') }.to raise_error(ArgumentError, /reason/)

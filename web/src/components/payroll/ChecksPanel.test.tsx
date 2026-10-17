@@ -2,9 +2,14 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CompanyListItem } from '@/services/api';
 import type { CheckItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { ChecksPanel } from './ChecksPanel';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
+
+const companyContext = vi.hoisted(() => ({ activeCompany: null as CompanyListItem | null }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => companyContext }));
+beforeEach(() => { companyContext.activeCompany = null; });
 
 const apiMocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -123,6 +128,40 @@ describe('ChecksPanel earnings statements', () => {
     vi.spyOn(window, 'open').mockReturnValue({ addEventListener: vi.fn(), print: vi.fn() } as unknown as Window);
   });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it('keeps reviewer records and previews readable without payment mutation controls', async () => {
+    companyContext.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: false } as CompanyListItem;
+    apiMocks.checkPdf.mockResolvedValue(new Blob(['%PDF']));
+    renderStatements();
+    await screen.findByRole('listitem', { name: 'Earnings statement for Avery Example' });
+    expect(screen.queryByRole('button', { name: /Record Issued|Reissue|Void|Confirm bank payment|Change payment method/ })).toBeNull();
+    expect(screen.getAllByRole('textbox', { name: 'Check number for Avery Example' }).every(input => (input as HTMLInputElement).disabled)).toBe(true);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]);
+    expect(await screen.findByText('Shared PDF preview')).toBeTruthy();
+    expect(apiMocks.checkPdf).toHaveBeenCalledWith(42, undefined);
+    expect(screen.getByRole('button', { name: 'Download all earnings statements' })).toBeTruthy();
+  });
+
+  it('retains an issued-check draft after denied save and a capability refresh', async () => {
+    companyContext.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true } as CompanyListItem;
+    apiMocks.markDelivered.mockRejectedValueOnce(new Error('Workspace access expired. No changes were saved.'));
+    const rendered = renderStatements();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Record Issued' }))[0]);
+    const dialog = screen.getByRole('dialog', { name: 'Record check issued' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Note (optional)' }), { target: { value: 'Keep the entered handoff draft' } });
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record Issued' }));
+    await screen.findByText('Workspace access expired. No changes were saved.');
+    companyContext.activeCompany = { ...companyContext.activeCompany, workspace_can_write: false, test_workspace_expired: true };
+    rendered.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed', pay_date: '2026-10-08' } as PayPeriod} /></FeedbackProvider>);
+    const retained = screen.getByRole('dialog', { name: 'Record check issued' });
+    expect((within(retained).getByRole('textbox', { name: 'Note (optional)' }) as HTMLInputElement).value).toBe('Keep the entered handoff draft');
+    expect((within(retained).getByRole('button', { name: 'Record Issued' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(retained).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(retained).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Record check issued' })).toBeNull();
+    expect(apiMocks.markDelivered).toHaveBeenCalledOnce();
+  });
 
   it('shows a statement-only employee once with amounts and no physical-payment actions', async () => {
     renderStatements();
@@ -443,4 +482,11 @@ describe('individual check preview', () => {
     expect(previewMocks.show).toHaveBeenLastCalledWith(expect.objectContaining({ blob: latest, filename: 'check_8102.pdf' }));
     expect(screen.queryByRole('dialog', { name: 'Check #8101 — Avery Example' })).toBeNull();
   });
+});
+
+it('does not promise payment or official statement actions on a valid approved workspace baseline', () => {
+  companyContext.activeCompany = { test_workspace: true, workspace_can_write: false } as unknown as CompanyListItem;
+  render(<ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'approved', parallel_run: true, test_workspace_role: 'baseline' } as PayPeriod} />);
+  expect(screen.getByText(/Payments and official earnings statements are unavailable in test workspaces/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Print|Download|View stub|Issue|Record/i })).toBeNull();
 });
