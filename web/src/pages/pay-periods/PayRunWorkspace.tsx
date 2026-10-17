@@ -253,6 +253,7 @@ interface PayRunOverviewProps {
 function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo, readOnlyMode }: PayRunOverviewProps): ReactElement {
   const totalGross = items.reduce((sum, item) => sum + Number(item.gross_pay || 0), 0);
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
+  const hasCorrectionPayBasisHold = items.some(item => item.correction_pay_basis_hold);
   const sourceCount = new Set(items.map((item) => item.import_source || item.timekeeping_source || 'manual')).size;
   const readOnly = readOnlyMode !== null;
   const recordsTitle = readOnlyMode === 'training_baseline'
@@ -270,8 +271,8 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo,
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={UsersRound} label="Payroll records" value={String(items.length)} detail="Employees and contractors" />
-        <Metric icon={Banknote} label="Gross payroll" value={formatCurrency(totalGross)} detail="Before taxes and deductions" />
-        <Metric icon={ReceiptText} label="Net payroll" value={formatCurrency(totalNet)} detail="Employee and contractor payments" />
+        <Metric icon={Banknote} label={hasCorrectionPayBasisHold ? "Saved gross payroll" : "Gross payroll"} value={formatCurrency(totalGross)} detail={hasCorrectionPayBasisHold ? "Retained amounts · correction pay setup review required" : "Before taxes and deductions"} />
+        <Metric icon={ReceiptText} label={hasCorrectionPayBasisHold ? "Saved net payroll" : "Net payroll"} value={formatCurrency(totalNet)} detail={hasCorrectionPayBasisHold ? "Saved amounts, not a new-pay forecast" : "Employee and contractor payments"} />
         <Metric icon={FileClock} label="Input sources" value={String(sourceCount)} detail="Import, timekeeping, or manual" />
       </div>
 

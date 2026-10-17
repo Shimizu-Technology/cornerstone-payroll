@@ -60,6 +60,7 @@ class PayrollItem < ApplicationRecord
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validate :retained_correction_pay_basis_reconciles, on: :update
   # Hours / wage validations only apply to non-correction rows. A correction
   # row stores deltas (corrected_value - original_value), which can legitimately
   # be negative when the correction reduces hours/wages.
@@ -82,6 +83,7 @@ class PayrollItem < ApplicationRecord
   validate :direct_deposit_has_no_check_number
   validate :custom_deductions_are_valid
   validate :payroll_adjustments_are_valid
+  validate :imported_source_inputs_reconcile
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }
@@ -608,6 +610,7 @@ class PayrollItem < ApplicationRecord
   # Calculate and store all values
   def calculate!
     ApplicationRecord.transaction do
+      PayrollCorrectionPayBasisGuard.validate!(self)
       # Validate a clean copy of the persisted period. Calculating an item built
       # through `pay_period.payroll_items` leaves that unsaved item in the
       # association target; validating the in-memory parent would recursively
@@ -626,6 +629,7 @@ class PayrollItem < ApplicationRecord
       calculator = PayrollCalculator.for(employee, self)
       calculator.calculate
       save!
+      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)
     end
   end
 
@@ -634,6 +638,7 @@ class PayrollItem < ApplicationRecord
     Array(entries).map do |entry|
       normalized = normalize_wage_rate_entry(entry)
       {
+        **normalized.stringify_keys.slice("source_bucket_key", "source_lines"),
         "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
         "label" => normalized["label"] || normalized[:label],
         "rate" => (normalized["rate"] || normalized[:rate]).to_f,
@@ -654,6 +659,7 @@ class PayrollItem < ApplicationRecord
       next if label.blank?
 
       {
+        **normalized.stringify_keys.slice("source_bucket_key", "source_lines"),
         "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
         "label" => label,
         "rate" => round_currency_value(normalized["rate"] || normalized[:rate]).to_f,
@@ -674,6 +680,30 @@ class PayrollItem < ApplicationRecord
   end
 
   private
+
+  def retained_correction_pay_basis_reconciles
+    inputs = %w[employment_type pay_rate hours_worked overtime_hours holiday_hours pto_hours scheduled_hours
+      salary_override bonus reported_tips tips_paid_out service_charge_wages non_taxable_pay custom_columns_data
+      gross_pay withholding_tax withholding_tax_adjustment withholding_tax_override additional_withholding
+      additional_withholding_override custom_earnings custom_deductions payroll_adjustments loan_deduction]
+    return if (changed_attribute_names_to_save & (inputs + PayrollCorrectionPayBasisGuard::IDENTITY_ATTRIBUTES)).empty?
+
+    PayrollCorrectionPayBasisGuard.validate!(self)
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
+
+  def imported_source_inputs_reconcile
+    # Old committed imports may lack complete source/capture proof. Operational
+    # payment evidence must remain usable without recalculating that history.
+    # Financial input edits and every editable/finalization path still validate.
+    input_fields = %w[hours_worked overtime_hours pay_rate employment_type custom_columns_data gross_pay employee_id company_id pay_period_id]
+    return if pay_period&.committed? && (changed_attribute_names_to_save & input_fields).empty?
+
+    TimeTracking::SourceEarningsConservation.validate!(self)
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
 
   def legacy_adjustments_subset_of_defaults?(current, defaults)
     remaining_defaults = defaults.dup

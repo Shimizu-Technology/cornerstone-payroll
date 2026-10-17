@@ -4057,6 +4057,7 @@ function EmptyReportSearch({ onClear }: { onClear: () => void }) {
 
 function ReportsContent() {
   const { user } = useAuth();
+  const { activeCompanyId } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const reportParam = searchParams.get('report');
   const activeReport = reports.some((report) => report.id === reportParam) ? (reportParam as ReportId) : null;
@@ -4064,7 +4065,7 @@ function ReportsContent() {
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<ReportCategory>('all');
   const storageScope = user
-    ? `org-${user.organization_id ?? 'none'}:company-${user.company_id}:user-${user.id}`
+    ? `org-${user.organization_id ?? 'none'}:company-${activeCompanyId ?? 'none'}:user-${user.id}`
     : 'anonymous';
   const favoritesKey = reportStorageKey(FAVORITES_KEY_PREFIX, storageScope);
   const recentsKey = reportStorageKey(RECENTS_KEY_PREFIX, storageScope);

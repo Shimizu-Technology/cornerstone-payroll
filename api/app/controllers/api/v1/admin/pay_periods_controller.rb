@@ -21,7 +21,7 @@ module Api
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :corrected_hours, :connect_corrected_hours
         ]
-        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup ]
+        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup, :generate_fit_check ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -388,6 +388,7 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              PayrollCorrectionPayBasisGuard.validate!(payroll_item)
               pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.employment_type
               # Draft/calculated rows must reflect the employee classification used by
               # the calculator. Otherwise a contractor-to-W-2 change can calculate
@@ -424,6 +425,10 @@ module Api
                   payroll_item.pto_hours = hours_data[:pto] if hours_data[:pto]
                 end
               end
+
+              # Reject altered frozen inputs before field/loan draft writes can
+              # persist; the calculator and finalization recheck independently.
+              TimeTracking::SourceEarningsConservation.validate!(payroll_item)
 
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
@@ -951,6 +956,10 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/generate_fit_check
         def generate_fit_check
+          if @pay_period.voided?
+            return render json: { error: "Cannot generate a FIT check for a voided payroll" }, status: :unprocessable_entity
+          end
+
           unless @pay_period.status == "committed"
             return render json: { error: "FIT check can only be generated for committed pay periods" }, status: :unprocessable_entity
           end
@@ -1418,6 +1427,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
             bonus_source: item.bonus_source,
