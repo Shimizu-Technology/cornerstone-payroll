@@ -2,11 +2,12 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail } from './PayPeriodDetail';
+import { payrollFinalRecordFixture, voidedFinalRecordFixture } from '@/components/payroll/PayrollFinalRecordPanel.fixtures';
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -17,12 +18,15 @@ const apiMocks = vi.hoisted(() => ({
   commit: vi.fn(),
   refreshSetup: vi.fn(),
   comparison: vi.fn(),
+  payrollFinalRecord: vi.fn(),
 }));
 
 const componentMocks = vi.hoisted(() => ({
   timeTrackingImport: vi.fn(),
   calendarRefreshCompleted: vi.fn(),
   correctionCallback: vi.fn(),
+  paymentMethodSaved: vi.fn(),
+  finalRecordEnabled: false,
 }));
 
 vi.mock('@/services/api', () => ({
@@ -38,19 +42,32 @@ vi.mock('@/services/api', () => ({
   },
   employeesApi: { list: apiMocks.employeesList },
   payrollItemsApi: {},
+  reportsApi: { payrollFinalRecord: apiMocks.payrollFinalRecord },
 }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
-  ChecksPanel: ({ refreshToken, payPeriod }: { refreshToken?: number; payPeriod: PayPeriod }) => (
+  ChecksPanel: ({ refreshToken, payPeriod, onChecksChanged }: { refreshToken?: number; payPeriod: PayPeriod; onChecksChanged?: () => Promise<void> }) => (
     <><div data-testid="processing-check-list-refresh-token">{refreshToken}</div>
-      <div data-testid="saved-instrument-state">{payPeriod.payroll_items?.[0]?.voided ? 'Voided' : 'Assigned'}</div></>
+      <div data-testid="saved-instrument-state">{payPeriod.payroll_items?.[0]?.voided ? 'Voided' : 'Assigned'}</div>
+      {componentMocks.finalRecordEnabled && <button onClick={() => void onChecksChanged?.()}>Saved employee check changed</button>}</>
   ),
 }));
-vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => null }));
+vi.mock('@/components/payroll/PaymentMethodDialog', () => ({
+  PaymentMethodDialog: ({ onSaved }: { onSaved: () => Promise<void> }) => { componentMocks.paymentMethodSaved(onSaved); return null; },
+}));
+vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({
+  NonEmployeeChecksPanel: ({ onChecksLoaded, onChecksChanged }: { onChecksLoaded?: (checks: []) => void; onChecksChanged?: () => void }) => componentMocks.finalRecordEnabled
+    ? <><button onClick={() => onChecksLoaded?.([])}>Saved liability check changed</button>
+      <button onClick={onChecksChanged}>Liability saved without a list reload</button></> : null,
+}));
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
-vi.mock('@/components/payroll/PayrollFinalRecordPanel', () => ({ PayrollFinalRecordPanel: () => null }));
+vi.mock('@/components/payroll/PayrollFinalRecordPanel', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/components/payroll/PayrollFinalRecordPanel')>();
+  return { PayrollFinalRecordPanel: (props: ComponentProps<typeof actual.PayrollFinalRecordPanel>) => componentMocks.finalRecordEnabled
+    ? <actual.PayrollFinalRecordPanel {...props} /> : null };
+});
 vi.mock('@/components/payroll/TimeTrackingImportModal', () => ({
-  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => void; onCorrectionRecorded?: () => void }) => {
+  TimeTrackingImportModal: (props: { open: boolean; autoPreview?: boolean; initialSourceId?: number; onImportComplete?: () => Promise<boolean>; onCorrectionRecorded?: () => void }) => {
     componentMocks.timeTrackingImport(props);
     return props.open ? (
       <div
@@ -114,7 +131,7 @@ const sourceCalendar: AirePayrollCalendarState = {
     occurred_at: '2026-09-22T07:00:00Z', payroll_batch_id: 'batch-12', payroll_batch_checksum: 'checksum-12' },
 };
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); componentMocks.finalRecordEnabled = false; });
 
 it.each([
   { recurring: false, expectedGross: '$64.00', editedGross: '$89.00', firstEmployee: 'Ana Cruz' },
@@ -832,7 +849,7 @@ it('refreshes accounting correction metadata and every source panel while preser
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 888, replace_request: true });
 });
 
-async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }, standaloneAmount = 0, namedAmount = 0, namedRequest?: number) {
+async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' = 'calculated', comparisonResponse?: unknown, loanPayment = 0, rates?: { profile: number; saved: number }, standaloneAmount = 0, namedAmount = 0, namedRequest?: number, worksheetExtras: Record<string, unknown> = {}) {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: rates?.profile ?? 16, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const other = { ...employee, id: 31, first_name: 'Other' } as Employee;
@@ -841,7 +858,7 @@ async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' =
   const options = [{ employee_id: 30, loan_id: 2, name: 'Employee Loan', tracking_mode: 'balance_tracked', current_balance: 3259.97, scheduled_amount: 300, current_amount: namedAmount, eligible: true, mode: namedRequest === undefined ? 'default' : 'override', requested_amount: namedRequest }];
   apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
-  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options } });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [], named_loan_options: options, ...worksheetExtras } });
   apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'calculated' } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   apiMocks.comparison.mockResolvedValue(comparisonResponse);
@@ -1082,6 +1099,76 @@ async function renderCorrectionRefresh() {
   await screen.findByRole('button', { name: 'Finish correction' });
 }
 
+function enableFinalRecord() {
+  componentMocks.finalRecordEnabled = true;
+  apiMocks.payrollFinalRecord.mockResolvedValue({ final_record: { ...payrollFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 } } });
+}
+
+it('refreshes the real final record immediately after same-ID void even when the pay-run reload fails', async () => {
+  enableFinalRecord();
+  await renderCorrectionRefresh();
+  await screen.findByText('$750.00 net');
+  let finish!: (value: { final_record: typeof voidedFinalRecordFixture }) => void;
+  apiMocks.payrollFinalRecord.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  apiMocks.get.mockRejectedValueOnce(new Error('Surrounding payroll could not reload'));
+  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  await waitFor(() => expect(apiMocks.payrollFinalRecord).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText('$750.00 net')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Export final payroll record' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => finish({ final_record: { ...voidedFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...voidedFinalRecordFixture.pay_period, id: 12 } } }));
+  expect(await screen.findByText('$0.00 net')).toBeTruthy();
+  expect(screen.getByText('0 checks open · 0 direct deposit')).toBeTruthy();
+  expect(screen.getByText('$0.00 outstanding')).toBeTruthy();
+  expect(screen.queryByText('$750.00 net')).toBeNull();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+
+it('refreshes final payment settlement after the checks callback without relying on a correction token', async () => {
+  enableFinalRecord();
+  await renderCorrectionRefresh();
+  await screen.findByText('0 of 1 reconciled');
+  apiMocks.get.mockResolvedValue({ pay_period: correctionOriginal });
+  apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
+    employee_payments: { ...payrollFinalRecordFixture.employee_payments, reconciled_count: 1, outstanding_count: 0 } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Saved employee check changed' }));
+  expect(await screen.findByText('1 of 1 reconciled')).toBeTruthy();
+  expect(screen.getByText('0 checks open · 0 direct deposit')).toBeTruthy();
+});
+
+it('refreshes final liability totals when the non-employee check observer reports saved state', async () => {
+  enableFinalRecord();
+  await renderCorrectionRefresh();
+  await screen.findByText('$316.50 outstanding');
+  apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
+    liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Saved liability check changed' }));
+  expect(await screen.findByText('$316.50 paid')).toBeTruthy();
+  expect(screen.getByText('$0.00 outstanding')).toBeTruthy();
+  expect(apiMocks.get).not.toHaveBeenCalled();
+});
+
+it('invalidates final liability truth after a saved check without requiring a successful check-list reload', async () => {
+  enableFinalRecord();
+  await renderCorrectionRefresh();
+  await screen.findByText('$316.50 outstanding');
+  apiMocks.payrollFinalRecord.mockRejectedValueOnce(new Error('Final record reload unavailable'));
+  fireEvent.click(screen.getByRole('button', { name: 'Liability saved without a list reload' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Final record reload unavailable');
+  expect(screen.queryByText('$316.50 outstanding')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Export final payroll record' }) as HTMLButtonElement).disabled).toBe(true);
+  apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
+    company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
+    liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reload final payroll record' }));
+  expect(await screen.findByText('$316.50 paid')).toBeTruthy();
+  expect(apiMocks.get).not.toHaveBeenCalled();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+});
+
 it('reloads saved instruments, journal liabilities and source history after a partial correction response', async () => {
   await renderCorrectionRefresh();
   expect(screen.getByTestId('saved-instrument-state').textContent).toBe('Assigned');
@@ -1140,9 +1227,11 @@ async function renderRefreshNavigation() {
   apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
   function Page() {
     const navigate = useNavigate();
-    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next refresh run</button>
+    const [refreshToken, setRefreshToken] = useState(0);
+    return <><button onClick={() => setRefreshToken(token => token + 1)}>Sibling refresh</button>
+      <button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next refresh run</button>
       <button onClick={() => navigate('/companies/8/pay-runs/12/work')}>Next refresh company</button>
-      <PayPeriodDetail initialPayPeriod={original} /></>;
+      <PayPeriodDetail initialPayPeriod={original} refreshToken={refreshToken} /></>;
   }
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
   await screen.findByRole('button', { name: 'Refresh current setup' });
@@ -1284,4 +1373,253 @@ it.each(['mobile', 'desktop'])('retains both imported earning buckets and captur
   fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 6, overtime: 0, wage_rates: buckets });
+});
+
+it.each([25, 10])('describes retained earning entries accurately when one wage ID captured $%i and $25 rates', async carryRate => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 25, status: 'active' } as Employee;
+  const buckets = [
+    { employee_wage_rate_id: 1, source_bucket_key: 'carry', label: 'Carryover Nov2', rate: carryRate, regular_hours: 4, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+    { employee_wage_rate_id: 1, source_bucket_key: 'current', label: 'Current Nov16', rate: 25, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true },
+  ];
+  const originalBuckets = JSON.stringify(buckets);
+  const gross = carryRate * 4 + 50;
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25,
+    hours_worked: 6, overtime_hours: 0, gross_pay: gross, net_pay: gross - 10, wage_rate_hours: buckets };
+  const period = { ...initialPayPeriod, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const badge = await screen.findByText('Multiple earnings');
+  const row = badge.closest('tr')!;
+  const mobile = screen.getByRole('region', { name: 'Payroll result for Ana Cruz' });
+  for (const container of [row, mobile]) {
+    expect(within(container).getAllByText(/Carryover Nov2/).length).toBeGreaterThan(0);
+    expect(within(container).getAllByText(/Current Nov16/).length).toBeGreaterThan(0);
+    expect(within(container).getByText(`$${gross.toFixed(2)}`)).toBeTruthy();
+  }
+  expect(within(row).getAllByText('$25.00/hr').length).toBe(carryRate === 25 ? 2 : 1);
+  if (carryRate !== 25) expect(within(row).getByText('$10.00/hr')).toBeTruthy();
+  expect(screen.queryByText('Multi-rate')).toBeNull();
+  expect(JSON.stringify(buckets)).toBe(originalBuckets);
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and displays their recorded context on %s', async surface => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 99, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const buckets = [6, -1].map((hours, index) => ({ employee_wage_rate_id: 1, source_bucket_key: `bucket-${index}`, label: 'Regular', rate: 25,
+    regular_hours: hours, overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true,
+    source_lines: [{ source_time_entry_id: `line-${index}`, line_key: 'REG', source_time_entry_version: 1,
+      source_kind: index === 0 ? 'current' : 'correction', original_work_date: index === 0 ? '2026-10-20' : '2026-10-10', total_hours: hours, regular_hours: hours, overtime_hours: 0 }] }));
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 5, overtime_hours: 0, gross_pay: 125, net_pay: 115.44,
+    import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: buckets };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_recurring_items: false, includes_base_salary: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  const entry = surface === 'mobile' ? screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' }) : screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }))!;
+  expect(within(entry).getAllByText('Current work · Oct 20, 2026').length).toBeGreaterThan(0);
+  expect(within(entry).getAllByText('Correction · Oct 10, 2026').length).toBeGreaterThan(0);
+  expect(within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Current work · Oct 20, 2026' })).toHaveProperty('disabled', true);
+  expect(within(entry).getByRole('textbox', { name: 'Overtime hours for Ana Cruz · Regular · Correction · Oct 10, 2026' })).toHaveProperty('disabled', true);
+  const signedInput = within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Correction · Oct 10, 2026' }) as HTMLInputElement;
+  expect(signedInput.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
+  expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 5, overtime: 0, wage_rates: buckets });
+  expect(screen.queryByText('Hours must be between 0 and 200 per period')).toBeNull();
+});
+
+it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async status => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary', salary_type: 'annual', pay_rate: 52000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const reason = 'Review original payroll evidence: retained hourly pay basis differs from current salary setup.';
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25, hours_worked: 3, overtime_hours: 0,
+    gross_pay: 75, net_pay: 69.26, timekeeping_source: 'correction_reference', correction_pay_basis_hold: { reason } };
+  const period = { ...initialPayPeriod, status, run_purpose: 'correction', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Saved gross pay');
+  await waitFor(() => expect(screen.getAllByText(text => text.includes(reason)).length).toBeGreaterThan(0));
+  expect(screen.queryByText('$1.04/period')).toBeNull();
+  expect(screen.queryByText('$2,166.67/period')).toBeNull();
+  expect(screen.getAllByText('$75.00').length).toBeGreaterThan(0);
+  if (status !== 'committed') {
+    const mobile = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+    expect(within(mobile).getByText(reason)).toBeTruthy();
+    const row = screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }) && within(row).queryByText(reason))!;
+    expect(within(row).getByText('Retained pay basis · review required')).toBeTruthy();
+    const calculate = screen.getByRole('button', { name: status === 'draft' ? 'Calculate Payroll' : 'Recalculate' }) as HTMLButtonElement;
+    expect(calculate.disabled).toBe(true);
+    fireEvent.click(calculate);
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+    if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  } else {
+    expect(screen.getAllByRole('link', { name: 'View details' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
+  }
+});
+
+it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without synthesizing profile rates or new salary forecasts', async shape => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: shape === 'changed basis' ? 'salary' : 'hourly',
+    salary_type: 'annual', pay_rate: shape === 'changed basis' ? 52000 : 99, pay_frequency: 'semimonthly', status: 'active',
+    wage_rates: [{ id: 1, label: 'Current primary profile', rate: 99, is_primary: true, active: true },
+      { id: 2, label: 'Current secondary profile', rate: 150, is_primary: false, active: true }] } as unknown as Employee;
+  const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 3, overtime_hours: 0, gross_pay: 75, net_pay: 69.26,
+    import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: shape === 'changed basis' ? [{ employee_wage_rate_id: 1, label: 'Retained regular', rate: 25,
+      source_bucket_key: 'retained', regular_hours: 3, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] : [] };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const mobile = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(within(mobile).getByText('Retained pay basis · review required')).toBeTruthy();
+  const reason = shape === 'changed basis' ? /Retained Source pay basis differs/ : /Retained Source earning evidence is unavailable/;
+  expect(within(mobile).getByText(reason)).toBeTruthy();
+  const row = screen.getAllByRole('row').find(candidate => within(candidate).queryByRole('link', { name: 'Ana Cruz' }))!;
+  expect(within(row).getByText(reason)).toBeTruthy();
+  expect(within(row).getByText('$75.00')).toBeTruthy();
+  expect(screen.queryByText('$1.04/period')).toBeNull();
+  expect(screen.queryByText('Current primary profile')).toBeNull();
+  expect(screen.queryByText('Current secondary profile')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Calculate Payroll' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it.each(['resolve', 'reject'])('retains a newer same-run reload when the setup GET is superseded then %s', async completion => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  let reject!: (error: Error) => void;
+  apiMocks.refreshSetup.mockResolvedValue({ results: { success: [], skipped: [], errors: [] } });
+  apiMocks.get.mockImplementationOnce(() => new Promise((resolve, failure) => { finish = resolve; reject = failure; }));
+  submitRefreshNavigation();
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Latest same-run payroll' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Latest same-run payroll');
+  await act(async () => completion === 'resolve'
+    ? finish({ pay_period: { ...original, notes: 'Old canonical setup' } })
+    : reject(new Error('Old setup GET failed')));
+  expect(screen.getByText('Latest same-run payroll')).toBeTruthy();
+  expect(screen.queryByText(/Setup changed, but the updated payroll could not load/)).toBeNull();
+  expect(screen.queryByText(/Current setup applied to the saved employees/)).toBeNull();
+  expect(screen.queryByText('Old setup GET failed')).toBeNull();
+});
+
+it('rejects the saved-payment callback when the current canonical reload fails', async () => {
+  await renderRefreshNavigation();
+  apiMocks.get.mockRejectedValueOnce(new Error('Saved method read failed'));
+  const callback = componentMocks.paymentMethodSaved.mock.calls.at(-1)![0] as () => Promise<void>;
+  await act(async () => { await expect(callback()).rejects.toThrow('Saved payment method could not refresh.'); });
+  expect(await screen.findByText('Saved method read failed')).toBeTruthy();
+});
+
+it('retains saved-import context, blocks stale approval/commit and retries canonical payroll without reapplying', async () => {
+  const original = await renderRefreshNavigation();
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  apiMocks.get.mockRejectedValueOnce(new Error('Saved source payroll read unavailable'));
+  await act(async () => { expect(await callback()).toBe(false); });
+  expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Canonical saved source hours' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await screen.findByText('Canonical saved source hours');
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+  expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
+  expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('accepts a newer successful canonical read when the saved-import reload is superseded', async () => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  let pending!: Promise<boolean>;
+  act(() => { pending = callback(); });
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Fresh canonical imported payroll' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Fresh canonical imported payroll');
+  await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(true); });
+  expect(screen.getByText('Fresh canonical imported payroll')).toBeTruthy();
+  expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+});
+
+it('requires the saved-import worksheet before clearing the hold and preserves saved field, loan and retirement context', async () => {
+  const field = { id: 8, company_id: 7, name: 'Retained allowance', kind: 'addition', tax_treatment: 'taxable_addition', category: 'allowance', amount_type: 'fixed', default_amount: 75, active: true, show_in_payroll_grid: true, sort_order: 0 };
+  const extras = { fields: [field], assignments: [{ employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', assigned_amount: 75, default_amount: 75, suggested_amount: 75, requested_amount: 75, editable: true, overridden: true }],
+    retained_manual_entries: [{ employee_id: 30, field_id: 9, label: 'Retained 401(k)', requested_amount: 50, applied_amount: 50, source: 'manual' }] };
+  const card = await renderLoanWorksheet('calculated', undefined, 300, undefined, 0, 300, 300, extras);
+  const fieldInput = within(card!).getByLabelText('Retained allowance') as HTMLInputElement;
+  fireEvent.change(fieldInput, { target: { value: '88' } });
+  fireEvent.blur(fieldInput);
+  const loanInput = within(card!).getByLabelText('Employee Loan repayment amount') as HTMLInputElement;
+  fireEvent.change(loanInput, { target: { value: '125' } });
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  apiMocks.payrollFieldInputs.mockRejectedValueOnce(new Error('Worksheet unavailable'));
+  await act(async () => { expect(await callback()).toBe(false); });
+  expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getAllByText('Retained allowance').length).toBeGreaterThan(0);
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('88.00');
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('125.00');
+  expect(within(screen.getByRole('region', { name: 'Retained manual retirement entries' })).getByText(/Retained 401\(k\).*requested \$50.00, applied \$50.00/)).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await waitFor(() => expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull());
+  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('75.00');
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('keeps the saved-import hold when a newer superseding read fails its required worksheet', async () => {
+  const original = await renderRefreshNavigation();
+  let finish!: (value: { pay_period: PayPeriod }) => void;
+  apiMocks.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  apiMocks.payrollFieldInputs.mockResolvedValueOnce({ payroll_field_inputs: { fields: [], assignments: [] } })
+    .mockRejectedValueOnce(new Error('Newer required worksheet unavailable'));
+  const callback = componentMocks.timeTrackingImport.mock.calls.at(-1)![0].onImportComplete as () => Promise<boolean>;
+  let pending!: Promise<boolean>;
+  act(() => { pending = callback(); });
+  await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
+  apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Incomplete newer read' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  await screen.findByText('Saved payroll worksheet could not load: Newer required worksheet unavailable');
+  await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(false); });
+  expect(screen.queryByText('Incomplete newer read')).toBeNull();
+  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  await screen.findByText('Incomplete newer read');
+  expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
+  expect(apiMocks.commit).not.toHaveBeenCalled();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('names each ordinary regular and overtime hours input for its employee on phone cards and desktop rows', async () => {
+  await renderLoanWorksheet('draft');
+  const regular = screen.getAllByRole('textbox', { name: 'Regular hours for Ana Cruz' });
+  const overtime = screen.getAllByRole('textbox', { name: 'Overtime hours for Ana Cruz' });
+  expect(regular).toHaveLength(2);
+  expect(overtime).toHaveLength(2);
+  expect(regular.every(input => (input as HTMLInputElement).value === '80.3')).toBe(true);
+  expect(overtime.every(input => (input as HTMLInputElement).value === '14')).toBe(true);
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });

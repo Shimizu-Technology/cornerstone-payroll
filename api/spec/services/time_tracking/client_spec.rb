@@ -57,6 +57,30 @@ RSpec.describe TimeTracking::Client do
       expect { client.payroll_payment_attestations }.to raise_error(TimeTracking::Client::Error, /scoped employee or both work-period dates/)
     end
 
+    it "requires the same pinned descriptor on every modern dated employee page" do
+      instance_id = SecureRandom.uuid
+      capabilities = TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ]
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current, source_capabilities: capabilities)
+      uuid = SecureRandom.uuid
+      integration = { protocol: "shimizu_time_payroll", protocol_version: "1.0", source_instance_id: instance_id,
+        source_type: "aire_services", capabilities: capabilities }
+      request = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/payment_attestations")
+        .with(query: { source_user_uuid: uuid, page: "2", per_page: "250", start_date: "2026-10-01", end_date: "2026-10-15" })
+        .to_return(status: 200, body: { integration: integration, payment_attestations: [], pagination: { total_pages: 2 } }.to_json,
+          headers: { "Content-Type" => "application/json" })
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      client = client_for(source, actor: actor)
+      query = { source_user_uuid: uuid, page: 2, start_date: "2026-10-01", end_date: "2026-10-15" }
+      expect(client.payroll_payment_attestations(**query)["payment_attestations"]).to eq([])
+      [ {}, { integration: integration.merge(capabilities: capabilities - [ "payment_attestation_resolution_v1" ]) },
+        { integration: integration.merge(source_instance_id: SecureRandom.uuid) },
+        { integration: integration.merge(policy_constraints: { time_zones: [ "UTC" ] }) } ].each do |payload|
+        request.to_return(status: 200, body: payload.to_json, headers: { "Content-Type" => "application/json" })
+        expect { client.payroll_payment_attestations(**query) }.to raise_error(TimeTracking::Client::Error, /identity|contract changed/)
+      end
+    end
+
     it "binds both read and mutation requests to the pinned source installation" do
       instance_id = SecureRandom.uuid
       source.update!(expected_source_instance_id: instance_id, source_protocol: "aire_payroll", source_protocol_version: "2.0", identity_verified_at: Time.current)

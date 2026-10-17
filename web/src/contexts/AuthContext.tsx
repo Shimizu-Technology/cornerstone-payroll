@@ -10,8 +10,8 @@ interface User {
   role: string;
   organization_id?: number;
   organization_name?: string;
-  company_id: number;
-  company_name: string;
+  company_id: number | null;
+  company_name: string | null;
   assigned_company_ids: number[];
   capabilities: string[];
 }

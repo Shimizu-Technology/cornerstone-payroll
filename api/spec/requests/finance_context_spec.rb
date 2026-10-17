@@ -28,7 +28,7 @@ RSpec.describe "Finance organization context", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
 
     get "/api/v1/admin/invoices", headers: { "X-Company-Id" => "999999999" }
-    expect(response).to have_http_status(:not_found)
+    expect(response).to have_http_status(:forbidden)
   end
 
   it "rejects an invalid organization rather than using the home organization" do

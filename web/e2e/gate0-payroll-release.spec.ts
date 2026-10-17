@@ -1362,8 +1362,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const crossCompanyEmployee = await clientApi.get(`client/employees/${fixture.other_employee_id}`, {
       headers: { 'X-Company-Id': String(fixture.other_company_id) },
     });
-    expect(crossCompanyEmployee.status()).toBe(404);
-    expect(JSON.stringify(await responseJson(crossCompanyEmployee))).not.toContain('Jordan Boundary');
+    expect(crossCompanyEmployee.status()).toBe(403);
+    const crossCompanyBody = await responseJson(crossCompanyEmployee);
+    expect(crossCompanyBody.code).toBe('company_context_unavailable');
+    expect(JSON.stringify(crossCompanyBody)).not.toContain('Jordan Boundary');
   });
 
   test('keeps SSNs masked and routes client payroll changes to staff approval', async (): Promise<void> => {
