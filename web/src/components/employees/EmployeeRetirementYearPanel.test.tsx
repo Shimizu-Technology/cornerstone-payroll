@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementYearPanel } from './EmployeeRetirementYearPanel';
 import type { Employee, HistoricalRetirementReview, HistoricalRetirementSource } from '@/types';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), inputs: vi.fn(), create: vi.fn(), canManage: true }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), inputs: vi.fn(), create: vi.fn(), canManage: true, activeCompany: null as import('@/services/api').CompanyListItem | null }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
 vi.mock('@/services/api', () => ({
   annualRetirementLimitsApi: { list: mocks.list },
   employeesApi: { retirementYearInputs: mocks.inputs, createRetirementYearInput: mocks.create },
@@ -34,8 +35,17 @@ async function enterReviewNote(user: ReturnType<typeof userEvent.setup>): Promis
 }
 
 describe('annual retirement evidence', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.canManage = true; mocks.list.mockResolvedValue({ data: [limit] }); mocks.inputs.mockResolvedValue({ data: [] }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.activeCompany = null; mocks.canManage = true; mocks.list.mockResolvedValue({ data: [limit] }); mocks.inputs.mockResolvedValue({ data: [] }); });
   afterEach(cleanup);
+  it('keeps annual evidence readable but hides configuration writes from a manager workspace operator', async () => {
+    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_client_configuration: false } } as unknown as import('@/services/api').CompanyListItem;
+    const view = render(<EmployeeRetirementYearPanel employee={employee} />);
+    await screen.findByText(/employer wages need verification before catch-up/);
+    expect(screen.queryByRole('button', { name: 'Review yearly records' })).toBeNull();
+    mocks.activeCompany = { ...mocks.activeCompany, workspace_write_permissions: { manage_client_configuration: true } };
+    view.rerender(<EmployeeRetirementYearPanel employee={employee} />);
+    expect(screen.getByRole('button', { name: 'Review yearly records' })).toBeTruthy();
+  });
   it('shows year-end eligibility and missing evidence without pretending wages are zero', async () => {
     render(<EmployeeRetirementYearPanel employee={employee} />);
     expect(await screen.findByText('$35,750.00')).toBeTruthy();
@@ -203,7 +213,7 @@ it('does not apply the 2026 Roth catch-up requirement to a 2025 review', async (
 });
 
 it('keeps cleared verified wages unknown and requires an explicit amount before saving', async () => {
-  vi.clearAllMocks(); mocks.canManage = true;
+  vi.clearAllMocks(); mocks.activeCompany = null; mocks.canManage = true;
   mocks.list.mockResolvedValue({ data: [limit] });
   mocks.inputs.mockResolvedValue({ data: [{ id: 17, tax_year: year, prior_year_wage_status: 'verified', prior_year_fica_wages: 175000, prior_year_wage_source: 'Synthetic wage record', source_reference: 'Synthetic annual review', reason: 'Earlier review', external_traditional_deferrals: 0, external_roth_deferrals: 0, eligible_compensation_before_system: 0, employer_additions_before_system: 0, non_roth_after_tax_before_system: 0, historical_retirement_review: {} }] });
   mocks.create.mockImplementation(async (_id, draft) => ({ data: { ...draft, id: 18 } }));

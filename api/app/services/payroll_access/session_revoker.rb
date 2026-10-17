@@ -4,14 +4,10 @@ module PayrollAccess
   class SessionRevoker
     class << self
       def disconnect_user(user)
-        connections = ActionCable.server.remote_connections
-        # Cover user-only channels retained from an older connection contract.
-        connections.where(current_user: user, current_company: nil).disconnect(reconnect: false)
-        # Current access cannot describe every still-open connection: roles,
-        # assignments and company activity may have changed since it connected.
-        Company.unscoped.select(:id).find_each do |company|
-          connections.where(current_user: user, current_company: company).disconnect(reconnect: false)
-        end
+        # The native internal channel is user-scoped, independent of assignments
+        # or companies retained by existing sockets. One broadcast reaches every
+        # matching connection across servers; adapter failures remain retryable.
+        ActionCable.server.remote_connections.where(current_user: user).disconnect(reconnect: false)
       end
     end
   end

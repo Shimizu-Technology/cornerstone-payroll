@@ -183,8 +183,46 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
   end
 
   describe "POST /api/v1/admin/companies" do
+    it "associates one creation audit with the new client rather than the selected client" do
+      organization.update!(client_limit: nil)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_company_id).and_return(client_company.id)
+      audits = AuditLog.where(action: "companies#create")
+      original_ids = audits.pluck(:id)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: { name: "New Audit Client", pay_frequency: "biweekly" }
+        }
+      }.to change(audits, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      created_id = response.parsed_body.fetch("company").fetch("id")
+      expect(created_id).not_to eq(client_company.id)
+      audit = audits.where.not(id: original_ids).sole
+      expect(audit).to have_attributes(
+        company_id: created_id, organization_id: organization.id,
+        record_id: created_id, record_type: "companies",
+        user_id: admin_user.id, subject_name: "New Audit Client"
+      )
+      expect(audits.where.not(id: original_ids).where(company_id: client_company.id)).to be_empty
+    end
+
+    it "does not record a company creation audit when normal validation rejects the client" do
+      organization.update!(client_limit: nil)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_company_id).and_return(client_company.id)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: { name: "", pay_frequency: "biweekly" }
+        }
+      }.not_to change(AuditLog, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
     it "blocks client creation when the organization client limit is reached" do
       organization.update!(client_limit: 3)
+      audit_count = AuditLog.count
 
       expect {
         post "/api/v1/admin/companies", params: {
@@ -197,6 +235,7 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors")).to include("Client limit reached for this organization")
+      expect(AuditLog.count).to eq(audit_count)
     end
 
     it "allows client creation when the organization has unlimited clients" do

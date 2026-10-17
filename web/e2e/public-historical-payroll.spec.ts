@@ -1187,6 +1187,9 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await page.goto('/historical-payroll');
   const batchSelector = page.locator('#historical-batch');
   await expect(batchSelector).toHaveValue('1');
+  // Selection comes from the list before the detail request settles. Wait for
+  // the pending detail before enabling the verified polling response so that
+  // an initial request cannot consume it and prevent the poll from starting.
   await expect(page.getByText('Comparing the retained source with the archive', { exact: true })).toBeVisible();
   await expect.poll(() => fulfilledInitialDetailResponseCount).toBeGreaterThanOrEqual(1);
   pollingEnabled = true;

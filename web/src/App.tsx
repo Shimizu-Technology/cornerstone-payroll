@@ -403,7 +403,8 @@ function AppFeedback({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const publicRoute = pathname === '/' || pathname === '/login' || pathname === '/invite';
   if (!publicRoute && (authLoading || companyLoading)) return <PageLoader />;
-  const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${activeCompanyId ?? 'none'}`;
+  const financePage = pathname.startsWith('/tools/invoices') || pathname.startsWith('/tools/expenses') || pathname.startsWith('/tools/finance');
+  const scope = `${user?.id ?? 'signed-out'}:${activeOrganizationId ?? 'none'}:${financePage ? 'finance' : activeCompanyId ?? 'none'}`;
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
 }
 

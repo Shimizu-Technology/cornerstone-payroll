@@ -142,7 +142,7 @@ module TimeTracking
           if item.new_record?
             item.company_id = @company.id
             item.employment_type = employee.employment_type
-            item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+            item.pay_rate = employee.default_payroll_rate
           end
           item.sync_default_payroll_adjustments!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
