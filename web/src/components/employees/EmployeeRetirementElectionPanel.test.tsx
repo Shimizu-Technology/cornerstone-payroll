@@ -5,7 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementElectionPanel } from './EmployeeRetirementElectionPanel';
 import type { Employee, EmployeeRetirementElection } from '@/types';
-const mocks = vi.hoisted(() => ({ create: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), activeCompany: null as import('@/services/api').CompanyListItem | null }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
 vi.mock('@/services/api', () => ({ employeesApi: { createRetirementElection: mocks.create }, ApiError: class ApiError extends Error { fieldErrors = {}; } }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
 
@@ -49,8 +50,33 @@ function election(overrides: Partial<EmployeeRetirementElection> = {}): Employee
 }
 
 describe('retirement election setup', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.create.mockResolvedValue({ data: {} }); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.activeCompany = null; mocks.create.mockResolvedValue({ data: {} }); });
   afterEach(cleanup);
+  it('shows retirement evidence without configuration writes for a manager workspace operator', () => {
+    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { payroll_operations: true, manage_client_configuration: false } } as unknown as import('@/services/api').CompanyListItem;
+    const view = render(<EmployeeRetirementElectionPanel employee={{ id: 5, current_retirement_election: election() } as Employee} onSaved={async () => undefined} />);
+    expect(screen.getByText('MoSa 401(k)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Record contribution change' })).toBeNull();
+    mocks.activeCompany = { ...mocks.activeCompany, workspace_write_permissions: { manage_client_configuration: true } };
+    view.rerender(<EmployeeRetirementElectionPanel employee={{ id: 5, current_retirement_election: election() } as Employee} onSaved={async () => undefined} />);
+    expect(screen.getByRole('button', { name: 'Record contribution change' })).toBeTruthy();
+  });
+  it('preserves an open draft and usable Cancel when workspace configuration access changes', async () => {
+    const user = userEvent.setup();
+    const employee = { id: 5 } as Employee;
+    const view = render(<EmployeeRetirementElectionPanel employee={employee} onSaved={async () => undefined} />);
+    await user.click(screen.getByRole('button', { name: 'Set up retirement' }));
+    const name = screen.getByLabelText('Plan name') as HTMLInputElement;
+    await user.clear(name);
+    await user.type(name, 'Retained draft');
+    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_client_configuration: false } } as unknown as import('@/services/api').CompanyListItem;
+    view.rerender(<EmployeeRetirementElectionPanel employee={employee} onSaved={async () => undefined} />);
+    expect((screen.getByLabelText('Plan name') as HTMLInputElement).value).toBe('Retained draft');
+    expect(screen.getByRole('button', { name: 'Save contribution change' }).hasAttribute('disabled')).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('button', { name: 'Save contribution change' })).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   it('shows a future-only first election as scheduled instead of reopening a blank setup form', () => {
     const upcoming = election();
     const employee = {

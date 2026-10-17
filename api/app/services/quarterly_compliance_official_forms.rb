@@ -99,6 +99,25 @@ module QuarterlyComplianceOfficialForms
   class Form941 < BaseForm
     TEMPLATE_PATH = Rails.root.join("lib/assets/irs_form_941_2026.pdf")
     PAGE_SIZE = [ 611.976, 791.968 ].freeze
+    SUPPORTED_TAX_YEARS = [ 2026 ].freeze
+
+    def self.template_status(tax_year)
+      exact_year = case tax_year
+      when Integer then tax_year
+      when String then tax_year.to_i if tax_year.match?(/\A[0-9]{4}\z/)
+      end
+      available = SUPPORTED_TAX_YEARS.include?(exact_year)
+      {
+        available: available,
+        supported_tax_years: SUPPORTED_TAX_YEARS,
+        message: available ? nil : "Official Form 941 PDFs are available only for tax year #{SUPPORTED_TAX_YEARS.join(', ')}. For #{tax_year}, use the worksheet or reconciliation workbook and obtain the matching IRS Form 941 revision."
+      }
+    end
+
+    def self.ensure_supported_tax_year!(tax_year)
+      status = template_status(tax_year)
+      raise OfficialPdfOverlay::TemplateUnavailableError, status[:message] unless status[:available]
+    end
 
     HEADER = {
       ein_prefix: [ 153.281, 707.969, 197.504, 725.969 ],
@@ -128,10 +147,10 @@ module QuarterlyComplianceOfficialForms
       line5d_add_medicare_wages: [ [ 216.0, 323.964, 280.8, 337.965 ], [ 288.0, 323.964, 308.85, 337.965 ] ],
       line5d_add_medicare_tax: [ [ 352.8, 323.964, 417.6, 337.965 ], [ 424.8, 323.964, 445.65, 337.965 ] ],
       line5e_total_ss_medicare: [ [ 446.4, 301.968, 547.2, 315.969 ], [ 554.4, 301.968, 575.25, 315.969 ] ],
-      line6_total_taxes_before_adj: [ [ 446.4, 282.967, 547.2, 296.968 ], [ 554.4, 282.967, 575.25, 296.968 ] ],
-      line7_adj_fractions_cents: [ [ 446.4, 263.966, 547.2, 277.967 ], [ 554.4, 263.966, 575.25, 277.967 ] ],
-      line10_total_taxes_after_adj: [ [ 446.4, 206.967, 547.2, 220.968 ], [ 554.4, 206.967, 575.25, 220.968 ] ],
-      line12_total_after_credits: [ [ 446.4, 168.966, 547.2, 182.967 ], [ 554.4, 168.966, 575.25, 182.967 ] ]
+      line6_total_taxes_before_adj: [ [ 446.4, 263.966, 547.2, 277.967 ], [ 554.4, 263.966, 575.25, 277.967 ] ],
+      line7_adj_fractions_cents: [ [ 446.4, 244.966, 547.2, 258.967 ], [ 554.4, 244.966, 575.25, 258.967 ] ],
+      line10_total_taxes_after_adj: [ [ 446.4, 187.967, 547.2, 201.968 ], [ 554.4, 187.967, 575.25, 201.968 ] ],
+      line12_total_after_credits: [ [ 446.4, 149.968, 547.2, 163.969 ], [ 554.4, 149.968, 575.25, 163.969 ] ]
     }.freeze
 
     PAGE2 = {
@@ -148,10 +167,20 @@ module QuarterlyComplianceOfficialForms
     }.freeze
 
     def initialize(report:, fields: {})
+      self.class.ensure_supported_tax_year!(report.deep_symbolize_keys.dig(:meta, :year))
       super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ])
     end
 
     private
+
+    def prepare_template_page(page)
+      # Reviewed values/checks are painted into page content. These static
+      # drafts must not retain the source template's blank input widgets.
+      page[:Annots]&.reject! do |annotation|
+        (annotation[:referenced_object] || annotation)[:Subtype] == :Widget
+      end
+      page.delete(:Annots) if page[:Annots]&.empty?
+    end
 
     def draw_page(pdf, page_number)
       case page_number

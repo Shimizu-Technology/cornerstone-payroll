@@ -17,7 +17,7 @@ class CreateTimecards < ActiveRecord::Migration[8.1]
 
       t.timestamps
     end
-    add_index :timecards, [:company_id, :image_hash], unique: true, where: "image_hash IS NOT NULL"
+    add_index :timecards, [ :company_id, :image_hash ], unique: true, where: "image_hash IS NOT NULL"
 
     create_table :punch_entries do |t|
       t.references :timecard, null: false, foreign_key: true

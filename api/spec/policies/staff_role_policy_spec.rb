@@ -10,6 +10,7 @@ RSpec.describe StaffRolePolicy do
     expected_roles = {
       staff_workspace: %w[super_admin org_admin admin manager accountant],
       payroll_operations: %w[super_admin org_admin admin manager accountant],
+      manage_payroll_fields: %w[super_admin org_admin admin manager accountant],
       use_printer_profiles: %w[super_admin org_admin admin manager accountant],
       create_printer_profiles: %w[super_admin org_admin admin manager accountant],
       manage_printer_profile_library: %w[super_admin org_admin admin manager],

@@ -87,5 +87,4 @@ RSpec.describe TimeTracking::Client do
     expect(direct_cancel(expected).dig("entry_processing", "event_id")).to eq(expected[:event_id])
     expect(request).to have_been_requested.times(variants.length + 1)
   end
-
 end

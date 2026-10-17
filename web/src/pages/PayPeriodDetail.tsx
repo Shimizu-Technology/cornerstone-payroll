@@ -1,5 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
+import { NamedLoanInputs, type NamedLoanDraft } from '@/components/payroll/NamedLoanInputs';
 import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
@@ -33,6 +34,7 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
+import { capturedSourceContext, capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
 import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
@@ -58,7 +60,12 @@ import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPan
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, NamedLoanOption } from '@/types';
+
+const payrollHoursInputLabel = (employee: Employee, kind: 'Regular' | 'Overtime', rate?: PayrollItemWageRateHours) => (
+  [`${kind} hours for ${employee.first_name} ${employee.last_name}`, rate?.label, rate && capturedSourceContext(rate)]
+    .filter(Boolean).join(' · ')
+);
 
 interface HoursEntry {
   regular: number;
@@ -137,9 +144,22 @@ function formatSignedNumber(value: number) {
   return '0';
 }
 
-function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
+function templateWageRates(employee: Employee | undefined, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
-  const configuredRates = employee.wage_rates || [];
+  if ((payrollItem?.correction_pay_basis_hold || payrollItem?.import_source?.startsWith('time_tracking:')) && !existing?.length) return [];
+  if ((payrollItem?.timekeeping_source === 'correction_reference' || payrollItem?.import_source?.startsWith('time_tracking:')) && existing?.length) {
+    return existing.map(entry => ({
+      ...entry,
+      rate: toNumber(entry.rate),
+      regular_hours: toNumber(entry.regular_hours),
+      overtime_hours: toNumber(entry.overtime_hours),
+      holiday_hours: toNumber(entry.holiday_hours),
+      pto_hours: toNumber(entry.pto_hours),
+      is_primary: entry.is_primary ?? false,
+      active: entry.active ?? true,
+    }));
+  }
+  const configuredRates = employee?.wage_rates || [];
   if (configuredRates.length > 0) {
     const existingById = new Map(
       (existing || []).flatMap((entry) => (
@@ -204,12 +224,14 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
   payrollItems.forEach((item) => {
     const employee = employeeMap.get(item.employee_id);
     const noHours = employee?.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly';
-    const wageRates = employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
+    const wageRates = (capturedSourceHoursLocked(item) || item.correction_pay_basis_hold)
+      ? templateWageRates(employee, item)
+      : employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
       ? templateWageRates(employee, item)
       : [];
     hours[String(item.employee_id)] = {
-      regular: noHours ? 0 : (item.hours_worked || 0),
-      overtime: noHours ? 0 : (item.overtime_hours || 0),
+      regular: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.hours_worked || 0),
+      overtime: noHours && !capturedSourceHoursLocked(item) && !item.correction_pay_basis_hold ? 0 : (item.overtime_hours || 0),
       wage_rates: wageRates.length > 0 ? wageRates : undefined,
     };
   });
@@ -365,9 +387,14 @@ export function PayPeriodDetail({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [savedImportReloadRequired, setSavedImportReloadRequired] = useState(false);
+  const savedImportReloadRequiredRef = useRef(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
   const commitInFlightRef = useRef(false);
   const commitRouteGenerationRef = useRef(0);
+  const refreshInFlightRouteRef = useRef<number | null>(null);
+  const activePageScopeRef = useRef({ companyId, payRunId });
+  activePageScopeRef.current = { companyId, payRunId };
   const { activeCompany } = useCompany();
   const [paymentMethodItem, setPaymentMethodItem] = useState<PayrollItem | null>(null);
   const [clientApprovalOpen, setClientApprovalOpen] = useState(false);
@@ -386,6 +413,14 @@ export function PayPeriodDetail({
   const [aireRecordsOpen, setAireRecordsOpen] = useState(false);
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
+  const [finalRecordRefreshToken, setFinalRecordRefreshToken] = useState(0);
+  const handleNonEmployeeChecksLoaded = useCallback((checks: NonEmployeeCheck[]) => {
+    setNonEmployeeChecks(checks);
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
+  const handleNonEmployeeChecksChanged = useCallback(() => {
+    setFinalRecordRefreshToken(token => token + 1);
+  }, []);
   const [aireSourceRefreshToken, setAireSourceRefreshToken] = useState(0);
   const invalidateAireSource = useCallback(() => {
     setAireSourceRefreshToken(token => token + 1);
@@ -418,6 +453,11 @@ export function PayPeriodDetail({
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [tipsPaidOutMap, setTipsPaidOutMap] = useState<Record<string, number>>({});
   const tipsPaidOutMapRef = useRef<Record<string, number>>({});
+  const [namedLoanOptions, setNamedLoanOptions] = useState<NamedLoanOption[]>([]);
+  const [namedLoanDrafts, setNamedLoanDrafts] = useState<Record<string, Record<string, NamedLoanDraft>>>({});
+  const [refreshSetupOpen, setRefreshSetupOpen] = useState(false);
+  const [refreshRecurring, setRefreshRecurring] = useState(false);
+  const [refreshBaseSalary, setRefreshBaseSalary] = useState(false);
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
   const [showPayrollFields, setShowPayrollFields] = useState(false);
@@ -442,6 +482,12 @@ export function PayPeriodDetail({
   }, []);
 
   const syncPayrollFieldInputs = useCallback((worksheet: PayPeriodPayrollFieldInputs) => {
+    setNamedLoanOptions(worksheet.named_loan_options || []);
+    setNamedLoanDrafts((worksheet.named_loan_options || []).reduce<Record<string, Record<string, NamedLoanDraft>>>((drafts, option) => {
+      drafts[String(option.employee_id)] ||= {};
+      drafts[String(option.employee_id)][String(option.loan_id)] = { mode: option.mode, amount: option.requested_amount ?? option.scheduled_amount };
+      return drafts;
+    }, {}));
     setPayrollFields(worksheet.fields);
     setPayrollFieldAssignments(worksheet.assignments);
     setRetainedRetirementEntries(worksheet.retained_manual_entries || []);
@@ -476,8 +522,13 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<void> => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false, preserveInputs = false): Promise<'loaded' | 'superseded' | 'failed'> => {
     const requestId = ++loadRequestIdRef.current;
+    // Saved check, correction and payment changes invalidate the final record
+    // even if the surrounding pay-run reload subsequently fails.
+    setFinalRecordRefreshToken(token => token + 1);
+    const requiresSavedSourceWorksheet = savedImportReloadRequiredRef.current;
+    const retainInputs = preserveInputs && !requiresSavedSourceWorksheet;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
     try {
@@ -503,18 +554,21 @@ export function PayPeriodDetail({
           return null;
         }),
         payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
+          if (requiresSavedSourceWorksheet) {
+            throw new Error(`Saved payroll worksheet could not load: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
           console.warn('Failed to load payroll field worksheet', err);
           return { payroll_field_inputs: { fields: [], assignments: [] } };
         }),
       ]);
 
-      if (!isCurrentRequest()) return;
+      if (!isCurrentRequest()) return 'superseded';
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
-      if (!preserveInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
+      if (!retainInputs) syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
-      if (!preserveInputs) {
+      if (!retainInputs) {
         setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
         syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
         // Canonical reloads after import, commit, or saved check changes must
@@ -522,10 +576,13 @@ export function PayPeriodDetail({
         if (loadedPeriodIdRef.current === periodId) invalidateAireSource();
       }
       loadedPeriodIdRef.current = periodId;
+      savedImportReloadRequiredRef.current = false;
+      setSavedImportReloadRequired(false);
+      return 'loaded';
     } catch (err) {
-      if (isCurrentRequest()) {
-        setError(err instanceof Error ? err.message : 'Failed to load pay period');
-      }
+      if (!isCurrentRequest()) return 'superseded';
+      setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      return 'failed';
     } finally {
       if (isCurrentRequest()) {
         setLiabilityLoading(false);
@@ -540,9 +597,16 @@ export function PayPeriodDetail({
     // new panel loads.
     setPayPeriod(null);
     setCommitPeriodId(null);
+    setRefreshSetupOpen(false);
+    if (refreshInFlightRouteRef.current !== null) {
+      refreshInFlightRouteRef.current = null;
+      setProcessing(false);
+    }
     setCalculationFailures([]);
     setCalculationNotice(null);
     setWorksheetRefreshWarning(null);
+    savedImportReloadRequiredRef.current = false;
+    setSavedImportReloadRequired(false);
     setTimeTrackingImportOpen(false);
     setTimeTrackingAutoPreview(false);
     setAireRecordsOpen(false);
@@ -567,7 +631,7 @@ export function PayPeriodDetail({
     return (): void => {
       loadRequestIdRef.current += 1;
     };
-  }, [loadPayPeriod, payRunId, setError]);
+  }, [companyId, loadPayPeriod, payRunId, setError]);
 
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) return;
@@ -632,12 +696,19 @@ export function PayPeriodDetail({
   }, [payPeriod, loadSupplementals]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => ({
       ...prev,
       [String(employeeId)]: {
         ...prev[String(employeeId)],
         [field]: clampedValue,
+        ...(prev[String(employeeId)]?.wage_rates?.length === 1 ? {
+          wage_rates: prev[String(employeeId)].wage_rates!.map(rate => ({
+            ...rate,
+            [field === 'regular' ? 'regular_hours' : 'overtime_hours']: clampedValue,
+          })),
+        } : {}),
       },
     }));
   };
@@ -648,6 +719,7 @@ export function PayPeriodDetail({
     field: 'regular_hours' | 'overtime_hours',
     value: number
   ) => {
+    if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => {
       const current = prev[String(employeeId)];
@@ -709,14 +781,18 @@ export function PayPeriodDetail({
     if (!assignment) return;
 
     const key = `${employeeId}:${fieldId}`;
+    const excludesRecurring = payPeriod?.includes_recurring_items === false;
     const normalizedAmount = amount == null ? null : Math.max(0, amount);
     const defaultAmount = assignment.requested_amount ?? assignment.current_amount ?? assignment.suggested_amount ?? null;
 
     setPayrollFieldDrafts((previous) => {
       const current = previous[key];
-      if (current && payrollFieldAmountsEqual(current.amount, normalizedAmount)) return previous;
+      if (excludesRecurring && normalizedAmount == null && current?.mode !== 'override') return previous;
+      if (current && payrollFieldAmountsEqual(current.amount, normalizedAmount)
+        && !(current.mode === 'default' && excludesRecurring)) return previous;
 
       const returnedToDefault = !assignment.overridden
+        && !excludesRecurring
         && payrollFieldAmountsEqual(normalizedAmount, defaultAmount);
 
       return {
@@ -747,7 +823,7 @@ export function PayPeriodDetail({
   };
 
   const handleRunPayroll = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
     try {
       setProcessing(true);
       setError(null);
@@ -755,31 +831,58 @@ export function PayPeriodDetail({
       setCalculationNotice(null);
       setWorksheetRefreshWarning(null);
 
-      const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
-        const rateEntryInvalid = (entry.wage_rates || []).some((rate) => (
-          toNumber(rate.regular_hours) < 0 ||
-          toNumber(rate.overtime_hours) < 0 ||
-          toNumber(rate.regular_hours) > MAX_HOURS_PER_PERIOD ||
-          toNumber(rate.overtime_hours) > MAX_HOURS_PER_PERIOD
-        ));
-
-        return (
-          entry.regular < 0 ||
-          entry.overtime < 0 ||
-          entry.regular > MAX_HOURS_PER_PERIOD ||
-          entry.overtime > MAX_HOURS_PER_PERIOD ||
-          rateEntryInvalid
-        );
-      });
+      const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+      if (heldItem) {
+        setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason);
+        return;
+      }
+      const invalidHours = Object.entries(hoursMap).find(([employeeId, entry]) => worksheetHoursInvalid(
+        entry, payrollItems.find(item => item.employee_id === Number(employeeId)), MAX_HOURS_PER_PERIOD,
+      ));
       if (invalidHours) {
         setError(`Hours must be between 0 and ${MAX_HOURS_PER_PERIOD} per period`);
         return;
       }
 
+      const selectedEmployeeIds = new Set([...payrollItems.map(item => item.employee_id), ...additionalEmployeeIds]);
+      if (payPeriod.status === 'draft' && payrollItems.length === 0 && payPeriod.run_purpose === 'regular') {
+        employees.forEach(employee => {
+          if (!(payPeriod.excluded_employee_ids || []).includes(employee.id)) selectedEmployeeIds.add(employee.id);
+        });
+      }
+      Object.entries(hoursMap).forEach(([employeeId, entry]) => {
+        if (entry.regular > 0 || entry.overtime > 0) selectedEmployeeIds.add(Number(employeeId));
+      });
+      [salaryOverrideMap, bonusMap, tipsPaidOutMap].forEach(values => {
+        Object.entries(values).forEach(([employeeId, amount]) => {
+          if (toNumber(amount) > 0) selectedEmployeeIds.add(Number(employeeId));
+        });
+      });
+      Object.entries(tipsMap).forEach(([employeeId, entry]) => {
+        if (entry.amount > 0) selectedEmployeeIds.add(Number(employeeId));
+      });
+      const named_loan_payments: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
+      Object.entries(namedLoanDrafts).forEach(([employeeId, drafts]) => {
+        if (!selectedEmployeeIds.has(Number(employeeId))) return;
+        named_loan_payments[employeeId] = {};
+        Object.entries(drafts).forEach(([loanId, draft]) => {
+          const option = namedLoanOptions.find(candidate => String(candidate.employee_id) === employeeId && String(candidate.loan_id) === loanId);
+          if (draft.mode === 'override' && !option?.eligible && toNumber(draft.amount) > 0) {
+            throw new Error(`The saved repayment for ${option?.name || 'this loan'} is no longer available. Choose no repayment or enter zero, then recalculate.`);
+          }
+          if (draft.mode === 'override' && draft.amount == null) throw new Error('Enter the linked loan repayment amount, or choose the scheduled default.');
+          named_loan_payments[employeeId][loanId] = draft.mode === 'override' ? { mode: 'override', amount: draft.amount ?? 0 } : { mode: 'default' };
+        });
+      });
+
       // Build hours payload
       const hours: Record<string, { regular?: number; overtime?: number; wage_rates?: PayrollItemWageRateHours[] }> = {};
       Object.entries(hoursMap).forEach(([empId, entry]) => {
-        hours[empId] = entry.wage_rates && entry.wage_rates.length > 1
+        if (!selectedEmployeeIds.has(Number(empId))) return;
+        const preservesSourceRates = payrollItems.some(item => item.employee_id === Number(empId)
+          && (item.timekeeping_source === 'correction_reference' || item.import_source?.startsWith('time_tracking:')));
+        hours[empId] = entry.wage_rates && entry.wage_rates.length > 0
+          && (entry.wage_rates.length > 1 || preservesSourceRates)
           ? {
               regular: entry.regular,
               overtime: entry.overtime,
@@ -841,7 +944,6 @@ export function PayPeriodDetail({
         if (!assignment.editable && !isLoanField) return;
         const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
         const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
-        if (isLoanField && toNumber(loansMap[String(assignment.employee_id)]) > 0 && draft.mode === 'default') return;
         if (draft.mode === 'override' && draft.amount == null) {
           const fieldName = worksheetPayrollFields.find(
             (field) => field.id === assignment.payroll_field_definition_id,
@@ -862,19 +964,20 @@ export function PayPeriodDetail({
       });
 
       // Include any manually-added employees who were missing from the import
-      const employee_ids = additionalEmployeeIds.size > 0
-        ? [...new Set([...payrollItems.map(pi => pi.employee_id), ...additionalEmployeeIds])]
-        : undefined;
+      const employee_ids = [...selectedEmployeeIds];
+      if (employee_ids.length === 0) throw new Error('Enter pay or add an employee before calculating this payroll.');
+      const selectedRecords = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([employeeId]) => selectedEmployeeIds.has(Number(employeeId))));
 
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
-        ...(Object.keys(bonusEdits).length > 0 ? { bonuses: bonusEdits } : {}),
-        ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
-        ...(Object.keys(tips).length > 0 ? { tips } : {}),
-        ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out } : {}),
-        ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions } : {}),
-        ...(Object.keys(payroll_field_inputs).length > 0 ? { payroll_field_inputs } : {}),
-        ...(employee_ids ? { employee_ids } : {}),
+        ...(Object.keys(bonusEdits).length > 0 ? { bonuses: selectedRecords(bonusEdits) } : {}),
+        ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides: selectedRecords(salary_overrides) } : {}),
+        ...(Object.keys(tips).length > 0 ? { tips: selectedRecords(tips) } : {}),
+        ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out: selectedRecords(tips_paid_out) } : {}),
+        ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions: selectedRecords(loan_deductions) } : {}),
+        ...(Object.keys(payroll_field_inputs).length > 0 ? { payroll_field_inputs: selectedRecords(payroll_field_inputs) } : {}),
+        employee_ids,
+        named_loan_payments,
       });
       setPayPeriod(response.pay_period);
       invalidateAireSource();
@@ -891,6 +994,10 @@ export function PayPeriodDetail({
       await payPeriodsApi.payrollFieldInputs(payPeriod.id)
         .then((updatedPayrollFieldResponse) => {
           syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
+          setNamedLoanDrafts(previous => ({
+            ...previous,
+            ...Object.fromEntries(Object.entries(namedLoanDrafts).filter(([employeeId]) => failedEmployeeIds.has(employeeId))),
+          }));
         })
         .catch((refreshError) => {
           console.warn('Payroll ran successfully, but the payroll field worksheet could not be refreshed.', refreshError);
@@ -910,6 +1017,46 @@ export function PayPeriodDetail({
     }
   };
 
+  const handleRefreshSetup = async () => {
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    refreshInFlightRouteRef.current = scope.generation;
+    setProcessing(true);
+    setError(null);
+    setCalculationFailures([]);
+    setCalculationNotice(null);
+    try {
+      const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
+      if (!isCurrentRoute()) return;
+      setRefreshSetupOpen(false);
+      const reloaded = await loadPayPeriod(scope.payRunId, true);
+      if (!isCurrentRoute()) return;
+      if (reloaded === 'superseded') return;
+      if (reloaded === 'failed') {
+        setPayPeriod(null);
+        setPayrollItems([]);
+        setError('Setup changed, but the updated payroll could not load. Your inputs are retained. Try again before reviewing or committing payroll.');
+        return;
+      }
+      setCalculationFailures(response.results.errors);
+      const failureCount = response.results.errors.length;
+      if (failureCount > 0) {
+        setError(`${failureCount} ${failureCount === 1 ? 'employee needs' : 'employees need'} attention after refreshing setup.`);
+      } else {
+        setCalculationNotice('Current setup applied to the saved employees and inputs. Review the recalculated payroll and obtain approval again.');
+      }
+    } catch (err) {
+      if (isCurrentRoute()) setError(err instanceof Error ? err.message : 'Unable to refresh payroll setup.');
+    } finally {
+      if (isCurrentRoute()) {
+        refreshInFlightRouteRef.current = null;
+        setProcessing(false);
+      }
+    }
+  };
+
   const handleAdoptConfirmedWorkweek = async (): Promise<void> => {
     if (!payPeriod) return;
 
@@ -926,7 +1073,9 @@ export function PayPeriodDetail({
   };
 
   const handleApprove = async () => {
-    if (!payPeriod) return;
+    if (savedImportReloadRequiredRef.current || !payPeriod) return;
+    const heldItem = payrollItems.find(item => !item.voided && worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+    if (heldItem) { setError(worksheetPayBasisHold(heldItem, employees.find(employee => employee.id === heldItem.employee_id))!.reason); return; }
     try {
       setProcessing(true);
       setError(null);
@@ -1004,7 +1153,7 @@ export function PayPeriodDetail({
   }, [payPeriod?.id, payPeriod?.status, payPeriod?.correction_status]);
 
   const handleCommit = async (confirmedPeriodId: number) => {
-    if (!payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
+    if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || confirmedPeriodId !== payRunId || commitPeriodId !== confirmedPeriodId ||
         payPeriod.status !== 'approved' || payPeriod.correction_status === 'voided' || processing || commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     const currentRouteGeneration = commitRouteGenerationRef.current;
@@ -1083,6 +1232,22 @@ export function PayPeriodDetail({
     }
   };
 
+  const reloadSavedSourceImport = async (): Promise<boolean> => {
+    const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
+    const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
+      scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
+    if (!isCurrentRoute() || !payPeriod || payPeriod.id !== payRunId) return false;
+    savedImportReloadRequiredRef.current = true;
+    setSavedImportReloadRequired(true);
+    setCalculationNotice(null);
+    const result = await loadPayPeriod(scope.payRunId, true);
+    if (!isCurrentRoute()) return false;
+    if (result === 'failed') {
+      setError('Source hours were saved, but the current payroll could not load. Reload saved payroll before calculating, approving or committing; do not import the hours again.');
+    }
+    return result === 'loaded' || (result === 'superseded' && !savedImportReloadRequiredRef.current);
+  };
+
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
     // Import endpoints return the newly calculated rows but not every field
     // from the canonical pay-run response. Preserve the current run context
@@ -1125,6 +1290,15 @@ export function PayPeriodDetail({
     });
   };
 
+  useEffect(() => {
+    if (loading || !payPeriod?.id || location.hash !== '#time-tracking-sync') return;
+    const target = document.getElementById('time-tracking-sync');
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }, [loading, payPeriod?.id, location.hash]);
+
+  const correctionRouteGeneration = commitRouteGenerationRef.current;
+
   if (loading) {
     return <WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />;
   }
@@ -1156,7 +1330,7 @@ export function PayPeriodDetail({
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const canEditPayPeriod = !isCommitted && !isVoided;
+  const canEditPayPeriod = !isCommitted && !isVoided && !savedImportReloadRequired;
   const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
   const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
@@ -1170,6 +1344,9 @@ export function PayPeriodDetail({
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const hasCorrectionPayBasisHold = reportablePayrollItems.some(item => worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+  const correctionCalculationHeld = !isCommitted && hasCorrectionPayBasisHold;
+  const financialActionsHeld = correctionCalculationHeld || savedImportReloadRequired;
   const hasLinkedAireRecord = linkedAireRecords.length > 0;
   const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
@@ -1246,7 +1423,7 @@ export function PayPeriodDetail({
       || currentDraft.mode !== calculatedMode
       || !payrollFieldAmountsEqual(currentDraft.amount, calculatedAmount);
   });
-  const hasPendingCalculationChanges = isCalculated && (
+  const hasStagedWorksheetChanges = (
     additionalEmployeeIds.size > 0
     || !hoursRecordsEqual(hoursMap, calculatedHoursMap)
     || !numericRecordsEqual(salaryOverrideMap, calculatedUiState.salaryOverrides)
@@ -1254,8 +1431,28 @@ export function PayPeriodDetail({
     || !tipRecordsEqual(tipsMap, calculatedUiState.tips)
     || !numericRecordsEqual(tipsPaidOutMap, calculatedUiState.tipsPaidOut)
     || !numericRecordsEqual(loansMap, calculatedUiState.loans)
+    || namedLoanOptions.some(option => {
+      const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
+      return draft && (draft.mode !== option.mode || (draft.mode === 'override'
+        && Math.abs(toNumber(draft.amount) - toNumber(option.requested_amount)) > 0.005));
+    })
     || payrollFieldDraftsChanged
   );
+  const hasPendingCalculationChanges = isCalculated && hasStagedWorksheetChanges;
+  const standaloneLoanConflicts = namedLoanOptions.filter(option => {
+    const draft = namedLoanDrafts[String(option.employee_id)]?.[String(option.loan_id)];
+    const mode = draft?.mode ?? option.mode;
+    const requestedAmount = draft ? draft.amount : option.requested_amount;
+    const draftDiffers = draft && (draft.mode !== option.mode
+      || Math.abs(toNumber(draft.amount) - toNumber(option.requested_amount)) > 0.005);
+    const hasStagedNamedRepayment = draftDiffers && draft?.mode === 'override'
+      && draft.amount != null && draft.amount > 0;
+    return option.eligible
+      && toNumber(loansMap[String(option.employee_id)]) > 0
+      && toNumber(option.current_amount) <= 0
+      && !hasStagedNamedRepayment
+      && !(mode === 'override' && requestedAmount != null && toNumber(requestedAmount) === 0);
+  });
   const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
     payrollFields.reduce((total, field) => {
       if (field.tax_treatment !== 'taxable_addition') return total;
@@ -1266,6 +1463,7 @@ export function PayPeriodDetail({
 
       const draft = payrollFieldDrafts[key];
       if (draft?.mode === 'override') return total + Math.max(0, toNumber(draft.amount));
+      if (payPeriod.includes_recurring_items === false) return total;
 
       if (assignment.amount_type === 'percentage') {
         const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
@@ -1277,6 +1475,7 @@ export function PayPeriodDetail({
   );
 
   const recurringTaxableAdditions = (employee: Employee) => (
+    payPeriod.includes_recurring_items === false ? 0 :
     (employee.default_custom_earnings || []).reduce((total, earning) => total + toNumber(earning.amount), 0)
     + (employee.default_payroll_adjustments || []).reduce((total, adjustment) => (
       adjustment.active !== false && adjustment.treatment === 'taxable_addition' ? total + toNumber(adjustment.amount) : total
@@ -1566,22 +1765,40 @@ export function PayPeriodDetail({
           )}
         </>
       )}
+      {canEditPayPeriod && payrollItems.length > 0 && (
+        <div>
+          <Button
+            variant="outline"
+            disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges}
+            title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}
+            onClick={() => {
+              setRefreshRecurring(payPeriod.includes_recurring_items);
+              setRefreshBaseSalary(payPeriod.includes_base_salary);
+              setRefreshSetupOpen(true);
+            }}
+          >
+            Refresh current setup
+          </Button>
+          {hasStagedWorksheetChanges && <p className="mt-1 text-xs text-slate-600">Calculate your worksheet edits first, then refresh current setup.</p>}
+        </div>
+      )}
       {isDraft && (
         <>
-          <Button onClick={handleRunPayroll} disabled={processing}>
+          <Button onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
       )}
       {isCalculated && (
         <>
-          <Button variant="outline" onClick={handleRunPayroll} disabled={processing}>
+          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             Recalculate
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={processing || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
-            title={calculationFailures.length > 0
+            disabled={processing || financialActionsHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}
+            title={savedImportReloadRequired ? 'Reload the saved source import before approval' : correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval'
+              : calculationFailures.length > 0
               ? 'Resolve the employee calculation errors and calculate again before approval'
               : payrollItems.length === 0
               ? 'Enter pay for at least one employee before approval'
@@ -1602,7 +1819,7 @@ export function PayPeriodDetail({
           </Button>
           {payPeriod.parallel_run
             ? <Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge>
-            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
+            : <Button onClick={() => setCommitPeriodId(payPeriod.id)} disabled={processing || financialActionsHeld}>{processing ? 'Committing...' : 'Commit & Finalize'}</Button>}
         </>
       )}
     </div>
@@ -1610,7 +1827,7 @@ export function PayPeriodDetail({
 
   const displayEmployeesForHours = (() => {
         const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-        const filtered = isCalculated
+        const filtered = isCalculated || payPeriod.run_purpose !== 'regular'
           ? employees.filter((emp) => payrollEmployeeIds.has(emp.id) || additionalEmployeeIds.has(emp.id))
           : employees;
         const displayEmployees = [...filtered]
@@ -1640,10 +1857,10 @@ export function PayPeriodDetail({
             if (hoursSortBy === 'gross') {
               const estimateGross = (employee: Employee) => {
                 const calculatedItem = payrollItemByEmployeeId.get(employee.id);
-                if (isCalculated && calculatedItem) return toNumber(calculatedItem.gross_pay);
+                if ((isCalculated || worksheetPayBasisHold(calculatedItem, employee)) && calculatedItem) return toNumber(calculatedItem.gross_pay);
 
                 const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
-                const rate = toNumber(employee.pay_rate);
+                const rate = toNumber(calculatedItem?.timekeeping_source === 'correction_reference' ? calculatedItem.pay_rate : employee.pay_rate);
                 const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
                 const isFlatContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type !== 'hourly';
                 const activeRates = (entry.wage_rates || []).filter((row) => row.active !== false);
@@ -1694,7 +1911,10 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={() => loadPayPeriod(payPeriod.id, true)} />
+      <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => {
+        const result = await loadPayPeriod(payPeriod.id, true);
+        if (result === 'failed') throw new Error('Saved payment method could not refresh.');
+      }} />
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
           <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
@@ -1716,14 +1936,14 @@ export function PayPeriodDetail({
           <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {payableItems.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-neutral-950">{item.employee_name}</span>
+              <div key={item.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm sm:flex-row sm:items-center">
+                <span className="min-w-0 sm:flex-1">
+                  <span className="block break-words font-medium text-neutral-950 sm:truncate">{item.employee_name}</span>
                   {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
                 </span>
-                <div className="shrink-0 text-right">
+                <div className="text-right sm:shrink-0">
                   <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
-                  <Button size="sm" variant="outline" className="min-h-11" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
+                  <Button size="sm" variant="outline" className="min-h-11 w-full sm:w-auto" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
                 </div>
               </div>
             ))}
@@ -1740,6 +1960,10 @@ export function PayPeriodDetail({
         }}>Review affected employees</Button>}
       </ActionFeedback>}
       {calculationNotice && <ActionFeedback tone="success" message={calculationNotice} />}
+      {savedImportReloadRequired && <ActionFeedback tone="warning" message="Saved source hours need a current payroll reload before processing.">
+        <p>Saved source hours need a current payroll reload before processing. The last saved payroll remains visible for context.</p>
+        <Button className="mt-3 min-h-11" variant="outline" disabled={processing || timeTrackingImportOpen} onClick={() => void reloadSavedSourceImport()}>Reload saved payroll</Button>
+      </ActionFeedback>}
       {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
       {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
         ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
@@ -1855,6 +2079,7 @@ export function PayPeriodDetail({
           </div>
         ))}
 
+        <div id="time-tracking-sync" tabIndex={-1} className="scroll-mt-24">
         {payPeriod.time_tracking?.aire_calendar && (
           <AirePayrollCockpit
             key={payPeriod.id}
@@ -1867,8 +2092,7 @@ export function PayPeriodDetail({
             onSourceChanged={invalidateAireSource}
             onRefresh={async () => {
               invalidateAireSource();
-              await loadPayPeriod(payPeriod.id, true, true);
-              return true;
+              return (await loadPayPeriod(payPeriod.id, true, true)) !== 'failed';
             }}
             onReviewFinalizedBatch={() => {
               setTimeTrackingAutoPreview(true);
@@ -1888,6 +2112,8 @@ export function PayPeriodDetail({
               onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
           </div>
         )}
+
+        </div>
 
         {payPeriod.notes && (
           <Card className="border-blue-100 bg-blue-50/60">
@@ -2016,6 +2242,74 @@ export function PayPeriodDetail({
           </div>
         </Card>
 
+        {refreshSetupOpen && (
+          <Dialog open onOpenChange={open => { if (!processing) setRefreshSetupOpen(open); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Refresh current setup</DialogTitle>
+                <DialogDescription>
+                  Apply current employee and client setup to the saved payroll. Hours, selected employees,
+                  and manual overrides are preserved. Existing approval and client review will be withdrawn;
+                  review and approve the new calculation.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <label className="flex min-h-11 items-center gap-3">
+                  <input type="checkbox" checked={refreshRecurring} onChange={event => setRefreshRecurring(event.target.checked)} disabled={processing} />
+                  Include recurring employee setup
+                </label>
+                <p className="text-xs text-slate-600">
+                  Includes configured deductions and recurring additions. For only one saved loan,
+                  use Linked loan repayments in the worksheet instead.
+                </p>
+                <label className="flex min-h-11 items-center gap-3">
+                  <input type="checkbox" checked={refreshBaseSalary} onChange={event => setRefreshBaseSalary(event.target.checked)} disabled={processing} />
+                  Include ordinary base salary
+                </label>
+                {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" disabled={processing} onClick={() => setRefreshSetupOpen(false)}>Cancel</Button>
+                <Button disabled={processing} onClick={handleRefreshSetup}>{processing ? 'Refreshing…' : 'Refresh and recalculate'}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {standaloneLoanConflicts.length > 0 && canEditPayPeriod && (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Use Linked loan repayments to credit the saved loan balance. Clear the standalone one-time deduction
+            for {Array.from(new Set(standaloneLoanConflicts.map(option => {
+              const employee = employees.find(candidate => candidate.id === option.employee_id);
+              return employee ? `${employee.first_name} ${employee.last_name}` : `employee #${option.employee_id}`;
+            }))).join(', ')} before calculating and approving.
+          </div>
+        )}
+        {(isDraft || isCalculated) && namedLoanOptions.length > 0 && (
+          <section className="hidden space-y-3 md:block" aria-label="Linked loan repayments">
+            <h3 className="font-semibold text-slate-900">Linked loan repayments</h3>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {employees.filter(employee => namedLoanOptions.some(option => option.employee_id === employee.id)
+                && (isDraft || payrollItems.some(item => item.employee_id === employee.id) || additionalEmployeeIds.has(employee.id)))
+                .map(employee => (
+                  <div key={employee.id}>
+                    <p className="mb-1 text-sm font-semibold">{employee.first_name} {employee.last_name}</p>
+                    <NamedLoanInputs
+                      options={namedLoanOptions.filter(option => option.employee_id === employee.id)}
+                      drafts={namedLoanDrafts[String(employee.id)] || {}}
+                      includesRecurring={payPeriod.includes_recurring_items}
+                      onChange={(loanId, draft) => setNamedLoanDrafts(previous => ({
+                        ...previous,
+                        [String(employee.id)]: { ...previous[String(employee.id)], [String(loanId)]: draft },
+                      }))}
+                    />
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
+
+        {hasCorrectionPayBasisHold && <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Saved payroll amounts are retained. Review the source evidence and pay setup for held correction records before recalculating or approving. These totals are saved amounts, not a new-pay forecast.</div>}
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
@@ -2027,25 +2321,25 @@ export function PayPeriodDetail({
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved gross pay' : 'Gross Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Deductions</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved deductions' : 'Total Deductions'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved net pay' : 'Net Pay'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
               </CardContent>
             </Card>
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">DRT Deposit</p>
+                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved DRT deposit' : 'DRT Deposit'}</p>
                 <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
               </CardContent>
             </Card>
@@ -2067,13 +2361,13 @@ export function PayPeriodDetail({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">
-                    {comparison?.comparison_kind === 'training_benchmark' ? 'Training Benchmark Comparison' : 'Previous Pay Period Comparison'}
+                    {comparison?.comparison_kind === 'training_benchmark' ? 'Training Benchmark Comparison' : comparison?.comparison_kind === 'selected_employees' ? 'Selected Employee Comparison' : 'Previous Pay Period Comparison'}
                   </h3>
                   <p className={`mt-1 text-sm ${comparisonError ? 'text-red-700' : 'text-gray-600'}`}>
                     {comparisonError
                       ? 'Comparison failed to load. Retry before approving this payroll.'
                       : comparison?.previous_pay_period
-                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
+                        ? `${comparison.comparison_kind === 'training_benchmark' ? `${comparison.benchmark?.immutable ? 'Frozen expected result' : 'Expected result'} from` : comparison.comparison_kind === 'selected_employees' ? 'Compared for the selected employees with' : 'Compared with'} ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}${comparison.benchmark?.source_status ? ` · Captured as ${comparison.benchmark.source_status}` : ''}`
                         : comparisonLoading ? 'Loading comparison…' : 'No comparison target found for this payroll.'}
                   </p>
                 </div>
@@ -2170,7 +2464,9 @@ export function PayPeriodDetail({
                     <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                       {comparison.comparison_kind === 'training_benchmark'
                         ? 'No material employee-level differences from the training benchmark.'
-                        : 'No material employee-level changes detected against the previous committed period.'}
+                        : comparison.comparison_kind === 'selected_employees'
+                          ? 'No material differences for the selected employees. Employees outside this special run are excluded from the comparison.'
+                          : 'No material employee-level changes detected against the previous committed period.'}
                     </div>
                   )}
                 </>
@@ -2181,26 +2477,38 @@ export function PayPeriodDetail({
 
         {/* Active employees remain available for a later adjustment without
             becoming payroll records for a period in which they earned nothing. */}
-        {isCalculated && (() => {
+        {(isCalculated || (isDraft && payPeriod.run_purpose !== 'regular')) && (() => {
           const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
           const excludedEmployeeIds = new Set(payPeriod.excluded_employee_ids || []);
           const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id) && !excludedEmployeeIds.has(emp.id));
           if (missingEmployees.length === 0) return null;
           return (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-start justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="font-medium text-slate-800">
-                    No pay in this period for {missingEmployees.length} eligible employee{missingEmployees.length !== 1 ? 's' : ''}
+                    {isDraft ? 'Choose employees for this special run' : `No pay in this period for ${missingEmployees.length} eligible employee${missingEmployees.length !== 1 ? 's' : ''}`}
                   </p>
-                  <p className="mt-1 text-sm text-slate-600">They have no payroll item or paycheck for this run. Enter pay and recalculate if one should be included.</p>
+                  <p className="mt-1 text-sm text-slate-600">{isDraft ? 'Only the employees you choose are included. Select Enter pay, review their amounts below, then calculate payroll.' : 'They have no payroll item or paycheck for this run. Enter pay and recalculate if one should be included.'}</p>
                   <ul className="mt-3 space-y-2 text-sm text-slate-700">
                     {missingEmployees.map((emp) => (
-                      <li key={emp.id} className="flex items-center gap-2">
+                      <li key={emp.id} className="flex flex-wrap items-center gap-2">
                         <span>{emp.first_name} {emp.last_name}</span>
                         <span className="text-xs text-slate-500">({emp.employment_type})</span>
                         {additionalEmployeeIds.has(emp.id) ? (
-                          <span className="text-xs font-medium text-emerald-700">Ready for pay entry — enter the amount below, then recalculate</span>
+                          <>
+                            <span className="text-xs font-medium text-emerald-700">Ready for pay entry — review the amount below, then calculate</span>
+                            <button type="button" className="min-h-11 text-xs font-medium text-primary-700 underline"
+                              aria-label={`Remove ${emp.first_name} ${emp.last_name} from this run`}
+                              onClick={() => {
+                                setAdditionalEmployeeIds(previous => { const next = new Set(previous); next.delete(emp.id); return next; });
+                                const withoutEmployee = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([key]) => key !== String(emp.id)));
+                                setHoursMap(withoutEmployee); setSalaryOverrideMap(withoutEmployee); setBonusMap(withoutEmployee);
+                                setBonusEdits(withoutEmployee); setTipsMap(withoutEmployee); setTipsPaidOutMap(withoutEmployee);
+                                setLoansMap(withoutEmployee); setNamedLoanDrafts(withoutEmployee);
+                                setPayrollFieldDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${emp.id}:`))));
+                              }}>Remove from this run</button>
+                          </>
                         ) : (
                           <button
                             onClick={() => {
@@ -2210,7 +2518,7 @@ export function PayPeriodDetail({
                                 [String(emp.id)]: { regular: 0, overtime: 0, wage_rates: prev[String(emp.id)]?.wage_rates },
                               }));
                             }}
-                            className="text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                            className="min-h-11 rounded-lg px-3 py-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
                           >
                             Enter pay
                           </button>
@@ -2220,8 +2528,8 @@ export function PayPeriodDetail({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing}>
-                    Recalculate with {additionalEmployeeIds.size} added
+                  <Button size="sm" className="min-h-11" variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+                    {isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added
                   </Button>
                 )}
               </div>
@@ -2318,7 +2626,7 @@ export function PayPeriodDetail({
                         tipsLoansVisibilityModeRef.current = 'manual';
                         setShowTipsLoans(prev => !prev);
                       }}
-                      className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                      className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
                         showTipsLoans
                           ? 'bg-blue-100 text-blue-700 border-blue-300'
                           : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
@@ -2334,7 +2642,7 @@ export function PayPeriodDetail({
                           event.stopPropagation();
                           setShowPayrollFields((previous) => !previous);
                         }}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           showPayrollFields
                             ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
                             : 'border-gray-200 bg-gray-100 text-gray-500 hover:bg-gray-200'
@@ -2370,27 +2678,35 @@ export function PayPeriodDetail({
                 const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
                 const hasHours = emp.employment_type !== 'salary' && !isFlatContractor;
                 const name = `${emp.first_name} ${emp.last_name}`;
+                const savedItem = payrollItemByEmployeeId.get(emp.id);
+                const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                const correctionHold = worksheetPayBasisHold(savedItem, emp);
+                const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                 const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
-                const rateLabel = isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
-                  ? `${formatCurrency(toNumber(emp.pay_rate) / periodsPerYear)}/period`
-                  : `${formatCurrency(toNumber(emp.pay_rate))}${hasHours ? '/hr' : '/period'}`;
+                const rateLabel = correctionHold ? 'Retained pay basis · review required' : sourceHoursLocked && activeRates.length ? 'Retained Source rates' : isVariableSalary ? 'Variable pay' : emp.employment_type === 'salary' && emp.salary_type !== 'per_period'
+                  ? `${formatCurrency(payRate / periodsPerYear)}/period`
+                  : `${formatCurrency(payRate)}${hasHours ? '/hr' : '/period'}`;
                 return <section key={emp.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll entry for ${name}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
+                  {correctionHold && <div role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-semibold">Retained saved gross {formatCurrency(toNumber(savedItem?.gross_pay))}</p><p className="mt-1">{correctionHold.reason}</p></div>}
+                  {!hasMultiRate && activeRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
+                  {sourceHoursLocked && <p className="text-xs text-neutral-600">Imported work is read-only. Use Source review and the correction workflow to change work.</p>}
                   {additionalEmployeeIds.has(emp.id) && <p className="text-xs font-medium text-blue-700">New to this payroll</p>}
                   {isFlatContractor && payPeriod.run_purpose === 'off_cycle_tips' && <p className="text-xs font-medium text-primary-700">Flat fee excluded from this tips-only run</p>}
-                  {isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
+                  {correctionHold ? <p className="text-xs text-amber-800">Review retained source evidence and pay setup before entering new pay.</p> : isVariableSalary ? <label className="block text-sm font-medium text-neutral-700">Pay this period
                     <NumericInput className="mt-1 min-h-11 w-full" value={salaryOverrideMap[String(emp.id)] || null} onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} aria-label={`Pay this period for ${name}`} />
-                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
+                  </label> : hasMultiRate ? <div className="space-y-3">{activeRates.map(({ rate, index }) => <div key={`${rate.label}-${index}`} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3"><p className="text-sm font-semibold text-neutral-800">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</p>{capturedSourceContext(rate) && <p className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>}<div className="mt-3 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.regular_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)} disabled={sourceHoursLocked || Boolean(correctionHold)} value={toNumber(rate.overtime_hours)} onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div></div>)}</div> : hasHours ? <div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium text-neutral-600">Regular hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Regular')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.regular} onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label><label className="text-xs font-medium text-neutral-600">Overtime hours<NumericInput className="mt-1 min-h-11 w-full" aria-label={payrollHoursInputLabel(emp, 'Overtime')} disabled={sourceHoursLocked || Boolean(correctionHold)} value={hours.overtime} onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)} min={0} max={MAX_HOURS_PER_PERIOD} /></label></div> : <p className="text-xs text-neutral-500">Base pay is calculated from this employee’s pay setup.</p>}
                   <label className="block text-xs font-medium text-neutral-600">Bonus this payroll
                     <NumericInput className="mt-1 min-h-11 w-full" aria-label={`Bonus this payroll for ${name}`} value={bonusMap[String(emp.id)] ?? 0} onValueChange={(value) => { const amount = value ?? 0; if (amount === (bonusMap[String(emp.id)] ?? 0)) return; setBonusMap((previous) => ({ ...previous, [String(emp.id)]: amount })); setBonusEdits((previous) => ({ ...previous, [String(emp.id)]: amount })); }} min={0} max={99999999.99} fixedDecimalsOnBlur={2} />
                   </label>
                   {payrollItemByEmployeeId.get(emp.id)?.imported_bonus != null && <p className="text-xs text-neutral-500">Workbook bonus: {formatCurrency(toNumber(payrollItemByEmployeeId.get(emp.id)?.imported_bonus))}{bonusEdits[String(emp.id)] != null && ' · Manual amount retained'}</p>}
                   {(emp.default_payroll_adjustments || []).some((adjustment) => adjustment.active !== false && adjustment.treatment === 'taxable_addition' && /bonus/i.test(adjustment.label)) && <p className="text-xs text-amber-700">A recurring bonus is also configured. Review it before adding another bonus.</p>}
-                  {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">One-time loan deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
-                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>Use employee default</button>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
+                  <NamedLoanInputs options={namedLoanOptions.filter(option => option.employee_id === emp.id)} drafts={namedLoanDrafts[String(emp.id)] || {}} includesRecurring={payPeriod.includes_recurring_items} onChange={(loanId, draft) => setNamedLoanDrafts(previous => ({ ...previous, [String(emp.id)]: { ...previous[String(emp.id)], [String(loanId)]: draft } }))} />
+                  {showTipsLoans && <div className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3"><label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 min-h-11 w-full" value={tipsMap[String(emp.id)]?.amount ?? null} onValueChange={(value) => updateTip(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Tip pool<select className="mt-1 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3" value={tipsMap[String(emp.id)]?.pool || ''} onChange={(event) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, event.target.value)}><option value="">—</option><option value="foh">FOH</option><option value="boh">BOH</option><option value="mixed">Mixed</option></select></label><label className="text-xs font-medium text-neutral-600">Tips paid out<NumericInput className="mt-1 min-h-11 w-full" value={tipsPaidOutMap[String(emp.id)] ?? null} onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label><label className="text-xs font-medium text-neutral-600">Standalone one-time deduction<NumericInput className="mt-1 min-h-11 w-full" value={loansMap[String(emp.id)] ?? null} onValueChange={(value) => updateLoan(emp.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label></div>}
+                  {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.mode !== 'override' && payPeriod.includes_recurring_items === false ? null : draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>{payPeriod.includes_recurring_items === false ? 'Clear this payroll amount' : 'Use employee default'}</button>}{assignment.editable && draft?.mode !== 'override' && payPeriod.includes_recurring_items === false && <p className="mt-1 text-xs text-neutral-500">Recurring setup excluded</p>}{!assignment.editable && <p className="mt-1 text-xs text-amber-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
               {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
@@ -2412,7 +2728,7 @@ export function PayPeriodDetail({
                     <TableHead className={`w-[180px] min-w-[180px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Bonus this payroll</TableHead>
                     {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Standalone deduction</TableHead>}
                     {showPayrollFields && worksheetPayrollFields.map((field) => (
                       <TableHead
                         key={`worksheet-field-${field.id}`}
@@ -2442,7 +2758,10 @@ export function PayPeriodDetail({
                       const showDivider = currentGroup !== prevGroup;
                       prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
-                      const payRate = toNumber(emp.pay_rate);
+                      const savedItem = payrollItemByEmployeeId.get(emp.id);
+                      const sourceHoursLocked = capturedSourceHoursLocked(savedItem);
+                      const correctionHold = worksheetPayBasisHold(savedItem, emp);
+                      const payRate = toNumber(savedItem && (isCalculated || sourceHoursLocked || savedItem.timekeeping_source === 'correction_reference') ? savedItem.pay_rate : emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                       const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                       const activeWageRates = (hours.wage_rates || []).map((rate, index) => ({ rate, index })).filter(({ rate }) => rate.active !== false);
@@ -2477,7 +2796,7 @@ export function PayPeriodDetail({
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
                       const grossBeforeFields = baseEstGross + reportedTipGross + toNumber(bonusMap[String(emp.id)]) + recurringTaxableAdditions(emp);
                       const calculatedItem = payrollItemByEmployeeId.get(emp.id);
-                      const estGross = isCalculated && calculatedItem
+                      const estGross = (isCalculated || correctionHold) && calculatedItem
                         ? toNumber(calculatedItem.gross_pay)
                         : grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
                       return (
@@ -2501,6 +2820,8 @@ export function PayPeriodDetail({
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
                             </div>
+                            {correctionHold && <p className="mt-2 text-xs text-amber-800">{correctionHold.reason}</p>}
+                            {sourceHoursLocked && <p className="mt-2 text-xs text-neutral-600">Imported work retained. Use source review and corrections to change hours.</p>}
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
                               {emp.department?.name ? ` · ${emp.department.name}` : ''}
@@ -2508,7 +2829,11 @@ export function PayPeriodDetail({
                           </div>
                         </TableCell>
                         <TableCell className={`text-gray-700 ${rowTone}`}>
-                          {isVariableSalary ? (
+                          {correctionHold ? (
+                            <span className="text-xs font-medium text-amber-800">Retained pay basis · review required</span>
+                          ) : sourceHoursLocked && activeWageRates.length ? (
+                            <div className="space-y-1 text-left">{activeWageRates.map(({ rate, index }) => <div key={rate.source_bucket_key || index} className="text-xs"><span className="font-medium">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr</span>{capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}</div>)}</div>
+                          ) : isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
                           ) : isPerPeriodSalary ? (
                             `${formatCurrency(payRate)}/period`
@@ -2521,15 +2846,17 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-1 text-left">
                               {activeWageRates.map(({ rate }) => (
-                                <div key={`${emp.id}-${rate.label}`} className="text-xs">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}`} className="text-xs">
                                   <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                   <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
+                                  {capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}
                                 </div>
                               ))}
                             </div>
                           ) : (
                             `${formatCurrency(payRate)}/hr`
                           )}
+                          {!hasMultiRate && activeWageRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="mt-1 text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
                         </TableCell>
                         <TableCell className={`text-center align-top ${rowTone}`} colSpan={isVariableSalary ? 2 : 1}>
                           {isVariableSalary ? (
@@ -2537,6 +2864,7 @@ export function PayPeriodDetail({
                               <span className="text-xs text-gray-500">Pay this period: $</span>
                               <NumericInput
                                 value={salaryOverride || null}
+                                disabled={Boolean(correctionHold)}
                                 aria-label={`Pay this period for ${emp.first_name} ${emp.last_name}`}
                                 onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)}
                                 placeholder="0.00"
@@ -2548,14 +2876,17 @@ export function PayPeriodDetail({
                           ) : hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Regular', rate)}
                                     value={toNumber(rate.regular_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2567,12 +2898,13 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Regular')}
                               value={hours.regular}
                               onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -2581,14 +2913,17 @@ export function PayPeriodDetail({
                           {hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map(({ rate, index }) => (
-                                <div key={`${emp.id}-${rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
+                                <div key={`${emp.id}-${rate.source_bucket_key || rate.label}-overtime`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
                                   <span
-                                    className="text-left text-xs leading-tight text-gray-500 whitespace-nowrap"
-                                    title={rate.label}
+                                    className="text-left text-xs leading-tight text-gray-500"
+                                    title={capturedSourceContext(rate) || rate.label}
                                   >
                                     {rate.label}
+                                    {capturedSourceContext(rate) && <span className="mt-1 block text-neutral-600">{capturedSourceContext(rate)}</span>}
                                   </span>
                                   <NumericInput
+                                    disabled={sourceHoursLocked || Boolean(correctionHold)}
+                                    aria-label={payrollHoursInputLabel(emp, 'Overtime', rate)}
                                     value={toNumber(rate.overtime_hours)}
                                     onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -2600,12 +2935,13 @@ export function PayPeriodDetail({
                             </div>
                           ) : (
                             <NumericInput
+                              aria-label={payrollHoursInputLabel(emp, 'Overtime')}
                               value={hours.overtime}
                               onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
-                              disabled={noHoursType}
+                              disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
                             />
                           )}
                         </TableCell>
@@ -2690,7 +3026,7 @@ export function PayPeriodDetail({
                               fixedDecimalsOnBlur={2}
                             />
                           </div>
-                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">Separate one-time deduction. Configured loan columns also apply.</p>
+                          <p className="mt-1 max-w-[160px] text-[11px] text-gray-500">Standalone deduction. Does not credit a saved loan.</p>
                         </TableCell>
                         )}
                         {showPayrollFields && worksheetPayrollFields.map((field) => {
@@ -2721,7 +3057,7 @@ export function PayPeriodDetail({
                                 <div className="flex items-center justify-center gap-1.5">
                                   <span className="text-xs text-gray-400">$</span>
                                   <NumericInput
-                                    value={draft?.amount ?? null}
+                                    value={draft?.mode !== 'override' && payPeriod.includes_recurring_items === false ? null : draft?.amount ?? null}
                                     onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)}
                                     emptyValue={null}
                                     notifyEmptyOnChange
@@ -2747,7 +3083,7 @@ export function PayPeriodDetail({
                                       onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
                                       className="text-center text-[10px] font-semibold leading-tight text-red-600 transition-colors hover:text-red-700 hover:underline"
                                     >
-                                      Enter an amount or use the employee default
+                                      {payPeriod.includes_recurring_items === false ? 'Enter an amount or clear this payroll amount' : 'Enter an amount or use the employee default'}
                                     </button>
                                   ) : draft?.mode === 'override' ? (
                                     <button
@@ -2755,11 +3091,11 @@ export function PayPeriodDetail({
                                       onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
                                       className="text-[10px] font-medium text-blue-700 hover:text-blue-900 hover:underline"
                                     >
-                                      Override · use {defaultLabel}
+                                      {payPeriod.includes_recurring_items === false ? 'Override · clear this payroll amount' : `Override · use ${defaultLabel}`}
                                     </button>
                                   ) : (
                                     <span className="text-[10px] text-gray-500">
-                                      {field.amount_type === 'manual' ? 'Enter for this payroll' : `Using ${defaultLabel}`}
+                                      {field.amount_type === 'manual' ? 'Enter for this payroll' : payPeriod.includes_recurring_items === false ? 'Recurring setup excluded' : `Using ${defaultLabel}`}
                                     </span>
                                   )
                                 ) : (
@@ -2774,7 +3110,7 @@ export function PayPeriodDetail({
                         <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
                           <p className="mt-1 text-[11px] font-normal text-gray-500">
-                            {isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
+                            {correctionHold ? 'Retained saved gross · pay setup review required' : isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
                           </p>
                         </TableCell>
                       </TableRow>
@@ -2884,6 +3220,8 @@ export function PayPeriodDetail({
                     <div><dt className="text-xs text-neutral-500">Total deductions</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.total_deductions))}</dd></div>
                     <div className="col-span-2 border-t border-neutral-100 pt-2"><dt className="text-xs text-neutral-500">Net pay</dt><dd className="text-lg font-bold tabular-nums text-green-700">{formatCurrency(toNumber(item.net_pay))}</dd></div>
                   </dl>
+                  {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {toNumber(rate.regular_hours)} REG / {toNumber(rate.overtime_hours)} OT{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
+                  {item.correction_pay_basis_hold && <p className="text-xs text-amber-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
                   {item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}
                   <div className="grid grid-cols-2 gap-2">
                     <Link className="inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700" to={payrollItemPath(companyId, payPeriod.id, item.id, { returnTo: currentPath })}>View details</Link>
@@ -2915,7 +3253,7 @@ export function PayPeriodDetail({
                     ))}
                     {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
-                    {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {hasLoans && <TableHead title="Calculated total of linked loan repayments and any standalone loan deduction." className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan deductions</TableHead>}
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
@@ -2932,7 +3270,7 @@ export function PayPeriodDetail({
                     </TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Net Pay</TableHead>
-                    {(isCalculated || isCommitted) && <TableHead className="text-center w-20"></TableHead>}
+                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-gray-50 text-center"></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2999,7 +3337,7 @@ export function PayPeriodDetail({
                                   )}
                                   {hasMultiRateResults && (
                                     <span className="inline-flex items-center rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
-                                      Multi-rate
+                                      Multiple earnings
                                     </span>
                                   )}
                                   {item.time_tracking_provenance && (
@@ -3078,7 +3416,7 @@ export function PayPeriodDetail({
                                 {itemWageRates.map((rate) => {
                                   const totalHours = toNumber(rate.regular_hours) + toNumber(rate.overtime_hours);
                                   return (
-                                    <div key={`${item.id}-${rate.label}-hours`} className="text-xs">
+                                    <div key={`${item.id}-${rate.source_bucket_key || rate.label}-hours`} className="text-xs">
                                       <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                       <span className="text-gray-600">{totalHours}</span>
                                       {toNumber(rate.overtime_hours) > 0 && (
@@ -3099,6 +3437,7 @@ export function PayPeriodDetail({
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
                             {(() => {
+                              if (item.correction_pay_basis_hold) return <span className="text-xs text-amber-800">Retained pay basis · {item.correction_pay_basis_hold.reason}</span>;
                               if (isSalary) {
                                 if (!payPeriod.includes_base_salary) return <span className="font-medium text-primary-700">Excluded from this run</span>;
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
@@ -3122,7 +3461,7 @@ export function PayPeriodDetail({
                                 return (
                                   <div className="space-y-1 text-left inline-block">
                                     {itemWageRates.map((rate) => (
-                                      <div key={`${item.id}-${rate.label}-rate`} className="text-xs">
+                                      <div key={`${item.id}-${rate.source_bucket_key || rate.label}-rate`} className="text-xs">
                                         <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                                         <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                       </div>
@@ -3267,7 +3606,7 @@ export function PayPeriodDetail({
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>
                           <TableCell className={`text-right font-bold text-green-600 ${rowTone}`}>{formatCurrency(toNumber(item.net_pay))}</TableCell>
                           {isCalculated && (
-                            <TableCell className={`text-center ${rowTone}`}>
+                            <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 text-center ${rowTone}`}>
                               <button
                                 onClick={() => setEditingItem(item)}
                                 className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
@@ -3287,9 +3626,9 @@ export function PayPeriodDetail({
                               payPeriod?.cycle !== 'supplemental' &&
                               !item.voided &&
                               !!item.check_number;
-                            if (!canCorrect && !canReplace) return <TableCell />;
+                            if (!canCorrect && !canReplace) return <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 ${rowTone}`} />;
                             return (
-                              <TableCell className={`text-center ${rowTone}`}>
+                              <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 text-center ${rowTone}`}>
                                 <div className="flex flex-col items-center gap-0.5">
                                   {canCorrect && (
                                     <button
@@ -3314,7 +3653,7 @@ export function PayPeriodDetail({
                             );
                           })()}
                           {isCommitted && isContractor && (
-                            <TableCell className={rowTone} />
+                            <TableCell className={`sticky right-0 z-10 border-l border-neutral-200 ${rowTone}`} />
                           )}
                         </TableRow>
                       </Fragment>
@@ -3360,7 +3699,7 @@ export function PayPeriodDetail({
                         <TableCell className="bg-slate-100 text-right text-amber-700">{formatCurrency(registerTotals.employerMedicare)}</TableCell>
                         <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.deductions)}</TableCell>
                         <TableCell className="bg-slate-100 text-right text-green-600">{formatCurrency(registerTotals.net)}</TableCell>
-                        {(isCalculated || isCommitted) && <TableCell className="bg-slate-100" />}
+                        {(isCalculated || isCommitted) && <TableCell className="sticky right-0 z-10 border-l border-neutral-200 bg-slate-100" />}
                       </TableRow>
                     );
                   })()}
@@ -3576,7 +3915,10 @@ export function PayPeriodDetail({
               </div>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={() => loadPayPeriod(payPeriod.id, true)} />
+              <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payPeriod.id, 'work', { returnTo })}#time-tracking-sync`} payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} onChecksChanged={async () => {
+                const result = await loadPayPeriod(payPeriod.id, true);
+                if (result === 'failed') throw new Error('Saved checks could not refresh.');
+              }} />
             </div>
           </Card>
         )}
@@ -3595,9 +3937,11 @@ export function PayPeriodDetail({
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
+            payPeriodVoided={isVoided}
             payDate={payPeriod.pay_date}
             refreshToken={checkPrintRefreshToken}
-            onChecksLoaded={setNonEmployeeChecks}
+            onChecksLoaded={handleNonEmployeeChecksLoaded}
+            onChecksChanged={handleNonEmployeeChecksChanged}
           />
         )}
 
@@ -3613,7 +3957,7 @@ export function PayPeriodDetail({
           />
         )}
 
-        {isCommitted && <PayrollFinalRecordPanel payPeriodId={payPeriod.id} />}
+        {isCommitted && <PayrollFinalRecordPanel companyId={companyId} payPeriodId={payRunId} refreshToken={finalRecordRefreshToken} />}
 
         {/* Reports Download Panel — for calculated/approved/committed */}
         {!isDraft && payrollItems.length > 0 && (
@@ -3643,10 +3987,14 @@ export function PayPeriodDetail({
                 payPeriod={payPeriod}
                 returnTo={returnTo}
                 onPayPeriodChange={(updated) => {
-                  setPayPeriod(updated);
-                  if (updated.payroll_items) {
-                    setPayrollItems(updated.payroll_items);
-                  }
+                  if (updated.id !== payRunId || updated.company_id !== payPeriod.company_id ||
+                      correctionRouteGeneration !== commitRouteGenerationRef.current) return;
+                  setPayPeriod(current => current?.id === updated.id ? {
+                    ...current, ...updated, payroll_items: updated.payroll_items ?? current.payroll_items,
+                  } : current);
+                  if (updated.payroll_items) setPayrollItems(updated.payroll_items);
+                  setCheckPrintRefreshToken(token => token + 1);
+                  void loadPayPeriod(updated.id, true);
                 }}
               />
             </div>
@@ -3683,7 +4031,11 @@ export function PayPeriodDetail({
         }}
         payPeriod={payPeriod}
         employees={employees}
-        onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
+        onImportComplete={reloadSavedSourceImport}
+        onCorrectionRecorded={() => {
+          invalidateAireSource();
+          void loadPayPeriod(payPeriod.id, true, true);
+        }}
         initialSourceId={timeTrackingAutoPreview
           ? payPeriod.time_tracking?.aire_calendar?.source_id
           : undefined}

@@ -19,7 +19,7 @@
 # Line 5d – Additional Medicare Tax wages (wages over $200K threshold per employee)
 # Line 5e – Total SS + Medicare taxes (5a + 5b + 5c + 5d)
 # Line 6  – Total taxes before adjustments (line 5e; line 3 skipped)
-# Line 7  – Adjustment: fractions of cents             [PLACEHOLDER]
+# Line 7  – Employee-share fractions-of-cents reconciliation
 # Line 8  – Adjustment: sick pay                        [PLACEHOLDER]
 # Line 9  – Adjustment: tips / group-term life          [PLACEHOLDER]
 # Line 10 – Total taxes after adjustments (line 6 + 7 + 8 + 9)
@@ -40,7 +40,6 @@ class Form941GuAggregator
   MEDICARE_RATE_COMBINED = 0.029 # 1.45% employee + 1.45% employer
   ADD_MEDICARE_RATE      = 0.009  # Additional Medicare Tax (employee only)
   ADD_MEDICARE_THRESHOLD = 200_000.00
-  FRACTIONS_OF_CENTS_WARNING_THRESHOLD = 0.10
   SS_WAGE_BASE_BY_YEAR = {
     2025 => 176_100.00,
     2026 => 184_500.00
@@ -112,15 +111,17 @@ class Form941GuAggregator
     # --- Line 6 ---
     line6  = line5e.round(2)
 
-    # Monthly liability breakdown (for Form 941 Part 2 / Schedule B support)
+    # Monthly wage-base reference; actual pay-date liabilities are retained
+    # separately in the compliance packet.
     monthly_liability = monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
-    monthly_total_liability = monthly_liability.sum { |month| month[:total_liability].to_f }.round(2)
 
     # --- Adjustments ---
-    adj_fractions_of_cents = fractions_of_cents_adjustment(
-      line6: line6,
-      monthly_total_liability: monthly_total_liability
+    reconciliation = withholding_reconciliation(
+      records: records, ss_base: taxable_ss_wages.to_d + taxable_ss_tips.to_d,
+      medicare_base: taxable_medicare_wages, additional_base: add_medicare_wages,
+      line6: line6
     )
+    adj_fractions_of_cents = reconciliation[:line7_suggestion]
     adj_sick_pay           = nil  # PLACEHOLDER: not tracked in payroll_items
     adj_tips_group_life    = nil  # PLACEHOLDER: not tracked in payroll_items
 
@@ -145,8 +146,9 @@ class Form941GuAggregator
         pay_periods_included: pay_period_count,
         source_summary: source_summary(items),
         caveats: [
-          "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
-          "Line 7 fractions-of-cents uses (monthly Schedule B total - line 6); positive means monthly liability exceeds line 6, negative means it is lower.",
+          "Line 7 compares recorded employee SS and Medicare withholding with the statutory employee share on quarter wage bases. Employer rounding is reviewed separately.",
+          "Quarter employee tax components are rounded once to cents; review the supporting reconciliation before filing.",
+          "Monthly wage-base calculations are a reference breakdown, not the recorded pay-date liabilities required for Schedule B.",
           "Lines 8–9 (adjustments) require manual entry before filing.",
           "Lines 2 and 3 are skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
           "Guam wage withholding is tracked through Form 500/W-1 and shown separately in the tax detail.",
@@ -161,6 +163,7 @@ class Form941GuAggregator
           *historical_caveats
         ]
       },
+      withholding_reconciliation: reconciliation,
       filing_readiness: {
         status: "draft",
         ready_to_file: false,
@@ -168,7 +171,8 @@ class Form941GuAggregator
         blockers: [
           "Lines 8–9 adjustments require manual review.",
           "Lines 11–14 credits, deposits, and balance require federal deposit records.",
-          "Signer and paid-preparer sections are not completed by Cornerstone."
+          "Signer and paid-preparer sections are not completed by Cornerstone.",
+          *(reconciliation[:requires_review] ? [ "Resolve the withholding or recorded-liability reconciliation before filing." ] : [])
         ]
       },
       employer_info: {
@@ -261,7 +265,7 @@ class Form941GuAggregator
     if items.is_a?(ActiveRecord::Relation)
       items.sum(column) || 0
     else
-      items.sum { |item| item.public_send(column).to_f }
+      items.sum(0.to_d) { |item| item.public_send(column).to_d }
     end
   end
 
@@ -276,24 +280,46 @@ class Form941GuAggregator
     end.round(2)
   end
 
-  def fractions_of_cents_adjustment(line6:, monthly_total_liability:)
-    diff = (monthly_total_liability - line6).round(2)
-    return nil if diff.zero?
+  # IRS Publication 15 section 13: fractions of cents concern the employee
+  # share actually withheld, not twice that gap or monthly wage-base rounding.
+  # Modern medicare_tax includes Additional Medicare already.
+  def withholding_reconciliation(records:, ss_base:, medicare_base:, additional_base:, line6:)
+    expected_ss = (ss_base.to_d * ss_rate_combined.to_d / 2).round(2, BigDecimal::ROUND_HALF_UP)
+    expected_medicare = (medicare_base.to_d * medicare_rate_combined.to_d / 2).round(2, BigDecimal::ROUND_HALF_UP)
+    expected_additional = (additional_base.to_d * additional_medicare_rate.to_d).round(2, BigDecimal::ROUND_HALF_UP)
+    expected = expected_ss + expected_medicare + expected_additional
+    recorded = sum(records, :social_security_tax).to_d + sum(records, :medicare_tax).to_d
+    difference = (recorded - expected).round(2, BigDecimal::ROUND_HALF_UP)
+    # A bound is a review signal, never proof that a discrepancy is rounding.
+    rounding_bound = records.length.to_d * "0.015".to_d + "0.02".to_d
+    unexplained = difference.abs > rounding_bound
+    suggestion = unexplained || difference.zero? ? nil : difference.to_f
+    recorded_employer = sum(records, :employer_social_security_tax).to_d + sum(records, :employer_medicare_tax).to_d
+    recorded_liability = recorded + recorded_employer
+    residual = (recorded_liability - line6.to_d - suggestion.to_d).round(2, BigDecimal::ROUND_HALF_UP)
 
-    if diff.abs > FRACTIONS_OF_CENTS_WARNING_THRESHOLD
-      Rails.logger.warn(
-        "[Form941GuAggregator] Large fractions-of-cents adjustment=#{diff} " \
-        "(company=#{company.id}, year=#{year}, quarter=#{quarter}). Verify monthly liability breakdown."
-      )
-    end
-
-    diff
+    {
+      method: "employee_withholding_vs_quarter_statutory_share",
+      rounding: "quarter employee components, nearest cent, half up",
+      expected_employee_ss: expected_ss.to_f,
+      expected_employee_base_medicare: expected_medicare.to_f,
+      expected_employee_additional_medicare: expected_additional.to_f,
+      expected_employee_total: expected.to_f,
+      recorded_employee_total: recorded.round(2, BigDecimal::ROUND_HALF_UP).to_f,
+      employee_difference: difference.to_f,
+      line7_suggestion: suggestion,
+      recorded_employer_total: recorded_employer.round(2, BigDecimal::ROUND_HALF_UP).to_f,
+      recorded_total_liability: recorded_liability.round(2, BigDecimal::ROUND_HALF_UP).to_f,
+      recorded_liability_residual: residual.to_f,
+      requires_review: unexplained || !residual.zero?,
+      explanation: unexplained ?
+        "The employee difference is not explained by ordinary cents rounding. Review source records and adjustments; no automatic line 7 amount is supplied." :
+        "Line 7 reflects only employee withholding rounding. Review any remaining employer or recorded-liability difference separately; do not double the employee adjustment."
+    }
   end
 
-  # Monthly breakdown: total tax liability per calendar month in the quarter.
-  # Useful for determining whether the company is a monthly or semiweekly depositor.
-  # Must reconcile to line 6 total (line 5e for Guam employers), including SS
-  # tips and Additional Medicare.
+  # Reference calculation on monthly aggregate bases. This is not Schedule B:
+  # it does not represent employee taxes actually withheld on each payday.
   def monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
     month_map = records.group_by { |item| record_pay_date(item).beginning_of_month.to_date }

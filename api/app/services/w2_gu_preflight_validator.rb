@@ -16,6 +16,9 @@ class W2GuPreflightValidator
   def run
     findings = []
 
+    unless AnnualTaxConfig.for_year(year) || W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year)
+      findings << Finding.new(severity: "blocking", code: "W2_RULE_YEAR_UNCONFIGURED", message: "W-2 filing rules are not configured for #{year}.")
+    end
     findings.concat(employer_findings)
     employee_ids, source_findings = filing_employee_ids
     findings.concat(source_findings)
@@ -93,7 +96,8 @@ class W2GuPreflightValidator
     native_ids = PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id)
-      .not_voided
+      .not_voided.reportable
+      .where.not(employment_type: "contractor")
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
           .where(company_id: company.id, pay_date: year_range)

@@ -3,10 +3,11 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AirePaymentEvidenceHolds } from './AirePaymentEvidenceHolds';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), create: vi.fn(), retract: vi.fn(), allowed: true }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), create: vi.fn(), retract: vi.fn(), resolve: vi.fn(), retry: vi.fn(), allowed: true }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => mocks.allowed }) }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: {
   airePaymentEvidence: mocks.read, createAirePaymentHold: mocks.create, retractAirePaymentHold: mocks.retract,
+  resolveAirePaymentHold: mocks.resolve, retryAirePaymentResolution: mocks.retry,
 } }));
 const uuid = '282bf986-dd27-46fa-bd70-65ebbc9d9cea';
 const entry = { source_time_entry_id: '41', source_time_entry_version: 2, source_user_uuid: uuid,
@@ -108,4 +109,108 @@ it('preserves retraction reason while invalidating a hold removed by source refr
   expect(mocks.retract).not.toHaveBeenCalled();
   view.rerender(<AirePaymentEvidenceHolds payPeriodId={13} refreshToken={1} onChanged={vi.fn()} />);
   expect(await screen.findByLabelText('Reporter and pending payment evidence')).toHaveProperty('value', '');
+});
+
+
+const paymentOption = { payroll_item_id: 88, pay_period_id: 16, pay_date: '2026-09-18',
+  gross_pay: 120, net_pay: 110, regular_hours: 4, overtime_hours: 0, payment_recorded_at: '2026-09-19T10:00:00Z',
+  payment_method: 'paper_check', payment_reference: '001045', payment_effective_on: '2026-09-18',
+  regular_hours_available: 4, overtime_hours_available: 0 };
+const resolvableHold = { ...hold, source_changed: false, resolution_context: { available: true, reason: null,
+  regular_hours: '4.00', overtime_hours: '0.00', total_hours: '4.00', weekly_context_fingerprint: 'a'.repeat(64) }, payment_options: [paymentOption] };
+const savedMatch = { id: 99, source_payment_attestation_id: hold.id, payroll_item_id: 88, pay_period_id: 16,
+  employee_name: hold.employee_name, original_work_date: hold.work_date, regular_hours: 4, overtime_hours: 0,
+  status: 'pending', allocation_status: 'pending_commit', payment_method: 'paper_check', payment_reference: '001045',
+  payment_effective_on: '2026-09-18', note: 'Verified unchanged hours and the existing delivered check', original_report: { reason: hold.reason, attested_at: '2026-09-10T10:00:00Z', hours: 4 },
+  last_sync_error: 'Lost Source receipt', can_retry: true, hours_reserved: true };
+
+it('shows lifecycle instants in Guam across a non-Guam midnight boundary while retaining business dates', async () => {
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = 'America/Los_Angeles';
+  try {
+    const instant = '2026-09-18T15:30:00Z'; // Sep19 01:30 Guam, Sep18 08:30 Los Angeles.
+    expect(new Date(instant).getDate()).toBe(18);
+    mocks.read.mockResolvedValue({ candidates: [], resolution_access: true,
+      payment_attestations: [{ ...resolvableHold, id: '503', payment_options: [{ ...paymentOption, payment_recorded_at: instant }] },
+        { ...hold, id: '502', status: 'resolved', resolved_manual_allocation_id: 10, resolved_at: instant }],
+      payment_resolutions: [{ ...savedMatch, status: 'matched', original_report: { ...savedMatch.original_report, attested_at: instant } }] });
+    const user = userEvent.setup();
+    render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+    await screen.findByText(/Reported Sep 19, 2026, 1:30:00 AM GMT\+10/);
+    expect(screen.getByText(/resolved Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Match existing payment' }));
+    await user.selectOptions(screen.getByLabelText('Existing issued payroll payment'), '88');
+    expect(screen.getByText(/Scheduled pay date Sep 18, 2026 · payment date Sep 18, 2026 · evidence recorded Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    expect(screen.getByText(/Synthetic Worker · Sep 3, 2026 · 4.00 hours/)).toBeTruthy();
+  } finally {
+    if (originalTimezone == null) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
+});
+
+it('matches exact existing payment with complete hours, useful evidence preview and no new payment', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true, payment_resolutions: [] });
+  mocks.resolve.mockResolvedValue({ payment_resolution: { ...savedMatch, status: 'matched' } });
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Match existing payment' }));
+  const submit = screen.getByRole('button', { name: 'Confirm existing payment match' });
+  expect(submit.hasAttribute('disabled')).toBe(true);
+  await user.selectOptions(screen.getByLabelText('Existing issued payroll payment'), '88');
+  expect(screen.getByText(/Original payroll: 4.00 REG/).textContent).toContain('gross $120.00 · net $110.00');
+  await user.type(screen.getByLabelText('Existing payment match reason'), savedMatch.note);
+  await user.click(submit);
+  expect(mocks.resolve).toHaveBeenCalledWith(12, '501', { source_user_uuid: uuid, payroll_item_id: 88, expected_version: 3, reason: savedMatch.note });
+  expect(await screen.findByText(/no new payment was created/)).toBeTruthy();
+});
+
+it('keeps a pending server match visible across remount, blocks retraction and retries only its saved reservation', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true, payment_resolutions: [savedMatch] });
+  mocks.retry.mockResolvedValue({ payment_resolution: { ...savedMatch, status: 'matched' } });
+  const view = render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await screen.findByText(/Match receipt pending/);
+  expect(screen.getByRole('button', { name: 'Match existing payment' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Retract hold' }).hasAttribute('disabled')).toBe(true);
+  view.unmount();
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Retry saved match' }));
+  expect(mocks.retry).toHaveBeenCalledWith(12, 99);
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Saved match reconciled/)).toBeTruthy();
+});
+
+it('rejects split REG/OT capacity and unavailable review context without losing the report', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [{ ...resolvableHold, payment_options: [{ ...paymentOption, regular_hours_available: 3, overtime_hours_available: 1 }] }], resolution_access: true });
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Match existing payment' }));
+  await user.selectOptions(screen.getByLabelText('Existing issued payroll payment'), '88');
+  await user.type(screen.getByLabelText('Existing payment match reason'), savedMatch.note);
+  expect(screen.getByRole('button', { name: 'Confirm existing payment match' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('alert').textContent).toContain('entire separate REG and OT');
+  expect(mocks.resolve).not.toHaveBeenCalled();
+});
+
+it('retains resolved Source report history after pending list becomes empty', async () => {
+  mocks.read.mockResolvedValue({ candidates: [], payment_attestations: [{ ...hold, status: 'resolved', resolved_manual_allocation_id: '601' }], payment_resolutions: [{ ...savedMatch, status: 'matched', allocation_status: 'committed' }] });
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  expect(await screen.findByText(/Matched existing payment/)).toBeTruthy();
+  expect(screen.getByText(/current source allocation: committed/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Retract hold' })).toBeNull();
+});
+
+
+it('refreshes the durable pending error after a rejected saved retry and keeps the new action feedback visible', async () => {
+  const user = userEvent.setup();
+  mocks.read.mockResolvedValueOnce({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true, payment_resolutions: [savedMatch] })
+    .mockResolvedValue({ candidates: [], payment_attestations: [resolvableHold], resolution_access: true,
+      payment_resolutions: [{ ...savedMatch, last_sync_error: 'New saved receipt rejection' }] });
+  mocks.retry.mockRejectedValue(new Error('New saved receipt rejection'));
+  render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
+  await user.click(await screen.findByRole('button', { name: 'Retry saved match' }));
+  await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+  expect((await screen.findByRole('alert')).textContent).toContain('New saved receipt rejection');
+  expect(screen.queryByText('Lost Source receipt')).toBeNull();
+  expect(screen.getAllByText('New saved receipt rejection').length).toBe(2);
 });

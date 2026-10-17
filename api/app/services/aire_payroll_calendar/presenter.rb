@@ -29,6 +29,7 @@ module AirePayrollCalendar
         enabled: true,
         source_id: @source.id,
         source_name: @source.name,
+        source_capabilities: @source.connector.capabilities,
         eligible: desired.present? && !missed_unpublished_cutoff,
         eligibility_error: eligibility_error(missed_unpublished_cutoff),
         eligibility_code: eligibility_code(missed_unpublished_cutoff),

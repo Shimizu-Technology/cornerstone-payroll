@@ -487,6 +487,14 @@ class QuarterlyCompliancePacketBuilder
       details: { mapped_components: component_taxability.length },
       href: "/pay-periods"
     )
+    reconciliation = federal_941_section.dig(:report, :withholding_reconciliation)
+    checks << review_check(
+      "form_941_withholding_reconciled",
+      reconciliation.present? && !reconciliation[:requires_review],
+      "Review employee withholding rounding and any remaining recorded-liability difference before filing Form 941.",
+      details: reconciliation || {},
+      href: "/reports"
+    )
     checks << review_check(
       "form_941_lines_2_3_skipped",
       federal_941_section.dig(:report, :lines, :line2_wages_tips_other).nil? && federal_941_section.dig(:report, :lines, :line3_fit_withheld).nil?,

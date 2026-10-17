@@ -2,12 +2,18 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CheckItem, EarningsStatementItem, PayPeriod } from '@/types';
+import type { CompanyListItem } from '@/services/api';
+import type { CheckItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { ChecksPanel } from './ChecksPanel';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 
+const companyContext = vi.hoisted(() => ({ activeCompany: null as CompanyListItem | null }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => companyContext }));
+beforeEach(() => { companyContext.activeCompany = null; });
+
 const apiMocks = vi.hoisted(() => ({
   list: vi.fn(),
+  checkPdf: vi.fn(),
   markDelivered: vi.fn(),
   confirmDirectDepositPayment: vi.fn(),
   batchPdf: vi.fn(),
@@ -15,18 +21,23 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/services/api', () => ({
-  checksApi: { list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
+  checksApi: { checkPdf: apiMocks.checkPdf, list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
   payStubsApi: { batchPdf: apiMocks.batchPdf, directDepositStubsPdf: apiMocks.directDepositStubsPdf },
 }));
 
+const previewMocks = vi.hoisted(() => ({ show: vi.fn() }));
+
 vi.mock('@/components/documents/PdfPreview', () => ({
-  PdfPreview: ({ artifact, onClose }: { artifact: { blob: Blob; filename: string; title?: string } | null; onClose: () => void }) => artifact ? (
+  PdfPreview: ({ artifact, onClose, actions }: { artifact: { blob: Blob; filename: string; title?: string } | null; onClose: () => void; actions?: import('react').ReactNode }) => {
+    if (artifact) previewMocks.show(artifact);
+    return artifact ? (
     <section role="dialog" aria-label={artifact.title}>
       <p>{artifact.filename}</p>
       <p>Shared PDF preview</p>
+      {actions}
       <button onClick={onClose}>Close PDF preview</button>
     </section>
-  ) : null,
+  ) : null; },
 }));
 
 const check = {
@@ -117,6 +128,40 @@ describe('ChecksPanel earnings statements', () => {
     vi.spyOn(window, 'open').mockReturnValue({ addEventListener: vi.fn(), print: vi.fn() } as unknown as Window);
   });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it('keeps reviewer records and previews readable without payment mutation controls', async () => {
+    companyContext.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: false } as CompanyListItem;
+    apiMocks.checkPdf.mockResolvedValue(new Blob(['%PDF']));
+    renderStatements();
+    await screen.findByRole('listitem', { name: 'Earnings statement for Avery Example' });
+    expect(screen.queryByRole('button', { name: /Record Issued|Reissue|Void|Confirm bank payment|Change payment method/ })).toBeNull();
+    expect(screen.getAllByRole('textbox', { name: 'Check number for Avery Example' }).every(input => (input as HTMLInputElement).disabled)).toBe(true);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]);
+    expect(await screen.findByText('Shared PDF preview')).toBeTruthy();
+    expect(apiMocks.checkPdf).toHaveBeenCalledWith(42, undefined);
+    expect(screen.getByRole('button', { name: 'Download all earnings statements' })).toBeTruthy();
+  });
+
+  it('retains an issued-check draft after denied save and a capability refresh', async () => {
+    companyContext.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true } as CompanyListItem;
+    apiMocks.markDelivered.mockRejectedValueOnce(new Error('Workspace access expired. No changes were saved.'));
+    const rendered = renderStatements();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Record Issued' }))[0]);
+    const dialog = screen.getByRole('dialog', { name: 'Record check issued' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Note (optional)' }), { target: { value: 'Keep the entered handoff draft' } });
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record Issued' }));
+    await screen.findByText('Workspace access expired. No changes were saved.');
+    companyContext.activeCompany = { ...companyContext.activeCompany, workspace_can_write: false, test_workspace_expired: true };
+    rendered.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed', pay_date: '2026-10-08' } as PayPeriod} /></FeedbackProvider>);
+    const retained = screen.getByRole('dialog', { name: 'Record check issued' });
+    expect((within(retained).getByRole('textbox', { name: 'Note (optional)' }) as HTMLInputElement).value).toBe('Keep the entered handoff draft');
+    expect((within(retained).getByRole('button', { name: 'Record Issued' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(retained).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(retained).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Record check issued' })).toBeNull();
+    expect(apiMocks.markDelivered).toHaveBeenCalledOnce();
+  });
 
   it('shows a statement-only employee once with amounts and no physical-payment actions', async () => {
     renderStatements();
@@ -253,4 +298,195 @@ describe('ChecksPanel earnings statements', () => {
     expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
   });
 
+});
+
+
+describe('ChecksPanel paper status scope', () => {
+  const noPaperMeta = { ...meta, total: 0, unprinted: 0, prepared: 0, printed: 0, delivered: 0, voided: 0 };
+  const bankConfirmation = { settled_on: '2026-11-22', bank_reference: 'SYNTHETIC-P01-BANK-20261122-4H', confirmed_at: '2026-11-22T07:02:00Z' };
+  const deposit = { id: depositStatement.id, employee_id: depositStatement.employee_id, employee_name: depositStatement.employee_name, net_pay: depositStatement.net_pay };
+  const countLabel = (count: number, label: string) => (_: string, element: Element | null) =>
+    Boolean(element?.tagName === 'SPAN' && element.textContent === `${count} ${label}`);
+
+  beforeEach(() => { apiMocks.list.mockReset(); });
+  afterEach(cleanup);
+
+  it.each([false, true])('omits paper status pills for DD-only payroll, confirmed=%s', async (confirmed) => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [{ ...deposit, payment_confirmation: confirmed ? bankConfirmation : null }], earnings_statement_items: [depositStatement], meta: { ...noPaperMeta, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'not prepared'))).toBeNull();
+    expect(screen.getByText(countLabel(0, 'paper checks'))).toBeTruthy();
+    expect(screen.getByText(countLabel(1, 'direct-deposit stubs'))).toBeTruthy();
+    if (confirmed) {
+      expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
+    } else {
+      expect(screen.getByRole('button', { name: 'Confirm bank payment' })).toBeTruthy();
+    }
+  });
+
+  it('scopes issued counts to the paper item in a mixed confirmed-bank run', async () => {
+    const delivered = { ...check, check_status: 'delivered' as const };
+    apiMocks.list.mockResolvedValue({ checks: [delivered], direct_deposit_items: [{ ...deposit, payment_confirmation: bankConfirmation }], earnings_statement_items: [paperStatement, depositStatement], meta: { ...meta, prepared: 0, delivered: 1, direct_deposit_count: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(depositStatement.employee_name);
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    expect(within(group).getByText('Paper check status')).toBeTruthy();
+    expect(within(group).getByText(countLabel(1, 'issued'))).toBeTruthy();
+    expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+    expect(within(group).queryByText(/Bank paid/)).toBeNull();
+  });
+
+  it('preserves every supplied paper status count including voided history', async () => {
+    const statuses = ['unprinted', 'prepared', 'printed', 'delivered', 'voided'] as const;
+    const paperChecks = statuses.map((status, index) => ({ ...check, id: 42 + index, employee_name: `Paper Employee ${index}`, check_number: String(8101 + index), check_status: status, voided: status === 'voided' }));
+    apiMocks.list.mockResolvedValue({ checks: paperChecks, direct_deposit_items: [], earnings_statement_items: [], meta: { ...meta, total: 5, unprinted: 1, prepared: 1, printed: 1, delivered: 1, voided: 1 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(5, 'paper checks'));
+    const group = screen.getByRole('group', { name: 'Paper check status' });
+    for (const label of ['not prepared', 'prepared', 'printed', 'issued', 'voided']) {
+      expect(within(group).getByText(countLabel(1, label))).toBeTruthy();
+    }
+  });
+
+  it('omits irrelevant paper status pills for an empty run', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [], meta: noPaperMeta });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    await screen.findByText(countLabel(0, 'paper checks'));
+    expect(screen.queryByRole('group', { name: 'Paper check status' })).toBeNull();
+    expect(screen.queryByText(countLabel(0, 'issued'))).toBeNull();
+  });
+});
+
+const pendingCancellation = { status: 'pending' as const, pending_count: 2, acknowledged_count: 1,
+  oldest_pending_at: '2026-10-08T01:00:00Z', errors: [], hours_reserved: true };
+
+function renderCancellationStatement(state: PaymentCancellationSync = pendingCancellation, confirmed = false) {
+  const item = { ...depositStatement, payment_cancellation_sync: state };
+  apiMocks.list.mockResolvedValue({ checks: [], earnings_statement_items: [item],
+    direct_deposit_items: [{ ...item, payment_confirmation: confirmed ? { settled_on: '2026-10-08', bank_reference: 'Bank completed 42', confirmed_at: '2026-10-08T04:00:00Z' } : null }],
+    meta: { ...meta, total: 0, prepared: 0, direct_deposit_count: 1 } });
+  return render(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'committed' } as PayPeriod}
+    timeTrackingReviewHref="/companies/7/pay-runs/8/work?return_to=%2Fcompanies%2F7%2Fpay-runs%2F8%2Fchecks#time-tracking-sync" /></FeedbackProvider>);
+}
+
+describe('ChecksPanel cancellation sync evidence', () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(cleanup);
+
+  it('shows pending reservation coverage without disabling truthful bank confirmation', async () => {
+    renderCancellationStatement();
+    expect(await screen.findByText('Check cancellation pending time tracking confirmation')).toBeTruthy();
+    expect(screen.getByText(/2 cancellation records awaiting confirmation/)).toBeTruthy();
+    expect(screen.getByText(/payroll hours remain reserved in time tracking/)).toBeTruthy();
+    const link = screen.getByRole('link', { name: 'Review time tracking sync' });
+    expect(link.getAttribute('href')).toBe('/companies/7/pay-runs/8/work?return_to=%2Fcompanies%2F7%2Fpay-runs%2F8%2Fchecks#time-tracking-sync');
+    const confirm = screen.getByRole('button', { name: 'Confirm bank payment' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(await screen.findByRole('dialog', { name: 'Confirm bank payment' })).toBeTruthy();
+    expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
+  });
+
+  it('keeps actual completed bank evidence visible while source cancellation still waits', async () => {
+    renderCancellationStatement(pendingCancellation, true);
+    expect(await screen.findByText(/Bank paid 2026-10-08 · Bank completed 42/)).toBeTruthy();
+    expect(screen.getByText('Check cancellation pending time tracking confirmation')).toBeTruthy();
+    expect(screen.getByText(/separate from any recorded bank payment/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
+  });
+
+  it('distinguishes a failed cancellation from bank evidence and provides review guidance', async () => {
+    renderCancellationStatement({ ...pendingCancellation, status: 'error', errors: ['The connected source could not confirm this cancellation.'] }, true);
+    expect(await screen.findByText('Check cancellation sync needs attention')).toBeTruthy();
+    expect(screen.getByText('The connected source could not confirm this cancellation.')).toBeTruthy();
+    expect(screen.getByText(/Bank paid 2026-10-08/)).toBeTruthy();
+  });
+
+  it('clears waiting guidance only after the API reports acknowledgement', async () => {
+    const view = renderCancellationStatement();
+    await screen.findByText('Check cancellation pending time tracking confirmation');
+    apiMocks.list.mockResolvedValue({ checks: [], earnings_statement_items: [{ ...depositStatement,
+      payment_cancellation_sync: { ...pendingCancellation, status: 'acknowledged', pending_count: 0, oldest_pending_at: null, hours_reserved: false } }],
+      direct_deposit_items: [], meta: { ...meta, total: 0, direct_deposit_count: 1 } });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'committed' } as PayPeriod} refreshToken={1} /></FeedbackProvider>);
+    expect(await screen.findByText('Check cancellation confirmed by time tracking')).toBeTruthy();
+    expect(screen.queryByText(/payroll hours remain reserved/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Review time tracking sync' })).toBeNull();
+  });
+
+  it('does not invent a sync label for an ordinary no-source payment', async () => {
+    renderStatements([depositStatement]);
+    await screen.findByText('Drew Deposit');
+    expect(screen.queryByText(/Check cancellation/)).toBeNull();
+  });
+
+  it('shows the same cancellation status in paper card and table without copying it to another item', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [{ ...check, payment_cancellation_sync: pendingCancellation },
+      { ...check, id: 99, employee_id: 99, employee_name: 'Other Employee', check_number: '8199' }],
+      direct_deposit_items: [], earnings_statement_items: [], meta: { ...meta, total: 2 } });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    const notices = await screen.findAllByText('Check cancellation pending time tracking confirmation');
+    expect(notices).toHaveLength(2);
+    const otherRow = screen.getAllByRole('row').find(row => within(row).queryByText('Other Employee'))!;
+    expect(within(otherRow).queryByText(/Check cancellation/)).toBeNull();
+  });
+});
+
+
+describe('individual check preview', () => {
+  beforeEach(() => { vi.clearAllMocks(); apiMocks.checkPdf.mockReset(); });
+  afterEach(cleanup);
+
+  it('opens the original PDF with matching filename and stub actions without issuing a payment', async () => {
+    const blob = new Blob(['original-check'], { type: 'application/pdf' });
+    apiMocks.checkPdf.mockResolvedValue(blob);
+    renderStatements([paperStatement]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[0]);
+    const dialog = await screen.findByRole('dialog', { name: 'Check #8101 — Avery Example' });
+    expect(previewMocks.show).toHaveBeenLastCalledWith(expect.objectContaining({ blob, filename: 'check_8101.pdf' }));
+    expect(within(dialog).getByRole('button', { name: 'Print Stub' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Download Stub' })).toBeTruthy();
+    expect(apiMocks.markDelivered).not.toHaveBeenCalled();
+    expect(apiMocks.confirmDirectDepositPayment).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close PDF preview' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('ignores a previous period response arriving after navigation', async () => {
+    let resolve!: (blob: Blob) => void;
+    apiMocks.checkPdf.mockReturnValue(new Promise<Blob>((done) => { resolve = done; }));
+    const view = renderStatements([paperStatement]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Preview' }))[0]);
+    apiMocks.list.mockResolvedValue({ checks: [], direct_deposit_items: [], earnings_statement_items: [], meta });
+    view.rerender(<FeedbackProvider><ChecksPanel payPeriod={{ id: 9, status: 'committed' } as PayPeriod} /></FeedbackProvider>);
+    await act(async () => { resolve(new Blob(['old-period'])); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(previewMocks.show).not.toHaveBeenCalled();
+  });
+
+  it('keeps the most recently requested check when an older request finishes later', async () => {
+    let resolveFirst!: (blob: Blob) => void;
+    const latest = new Blob(['latest-check']);
+    apiMocks.checkPdf.mockReturnValueOnce(new Promise<Blob>((done) => { resolveFirst = done; })).mockResolvedValueOnce(latest);
+    apiMocks.list.mockResolvedValue({ checks: [check, { ...check, id: 43, check_number: '8102', employee_name: 'Second Employee' }], direct_deposit_items: [], earnings_statement_items: [], meta });
+    render(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} /></FeedbackProvider>);
+    const buttons = await screen.findAllByRole('button', { name: 'Preview' });
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    await screen.findByRole('dialog', { name: 'Check #8102 — Second Employee' });
+    await act(async () => { resolveFirst(new Blob(['earlier-check'])); });
+    expect(previewMocks.show).toHaveBeenLastCalledWith(expect.objectContaining({ blob: latest, filename: 'check_8102.pdf' }));
+    expect(screen.queryByRole('dialog', { name: 'Check #8101 — Avery Example' })).toBeNull();
+  });
+});
+
+it('does not promise payment or official statement actions on a valid approved workspace baseline', () => {
+  companyContext.activeCompany = { test_workspace: true, workspace_can_write: false } as unknown as CompanyListItem;
+  render(<ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'approved', parallel_run: true, test_workspace_role: 'baseline' } as PayPeriod} />);
+  expect(screen.getByText(/Payments and official earnings statements are unavailable in test workspaces/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Print|Download|View stub|Issue|Record/i })).toBeNull();
 });

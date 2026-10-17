@@ -20,14 +20,37 @@ class TimeTrackingManualAllocation < ApplicationRecord
   validate :hours_are_positive
   validate :ownership_reconciles
   validate :classification_reconciliation_ownership
+  validate :preserve_payment_resolution_evidence, on: :update
 
   before_validation :assign_command_ids, on: :create
+
+  scope :resolution_history_for_period, ->(period) {
+    where("pay_period_id = :id OR payment_resolution_intent->>'review_pay_period_id' = :reference OR original_work_date BETWEEN :start AND :finish",
+      id: period.id, reference: period.id.to_s, start: period.start_date, finish: period.end_date)
+  }
+  scope :pending_payment_resolution, -> { where.not(payment_resolution_intent: {}).where(payment_resolution_receipt: {}) }
+
+  def payment_resolution_pending?
+    payment_resolution_intent.present? && payment_resolution_receipt.blank?
+  end
 
   def total_hours
     regular_hours.to_d + overtime_hours.to_d
   end
 
   private
+
+  def preserve_payment_resolution_evidence
+    return if payment_resolution_intent_in_database.blank?
+
+    frozen_fields = %w[payment_resolution_intent source_payment_attestation_id time_tracking_source_id company_id
+      pay_period_id payroll_item_id employee_id created_by_id source_user_uuid source_time_entry_id
+      source_time_entry_version original_work_date regular_hours overtime_hours reconciliation_note]
+    if (changes_to_save.keys & frozen_fields).any? ||
+        (payment_resolution_receipt_in_database.present? && will_save_change_to_payment_resolution_receipt?)
+      errors.add(:base, "The original reported-payment command, reservation and receipt are immutable")
+    end
+  end
 
   def assign_command_ids
     self.commit_command_id ||= SecureRandom.uuid

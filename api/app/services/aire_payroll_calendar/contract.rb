@@ -66,7 +66,7 @@ module AirePayrollCalendar
     end
 
     def validate!
-      fail_contract!("Only regular payroll runs can be published to AIRE", "unsupported_run") unless pay_period.regular_cycle? && pay_period.regular_run?
+      fail_contract!("Only regular payroll runs can publish a time-tracking calendar.", "unsupported_run") unless pay_period.regular_cycle? && pay_period.regular_run?
       unless confirmed_semimonthly_schedule?
         future_schedule = next_confirmed_semimonthly_schedule
         if future_schedule

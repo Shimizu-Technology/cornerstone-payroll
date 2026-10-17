@@ -385,23 +385,15 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
-    expect(response).to have_http_status(:ok)
-    json = JSON.parse(response.body)
-    expect(json.fetch("data").pluck("id")).to include(selected_log.id)
-    expect(json.fetch("data").pluck("company_id")).to all(eq(company.id))
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+    expect(response.parsed_body).not_to have_key("data")
 
     get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
-    expect(response).to have_http_status(:ok)
-    fallback_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
-    expect(fallback_exported_subjects).to include("Selected client employee")
-    expect(fallback_exported_subjects).not_to include(
-      "Other client employee",
-      "Second actor employee",
-      "Unassigned client employee",
-      "Organization user",
-      "Foreign user"
-    )
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+    expect(response.body).not_to include("Selected client employee")
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 

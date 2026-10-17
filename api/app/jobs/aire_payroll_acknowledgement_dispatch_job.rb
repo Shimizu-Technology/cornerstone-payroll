@@ -6,5 +6,6 @@ class AirePayrollAcknowledgementDispatchJob < ApplicationJob
   def perform
     AirePayrollAcknowledgement.dispatch_pending!
     AirePayrollEntryAcknowledgement.dispatch_pending!
+    TimeTrackingCorrectionReceipt.dispatch_pending!
   end
 end

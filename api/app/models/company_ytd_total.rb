@@ -37,16 +37,16 @@ class CompanyYtdTotal < ApplicationRecord
   end
 
   # CPR-71: Reverse the YTD contribution of a payroll item (used when voiding a committed period).
-  # Floors each field at 0 to guard against rounding edge-cases producing negative totals.
+  # Preserve signed reversal balances while later negative corrections remain.
   def subtract_payroll_item!(payroll_item)
     with_lock do
-      self.gross_pay              = [ gross_pay - payroll_item.gross_pay.to_f, 0 ].max
-      self.net_pay                = [ net_pay - payroll_item.net_pay.to_f, 0 ].max
-      self.withholding_tax        = [ withholding_tax - payroll_item.withholding_tax.to_f, 0 ].max
-      self.social_security_tax    = [ social_security_tax - payroll_item.social_security_tax.to_f, 0 ].max
-      self.medicare_tax           = [ medicare_tax - payroll_item.medicare_tax.to_f, 0 ].max
-      self.employer_social_security = [ employer_social_security - payroll_item.employer_social_security_tax.to_f, 0 ].max
-      self.employer_medicare      = [ employer_medicare - payroll_item.employer_medicare_tax.to_f, 0 ].max
+      self.gross_pay              = gross_pay.to_d - payroll_item.gross_pay.to_d
+      self.net_pay                = net_pay.to_d - payroll_item.net_pay.to_d
+      self.withholding_tax        = withholding_tax.to_d - payroll_item.withholding_tax.to_d
+      self.social_security_tax    = social_security_tax.to_d - payroll_item.social_security_tax.to_d
+      self.medicare_tax           = medicare_tax.to_d - payroll_item.medicare_tax.to_d
+      self.employer_social_security = employer_social_security.to_d - payroll_item.employer_social_security_tax.to_d
+      self.employer_medicare      = employer_medicare.to_d - payroll_item.employer_medicare_tax.to_d
       save!
     end
   end

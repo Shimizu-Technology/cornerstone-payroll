@@ -35,7 +35,7 @@ class ClientDocumentPreviewGenerator
       )
 
       unless status.success?
-        raise GenerationFailed, [stderr.presence, stdout.presence, "LibreOffice conversion failed"].compact.join("\n")
+        raise GenerationFailed, [ stderr.presence, stdout.presence, "LibreOffice conversion failed" ].compact.join("\n")
       end
 
       pdf_path = Dir[File.join(output_dir, "*.pdf")].first
@@ -99,7 +99,7 @@ class ClientDocumentPreviewGenerator
     return if status.success?
 
     Rails.logger.warn(
-      "Spreadsheet preview optimization failed for document #{document.id}: #{[stderr.presence, stdout.presence].compact.join("\n")}"
+      "Spreadsheet preview optimization failed for document #{document.id}: #{[ stderr.presence, stdout.presence ].compact.join("\n")}"
     )
   rescue StandardError => e
     Rails.logger.warn("Spreadsheet preview optimization errored for document #{document.id}: #{e.message}")

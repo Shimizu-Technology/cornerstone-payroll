@@ -28,6 +28,7 @@ class PayPeriodLifecycleService
       validate_employee_document_readiness!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -76,6 +77,7 @@ class PayPeriodLifecycleService
       validate_employee_document_readiness!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       committed_items = pay_period.payroll_items.includes(
         :employee,
         payroll_item_deductions: :deduction_type,
@@ -86,6 +88,7 @@ class PayPeriodLifecycleService
         item.update!(payment_delivery_method: item.effective_payment_delivery_method)
       end
 
+      validate_financial_source_correction!
       pay_period.update!(
         status: "committed",
         committed_at: Time.current,
@@ -113,6 +116,14 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_source_earnings!
+    pay_period.payroll_items.not_voided.each do |item|
+      TimeTracking::SourceEarningsConservation.validate!(item, calculated: true)
+    end
+  rescue ArgumentError => e
+    raise InvalidTransitionError, e.message
+  end
 
   def validate_payroll_participation!
     items = pay_period.payroll_items.not_voided.includes(:employee).to_a
@@ -183,8 +194,20 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, e.message
   end
 
+  def validate_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).validate_before_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
+  def record_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).record_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
   def record_aire_processing_acknowledgements
-    result = { batch: [], entries: [] }
+    result = { batch: [], entries: record_financial_source_correction!.map(&:id) }
     pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
       next unless import.finalized_batch?
 
@@ -224,7 +247,7 @@ class PayPeriodLifecycleService
     EmployeeLoan.where(employee_id: employee_ids).order(:employee_id, :id).lock.load
 
     committed_items.each do |item|
-      PayrollCalculator.for(item.employee, item).apply_loan_payments!
+      PayrollCalculator.for(item.employee, item).apply_loan_payments!(actor: actor)
       employee_ytds.fetch(item.employee_id).add_payroll_item!(item)
       company_ytd.add_payroll_item!(item)
     end

@@ -5,6 +5,7 @@ require "uri"
 require "json"
 require "openssl"
 require "timeout"
+require "digest"
 
 module TimeTracking
   class Client
@@ -35,6 +36,37 @@ module TimeTracking
         new(source, delegation: delegation)
       else
         raise Error, "Connect your payroll-capable time tracking account in payroll before reviewing source hours"
+      end
+    end
+
+    def payroll_command_binding
+      if @actor
+        { "kind" => "account_link", "actor_id" => @actor.id }
+      elsif @delegation
+        { "kind" => "delegation", "actor_id" => @delegation.user_id,
+          "delegation_id" => @delegation.id, "credential_fingerprint" => Digest::SHA256.hexdigest(@delegation.token) }
+      else
+        raise Error, "The saved payroll command requires an authenticated actor"
+      end
+    end
+
+    def self.for_saved_payroll_actor(source, actor:, binding:)
+      raise Error, "Retry as the original payroll operator" unless binding.is_a?(Hash) && binding["actor_id"] == actor.id
+      if binding["kind"] == "account_link"
+        connected = new(source).payroll_account_link(external_actor_id: actor.id).dig("account_link", "connected") == true
+        raise Error, "Reconnect the original payroll operator account before retrying the saved match" unless connected
+
+        new(source, actor: actor)
+      elsif binding["kind"] == "delegation"
+        delegation = source.delegation_for(actor)
+        unless delegation && delegation.id == binding["delegation_id"] &&
+            Digest::SHA256.hexdigest(delegation.token) == binding["credential_fingerprint"]
+          raise Error, "The original saved payroll delegation changed; review it before retrying"
+        end
+
+        new(source, delegation: delegation)
+      else
+        raise Error, "The original saved payroll actor binding is unavailable"
       end
     end
 
@@ -174,6 +206,7 @@ module TimeTracking
       require_capability!(:manual_allocations)
       delegated_request_json(
         payroll_cockpit_uri("/manual_allocations/#{normalized_cockpit_id(allocation_id)}/issue"),
+        historical_manual_issue: true,
         body: {
           command_id: command_id,
           expected_version: expected_version,
@@ -256,11 +289,29 @@ module TimeTracking
       request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
     end
 
-    def payroll_payment_attestations(source_user_uuid:, page: 1)
+    def payroll_payment_attestations(source_user_uuid: nil, page: 1, start_date: nil, end_date: nil)
       require_capability!(:payment_attestations)
-      uri = payroll_cockpit_uri("/payment_attestations", source_user_uuid: source_user_uuid, page: page, per_page: 250)
+      query = { source_user_uuid: source_user_uuid, page: page, per_page: 250 }.compact
+      if start_date.present? || end_date.present?
+        require_capability!(:payment_attestation_resolution_v1)
+        raise Error, "Both work-period dates are required for payment evidence review" if start_date.blank? || end_date.blank?
+
+        query.merge!(start_date: start_date, end_date: end_date)
+      end
+      if source_user_uuid.blank? && (start_date.blank? || end_date.blank?)
+        raise Error, "A scoped employee or both work-period dates are required for payment evidence review"
+      end
+      uri = payroll_cockpit_uri("/payment_attestations", query)
       require_secure_payroll_transport!(uri)
-      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      result = request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      if start_date.present? || end_date.present?
+        identity = ConnectionIdentity.validate!(source: @source, payload: result)
+        raise Error, "Verify this source installation before reviewing period payment evidence" if identity.legacy || !@source.remote_identity_pinned?
+        validate_integration_response!(result)
+      end
+      result
+    rescue ConnectionIdentity::Error => e
+      raise Error, e.message
     end
 
     def create_payroll_payment_attestation(source_time_entry_id:, source_user_uuid:, command_id:, expected_version:, reason:)
@@ -275,6 +326,11 @@ module TimeTracking
       require_capability!(:payment_attestations)
       delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/retract"),
         body: { command_id: command_id, expected_version: expected_version, reason: reason })
+    end
+
+    def resolve_payroll_payment_attestation(attestation_id:, verified_saved_capability: false, **payload)
+      require_capability!(:payment_attestation_resolution_v1) unless verified_saved_capability
+      delegated_request_json(payroll_cockpit_uri("/payment_attestations/#{normalized_cockpit_id(attestation_id)}/resolve"), body: payload, historical_manual_issue: verified_saved_capability)
     end
 
     def payroll_cockpit_time_entry(entry_id:)
@@ -442,6 +498,68 @@ module TimeTracking
       payload
     end
 
+    def record_financial_correction_event(batch_id:, payload:, link_request:, binding_id: nil)
+      require_capability!(:payroll_obligation_correction_v1)
+      raise Error, "Verify the connected Source identity before connecting corrected hours" unless @source.active? && @source.remote_identity_pinned?
+      response = request_json(payroll_batch_obligation_events_uri(batch_id), validate_source: false, method: :post, body: payload)
+      validate_financial_correction_receipt!(response, expected: payload, link_request: link_request, binding_id: binding_id)
+      response
+    end
+
+    def validate_financial_correction_receipt!(response, expected:, link_request: expected, binding_id: nil, historical: false)
+      require_capability!(:payroll_obligation_correction_v1)
+      raise Error, "Verify the active Source identity before using corrected payroll ownership" unless @source.active? && @source.remote_identity_pinned?
+      identity = ConnectionIdentity.validate!(source: @source, payload: response)
+      raise Error, "Source omitted its verified correction descriptor" if identity.legacy || !identity.capabilities.include?("payroll_obligation_correction_v1")
+      validate_integration_response!(response) unless historical
+      event = response["entry_processing"]
+      valid = event.is_a?(Hash)
+      scalar = %w[event_id status external_system external_pay_period_id external_payroll_item_id contract_version
+        source_time_entry_id source_user_uuid source_line_key source_kind]
+      valid &&= scalar.all? { |key| event[key] == expected[key] }
+      valid &&= %w[total_hours regular_hours overtime_hours].all? { |key| exact_decimal?(event[key], expected[key]) }
+      valid &&= Time.iso8601(event["occurred_at"].to_s) == Time.iso8601(expected.fetch("occurred_at"))
+      metadata = expected.fetch("metadata", {})
+      raise Error, "Source correction metadata must be an object" unless metadata.is_a?(Hash)
+      metadata = metadata.deep_dup
+      metadata["payment_effective_on"] = expected["payment_effective_on"] if expected.key?("payment_effective_on")
+      if expected["status"] == "payment_cancelled"
+        metadata["original_payment_effective_on_known"] = expected["payment_effective_on"].present?
+        metadata["original_payment_effective_on"] = expected["payment_effective_on"].presence
+      end
+      valid &&= event["metadata"].is_a?(Hash) && event["metadata"] == metadata
+      valid &&= %w[payment_method payment_reference payment_effective_on].all? { |key| event[key].presence == expected[key].presence }
+      binding = response["obligation_correction"]
+      valid &&= binding.is_a?(Hash) && binding["binding_id"].to_s.match?(/\A[1-9]\d*\z/) &&
+        binding["request_digest"] == CanonicalPayload.checksum(link_request) &&
+        binding["command"] == link_request.fetch("obligation_correction")
+      valid &&= binding["binding_id"].to_s == binding_id.to_s if binding_id
+      raise Error, "Source did not acknowledge the exact corrected payroll ownership" unless valid
+      true
+    rescue ConnectionIdentity::Error, ArgumentError, TypeError, KeyError => e
+      raise Error, "Source correction receipt needs review: #{e.message}"
+    end
+
+    def record_accounting_correction_event(**attributes)
+      payload = record_payroll_entry_processing_event(**attributes)
+      identity = ConnectionIdentity.validate!(source: @source, payload: payload)
+      raise Error, "#{@source.name} omitted its verified accounting receipt descriptor" if identity.legacy
+      validate_integration_response!(payload)
+      expected = attributes.except(:batch_id).merge(external_system: "cornerstone_payroll")
+      receipt = payload["entry_processing"]
+      scalar_keys = %i[event_id status external_system external_pay_period_id external_payroll_item_id
+        source_time_entry_id source_user_uuid contract_version source_line_key source_kind]
+      valid = receipt.is_a?(Hash) && scalar_keys.all? { |key| receipt[key.to_s] == expected[key] }
+      valid &&= %i[total_hours regular_hours overtime_hours].all? { |key| exact_decimal?(receipt[key.to_s], expected[key]) }
+      valid &&= receipt["metadata"] == expected[:metadata].deep_stringify_keys
+      valid &&= %w[payment_method payment_reference payment_effective_on].all? { |key| receipt[key].blank? }
+      valid &&= Time.iso8601(receipt["occurred_at"].to_s) == Time.iso8601(expected[:occurred_at])
+      raise Error, "#{@source.name} did not acknowledge the exact accounting correction" unless valid
+      payload
+    rescue ConnectionIdentity::Error, ArgumentError, TypeError
+      raise Error, "#{@source.name} returned an invalid accounting correction receipt"
+    end
+
     class Error < StandardError
       attr_reader :response_status
 
@@ -453,7 +571,8 @@ module TimeTracking
 
     private
 
-    def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false)
+    def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false,
+                     historical_manual_issue: false)
       request = case method
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
@@ -492,7 +611,7 @@ module TimeTracking
       if validate_source
         validate_source_identity!(payload)
       elsif @source.source_type != "aire_services" || payload["integration"].present? || payload.dig("export", "integration").present?
-        validate_integration_response!(payload)
+        validate_integration_response!(payload, historical: historical_manual_issue)
       end
       payload
     rescue JSON::ParserError
@@ -528,6 +647,12 @@ module TimeTracking
     def payroll_batch_processing_events_uri(batch_id)
       uri = payroll_batch_uri(batch_id)
       uri.path = "#{uri.path}/processing_events"
+      uri
+    end
+
+    def payroll_batch_obligation_events_uri(batch_id)
+      uri = payroll_batch_uri(batch_id)
+      uri.path = "#{uri.path}/obligation_events"
       uri
     end
 
@@ -634,7 +759,7 @@ module TimeTracking
       normalized_id
     end
 
-    def delegated_request_json(uri, body:)
+    def delegated_request_json(uri, body:, historical_manual_issue: false)
       headers = payroll_actor_headers
       require_secure_payroll_transport!(uri)
 
@@ -644,7 +769,8 @@ module TimeTracking
         method: :post,
         body: body,
         headers: headers,
-        surface_remote_error: true
+        surface_remote_error: true,
+        historical_manual_issue: historical_manual_issue
       )
     end
 
@@ -839,14 +965,15 @@ module TimeTracking
       raise Error, e.message
     end
 
-    def validate_integration_response!(payload)
+    def validate_integration_response!(payload, historical: false)
       result = ConnectionIdentity.validate!(source: @source, payload: payload)
       if @source.source_type != "aire_services" && result.legacy
         raise Error, "#{@source.name} omitted its verified integration descriptor"
       end
       # A response may narrow support only after a fresh operator connection
-      # verification. Never accept an acknowledgement from a changed contract.
-      if @source.remote_identity_pinned? && !result.legacy &&
+      # verification. Manual ISSUE replay is checked against its saved original
+      # contract by ManualAllocationService; installation validation still applies.
+      if !historical && @source.remote_identity_pinned? && !result.legacy &&
         (result.protocol != @source.source_protocol || result.protocol_version != @source.source_protocol_version ||
           result.capabilities != @source.source_capabilities.sort || result.policy_constraints != @source.source_policy_constraints)
         raise Error, "#{@source.name} integration contract changed; test the connection before continuing"

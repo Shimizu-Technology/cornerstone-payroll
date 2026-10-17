@@ -18,6 +18,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { employeesApi } from '@/services/api';
 import type { Employee, EmployeeOvertimeStatus, EmployeeTimekeepingMode, EmployeeWorkProfile, EmployeeWorkProfileInput } from '@/types';
 import { EmployeeTimeRecordsDialog } from '@/components/employees/EmployeeTimeRecordsDialog';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 
 const WEEKDAYS = [
   ['sunday', 'Sun'], ['monday', 'Mon'], ['tuesday', 'Tue'], ['wednesday', 'Wed'],
@@ -70,7 +72,9 @@ interface Props {
   onUpdated: (profile: EmployeeWorkProfile) => void;
 }
 
-export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Props) {
+export function EmployeeWorkProfilePanel({ employee, canManage: roleCanManage, onUpdated }: Props) {
+  const { activeCompany } = useCompany();
+  const canManage = roleCanManage && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [open, setOpen] = useState(false);
   const [timeRecordsOpen, setTimeRecordsOpen] = useState(false);
   const [form, setForm] = useState<EmployeeWorkProfileInput>(() => initialInput(employee));
@@ -94,7 +98,7 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
   const nonexemptComplete = form.overtime_status !== 'nonexempt'
     || (Number(form.salary_covers_weekly_hours) >= 40
       && (form.salary_coverage_reason || '').trim().length >= 10);
-  const canSubmit = Boolean(form.effective_on)
+  const canSubmit = canManage && Boolean(form.effective_on)
     && form.overtime_status !== 'needs_review'
     && Number(form.standard_weekly_hours) > 0
     && (form.timekeeping_mode !== 'schedule_with_exceptions' || scheduleMatches)

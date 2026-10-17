@@ -81,7 +81,7 @@ RSpec.describe ContractorPayrollCalculator do
   end
 
   it "preserves contractor custom deductions and payroll adjustment deductions" do
-    payroll_item.custom_deductions = [{ "label" => "Rent", "amount" => 15.00 }]
+    payroll_item.custom_deductions = [ { "label" => "Rent", "amount" => 15.00 } ]
     payroll_item.payroll_adjustments = [
       { "label" => "Supplies", "amount" => 10.00, "treatment" => "post_tax_deduction", "active" => true },
       { "label" => "Pre-tax Plan", "amount" => 5.00, "treatment" => "pre_tax_deduction", "active" => true }
@@ -212,7 +212,7 @@ RSpec.describe ContractorPayrollCalculator do
     payroll_item.save!
     second_labels = payroll_item.reload.payroll_item_deductions.map(&:label)
 
-    expect(first_labels).to match_array(["Contractor Rent Deduction", "Contractor Admin Fee"])
+    expect(first_labels).to match_array([ "Contractor Rent Deduction", "Contractor Admin Fee" ])
     expect(second_labels).to match_array(first_labels)
     expect(payroll_item.payroll_item_deductions.count).to eq(2)
   end

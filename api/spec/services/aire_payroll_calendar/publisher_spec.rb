@@ -73,6 +73,19 @@ RSpec.describe AirePayrollCalendar::Publisher do
     expect(AirePayrollCalendarPublication).not_to have_received(:dispatch_one!)
   end
 
+  it "rejects adjustment publication with a provider-neutral explanation" do
+    pay_period.update!(run_purpose: "adjustment")
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    end.to raise_error(AirePayrollCalendar::Contract::Error, "Only regular payroll runs can publish a time-tracking calendar.") { |error|
+      expect(error.code).to eq("unsupported_run")
+    }
+
+    expect(source.aire_payroll_calendar_periods).to be_empty
+    expect(AirePayrollCalendarPublication).not_to have_received(:dispatch_one!)
+  end
+
   it "creates one versioned previous-payday-plus-seven Guam publication and queues delivery" do
     result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
 

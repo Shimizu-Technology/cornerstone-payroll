@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeHoursPayroll } from './EmployeeHoursPayroll';
 import { SavedHours } from './SavedHours';
 import type { EmployeePayHistoryReport, EmployeePayHistoryRecord } from '@/services/api';
+afterEach(cleanup);
 const mocks = vi.hoisted(() => ({ evidence: vi.fn() }));
 vi.mock('@/services/api', () => ({ employeesApi: { hoursEvidence: mocks.evidence } }));
 const totals = { worked_hours: 82, eligible_hours: 82, pending_hours: 0, denied_hours: 0,
@@ -23,7 +24,6 @@ function mount(path = '/companies/1/employees/2/hours-payroll?return_to=%2Femplo
   render(<MemoryRouter initialEntries={[path]}><EmployeeHoursPayroll employeeId={2} companyId={1} report={{ history: [item] } as EmployeePayHistoryReport} returnTo={path} /><Location /></MemoryRouter>);
 }
 describe('Employee hours and payroll evidence', () => {
-  afterEach(cleanup);
   beforeEach(() => { vi.clearAllMocks(); mocks.evidence.mockResolvedValue(evidence); });
   it('shows all-filter totals and source-only periods beside actual saved REG/OT', async () => {
     mount();
@@ -97,8 +97,8 @@ describe('Employee hours and payroll evidence', () => {
     } } });
     mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
     expect(await screen.findByText('1 retained line needs a receipt review. Confirm payment coverage for each frozen line.')).toBeTruthy();
-    expect(screen.getByText('Receipt scope: batch')).toBeTruthy();
-    expect(screen.getByText('Entry #18 · Receipt receipt_review')).toBeTruthy();
+    expect(screen.getByText('Receipt scope: Batch receipt only · no line confirmation')).toBeTruthy();
+    expect(screen.getByText('Entry #18 · Receipt needs review · line coverage unconfirmed')).toBeTruthy();
     expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage0.00');
     expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
   });
@@ -110,7 +110,74 @@ describe('Employee hours and payroll evidence', () => {
     expect(await screen.findByRole('link', { name: /Open exact source entry/ })).toHaveProperty('href', 'https://example.com/employee/42?entry=18');
     const actual = screen.getByText('Exact linked payroll results').parentElement!;
     expect(within(actual).getByText('Saved REG 41.00 · OT 0.00 · Holiday 0.00 · PTO 0.00')).toBeTruthy();
-    expect(within(actual).getByText(/Pay run status: draft/)).toBeTruthy();
+    expect(within(actual).getByText(/Pay run status: Draft/)).toBeTruthy();
     expect(screen.getByRole('link', { name: /Open exact payroll item/ }).getAttribute('href')).toContain('/pay-runs/5/payroll-items/9');
   });
+});
+
+it('explains saved receipt scope without using it to confirm a payment', async () => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'prepared', source_time_entry_id: '18', coverage_state: 'committed', identity_state: 'verified', receipt_scope: 'exact_line', regular_hours: 8, overtime_hours: 2, provenance: 'frozen_batch_and_exact_authenticated_receipt', reason: 'Chels kept this original note.' }],
+    settlement_cases: [{ public_id: 'case', source_time_entry_id: '18', status: 'in_payroll', origin_reason: 'created_after_cutoff', held_total_hours: 10 }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText('Entry #18 · Payroll committed · no active issued coverage')).toBeTruthy();
+  expect(screen.getByText('Receipt scope: Receipt for this saved line')).toBeTruthy();
+  expect(screen.getByText('Saved batch and receipt for this line')).toBeTruthy();
+  expect(screen.getByText('Chels kept this original note.')).toBeTruthy();
+  expect(screen.getByText(/Included in payroll · receipt confirmation pending · Historical reason: Entry was added after cutoff/)).toBeTruthy();
+  expect(screen.getByText('Source REG 8.00 · OT 2.00')).toBeTruthy();
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+});
+
+it('keeps unfamiliar evidence labels unresolved and preserves signed and unknown hours', async () => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'unknown', source_time_entry_id: '18', coverage_state: 'future_paid', identity_state: 'future_verified', receipt_scope: 'constructor', regular_hours: -1, overtime_hours: null, provenance: 'historical_attestation' }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText('Entry #18 · Coverage status needs review')).toBeTruthy();
+  expect(screen.getByText('Employee identity needs review')).toBeTruthy();
+  expect(screen.getByText('Receipt scope: Receipt scope not recognized · line confirmation unavailable')).toBeTruthy();
+  expect(screen.getByText('Evidence source needs review')).toBeTruthy();
+  expect(screen.getByText('Source REG -1.00 · OT Unknown')).toBeTruthy();
+  expect(screen.queryByText(/future_paid|future_verified|historical_attestation/)).toBeNull();
+});
+
+it.each([
+  { identity_state: 'future_verified', receipt_scope: 'exact_line' },
+  { identity_state: 'frozen_owner_mismatch', receipt_scope: 'exact_line' },
+  { identity_state: 'verified', receipt_scope: 'batch' },
+  { identity_state: 'verified', receipt_scope: 'ambiguous_entry' },
+  { identity_state: 'verified', receipt_scope: 'future_exact_line' },
+])('requires review of contradictory issued evidence $identity_state/$receipt_scope', async (context) => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'conflicting', source_time_entry_id: '18', coverage_state: 'issued', ...context, regular_hours: 8, overtime_hours: 2, provenance: 'frozen_batch_and_exact_authenticated_receipt' }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText(/Entry #18 · .*needs review.*coverage unconfirmed/)).toBeTruthy();
+  expect(screen.queryByText('Entry #18 · Issued payment coverage')).toBeNull();
+  expect(screen.queryByText('Saved batch and receipt for this line')).toBeNull();
+  expect(screen.getByText(context.identity_state === 'verified' ? 'Saved batch · receipt scope needs review' : 'Saved batch · receipt identity needs review')).toBeTruthy();
+  expect(screen.getByText('Source REG 8.00 · OT 2.00')).toBeTruthy();
+  expect(screen.getByText('Issued coverage').parentElement?.textContent).toBe('Issued coverage40.00');
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
+});
+
+it.each([
+  { source_kind: 'current', provenance: 'frozen_batch_and_exact_authenticated_receipt', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
+  { source_kind: undefined, provenance: 'manual_source_allocation', label: 'Issued payment coverage' },
+  { source_kind: 'current', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: 'frozen_batch_and_exact_authenticated_receipt', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'manual', provenance: undefined, label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: '', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+  { source_kind: 'future_manual', provenance: 'manual_source_allocation', label: 'Receipt needs review · line coverage unconfirmed' },
+])('keeps missing receipt scope unconfirmed except known manual evidence $source_kind', async (line) => {
+  mocks.evidence.mockResolvedValue({ ...evidence, evidence: { ...evidence.evidence, period: {
+    ...period, entries: [], coverage_lines: [{ id: 'missing-scope', source_time_entry_id: '18', coverage_state: 'issued', identity_state: 'verified', regular_hours: 8, overtime_hours: 0, ...line }],
+  } } });
+  mount('/companies/1/employees/2/hours-payroll?period=2026-08-01');
+  expect(await screen.findByText(`Entry #18 · ${line.label}`)).toBeTruthy();
+  expect(screen.getByText('Source REG 8.00 · OT 0.00')).toBeTruthy();
+  expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
 });

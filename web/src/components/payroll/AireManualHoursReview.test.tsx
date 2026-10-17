@@ -67,6 +67,17 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
+  it('does not turn an offline saved-link response into zero payable hours or a successful readiness check', async () => {
+    apiMocks.manualReview.mockResolvedValue({ ...review, source_available: false, source_error: 'Time source unavailable',
+      employees: [], exclusions: [], issues: null, summary: null });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Time source unavailable'));
+    expect(screen.queryByText('Time tracking payable now')).toBeNull();
+    expect(screen.queryByText('Regular and OT totals match')).toBeNull();
+    expect(screen.queryByText(/Time tracking has no payable time/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh check' })).toBeTruthy();
+  });
+
   it('shows exact time tracking regular, overtime, carryover, and the Payroll correction to make', async () => {
     render(
       <AireManualHoursReview
@@ -78,7 +89,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Live time tracking readiness')).toBeTruthy();
-    expect(screen.getAllByText('Includes 6.10 carryover')).toHaveLength(2);
+    expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
     expect(screen.getByText(/carries its exact entry links through calculation/i)).toBeTruthy();

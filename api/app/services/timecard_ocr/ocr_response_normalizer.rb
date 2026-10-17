@@ -13,7 +13,7 @@ module TimecardOcr
     TIME_SUFFIX_PATTERN = /([ap])\z/i
     PERIOD_PATTERN = /\A\d{4}-\d{2}-\d{2}\z/
     REPEATED_PATTERN_TOLERANCE_MINUTES = 4
-    ROUNDED_DRIFT_MINUTES = [0, 30].freeze
+    ROUNDED_DRIFT_MINUTES = [ 0, 30 ].freeze
     ROUNDED_DRIFT_DELTA_MINUTES = 10
     ROUNDED_DRIFT_COMPARISON_WINDOW_MINUTES = 30
     ROUNDED_DRIFT_MIN_COMPARABLE_ROWS = 2
@@ -106,28 +106,28 @@ module TimecardOcr
     end
 
     def reconcile_period_years(period_start, period_end)
-      return [period_start, period_end, false] unless @reference_date
+      return [ period_start, period_end, false ] unless @reference_date
 
       start_date = period_start.present? ? Date.iso8601(period_start) : nil
       end_date = period_end.present? ? Date.iso8601(period_end) : nil
-      extracted_years = [start_date&.year, end_date&.year].compact
+      extracted_years = [ start_date&.year, end_date&.year ].compact
 
-      return [period_start, period_end, false] if extracted_years.empty?
-      return [period_start, period_end, false] if extracted_years.all? { |year| (year - @reference_date.year).abs <= 1 }
+      return [ period_start, period_end, false ] if extracted_years.empty?
+      return [ period_start, period_end, false ] if extracted_years.all? { |year| (year - @reference_date.year).abs <= 1 }
 
       if start_date && end_date
         corrected_start, corrected_end = best_year_pair(start_date, end_date)
-        return [corrected_start.iso8601, corrected_end.iso8601, true]
+        return [ corrected_start.iso8601, corrected_end.iso8601, true ]
       end
 
       corrected_date = best_single_year(start_date || end_date)
       if start_date
-        [corrected_date.iso8601, period_end, true]
+        [ corrected_date.iso8601, period_end, true ]
       else
-        [period_start, corrected_date.iso8601, true]
+        [ period_start, corrected_date.iso8601, true ]
       end
     rescue Date::Error
-      [period_start, period_end, false]
+      [ period_start, period_end, false ]
     end
 
     def normalize_entry_date(value, card_day, period_start, period_end)
@@ -266,8 +266,8 @@ module TimecardOcr
         ERROR_NOTE_PATTERNS.any? { |pat| notes.include?(pat) }
       end
 
-      confidence = [confidence, 0.75].min if employee_name.blank?
-      confidence = [confidence, 0.8].min if period_year_corrected
+      confidence = [ confidence, 0.75 ].min if employee_name.blank?
+      confidence = [ confidence, 0.8 ].min if period_year_corrected
       confidence -= 0.02 * error_row_count
       confidence -= 0.05 * impossible_order_count
       confidence.clamp(0.0, 1.0).round(2)
@@ -279,7 +279,7 @@ module TimecardOcr
 
     def anomaly_notes(entry, period_start, period_end)
       notes = []
-      punch_count = [entry["clock_in"], entry["lunch_out"], entry["lunch_in"], entry["clock_out"], entry["in3"], entry["out3"]].count(&:present?)
+      punch_count = [ entry["clock_in"], entry["lunch_out"], entry["lunch_in"], entry["clock_out"], entry["in3"], entry["out3"] ].count(&:present?)
       blank_day = punch_count.zero? && entry["notes"].blank?
 
       return notes if blank_day
@@ -310,9 +310,9 @@ module TimecardOcr
 
     def apply_confidence_penalties!(entry, anomalies)
       confidence = entry["confidence"].to_f
-      confidence = [confidence, 0.55].min if anomalies.any? { |note| note.include?("missing clock_in") || note.include?("missing clock_out") }
-      confidence = [confidence, 0.65].min if anomalies.include?("missing lunch pair")
-      confidence = [confidence, 0.6].min if anomalies.include?("verify lunch punches or row alignment")
+      confidence = [ confidence, 0.55 ].min if anomalies.any? { |note| note.include?("missing clock_in") || note.include?("missing clock_out") }
+      confidence = [ confidence, 0.65 ].min if anomalies.include?("missing lunch pair")
+      confidence = [ confidence, 0.6 ].min if anomalies.include?("verify lunch punches or row alignment")
       entry["confidence"] = confidence.round(2)
     end
 
@@ -325,7 +325,7 @@ module TimecardOcr
     end
 
     def normalize_punch_structure!(entry)
-      all_punches = [entry["clock_in"], entry["lunch_out"], entry["lunch_in"], entry["clock_out"], entry["in3"], entry["out3"]].compact
+      all_punches = [ entry["clock_in"], entry["lunch_out"], entry["lunch_in"], entry["clock_out"], entry["in3"], entry["out3"] ].compact
       return entry unless all_punches.size == 2
 
       entry["clock_in"] = all_punches.first
@@ -380,7 +380,7 @@ module TimecardOcr
       repeated_groups = worked_pattern_groups(entries)
       repeated_rows = repeated_groups.flat_map do |group|
         group.map do |entry|
-          entry["notes"] = merge_notes(entry["notes"], ["repeated worked-row pattern; verify OCR"])
+          entry["notes"] = merge_notes(entry["notes"], [ "repeated worked-row pattern; verify OCR" ])
           entry
         end
       end
@@ -432,7 +432,7 @@ module TimecardOcr
 
       until remaining.empty?
         seed = remaining.shift
-        group = [seed]
+        group = [ seed ]
 
         loop do
           matching, rest = remaining.partition do |entry|
@@ -483,16 +483,16 @@ module TimecardOcr
 
       first_in = entry["clock_in"]
       final_out = entry["out3"].presence || entry["clock_out"]
-      outer_minutes = [minute_value(first_in), minute_value(final_out)]
-      inner_minutes = [minute_value(entry["lunch_out"]), minute_value(entry["lunch_in"])]
+      outer_minutes = [ minute_value(first_in), minute_value(final_out) ]
+      inner_minutes = [ minute_value(entry["lunch_out"]), minute_value(entry["lunch_in"]) ]
 
       outer_minutes.all? { |minute| ROUNDED_DRIFT_MINUTES.include?(minute) } &&
         inner_minutes.none? { |minute| ROUNDED_DRIFT_MINUTES.include?(minute) }
     end
 
     def flag_suspicious_rounded_digit!(entry, flagged)
-      entry["notes"] = merge_notes(entry["notes"], ["suspicious rounded digit read; verify handwritten minutes"])
-      entry["confidence"] = [entry["confidence"].to_f, 0.78].min.round(2)
+      entry["notes"] = merge_notes(entry["notes"], [ "suspicious rounded digit read; verify handwritten minutes" ])
+      entry["confidence"] = [ entry["confidence"].to_f, 0.78 ].min.round(2)
       flagged << entry
     end
 
@@ -517,7 +517,7 @@ module TimecardOcr
     end
 
     def best_year_pair(start_date, end_date)
-      candidate = [@reference_date.year - 1, @reference_date.year, @reference_date.year + 1].filter_map do |year|
+      candidate = [ @reference_date.year - 1, @reference_date.year, @reference_date.year + 1 ].filter_map do |year|
         candidate_start = change_year(start_date, year)
         candidate_end = change_year(end_date, year_rollover?(start_date, end_date) ? year + 1 : year)
         next unless candidate_start && candidate_end
@@ -526,11 +526,11 @@ module TimecardOcr
         { start: candidate_start, end: candidate_end, distance: (midpoint - @reference_date).abs }
       end.min_by { |item| item[:distance] }
 
-      [candidate[:start], candidate[:end]]
+      [ candidate[:start], candidate[:end] ]
     end
 
     def best_single_year(date)
-      [@reference_date.year - 1, @reference_date.year, @reference_date.year + 1]
+      [ @reference_date.year - 1, @reference_date.year, @reference_date.year + 1 ]
         .filter_map { |year| change_year(date, year) }
         .min_by { |candidate| (candidate - @reference_date).abs }
     end
@@ -546,7 +546,7 @@ module TimecardOcr
     end
 
     def merge_notes(existing, generated)
-      notes = [existing, *generated]
+      notes = [ existing, *generated ]
         .compact
         .flat_map { |value| value.to_s.split(/\s*;\s*/) }
         .map(&:strip)

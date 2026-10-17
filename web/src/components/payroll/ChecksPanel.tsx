@@ -1,13 +1,12 @@
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
-import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
+import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ReactElement } from 'react';
-import { createPortal } from 'react-dom';
-import type { CheckItem, CheckListMeta, DirectDepositItem, EarningsStatementItem, PayPeriod } from '@/types';
+import type { CheckItem, CheckListMeta, DirectDepositItem, EarningsStatementItem, PayPeriod, PaymentCancellationSync } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +18,8 @@ import { ReprintCheckModal } from './ReprintCheckModal';
 import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
 import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 import { canEditPayrollCheckNumber } from '@/components/checks/checkNumberEditability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { RecordCheckDeliveryDialog } from './RecordCheckDeliveryDialog';
 
 interface ChecksPanelProps {
@@ -27,6 +28,7 @@ interface ChecksPanelProps {
   refreshToken?: number;
   onChecksChanged?: () => Promise<void>;
   onChangePaymentMethod?: (payrollItemId: number) => void;
+  timeTrackingReviewHref?: string;
 }
 
 type CheckAction = 'preview' | 'stub';
@@ -74,14 +76,32 @@ function eventLabel(eventType: string): string {
   }
 }
 
-function BankPaymentEvidence({ item, onConfirm }: { item?: DirectDepositItem; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
-  if (!item) return null;
-  if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
-  return <Button size="sm" variant="outline" onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
+function CancellationSyncNotice({ state, reviewHref }: { state?: PaymentCancellationSync | null; reviewHref?: string }): ReactElement | null {
+  if (!state) return null;
+  const waiting = state.status !== 'acknowledged';
+  return <div className="mt-2 space-y-2 text-sm" role={state.status === 'error' ? 'alert' : 'status'}>
+    <Badge variant={state.status === 'error' ? 'danger' : waiting ? 'warning' : 'success'}>
+      {state.status === 'error' ? 'Check cancellation sync needs attention' : waiting ? 'Check cancellation pending time tracking confirmation' : 'Check cancellation confirmed by time tracking'}
+    </Badge>
+    {waiting && <p className="text-neutral-700">{state.pending_count} cancellation record{state.pending_count === 1 ? '' : 's'} awaiting confirmation.
+      {state.hours_reserved ? ' The payroll hours remain reserved in time tracking.' : ''} This sync status is separate from any recorded bank payment.</p>}
+    {waiting && state.oldest_pending_at && <p className="text-xs text-neutral-600">Waiting since {formatEventTime(state.oldest_pending_at)}</p>}
+    {state.errors.map(message => <p key={message} className="break-words text-danger-800">{message}</p>)}
+    {waiting && reviewHref && <a className="inline-flex min-h-11 items-center font-medium text-primary-700 underline" href={reviewHref}>Review time tracking sync</a>}
+  </div>;
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod }: ChecksPanelProps) {
+function BankPaymentEvidence({ item, readOnly, onConfirm }: { item?: DirectDepositItem; readOnly: boolean; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
+  if (!item) return null;
+  if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
+  if (readOnly) return <span className="text-sm text-neutral-500">Bank payment not recorded</span>;
+  return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined} onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
+}
+
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onChecksChanged, onChangePaymentMethod, timeTrackingReviewHref }: ChecksPanelProps) {
   const { notify } = useFeedback();
+  const { activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const loadRequest = useRef(0);
   const runScope = `${payPeriod.company_id || 0}:${payPeriod.id}`;
   const currentRunScope = useRef(runScope);
@@ -108,7 +128,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
   const [depositTarget, setDepositTarget] = useState<DirectDepositItem | null>(null);
   const [deliveryTarget, setDeliveryTarget] = useState<CheckItem | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [checkPreview, setCheckPreview] = useState<PdfArtifact | null>(null);
+  const previewRequest = useRef(0);
+  const invalidatePreview = useCallback(() => { previewRequest.current++; }, []);
   const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
   const load = useCallback(async () => {
@@ -137,7 +159,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
   useEffect(() => {
     setDepositTarget(null); setDeliveryTarget(null); setVoidTarget(null); setReprintTarget(null);
-  }, [runScope]);
+    previewRequest.current++;
+    setCheckPreview(null);
+    setPreviewItem(null);
+    setActionLoading(null);
+    return invalidatePreview;
+  }, [runScope, invalidatePreview]);
 
   const invalidateLoad = useCallback(() => { loadRequest.current++; }, []);
 
@@ -149,46 +176,35 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
 
-  // ---- Preview single check PDF ----
+  // Previewing never prepares or issues a check.
   const handlePreviewPdf = async (item: CheckItem) => {
+    const request = ++previewRequest.current;
+    const scope = currentRunScope.current;
     setActionLoading({ id: item.id, action: 'preview' });
     try {
       const blob = await checksApi.checkPdf(item.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
+      if (request !== previewRequest.current || scope !== currentRunScope.current) return;
+      setCheckPreview({
+        blob,
+        filename: `check_${item.check_number || item.id}.pdf`,
+        title: `Check #${item.check_number} — ${item.employee_name}`,
+        note: `Review this check here. Saving a package prepares it; recording its handoff marks it issued.${isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is available when needed.'}`,
+      });
       setPreviewItem(item);
     } catch (err) {
-      notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
+      if (request === previewRequest.current && scope === currentRunScope.current) {
+        notify({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load check PDF' });
+      }
     } finally {
-      setActionLoading(null);
+      if (request === previewRequest.current && scope === currentRunScope.current) setActionLoading(null);
     }
   };
 
   const handleClosePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+    previewRequest.current++;
+    setCheckPreview(null);
     setPreviewItem(null);
-  };
-
-  const handleDownloadFromPreview = () => {
-    if (!previewUrl || !previewItem) return;
-    const a = document.createElement('a');
-    a.href = previewUrl;
-    a.download = `check_${previewItem.check_number || previewItem.id}.pdf`;
-    a.click();
-  };
-
-  const handlePrintFromPreview = () => {
-    if (!previewUrl) return;
-    const printWindow = window.open(previewUrl);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        printWindow.print();
-      });
-    } else {
-      notify({ tone: 'error', message: 'Pop-up blocked. Please allow pop-ups for this site to print checks.' });
-    }
+    setActionLoading(null);
   };
 
   const handleDownloadStubForItem = async (item: Pick<CheckItem, 'id' | 'employee_name'>) => {
@@ -343,7 +359,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   };
 
   const saveCheckNumberChanges = async () => {
-    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    if (readOnly || checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
     setSavingCheckNumbers(true);
     setCheckNumberSaveError(null);
     try {
@@ -382,7 +398,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   if (payPeriod.status !== 'committed') {
     return (
       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-        Check printing is only available for committed pay periods.
+        {isTestWorkspaceCompany(activeCompany)
+          ? 'Payments and official earnings statements are unavailable in test workspaces. Review the payroll results in this workspace.'
+          : 'Check printing is only available for committed pay periods.'}
       </div>
     );
   }
@@ -467,17 +485,24 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
     <div className="space-y-4">
       {/* Header + batch actions */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+        <div className="space-y-1 text-sm text-gray-600">
           {meta && (
             <>
-              <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
-              {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
-              <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> not prepared</span>
-              <span><span className="font-medium text-blue-700">{meta.prepared}</span> prepared</span>
-              <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
-              <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
-              {meta.voided > 0 && (
-                <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span><span className="font-medium text-gray-900">{meta.total}</span> paper checks</span>
+                {meta.direct_deposit_count > 0 && <span><span className="font-medium text-blue-700">{meta.direct_deposit_count}</span> direct-deposit stubs</span>}
+              </div>
+              {meta.total > 0 && (
+                <div role="group" aria-label="Paper check status" className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="font-medium text-gray-900">Paper check status</span>
+                  <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> not prepared</span>
+                  <span><span className="font-medium text-blue-700">{meta.prepared}</span> prepared</span>
+                  <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
+                  <span><span className="font-medium text-success-700">{meta.delivered}</span> issued</span>
+                  {meta.voided > 0 && (
+                    <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
+                  )}
+                </div>
               )}
             </>
           )}
@@ -572,11 +597,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                             <input type="checkbox" className="h-4 w-4 shrink-0" checked={selectedStubIdSet.has(item.id)} onChange={() => toggleStubSelection(item)} aria-label={`Select earnings statement for ${item.employee_name}`} />
                             <span className="min-w-0 break-words font-semibold text-neutral-950">{item.employee_name}</span>
                           </label>
+                          <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
                           <p className="ml-8 text-xs text-neutral-600">{item.statement_only ? 'No payment issued' : item.payment_delivery_method === 'direct_deposit' ? 'Direct deposit' : 'Paper check'} · Gross {formatCurrency(item.gross_pay)} · Deductions {formatCurrency(item.total_deductions)} · Net {formatCurrency(item.net_pay)}</p>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-0 sm:flex sm:flex-wrap sm:justify-end [&>button]:min-h-11">
-                          <BankPaymentEvidence item={depositsById.get(item.id)} onConfirm={setDepositTarget} />
-                          {!item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
+                          <BankPaymentEvidence readOnly={readOnly} item={depositsById.get(item.id)} onConfirm={setDepositTarget} />
+                          {!readOnly && !item.statement_only && onChangePaymentMethod && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => onChangePaymentMethod(item.id)}>Change method</Button>}
                           <Button size="sm" variant="outline" onClick={() => void handleViewStatement(item)} disabled={isActionLoading(item.id, 'stub')}>View</Button>
                           <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Print</Button>
                           <Button size="sm" variant="outline" className={item.statement_only || !onChangePaymentMethod ? 'col-span-2 sm:col-span-1' : undefined} onClick={() => void handleDownloadStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>Download</Button>
@@ -601,7 +627,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
-            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={readOnly || savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
               {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
             </Button>
           </div>
@@ -652,13 +678,15 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                     </div>
                   )}
 
+                  <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
+
                   {!item.voided && item.check_number && (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <p className="mb-2 text-xs font-medium text-slate-500">Check number</p>
                       <InlineCheckNumberField
                         value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                         ariaLabel={`Check number for ${item.employee_name}`}
-                        disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
+                        disabled={readOnly || savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                         dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                         error={checkNumberErrors[item.id]}
                         onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -684,17 +712,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         {isActionLoading(item.id, 'stub') ? 'Loading…' : 'Stub'}
                       </Button>
                     )}
-                    {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
-                      <Button size="sm" onClick={() => setDeliveryTarget(item)}>
+                    {!readOnly && !item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
+                      <Button size="sm" className="max-sm:min-h-[44px]" onClick={() => setDeliveryTarget(item)} disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined}>
                         Record Issued
                       </Button>
                     )}
-                    {!item.voided && item.check_number && (
+                    {!readOnly && !item.voided && item.check_number && (
                       <Button size="sm" variant="outline" onClick={() => setReprintTarget(item)} disabled={actionLoading?.id === item.id} className="border-orange-300 text-orange-700 hover:bg-orange-50">
                         Reissue
                       </Button>
                     )}
-                    {!item.voided && item.check_number && (
+                    {!readOnly && !item.voided && item.check_number && (
                       <Button size="sm" variant="outline" onClick={() => setVoidTarget(item)} disabled={actionLoading?.id === item.id} className="border-red-300 text-red-700 hover:bg-red-50">
                         Void
                       </Button>
@@ -731,7 +759,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         <InlineCheckNumberField
                           value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                           ariaLabel={`Check number for ${item.employee_name}`}
-                          disabled={savingCheckNumbers || !canEditPayrollCheckNumber(item)}
+                          disabled={readOnly || savingCheckNumbers || !canEditPayrollCheckNumber(item)}
                           dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
                           error={checkNumberErrors[item.id]}
                           onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
@@ -746,6 +774,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                     </div>
                   </td>
                   <td className="px-3 py-2 text-gray-900">
+                    <CancellationSyncNotice state={item.payment_cancellation_sync} reviewHref={timeTrackingReviewHref} />
                     <div className="space-y-0.5">
                       <div>{item.employee_name}</div>
                       {item.department_name && (
@@ -806,10 +835,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         </Button>
                       )}
 
-                      {!item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
+                      {!readOnly && !item.voided && (item.check_status === 'prepared' || item.check_status === 'printed') && (
                         <Button
                           size="sm"
                           onClick={() => setDeliveryTarget(item)}
+                          disabled={Boolean(item.source_payment_blocker)}
+                          title={item.source_payment_blocker || undefined}
                           className="text-xs px-2 py-2"
                         >
                           Record Issued
@@ -817,7 +848,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       )}
 
                       {/* Reissue physical check */}
-                      {!item.voided && item.check_number && (
+                      {!readOnly && !item.voided && item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -830,7 +861,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       )}
 
                       {/* Void */}
-                      {!item.voided && item.check_number && (
+                      {!readOnly && !item.voided && item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -858,9 +889,12 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
         </>
       )}
 
+      {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{companyReadOnlyMessage(activeCompany)}</p>}
+
       {/* Modals */}
       {voidTarget && (
         <VoidCheckModal
+          readOnly={readOnly}
           item={voidTarget}
           onClose={() => setVoidTarget(null)}
           onComplete={handleVoidComplete}
@@ -868,6 +902,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {reprintTarget && (
         <ReprintCheckModal
+          readOnly={readOnly}
           item={reprintTarget}
           onClose={() => setReprintTarget(null)}
           onComplete={handleReprintComplete}
@@ -875,6 +910,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {depositTarget && (
         <RecordDirectDepositPaymentDialog
+          readOnly={readOnly}
           item={depositTarget}
           onClose={() => setDepositTarget(null)}
           onComplete={async () => {
@@ -887,6 +923,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       )}
       {deliveryTarget && (
         <RecordCheckDeliveryDialog
+          readOnly={readOnly}
           item={deliveryTarget}
           onClose={() => setDeliveryTarget(null)}
           onComplete={async () => {
@@ -899,63 +936,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
 
       <PdfPreview artifact={statementPreview} onClose={() => setStatementPreview(null)} />
 
-      {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
-      {previewUrl && previewItem && createPortal(
-        <div className={`fixed inset-0 ${ACTION_OVERLAY_LAYERS.legacyDialog} flex items-center justify-center bg-gray-900/70 p-4`}>
-          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-6 py-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Check #{previewItem.check_number} — {previewItem.employee_name}
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Preview sized for desktop review and printing checks onto stock paper. Generate a saved package to mark this check prepared.
-                  {isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is also available when needed.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {!previewItem.voided && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handlePrintStubForItem(previewItem)}
-                      disabled={isActionLoading(previewItem.id, 'stub')}
-                    >
-                      Print Stub
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleDownloadStubForItem(previewItem)}
-                      disabled={isActionLoading(previewItem.id, 'stub')}
-                    >
-                      Download Stub
-                    </Button>
-                  </>
-                )}
-                <Button variant="outline" size="sm" onClick={handlePrintFromPreview}>
-                  Print
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleDownloadFromPreview}>
-                  Download PDF
-                </Button>
-                <Button size="sm" onClick={handleClosePreview}>
-                  Close
-                </Button>
-              </div>
-            </div>
-            <div className="flex-1 bg-gray-100 p-5">
-              <iframe
-                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
-                className="h-full w-full rounded-xl border bg-white shadow-lg"
-                title="Check Preview"
-              />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <PdfPreview artifact={checkPreview} onClose={handleClosePreview} actions={previewItem && !previewItem.voided ? <>
+        <Button variant="outline" disabled={isActionLoading(previewItem.id, 'stub')} onClick={() => void handlePrintStubForItem(previewItem)}>Print Stub</Button>
+        <Button variant="outline" disabled={isActionLoading(previewItem.id, 'stub')} onClick={() => void handleDownloadStubForItem(previewItem)}>Download Stub</Button>
+      </> : null} />
     </div>
   );
 }
