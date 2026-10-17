@@ -30,6 +30,18 @@ RSpec.describe TestWorkspaceAccessPolicy do
     expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "PATCH")).to be(false)
   end
 
+  it "recognizes only the two server-identified plain-paper statement POST reads" do
+    reviewer = create(:user, company: source, organization: organization, role: "accountant")
+    CompanyAssignment.create!(user: reviewer, company: workspace, workspace_access_level: "reviewer")
+    %w[batch_pdf direct_deposit_stubs_pdf].each do |action|
+      expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "POST", controller_path: "api/v1/admin/pay_stubs", action_name: action)).to be(true)
+    end
+    expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "POST")).to be(false)
+    expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "POST", controller_path: "api/v1/admin/checks", action_name: "batch_pdf")).to be(false)
+    expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "POST", controller_path: "api/v1/admin/pay_stubs", action_name: "batch_generate")).to be(false)
+    expect(described_class.allowed?(user: reviewer, company: workspace, request_method: "PATCH", controller_path: "api/v1/admin/pay_stubs", action_name: "batch_pdf")).to be(false)
+  end
+
   it "lets operators run payroll but not change protected client configuration" do
     operator = create(:user, company: source, organization: organization, role: "accountant")
     CompanyAssignment.create!(user: operator, company: workspace, workspace_access_level: "operator")

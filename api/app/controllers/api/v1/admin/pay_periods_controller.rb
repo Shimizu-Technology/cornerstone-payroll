@@ -389,6 +389,7 @@ module Api
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
               PayrollCorrectionPayBasisGuard.validate!(payroll_item)
+              pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.employment_type
               # Draft/calculated rows must reflect the employee classification used by
               # the calculator. Otherwise a contractor-to-W-2 change can calculate
               # FICA while retaining a contractor snapshot that reporting excludes.
@@ -402,6 +403,9 @@ module Api
               payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
 
               sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+              if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
+                payroll_item.pay_rate = employee.default_payroll_rate
+              end
               payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
 
@@ -1589,6 +1593,9 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+            raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
+          end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
 
@@ -1598,14 +1605,16 @@ module Api
           payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
-          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          unless payroll_item.timekeeping_source == "correction_reference"
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          end
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
           return if payroll_item.timekeeping_source == "correction_reference"
-          return if payroll_item.wage_rate_hours.present?
+          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          payroll_item.pay_rate = employee.default_payroll_rate
         end
 
         # Compact summary of a corrective payroll_item — shipped back to the

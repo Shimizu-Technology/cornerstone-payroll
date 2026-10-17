@@ -133,6 +133,36 @@ const sourceCalendar: AirePayrollCalendarState = {
 
 afterEach(() => { cleanup(); componentMocks.finalRecordEnabled = false; });
 
+it('lets an accountant explicitly include a fixed salary before calculating a fresh special run', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary',
+    salary_type: 'annual', pay_rate: 52000, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const other = { ...employee, id: 31, first_name: 'Other' };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_base_salary: true,
+    includes_recurring_items: false, payroll_items: [] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee, other], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [{
+    id: 1, employee_id: 30, employment_type: 'salary', gross_pay: 2000, net_pay: 1800,
+  }] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Choose employees for this special run');
+  expect(screen.queryByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeNull();
+  const choice = screen.getAllByText('Ana Cruz').map((node) => node.closest('li')).find(Boolean)!;
+  fireEvent.click(within(choice).getByRole('button', { name: 'Enter pay' }));
+  expect(await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Payroll entry for Other Cruz' })).toBeNull();
+  fireEvent.change(within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Bonus this payroll for Ana Cruz'), { target: { value: '25' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Ana Cruz from this run' }));
+  expect(screen.queryByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeNull();
+  fireEvent.click(within(choice).getByRole('button', { name: 'Enter pay' }));
+  expect((within(await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Bonus this payroll for Ana Cruz') as HTMLInputElement).value).toBe('0.00');
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate with 1 added' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids).toEqual([30]);
+});
+
 it.each([
   { recurring: false, expectedGross: '$64.00', editedGross: '$89.00', firstEmployee: 'Ana Cruz' },
   { recurring: true, expectedGross: '$214.00', editedGross: '$239.00', firstEmployee: 'Zed Cruz' },

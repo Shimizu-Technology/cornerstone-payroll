@@ -58,3 +58,33 @@ test('requires confirmation when the identifier is actually replaced', async ({ 
   await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
   expect(patches).toHaveLength(0);
 });
+
+test('keeps mobile navigation reachable while successful employee feedback is visible', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { patches } = await mockProfile(page);
+  await page.goto('/companies/1/employees/31/edit');
+  await expect(page.locator('[name="ssn"]')).toHaveValue('000-00-0001');
+  await page.locator('[name="hire_date"]').fill('2025-05-28');
+  await page.getByRole('button', { name: 'Update Employee', exact: true }).click();
+  await expect.poll(() => patches.length).toBe(1);
+
+  const toast = page.getByRole('status').filter({ hasText: 'Employee updated.' });
+  await expect(toast).toBeVisible();
+  const navigation = page.getByRole('button', { name: 'Open navigation', exact: true });
+  // A successful DOM click does not prove the pointer can reach the control.
+  // Check the real browser's hit target before any toast expiry or dismissal.
+  expect(await navigation.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return target !== null && button.contains(target);
+  })).toBe(true);
+  await navigation.click();
+  const menu = page.getByRole('dialog');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('link', { name: 'Employees', exact: true })).toBeVisible();
+  await expect(toast).toBeVisible();
+  await menu.getByRole('button', { name: 'Close navigation', exact: true }).last().click();
+  await expect(menu).not.toBeVisible();
+  await expect(toast).toBeVisible();
+  expect(patches).toHaveLength(1);
+});

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
@@ -71,7 +72,7 @@ export function CompanySwitcher() {
           {activeLabel || 'Loading...'}
         </p>
         {activeCompany && isTestWorkspace(activeCompany) && (
-          <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
+          <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}{!canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
         )}
       </div>
     );
@@ -99,7 +100,7 @@ export function CompanySwitcher() {
             {activeLabel || 'Select Company'}
           </p>
           {activeCompany && isTestWorkspace(activeCompany) && (
-            <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}</p>
+            <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}{!canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
           )}
           <p className="text-xs text-neutral-500">
             {activeCompany?.active_employees || 0} employees
@@ -149,7 +150,7 @@ export function CompanySwitcher() {
                         {clientLabel(company)}
                       </p>
                       {isTestWorkspace(company) && (
-                        <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}</p>
+                        <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}{!canWriteCompany(company) ? ' · Read-only' : ''}</p>
                       )}
                       <p className="text-xs text-neutral-500">
                         {company.active_employees} active employees &middot; {company.pay_frequency}

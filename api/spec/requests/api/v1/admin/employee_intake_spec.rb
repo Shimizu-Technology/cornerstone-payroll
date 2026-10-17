@@ -106,6 +106,22 @@ RSpec.describe "Employee incomplete intake", type: :request do
     expect(response.parsed_body.fetch("details")).to include("ssn", "hire_date", "address_line1")
   end
 
+  it "explains an expired incomplete-entry window and saves only after required data is supplied" do
+    enable_window
+    travel 2.hours do
+      expect do
+        post "/api/v1/admin/employees", params: { employee: minimal }
+      end.not_to change(Employee, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("code")).to eq("employee_intake_expired")
+      expect(response.parsed_body.fetch("error")).to include("Complete the required fields", "not been saved")
+      complete = attributes_for(:employee).except(:ssn_encrypted).merge(ssn: "900701234", ssn_confirmation: "900701234", w4_effective_on: "2026-01-01")
+      post "/api/v1/admin/employees", params: { employee: complete }
+      expect(response).to have_http_status(:created), response.body
+      expect(company.employees.sole.intake_exception).to be_blank
+    end
+  end
+
   it "runs the enable, create, disable, incremental-complete workflow" do
     enable_window
     post "/api/v1/admin/employees", params: { employee: minimal }

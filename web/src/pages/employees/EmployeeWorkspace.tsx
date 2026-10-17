@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
@@ -97,7 +98,8 @@ export function EmployeeWorkspace(): ReactElement {
   }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const employeeId = parsePositiveRouteId(idParam) ?? 0;
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -286,9 +288,9 @@ export function EmployeeWorkspace(): ReactElement {
             <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}>
               <ArrowLeft className="h-4 w-4" />Back
             </Link>
-            <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
+            {!readOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
               <Pencil className="h-4 w-4" />Edit employee
-            </Link>
+            </Link>}
           </div>
         }
       />
@@ -324,6 +326,7 @@ export function EmployeeWorkspace(): ReactElement {
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+        {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">{companyReadOnlyMessage(activeCompany)}</p>}
         {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
@@ -345,6 +348,7 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         {activeTab === 'pay-setup' && (
           <PaySetup
+            readOnly={readOnly}
             employee={employee}
             editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}
             reviewNotes={reviewNotes}
@@ -438,6 +442,7 @@ function EmployeeOverview({
 }
 
 interface PaySetupProps {
+  readOnly: boolean;
   employee: Employee;
   editHref: string;
   reviewNotes: Record<string, string>;
@@ -452,7 +457,7 @@ interface PaySetupProps {
   retirementYear?: number;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
+function PaySetup({ readOnly, employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -479,7 +484,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
                 <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
                   <p className="font-semibold text-neutral-950">{item.message}</p>
                   {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
-                  {requiresCertificationEvidence && (
+                  {!readOnly && requiresCertificationEvidence && (
                     <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50/60 p-4">
                       <p className="text-sm font-semibold text-primary-950">Certification evidence</p>
                       <p className="mt-1 text-sm leading-6 text-primary-800">Use the current signed plan, employee form, loan statement, employer confirmation, or other authoritative record—not the predecessor configuration by itself.</p>
@@ -502,19 +507,19 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
                       </div>
                     </div>
                   )}
-                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  {!readOnly && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                     <label className="block space-y-2">
                       <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
                       <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
                     </label>
                     <Button disabled={!readyToRecord || reviewBusyCode !== null} onClick={() => onResolveReview(item)}>{reviewBusyCode === item.code ? 'Recording…' : requiresCertificationEvidence ? 'Record certification' : 'Mark reviewed'}</Button>
-                  </div>
+                  </div>}
                 </div>
               );
             })}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-neutral-600">Need to correct a date, address, W-4, rate, or recurring payroll item first?</p>
-              <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
+              {!readOnly && <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>}
             </div>
             {(employee.configuration_review_resolutions || []).length > 0 && (
               <div className="border-t border-neutral-200 pt-4">
@@ -554,7 +559,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm"><Settings2 className="h-5 w-5" /></span>
           <h2 className="mt-4 font-display text-xl font-extrabold tracking-tight text-neutral-950">Edit source settings</h2>
           <p className="mt-2 text-sm leading-6 text-neutral-600">Wage, tax, and other employee fields use the validated employee form. Payment method and retirement settings have their own controls here.</p>
-          <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
+          {!readOnly && <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>}
         </CardContent>
       </Card>
       </div>
