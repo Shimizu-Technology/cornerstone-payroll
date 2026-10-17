@@ -127,7 +127,10 @@ class CheckNumberBatchCorrectionService
     end
     non_employee_checks.each_value do |check|
       raise Error, "Cannot change the number on a voided non-employee check" if check.voided?
-      raise Error, "Recreate prepared or issued other-payment checks instead of changing their numbers" if check.prepared_at.present? || check.printed?
+      raise Error, "Only paper-check payments can have check numbers corrected" unless check.payment_method == "check"
+      if check.printed? || %w[issued cleared replacement_required].include?(CheckReconciliationStatus.for(check))
+        raise Error, "Other-payment check numbers cannot be changed after printing, payment, or reconciliation"
+      end
       targets[[ "non_employee_check", check.id ]] = check
     end
     targets
