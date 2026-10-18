@@ -16,6 +16,7 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -190,7 +191,7 @@ export function EmployeeForm() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
-  const { user, isClient, isSuperAdmin, isManager } = useAuth();
+  const { user, isClient, isSuperAdmin } = useAuth();
   const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
@@ -205,6 +206,7 @@ export function EmployeeForm() {
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
+  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [initialSsn, setInitialSsn] = useState('');
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
@@ -1068,7 +1070,7 @@ export function EmployeeForm() {
               )}
             </div>
           </div>
-          {isManager && <Button
+          {canManageClientConfiguration && <Button
             type="button"
             variant="outline"
             onClick={() => setStatusTransitionMode('reactivate')}
@@ -1527,7 +1529,7 @@ export function EmployeeForm() {
         {isEditing && form.employment_type === 'salary' && loadedEmployee && !isClient && (
           <EmployeeWorkProfilePanel
             employee={loadedEmployee}
-            canManage={isManager}
+            canManage={canManageClientConfiguration}
             onUpdated={(profile) => setLoadedEmployee((current) => current ? { ...current, current_work_profile: profile } : current)}
           />
         )}
@@ -2155,7 +2157,7 @@ export function EmployeeForm() {
           </CardContent>
         </Card>
 
-        {isEditing && employeeStatus !== 'terminated' && !isClient && isManager && (
+        {isEditing && employeeStatus !== 'terminated' && !isClient && canManageClientConfiguration && (
           <div className="flex justify-start">
             <Button
               type="button"

@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { employeesApi } from '@/services/api';
 import type { Employee, EmployeeOvertimeStatus, EmployeeTimekeepingMode, EmployeeWorkProfile, EmployeeWorkProfileInput } from '@/types';
 import { EmployeeTimeRecordsDialog } from '@/components/employees/EmployeeTimeRecordsDialog';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
 
@@ -74,7 +75,8 @@ interface Props {
 
 export function EmployeeWorkProfilePanel({ employee, canManage: roleCanManage, onUpdated }: Props) {
   const { activeCompany } = useCompany();
-  const canManage = roleCanManage && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', employee.company_id);
+  const canManage = hasConfigurationAccess && roleCanManage && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [open, setOpen] = useState(false);
   const [timeRecordsOpen, setTimeRecordsOpen] = useState(false);
   const [form, setForm] = useState<EmployeeWorkProfileInput>(() => initialInput(employee));

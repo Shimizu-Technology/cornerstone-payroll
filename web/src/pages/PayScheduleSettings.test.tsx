@@ -20,7 +20,7 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
   hasCapability: (capability: string) => mocks.capabilities.includes(capability),
 }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
-  activeCompany: mocks.activeCompany, activeCompanyId: mocks.activeCompanyId, loading: mocks.companyLoading,
+  activeCompany: mocks.activeCompany && { ...mocks.activeCompany, client_capabilities: mocks.capabilities }, activeCompanyId: mocks.activeCompanyId, loading: mocks.companyLoading,
 }) }));
 vi.mock('@/services/api', () => ({ payScheduleSettingsApi: { get: mocks.get, update: mocks.update } }));
 

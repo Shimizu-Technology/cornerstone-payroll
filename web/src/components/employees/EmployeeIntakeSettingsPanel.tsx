@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,8 @@ import { formatGuamDateTime } from '@/lib/utils';
 
 export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = false }: { companyId: number; isClient: boolean; readOnly?: boolean }) {
   const { activeCompany } = useCompany();
-  const effectiveReadOnly = readOnly || !canWriteCompany(activeCompany, 'manage_organization');
+  const canAdministerClient = useSelectedCompanyCapability('manage_client_administration', companyId);
+  const effectiveReadOnly = readOnly || !canAdministerClient || !canWriteCompany(activeCompany, 'manage_client_administration');
   const { settings, loading, error, reload } = useEmployeeIntakeSettings(companyId, isClient);
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState('1');
@@ -52,8 +54,8 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
     <section className="mb-6 rounded-xl border border-neutral-200 bg-white p-4" aria-label="Employee entry requirements">
       <p className="font-semibold text-neutral-900">{settings.enabled ? 'Incomplete employee entry is temporarily enabled' : 'Full employee details required'}</p>
       <p className="mt-1 text-sm leading-6 text-neutral-600">{settings.enabled
-        ? `Enabled by ${settings.enabled_by_name || 'an administrator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
-        : 'An administrator can temporarily allow missing personal details for this client.'}</p>
+        ? `Enabled by ${settings.enabled_by_name || 'an authorized operator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
+        : 'An administrator or an accountant with Client management can temporarily allow missing personal details for this client.'}</p>
       {settings.enabled && <p className="mt-2 text-sm text-warning-800">Missing information stays on the employee checklist. Payroll documents and filing requirements still apply.</p>}
       {settings.can_manage && !effectiveReadOnly && (
         settings.enabled ? <Button className="mt-3" variant="outline" disabled={saving} onClick={() => void save(false)}>Require full details again</Button>

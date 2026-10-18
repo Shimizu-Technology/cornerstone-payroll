@@ -1048,7 +1048,7 @@ describe('AirePayrollCockpit', () => {
       </MemoryRouter>
     );
     await screen.findByText(/actions need your time tracking access/i);
-    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    expect(screen.queryByText('Time changes require Client management, a Payroll manager, or an admin')).toBeNull();
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /lock time tracking cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
@@ -1064,8 +1064,8 @@ describe('AirePayrollCockpit', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
 
-    await screen.findByText('Time changes require a Payroll manager or admin');
-    expect(screen.getByText('Time approvals, corrections and held-time destinations require that role. You can still review time and payroll evidence.')).toBeTruthy();
+    await screen.findByText('Time changes require Client management, a Payroll manager, or an admin');
+    expect(screen.getByText('Ask an administrator to grant Client management for this client. You can still review time and payroll evidence.')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /connect my time tracking account/i })).toBeNull();
     expect(screen.getByText('Malia Cruz')).toBeTruthy();
     const approve = screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement;
@@ -1085,15 +1085,15 @@ describe('AirePayrollCockpit', () => {
     const user = userEvent.setup();
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Malia Cruz');
-    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    expect(screen.queryByText('Time changes require Client management, a Payroll manager, or an admin')).toBeNull();
     let finish!: (value: { aire_payroll_cockpit: AirePayrollCockpitOverview }) => void;
     apiMocks.overview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    expect(screen.queryByText('Time changes require Client management, a Payroll manager, or an admin')).toBeNull();
     await act(async () => finish({ aire_payroll_cockpit: fixtures().overview }));
     await waitFor(() => expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(false));
-    expect(screen.queryByText('Time changes require a Payroll manager or admin')).toBeNull();
+    expect(screen.queryByText('Time changes require Client management, a Payroll manager, or an admin')).toBeNull();
   });
 
   it.each([{ payPeriodId: 18, sourceId: 1 }, { payPeriodId: 17, sourceId: 2 }])('does not let an older refresh overwrite period $payPeriodId/source $sourceId', async ({ payPeriodId, sourceId }) => {

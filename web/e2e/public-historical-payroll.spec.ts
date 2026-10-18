@@ -445,6 +445,7 @@ async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = '
       total_employees: 1,
       pay_frequency: 'biweekly',
       historical_payroll_enabled: true,
+      client_capabilities: role === 'admin' ? ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'] : [],
     }],
     can_manage_clients: role === 'admin',
     can_view_client_management: role === 'admin',
@@ -1455,6 +1456,7 @@ test('previews and creates a clean current-payroll roster after history is appli
         total_employees: rosterApplied ? 114 : 0,
         pay_frequency: 'biweekly',
         historical_payroll_enabled: true,
+        client_capabilities: ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'],
       },
       {
         id: 2,
@@ -1466,6 +1468,7 @@ test('previews and creates a clean current-payroll roster after history is appli
         total_employees: 1,
         pay_frequency: 'biweekly',
         historical_payroll_enabled: false,
+        client_capabilities: ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'],
       },
     ],
     can_manage_clients: true,
