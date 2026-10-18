@@ -130,6 +130,7 @@ RSpec.describe "Admin-delegated accountant client management", type: :request do
   it "reports intake review authority once for an employee page in the selected client" do
     grant!
     create_list(:employee, 3, company: company)
+    allow(StaffRolePolicy).to receive(:allowed?).and_call_original
     expect(StaffRolePolicy).to receive(:allowed?).with(accountant, :manage_client_configuration, company: company).once.and_call_original
     get "/api/v1/admin/employees", headers: headers
     expect(response).to have_http_status(:ok)
