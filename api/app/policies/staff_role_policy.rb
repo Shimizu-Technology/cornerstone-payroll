@@ -204,6 +204,8 @@ class StaffRolePolicy
   # fallback to establish a delegated privilege. Revocation takes effect on the
   # next check, including service checks made after a request was authorized.
   def self.client_management_allowed?(user, company)
+    return false unless user&.accountant? && company
+
     User.uncached do
       actor = User.find_by(id: user&.id)
       target = Company.includes(:organization).find_by(id: company&.id)
