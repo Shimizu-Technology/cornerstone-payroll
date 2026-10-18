@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_15_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -512,6 +512,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_010000) do
   end
 
   create_table "company_assignments", force: :cascade do |t|
+    t.boolean "client_management", default: false, null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.datetime "expires_at"
@@ -523,6 +524,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_15_010000) do
     t.index [ "granted_by_id" ], name: "index_company_assignments_on_granted_by_id"
     t.index [ "user_id", "company_id" ], name: "index_company_assignments_on_user_id_and_company_id", unique: true
     t.index [ "user_id" ], name: "index_company_assignments_on_user_id"
+    t.check_constraint "NOT client_management OR workspace_access_level IS NULL AND granted_by_id IS NOT NULL", name: "company_assignments_client_management_live_shape"
     t.check_constraint "workspace_access_level IS NULL OR (workspace_access_level::text = ANY (ARRAY['operator'::character varying::text, 'reviewer'::character varying::text, 'workspace_admin'::character varying::text]))", name: "company_assignments_workspace_access_level_check"
   end
 

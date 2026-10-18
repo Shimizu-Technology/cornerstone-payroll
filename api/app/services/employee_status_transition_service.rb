@@ -24,6 +24,7 @@ class EmployeeStatusTransitionService
 
     ApplicationRecord.transaction do
       @employee.lock!
+      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
       raise Error, "This worker is already terminated" if @employee.status == "terminated"
       raise Error, "Termination cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
 
@@ -51,6 +52,7 @@ class EmployeeStatusTransitionService
 
     ApplicationRecord.transaction do
       @employee.lock!
+      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
       raise Error, "Only terminated workers can be reactivated" unless @employee.status == "terminated"
       if @employee.termination_date && effective_date <= @employee.termination_date
         raise Error, "Reactivation must be after the termination date"

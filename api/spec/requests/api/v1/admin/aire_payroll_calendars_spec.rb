@@ -95,7 +95,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
 
     post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar/publish"
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+    expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
   end
 
   it "queues the requested failed publication directly when delivery is retried" do

@@ -478,7 +478,7 @@ module Api
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
-          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: StaffRolePolicy.allowed?(current_user, :manage_client_configuration))
+          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: employee.company))
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["tax_classification"] = employee.tax_classification

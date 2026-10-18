@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class HistoricalClientBootstrapDispatch < ApplicationRecord
+  DISPATCH_LOCK_NAMESPACE = 714_292
   REDISPATCH_AFTER = 30.minutes
   MAX_DISPATCH_ATTEMPTS = 5
   MISSING_REQUESTER_ERROR = "The requesting payroll user is no longer available"
@@ -23,53 +24,107 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   def self.dispatch_pending!(ids: nil)
     scope = due_for_dispatch
     scope = scope.where(id: ids) if ids.present?
-    scope.find_each(&:dispatch!)
+    scope.find_each do |dispatch|
+      dispatch.dispatch!
+    rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized
+      # Preserve pending evidence; a later authorized request can resume it.
+      next
+    end
   end
 
-  def dispatch!
-    bootstrap = historical_client_bootstrap
-    bootstrap.with_lock do
-      with_lock do
-        bootstrap.reload
+  def dispatch!(authorization_actor: nil)
+    with_active_dispatch_lock do
+      bootstrap = historical_client_bootstrap
+      prepared = with_business_locks(bootstrap) do
         unless current_attempt?(bootstrap)
           update!(completed_at: Time.current, last_error: nil)
           next false
         end
         next false if enqueued_at.present? && enqueued_at >= REDISPATCH_AFTER.ago
+
+        # Automatic recovery may retry already-dispatched work. A first dispatch,
+        # including one recovered from a queue outage, still needs live authority.
+        authorization_actor ||= requested_by if enqueued_at.nil?
+        authorize_dispatch!(authorization_actor) if authorization_actor
         if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
           fail_attempt!(bootstrap, RETRIES_EXHAUSTED_ERROR)
           next false
         end
-
-        self.dispatch_attempts += 1
-        save!
         unless requested_by
+          self.dispatch_attempts += 1
           fail_attempt!(bootstrap, MISSING_REQUESTER_ERROR)
           next false
         end
-
-        begin
-          QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
-          update!(enqueued_at: Time.current, last_error: nil)
-          true
-        rescue StandardError => e
-          if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
-            fail_attempt!(bootstrap, RETRIES_EXHAUSTED_ERROR)
-          else
-            update!(last_error: e.message)
-          end
-          Rails.logger.error("Historical client bootstrap dispatch #{id} could not be enqueued: #{e.class}: #{e.message}")
-          false
-        end
+        true
       end
+      next false unless prepared
+
+      # All business row locks are released before this final, short check and
+      # queue transport. The advisory lock only serializes this dispatch's senders.
+      User.transaction { authorize_dispatch!(authorization_actor) } if authorization_actor
+      submit_job!(bootstrap, authorization_actor)
     end
+  rescue QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized
+    raise
   rescue StandardError => e
-    self.class.where(id: id).update_all(last_error: e.message, updated_at: Time.current) if persisted?
     Rails.logger.error("Historical client bootstrap dispatch #{id} could not be enqueued: #{e.class}: #{e.message}")
     false
   end
 
   private
+
+  def submit_job!(bootstrap, authorization_actor)
+    QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
+    with_lock do
+      # The worker can finish before the adapter returns. Preserve its terminal
+      # evidence while recording that this submission was accepted.
+      update!(dispatch_attempts: dispatch_attempts + 1, enqueued_at: Time.current, last_error: completed_at ? last_error : nil)
+    end
+    true
+  rescue StandardError => e
+    with_business_locks(bootstrap) do
+      authorize_dispatch!(authorization_actor) if authorization_actor
+      self.dispatch_attempts += 1
+      if dispatch_attempts >= MAX_DISPATCH_ATTEMPTS
+        fail_attempt!(bootstrap, RETRIES_EXHAUSTED_ERROR)
+      else
+        update!(last_error: e.message)
+      end
+    end
+    Rails.logger.error("Historical client bootstrap dispatch #{id} could not be enqueued: #{e.class}: #{e.message}")
+    false
+  end
+
+  def authorize_dispatch!(actor)
+    QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(
+      actor: actor, company_id: historical_client_bootstrap.company_id, lock: true
+    )
+  end
+
+  def with_business_locks(bootstrap)
+    bootstrap.with_lock do
+      with_lock do
+        bootstrap.reload
+        yield
+      end
+    end
+  end
+
+  def with_active_dispatch_lock
+    self.class.connection_pool.with_connection do |connection|
+      binds = [ DISPATCH_LOCK_NAMESPACE, id ].map.with_index do |value, index|
+        ActiveRecord::Relation::QueryAttribute.new("lock_key_#{index}", value, ActiveRecord::Type::Integer.new)
+      end
+      locked = connection.exec_query("SELECT pg_try_advisory_lock($1, $2)", "Client bootstrap dispatch lock", binds).rows.first.first
+      return false unless ActiveModel::Type::Boolean.new.cast(locked)
+
+      begin
+        yield
+      ensure
+        connection.exec_query("SELECT pg_advisory_unlock($1, $2)", "Client bootstrap dispatch unlock", binds)
+      end
+    end
+  end
 
   def current_attempt?(bootstrap)
     bootstrap.pending? && bootstrap.apply_started_at&.iso8601(6) == attempt_token

@@ -15,6 +15,7 @@ module TimeTracking
 
       mapping = TimeTrackingEmployeeMapping.transaction do
         source.lock!
+        raise ArgumentError, "Client configuration access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: company)
         record = TimeTrackingEmployeeMapping.resolve_source_identity!(
           company: company,
           source: source,

@@ -913,6 +913,55 @@ RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
     expect(AuditLog.order(:id).last.metadata.fetch("reason")).to eq("Cutoff review complete")
   end
 
+  it "lets a delegated accountant command only with an independently configured source identity" do
+    accountant = create(:user, company: company, role: "accountant")
+    assignment = create(:company_assignment, user: accountant, company: company, granted_by: admin, client_management: true)
+    allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(accountant)
+    allow(client).to receive(:payroll_cockpit_period).and_return(period_payload)
+    allow(client).to receive(:payroll_cockpit_employees).and_return(employee_payload)
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit"
+    expect(response).to have_http_status(:ok)
+    access = response.parsed_body.dig("aire_payroll_cockpit", "command_access")
+    expect(access).to include("can_manage_mappings" => true, "can_command" => false)
+
+    delegation = create(:time_tracking_delegation, company: company, time_tracking_source: source, user: accountant)
+    delegated_client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source, delegation: delegation).and_return(delegated_client)
+    allow(delegated_client).to receive(:finalize_payroll_cockpit_period).and_return("result" => { "status" => "finalized" })
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/finalize", params: {
+      command_id: SecureRandom.uuid, expected_version: 2, reason: "Delegated cutoff review"
+    }
+    expect(response).to have_http_status(:accepted)
+    expect(delegated_client).to have_received(:finalize_payroll_cockpit_period).once
+    assignment.update!(client_management: false)
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/finalize", params: {
+      command_id: SecureRandom.uuid, expected_version: 2, reason: "Revoked cutoff review"
+    }
+    expect(response).to have_http_status(:forbidden)
+    expect(delegated_client).to have_received(:finalize_payroll_cockpit_period).once
+  end
+
+  [ true, false ].each do |connected|
+    it "denies source mutation if the grant is revoked during account-status I/O (connected=#{connected})" do
+      accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+      assignment = create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin)
+      create(:time_tracking_delegation, company: company, time_tracking_source: source, user: accountant)
+      allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(accountant)
+      allow(client).to receive(:payroll_account_link) do
+        assignment.update!(client_management: false)
+        { "account_link" => { "connected" => connected } }
+      end
+      expect(client).not_to receive(:finalize_payroll_cockpit_period)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_cockpit/finalize", params: {
+        command_id: SecureRandom.uuid, expected_version: 2, reason: "Review delayed source connection"
+      }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(AuditLog.where(action: "aire_payroll_cockpit#finalize")).to be_empty
+    end
+  end
+
   it "lets accountants read the cockpit but not send commands" do
     accountant = create(:user, company: company, organization: company.organization, role: "accountant")
     allow_any_instance_of(Api::V1::Admin::AirePayrollCockpitsController).to receive(:current_user).and_return(accountant)

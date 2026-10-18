@@ -24,6 +24,7 @@ module QuickbooksHistory
       HistoricalWorker.transaction do
         worker.historical_import_batch.lock!
         worker.lock!
+        ensure_authorized_actor!(lock: true)
         unless worker.historical_import_batch.previewed?
           raise ArgumentError, "Historical worker mappings can only be changed while the batch is a preview"
         end
@@ -45,10 +46,14 @@ module QuickbooksHistory
 
     attr_reader :worker, :employee, :actor, :archive_only
 
-    def ensure_authorized_actor!
+    def ensure_authorized_actor!(lock: false)
+      if lock
+        @actor = User.lock.find_by(id: actor&.id)
+        worker.company.company_assignments.where(user_id: actor&.id).lock.load
+      end
       authorized = actor.present? &&
         actor.can_access_company?(worker.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: worker.company)
       return if authorized
 
       raise ArgumentError, "An attributed manager or administrator with company access is required"

@@ -17,19 +17,20 @@ module QuickbooksHistory
       prepared, dispatch = prepare_pending_bootstrap!
       return Result.new(bootstrap: prepared, enqueued: false) unless dispatch
 
-      Result.new(bootstrap: prepared, enqueued: dispatch.dispatch!)
+      Result.new(bootstrap: prepared, enqueued: dispatch.dispatch!(authorization_actor: actor))
     end
 
     private
 
     attr_reader :bootstrap, :actor, :acknowledgement
 
-    def ensure_authorized!
-      ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: bootstrap.company_id)
+    def ensure_authorized!(lock: false)
+      @actor = ClientBootstrapAuthorization.ensure_authorized!(actor: actor, lock: lock, company_id: bootstrap.company_id)
     end
 
     def prepare_pending_bootstrap!
       bootstrap.with_lock do
+        ensure_authorized!(lock: true)
         bootstrap.reload
         return [ bootstrap, nil ] if bootstrap.applied?
         if bootstrap.pending?

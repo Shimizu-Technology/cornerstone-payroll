@@ -255,7 +255,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
       expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
     end
   end
