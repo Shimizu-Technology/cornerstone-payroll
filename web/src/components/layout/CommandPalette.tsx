@@ -270,7 +270,9 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
           kind: 'navigation',
           href: '/payroll-reminders',
         });
+      }
 
+      if (hasCapability('manage_payroll_fields')) {
         add({
           id: 'payroll-fields',
           label: 'Payroll Fields',

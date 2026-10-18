@@ -4300,7 +4300,7 @@ export const companyAssignmentsApi = {
     api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
   create: (data: { user_id: number; company_id: number; workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin'; expires_at?: string }) =>
     api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
-  updateClientManagement: (id: number, enabled: boolean) =>
+  updateClientManagement: (id: number, enabled: boolean): Promise<{ data: CompanyAssignment }> =>
     api.patch<{ data: CompanyAssignment }>(`/admin/company_assignments/${id}`, {
       company_assignment: { client_management: enabled },
     }),

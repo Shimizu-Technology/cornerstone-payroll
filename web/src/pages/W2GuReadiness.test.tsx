@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import { W2GuPanel } from './Reports';
+import type { CompanyListItem } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
   readiness: vi.fn(), preflight: vi.fn(), markReady: vi.fn(), report: vi.fn(),
@@ -22,8 +23,8 @@ vi.mock('@/services/api', () => ({
   },
   ApiError: class ApiError extends Error {},
 }));
-const scope = vi.hoisted(() => ({ id: 42, capabilities: ['manage_client_administration'] as string[] }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: scope.id, activeCompany: { id: scope.id, client_capabilities: scope.capabilities }, loading: false }) }));
+const scope = vi.hoisted(() => ({ id: 42, capabilities: ['manage_client_administration'] as string[], workspace: {} as Partial<CompanyListItem> }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: scope.id, activeCompany: { id: scope.id, client_capabilities: scope.capabilities, ...scope.workspace }, loading: false }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 1, company_id: 42, role: 'accountant' }, isLoading: false }) }));
 
 function readiness(status = 'stale') {
@@ -44,6 +45,7 @@ describe('W-2 readiness recovery', () => {
     vi.clearAllMocks();
     scope.id = 42;
     scope.capabilities = ['manage_client_administration'];
+    scope.workspace = {};
     mocks.readiness.mockResolvedValue({ filing: readiness(), filing_gate: gate });
     mocks.preflight.mockResolvedValue({ filing: readiness('preflight_passed'), preflight: { findings: [], blocking_count: 0, warning_count: 0 }, filing_gate: gate });
     mocks.markReady.mockResolvedValue({ filing: readiness('filing_ready'), filing_gate: gate });
@@ -87,6 +89,22 @@ describe('W-2 readiness recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View W-2GU Report' }));
     expect(await screen.findByText('Review needed — inputs changed')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Mark Filing Ready' })).toHaveProperty('disabled', true);
+    expect(mocks.markReady).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { workspace_can_write: false },
+    { test_workspace_read_only: true },
+    { test_workspace_expired: true },
+    { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_client_administration: false } },
+  ])('blocks a retained client capability when workspace writes are unavailable: %j', async (workspace) => {
+    scope.workspace = workspace;
+    mocks.readiness.mockResolvedValue({ filing: readiness('preflight_passed'), filing_gate: gate });
+    renderPanel();
+    await screen.findByText('preflight passed');
+    const button = screen.getByRole('button', { name: 'Mark Filing Ready' });
+    expect(button).toHaveProperty('disabled', true);
+    fireEvent.click(button);
     expect(mocks.markReady).not.toHaveBeenCalled();
   });
 });
