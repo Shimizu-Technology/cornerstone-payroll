@@ -212,8 +212,10 @@ module QuickbooksHistory
     def persist_review!(evidence)
       batch.with_lock do
         batch.reload
-        @actor = self.class.ensure_authorized!(batch: batch, actor: actor, lock: true)
         review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
+        # Checklist and failure writers lock review before actor/assignment.
+        review.lock! if review.persisted?
+        @actor = self.class.ensure_authorized!(batch: batch, actor: actor, lock: true)
         raise ArgumentError, "The approved cutover review is sealed" if review.approved?
         ensure_current_attempt!(review) if expected_verification_started_at
 
