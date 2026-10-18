@@ -55,6 +55,47 @@ module Api
           end
         end
 
+        # PATCH /api/v1/admin/company_assignments/:id
+        # The only API path that can grant or revoke client management.
+        def update
+          assignment = scoped_assignments.find_by(id: params[:id])
+          return render json: { error: "Assignment not found" }, status: :not_found unless assignment
+          return render json: { error: "Cannot change your own grant" }, status: :forbidden if assignment.user_id == current_user.id
+
+          attributes = params.require(:company_assignment).permit(:client_management, :expires_at)
+          unless [ true, false ].include?(attributes[:client_management])
+            return render json: { error: "client_management must be a boolean" }, status: :unprocessable_entity
+          end
+          if attributes.key?(:expires_at) && !attributes[:expires_at].nil? && attributes[:expires_at] != ""
+            begin
+              attributes[:expires_at] = Time.iso8601(attributes[:expires_at].to_s)
+            rescue ArgumentError
+              return render json: { error: "expires_at must be an ISO 8601 timestamp" }, status: :unprocessable_entity
+            end
+          end
+          CompanyAssignment.transaction do
+            actor = User.lock.find(current_user.id)
+            raise CompanyWriteAccessChanged unless actor.organization_admin? && actor.payroll_access_allowed? &&
+              (actor.super_admin? || actor.organization_id == assignment.company.organization_id)
+            assignment.lock!
+            before_values = assignment.attributes.slice("client_management", "expires_at", "granted_by_id")
+            assignment.assign_attributes(attributes)
+            assignment.granted_by = actor
+            assignment.save!(context: :client_management_update)
+            AuditLog.record!(
+              user: actor, company_id: assignment.company_id, organization_id: assignment.company.organization_id,
+              action: "company_assignments#client_management_updated", record_type: "CompanyAssignment", record_id: assignment.id,
+              metadata: { user_id: assignment.user_id, company_id: assignment.company_id, actor_id: actor.id,
+                before_values: before_values, after_values: assignment.attributes.slice("client_management", "expires_at", "granted_by_id") },
+              ip_address: request.remote_ip, request_id: request.request_id, event_category: "security"
+            )
+          end
+          skip_default_audit_log!
+          render json: { data: serialize_assignment(assignment) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+        end
+
         # DELETE /api/v1/admin/company_assignments/:id
         def destroy
           assignment = scoped_assignments.find_by(id: params[:id])
@@ -150,6 +191,7 @@ module Api
             company_name: assignment.company.name,
             test_workspace: assignment.company.test_workspace?,
             workspace_access_level: assignment.workspace_access_level,
+            client_management: assignment.client_management,
             expires_at: assignment.expires_at,
             granted_by_id: assignment.granted_by_id,
             granted_by_name: assignment.granted_by&.name,

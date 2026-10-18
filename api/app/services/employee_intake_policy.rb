@@ -17,7 +17,8 @@ class EmployeeIntakePolicy
       enabled: enabled?(company), expires_at: company.employee_intake_expires_at,
       reason: company.employee_intake_reason,
       enabled_by_name: User.find_by(id: company.employee_intake_enabled_by_id)&.name,
-      can_manage: actor.organization_admin?
+      can_manage: StaffRolePolicy.allowed?(actor, :manage_client_administration, company: company) &&
+        TestWorkspaceAccessPolicy.allowed?(user: actor, company: company, request_method: "PATCH", capability: :manage_client_administration)
     }
   end
 

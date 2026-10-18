@@ -32,7 +32,10 @@ module Api
           return render json: { error: "Publish this pay period to time tracking first" }, status: :unprocessable_entity unless publication
           return render json: { aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period) } if publication.delivered?
 
-          publication.update!(next_delivery_attempt_at: Time.current, delivery_enqueued_until: nil)
+          @pay_period.company.with_lock do
+            revalidate_current_company_write_access!(company: @pay_period.company, capability: :manage_client_configuration)
+            publication.update!(next_delivery_attempt_at: Time.current, delivery_enqueued_until: nil)
+          end
           AirePayrollCalendarPublication.dispatch_one!(publication.id)
           render json: { aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period.reload) }
         end

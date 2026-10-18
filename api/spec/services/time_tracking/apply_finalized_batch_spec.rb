@@ -129,6 +129,133 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     )
   end
 
+  describe "unset payroll wage rates" do
+    def wage_safety_preview(company, pay_period, source, employee)
+      confirm_mapping!(company: company, source: source, employee: employee)
+      adjustments = [
+        {
+          "source_time_entry_id" => "unset-rate-101", "line_key" => "flight",
+          "source_kind" => "current", "original_work_date" => "2026-08-20",
+          "original_week_start" => "2026-08-16", "source_category_id" => "flight",
+          "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+          "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0
+        }
+      ]
+      preview_import(pay_period: pay_period, source: source,
+        payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+    end
+
+    %w[label override saved_preview].each do |match_path|
+      it "rejects an unset #{match_path} rate without saving zero wages or import receipts" do
+        company, pay_period, source = setup_records
+        employee = create(:employee, company: company, department: create(:department, company: company))
+        rate = create(:employee_wage_rate, employee: employee, label: match_path == "override" ? "Unconfigured" : "Flight Hours",
+          rate: match_path == "saved_preview" ? 25 : nil, is_primary: true)
+        create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25) if match_path == "override"
+        import = wage_safety_preview(company, pay_period, source, employee)
+        category = import.processed_payload.fetch("rows").first.fetch("categories").first
+        if match_path == "saved_preview"
+          expect(category.fetch("employee_wage_rate_id")).to eq(rate.id)
+          rate.update!(rate: nil)
+        end
+        mappings = if match_path == "override"
+          [ { source_user_id: "aire-user-1", employee_id: employee.id, wage_rate_mappings: [
+            { source_category_id: "flight", source_category_key: "flight_hours", source_category_name: "Flight Hours",
+              source_kind: "current", employee_wage_rate_id: rate.id }
+          ] } ]
+        else
+          []
+        end
+        item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+          hours_worked: 2, holiday_hours: 8, pto_hours: 4)
+        before_attributes = item.attributes
+
+        result = described_class.new(import: import, mappings: mappings, applied_by: create(:user, company: company)).call
+
+        expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+        if match_path == "label"
+          expect(category["employee_wage_rate_id"]).to be_nil
+          expect(import.processed_payload.fetch("rows").first.fetch("warnings"))
+            .to include(include("code" => "unmapped_wage_rate"))
+        end
+        expect(import.reload.status).to eq("previewed")
+        expect(item.reload.attributes).to eq(before_attributes)
+        expect(TimeTrackingEntryAllocation.where(time_tracking_import: import)).to be_empty
+        expect(AirePayrollAcknowledgement.where(time_tracking_import: import)).to be_empty
+        expect(AirePayrollEntryAcknowledgement.where(time_tracking_import: import)).to be_empty
+      end
+    end
+
+    [ false, true ].each do |explicit_override|
+      it "retains an intentional zero rate as a valid saved wage (explicit override: #{explicit_override})" do
+        company, pay_period, source = setup_records
+        employee = create(:employee, company: company, department: create(:department, company: company))
+        rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 0, is_primary: true)
+        import = wage_safety_preview(company, pay_period, source, employee)
+        expect(import.processed_payload.fetch("rows").first.fetch("categories").first)
+          .to include("employee_wage_rate_id" => rate.id, "payroll_rate_cents" => 0)
+
+        mappings = explicit_override ? [ { source_user_id: "aire-user-1", employee_id: employee.id, wage_rate_mappings: [
+          { source_category_id: "flight", source_category_key: "flight_hours", source_category_name: "Flight Hours",
+            source_kind: "current", employee_wage_rate_id: rate.id }
+        ] } ] : []
+        result = described_class.new(import: import, mappings: mappings, applied_by: create(:user, company: company)).call
+
+        expect(result[:errors]).to be_empty
+        expect(import.reload.status).to eq("applied")
+        expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours)
+          .to contain_exactly(include("employee_wage_rate_id" => rate.id, "rate" => 0.0, "regular_hours" => 8.0))
+        expect(TimeTrackingEntryAllocation.where(time_tracking_import: import).count).to eq(1)
+      end
+    end
+
+    it "rejects unset rates for hourly contractors" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, :contractor, company: company, department: create(:department, company: company),
+        contractor_pay_type: "hourly")
+      create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: nil, is_primary: true)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+      expect(pay_period.payroll_items.reload).to be_empty
+      expect(import.reload.status).to eq("previewed")
+    end
+
+    it "retains the salary pay basis when an old hourly wage amount is unset" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, :salary, company: company, department: create(:department, company: company))
+      create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: nil, is_primary: true)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.employment_type).to eq("salary")
+      expect(item.pay_rate).to eq(52_000)
+      expect(item.hours_worked).to eq(8)
+      expect(item.wage_rate_hours).to be_empty
+    end
+
+    it "preserves manual holiday and PTO hours at a configured rate when the primary placeholder is unset" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, company: company, department: create(:department, company: company))
+      create(:employee_wage_rate, employee: employee, label: "Unconfigured", rate: nil, is_primary: true)
+      rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25)
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        hours_worked: 0, holiday_hours: 8, pto_hours: 4)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to be_empty
+      expect(item.reload.wage_rate_hours).to contain_exactly(include("employee_wage_rate_id" => rate.id,
+        "rate" => 25.0, "regular_hours" => 8.0, "holiday_hours" => 8.0, "pto_hours" => 4.0))
+    end
+  end
+
   it "rejects excluded payroll employees without claiming their finalized entries were imported" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")

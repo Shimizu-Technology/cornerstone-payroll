@@ -223,8 +223,9 @@ module TimeTracking
       return match unless employee&.hourly? || employee&.contractor_hourly?
 
       active_rates = employee.active_wage_rates.to_a
-      return match if active_rates.length <= 1
+      return match if active_rates.length <= 1 && active_rates.none? { |rate| rate.rate.nil? }
 
+      active_rates = active_rates.reject { |rate| rate.rate.nil? }
       match[:multi_rate_employee] = true
       match[:categories] = categories.map do |category|
         wage_rate_match = find_wage_rate_for_category(category, active_rates)

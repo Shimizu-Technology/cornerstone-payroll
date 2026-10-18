@@ -608,6 +608,8 @@ module Api
           selected_profile = selected_profile_for(@company.organization_id, target_stock_type)
 
           Company.transaction do
+            @company.lock!
+            revalidate_current_company_write_access!(company: @company, capability: :manage_client_check_settings)
             if calibration_attributes.present? && selected_profile.present?
               if expected_profile_version.blank?
                 raise ArgumentError, "Reload the selected printer profile before saving calibration"
@@ -711,7 +713,13 @@ module Api
             }, status: :unprocessable_entity
           end
 
-          @company.update!(next_check_number: new_number)
+          @company.with_lock do
+            revalidate_current_company_write_access!(company: @company, capability: :manage_client_check_settings)
+            if new_number < @company.next_check_number.to_i
+              return render json: { error: "Next check number cannot move backward" }, status: :unprocessable_entity
+            end
+            @company.update!(next_check_number: new_number)
+          end
           render json: { check_settings: company_check_settings_json(@company) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -849,6 +857,9 @@ module Api
         end
 
         def set_company
+          if params[:company_id].present? && params[:company_id].to_s != current_company_id.to_s
+            return render json: { error: "Company context does not match the requested client" }, status: :forbidden
+          end
           @company = Company.find_by(id: current_company_id)
           render json: { error: "Company not found" }, status: :not_found and return unless @company
         end

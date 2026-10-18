@@ -26,6 +26,9 @@ class CompanyPayScheduleChangeService
 
     Company.transaction do
       @company.lock!
+      unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)
+        raise ChangeError, "Client configuration access required"
+      end
       current_schedule = @company.company_pay_schedules.find_by(ends_on: nil)
       current_workweek = @company.company_workweeks.find_by(ends_on: nil)
       validate_no_queued_configuration!(current_schedule, current_workweek)

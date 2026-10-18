@@ -18,6 +18,7 @@ class EmployeeWorkProfileChangeService
 
     ApplicationRecord.transaction do
       @employee.lock!
+      raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @employee.company)
       current = @employee.employee_work_profiles.find_by(ends_on: nil)
       if current && effective_on <= current.effective_on
         raise Error, "The new work profile must begin after the current profile's effective date"

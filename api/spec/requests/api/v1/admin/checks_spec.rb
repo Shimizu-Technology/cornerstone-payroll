@@ -1111,7 +1111,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         }
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
       expect(company.reload.check_offset_x).not_to eq(0.1)
     end
 

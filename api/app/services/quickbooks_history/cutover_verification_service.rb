@@ -62,7 +62,7 @@ module QuickbooksHistory
 
     def ensure_eligible!
       authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
       raise ArgumentError, "A manager or administrator with company access is required" unless authorized
 
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?

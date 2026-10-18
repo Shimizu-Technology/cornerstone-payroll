@@ -21,9 +21,7 @@ class NonEmployeeCheckSupersessionService
     note = reason.to_s.strip
     raise Error, "Explain why these records represent one physical check (at least 20 characters)" if note.length < 20
     raise Error, "Confirm that both records name the recipient of the same physical check" unless recipient_verified == true
-    unless StaffRolePolicy.allowed?(actor, :manage_client_configuration) && actor.can_access_company?(check.company_id)
-      raise Error, "Only an authorized manager or administrator can link duplicate checks"
-    end
+    ensure_authorized!
     if check.company.live_payroll? && !CheckSupersessionRolloutApproval.exists?(company_id: check.company_id)
       raise Error, "Live-check reconciliation is disabled until this company is approved for rollout"
     end
@@ -36,6 +34,7 @@ class NonEmployeeCheckSupersessionService
       raise Error, "Choose a matching committed payroll check" unless item
 
       item.with_lock do
+        ensure_authorized!(lock: true)
         raise Error, "Choose a matching issued payroll check" unless eligible_item?(item)
         delivery = delivery_event(item)
 
@@ -65,6 +64,17 @@ class NonEmployeeCheckSupersessionService
   private
 
   attr_reader :check, :actor
+
+  def ensure_authorized!(lock: false)
+    if lock
+      @actor = User.lock.find_by(id: actor&.id)
+      check.company.company_assignments.where(user_id: actor&.id).lock.load
+    end
+    return if StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: check.company) &&
+      actor.can_access_company?(check.company_id)
+
+    raise Error, "Only an authorized manager or administrator can link duplicate checks"
+  end
 
   def candidate_check?
     check.standalone? && !check.voided? && check.printed? && check.paid_at.nil? &&
