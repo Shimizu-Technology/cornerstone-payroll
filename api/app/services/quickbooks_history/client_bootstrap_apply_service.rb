@@ -24,6 +24,7 @@ module QuickbooksHistory
         bootstrap.company.lock!
         bootstrap.historical_import_batch.lock!
         bootstrap.lock!
+        ensure_authorized_actor!(lock: true)
         next bootstrap if bootstrap.applied?
         ensure_current_attempt! if expected_apply_started_at
         unless bootstrap.previewed? || bootstrap.pending? || bootstrap.failed?
@@ -69,8 +70,8 @@ module QuickbooksHistory
       raise StaleBootstrapAttempt, "A newer clean-client preparation attempt superseded this job"
     end
 
-    def ensure_authorized_actor!
-      ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: bootstrap.company_id)
+    def ensure_authorized_actor!(lock: false)
+      @actor = ClientBootstrapAuthorization.ensure_authorized!(actor: actor, lock: lock, company_id: bootstrap.company_id)
     end
 
     def create_wage_rates!(employee, wage_rates)

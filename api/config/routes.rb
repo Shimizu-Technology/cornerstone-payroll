@@ -153,7 +153,7 @@ Rails.application.routes.draw do
             post "admin_users", to: "organizations#create_admin_user"
           end
         end
-        resources :company_assignments, only: [ :index, :create, :destroy ] do
+        resources :company_assignments, only: [ :index, :create, :update, :destroy ] do
           collection do
             put :bulk_update
           end

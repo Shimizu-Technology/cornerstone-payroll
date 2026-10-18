@@ -14,12 +14,16 @@ module Api
 
         # PUT /api/v1/admin/payroll_reminder_config
         def update
-          config = current_company.payroll_reminder_config || current_company.build_payroll_reminder_config
+          current_company.with_lock do
+            config = current_company.payroll_reminder_config || current_company.build_payroll_reminder_config
+            config.lock! if config.persisted?
+            revalidate_current_company_write_access!(capability: :manage_client_configuration)
 
-          if config.update(config_params)
-            render json: { payroll_reminder_config: serialize(config) }
-          else
-            render json: { errors: config.errors.full_messages }, status: :unprocessable_entity
+            if config.update(config_params)
+              render json: { payroll_reminder_config: serialize(config) }
+            else
+              render json: { errors: config.errors.full_messages }, status: :unprocessable_entity
+            end
           end
         end
 
@@ -41,14 +45,22 @@ module Api
 
           failures = []
           config.recipients.each do |email|
-            Resend::Emails.send({
+            payload = {
               from: from_email,
               to: email,
               subject: "Test: Payroll Reminder for #{current_company.name}",
               html: test_email_html
-            })
-          rescue StandardError => e
-            failures << { email: email, error: e.message }
+            }
+            # Resolve content before the final permission check. Release the
+            # short authorization transaction before calling the provider.
+            User.transaction do
+              revalidate_current_company_write_access!(capability: :manage_client_configuration)
+            end
+            begin
+              Resend::Emails.send(payload)
+            rescue StandardError => e
+              failures << { email: email, error: e.message }
+            end
           end
 
           if failures.size == config.recipients.size

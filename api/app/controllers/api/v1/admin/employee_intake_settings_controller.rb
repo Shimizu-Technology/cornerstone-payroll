@@ -9,8 +9,6 @@ module Api
         end
 
         def update
-          return render json: { error: "Organization administrator access required" }, status: :forbidden unless current_user.organization_admin?
-
           attrs = params.require(:employee_intake_settings).permit(:enabled, :reason, :expires_at, :duration_hours)
           enabled = ActiveModel::Type::Boolean.new.cast(attrs[:enabled])
           reason = attrs[:reason].to_s.strip
@@ -30,6 +28,7 @@ module Api
             return render json: { error: "Provide a reason and an expiration within the next 24 hours" }, status: :unprocessable_entity
           end
           current_company.with_lock do
+            revalidate_current_company_write_access!(capability: :manage_client_administration)
             current_company.update!(employee_intake_expires_at: enabled ? expires_at : nil,
               employee_intake_reason: enabled ? reason : current_company.employee_intake_reason,
               employee_intake_enabled_by_id: enabled ? current_user.id : current_company.employee_intake_enabled_by_id)

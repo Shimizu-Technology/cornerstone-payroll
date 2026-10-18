@@ -35,6 +35,9 @@ module AirePayrollCalendar
         PayPeriod.transaction do
           @pay_period.lock!
           @source.lock!
+          unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @pay_period.company)
+            raise Error, "Client configuration access required"
+          end
           validate_source!
           @source.connector.calendar_contract(@pay_period).validate!
 

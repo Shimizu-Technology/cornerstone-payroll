@@ -36,7 +36,7 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
 
     put "/api/v1/admin/pay_schedule_settings", params: { pay_schedule_settings: {} }
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+    expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
   end
 
   it "creates a confirmed effective-dated schedule and legal workweek" do

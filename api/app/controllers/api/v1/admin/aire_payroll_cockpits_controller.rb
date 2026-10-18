@@ -502,8 +502,19 @@ module Api
 
         def cockpit_client(with_delegation: false)
           require_published_source!
+          capability = StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name)
+          if capability == :manage_client_configuration &&
+            !StaffRolePolicy.allowed?(current_user, capability, company: @pay_period.company)
+            raise CompanyWriteAccessChanged
+          end
           delegation = current_delegation if with_delegation
           actor = current_user if with_delegation && account_link_connected?
+          # Account-link resolution may wait on a remote status request. A grant
+          # revoked during that request must not authorize the ensuing command.
+          if capability == :manage_client_configuration &&
+            !StaffRolePolicy.allowed?(current_user, capability, company: @pay_period.company)
+            raise CompanyWriteAccessChanged
+          end
           options = { delegation: delegation }
           options[:actor] = actor if actor
           TimeTracking::Client.new(@source, **options)
@@ -534,8 +545,8 @@ module Api
             can_read: @source.supports?(:payroll_cockpit),
             can_manage_manual_allocations: @source.supports?(:manual_allocations) && manual_reconciliation_allowed? &&
               (account_link_configured || delegation.present?),
-            can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration),
-            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&
+            can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: @pay_period.company),
+            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: @pay_period.company) &&
               (account_link_configured || delegation.present?),
             delegation_configured: account_link_configured || delegation.present?,
             account_link_configured: account_link_configured,

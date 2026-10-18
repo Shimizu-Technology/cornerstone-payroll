@@ -27,7 +27,7 @@ module QuickbooksHistory
         acknowledgement: ClientBootstrapApplyService::ACKNOWLEDGEMENT,
         expected_apply_started_at: apply_started_at
       ).call
-    rescue ClientBootstrapApplyService::StaleBootstrapAttempt
+    rescue ClientBootstrapApplyService::StaleBootstrapAttempt, ClientBootstrapAuthorization::NotAuthorized
       nil
     rescue *TRANSIENT_ERRORS
       raise
@@ -53,16 +53,24 @@ module QuickbooksHistory
       failure_snapshot = bootstrap.with_lock do
         return unless current_attempt?(bootstrap, apply_started_at)
 
+        dispatches = bootstrap.historical_client_bootstrap_dispatches.where(attempt_token: apply_started_at, completed_at: nil)
+        dispatches.lock.load
+        ClientBootstrapAuthorization.ensure_authorized!(
+          actor: User.find_by(id: actor_id), company_id: bootstrap.company_id, lock: true
+        )
         bootstrap.update!(
           status: "failed",
           apply_error: "Employee preparation could not be completed. Review the current setup preview and try again."
         )
-        bootstrap.historical_client_bootstrap_dispatches
-                 .where(attempt_token: apply_started_at, completed_at: nil)
-                 .update_all(completed_at: Time.current, last_error: error.class.name, updated_at: Time.current)
+        dispatches.update_all(completed_at: Time.current, last_error: error.class.name, updated_at: Time.current)
         { status: bootstrap.status, attempt_token: apply_started_at }
       end
-      record_failure_audit(bootstrap, actor_id, error, failure_snapshot)
+      User.transaction do
+        ClientBootstrapAuthorization.ensure_authorized!(
+          actor: User.find_by(id: actor_id), company_id: bootstrap.company_id, lock: true
+        )
+        record_failure_audit(bootstrap, actor_id, error, failure_snapshot)
+      end
     rescue StandardError => persistence_error
       Rails.logger.error(
         "Historical client bootstrap failure handling did not fully complete for bootstrap #{bootstrap_id}: " \

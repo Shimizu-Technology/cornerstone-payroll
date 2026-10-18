@@ -40,6 +40,8 @@ module Api
           total_employees: total_employee_counts.fetch(company.id, 0),
           pay_frequency: company.pay_frequency,
           historical_payroll_enabled: company.historical_payroll_enabled,
+          client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
+          client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
           payroll_environment: company.payroll_environment,
           test_workspace: company.test_workspace?,
           test_workspace_purpose: company.test_workspace_purpose,

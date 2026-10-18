@@ -188,7 +188,7 @@ module TimeTracking
       employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
       return result unless employee&.hourly? || employee&.contractor_hourly?
 
-      active_rates = employee.active_wage_rates.to_a
+      active_rates = employee.active_wage_rates.reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
         rate, method = find_wage_rate(category, active_rates)

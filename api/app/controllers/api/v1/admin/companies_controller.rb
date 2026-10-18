@@ -263,12 +263,16 @@ module Api
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          update_params = current_user&.organization_admin? ? company_params : staff_company_params
+          full_management = full_company_management?(company)
+          update_params = full_management ? company_params : staff_company_params
           if update_params.blank?
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
           company.with_lock do
+            revalidate_current_company_write_access!(company: company,
+              capability: full_management ? :manage_client_administration : nil)
+            update_params = full_company_management?(company) ? company_params : staff_company_params
             before_updated_at = company.updated_at
             normalize_company_check_layout_config!(update_params, company)
             company.assign_attributes(update_params)
@@ -363,6 +367,8 @@ module Api
             total_employees: total_employee_counts&.fetch(company.id, 0) || company.employees.count,
             pay_frequency: company.pay_frequency,
             historical_payroll_enabled: company.historical_payroll_enabled,
+            client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
+            client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
             client_payroll_approval_required: company.client_payroll_approval_required,
             payroll_environment: company.payroll_environment,
             test_workspace: company.test_workspace?,
@@ -409,12 +415,16 @@ module Api
           payload[:organization_id] = company.organization_id
           payload[:can_update] = can_update
           payload[:editable_fields] = if can_update
-            current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+            full_company_management?(company) ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
           else
             []
           end
 
           payload
+        end
+
+        def full_company_management?(company)
+          StaffRolePolicy.allowed?(current_user, :manage_client_administration, company: company)
         end
 
         def can_update_company?(company)

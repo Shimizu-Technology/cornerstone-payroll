@@ -690,9 +690,6 @@ module Api
         # POST /api/v1/admin/reports/w2_gu_mark_ready
         # Marks a W-2 filing year as filing-ready if no blocking findings remain.
         def w2_gu_mark_ready
-          require_admin!
-          return if performed?
-
           raw_year = params[:year]
           year = if raw_year.present?
             Integer(raw_year, exception: false)
@@ -706,6 +703,7 @@ module Api
 
           company = Company.find(current_company_id)
           company.with_lock do
+            revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
             filing = W2FilingReadiness.find_by(company_id: company.id, year: year)
             unless filing
               return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity

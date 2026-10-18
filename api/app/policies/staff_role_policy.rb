@@ -1,7 +1,12 @@
 # frozen_string_literal: true
 
 class StaffRolePolicy
+  DELEGATABLE_CAPABILITIES = %i[manage_client_configuration manage_client_check_settings manage_client_administration].freeze
+  ROLE_ONLY_CAPABILITIES = %i[manage_source_delegations manage_payroll_go_live_setup].freeze
+
   CAPABILITY_ROLES = {
+    manage_source_delegations: %w[super_admin org_admin admin manager],
+    manage_payroll_go_live_setup: %w[super_admin org_admin admin manager],
     staff_workspace: %w[super_admin org_admin admin manager accountant],
     payroll_operations: %w[super_admin org_admin admin manager accountant],
     manage_payroll_fields: %w[super_admin org_admin admin manager accountant],
@@ -13,6 +18,7 @@ class StaffRolePolicy
     manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
+    manage_client_administration: %w[super_admin org_admin admin],
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
     manage_organization: %w[super_admin org_admin admin],
@@ -20,17 +26,20 @@ class StaffRolePolicy
   }.freeze
 
   CAPABILITY_ERRORS = {
+    manage_source_delegations: "Manager or admin access required",
+    manage_payroll_go_live_setup: "Manager or admin access required",
     staff_workspace: "Staff access required",
     payroll_operations: "Payroll operations access required",
     manage_payroll_fields: "Payroll field management access required",
     use_printer_profiles: "Printer profile access required",
     create_printer_profiles: "Printer profile creation access required",
     manage_printer_profile_library: "Printer profile library management access required",
-    manage_client_check_settings: "Manager or admin access required",
+    manage_client_check_settings: "Manager, admin, or Client management access required",
     view_record_activity: "Record activity access required",
     manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
-    manage_client_configuration: "Manager or admin access required",
+    manage_client_configuration: "Manager, admin, or Client management access required",
+    manage_client_administration: "Admin access required or Client management for this client",
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
     manage_organization: "Admin access required",
@@ -96,8 +105,8 @@ class StaffRolePolicy
     "api/v1/admin/time_tracking_sources#update" => :manage_organization,
     "api/v1/admin/time_tracking_sources#destroy" => :manage_organization,
     "api/v1/admin/time_tracking_sources#test_connection" => :manage_organization,
-    "api/v1/admin/time_tracking_sources#save_delegation" => :manage_client_configuration,
-    "api/v1/admin/time_tracking_sources#destroy_delegation" => :manage_client_configuration,
+    "api/v1/admin/time_tracking_sources#save_delegation" => :manage_source_delegations,
+    "api/v1/admin/time_tracking_sources#destroy_delegation" => :manage_source_delegations,
     "api/v1/admin/time_tracking_sources#show_aire_account_link" => :manage_own_aire_account_link,
     "api/v1/admin/time_tracking_sources#create_aire_account_link" => :manage_own_aire_account_link,
     "api/v1/admin/time_tracking_sources#destroy_aire_account_link" => :manage_own_aire_account_link,
@@ -119,7 +128,7 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_cockpits#resolve_payment_attestation" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#retry_payment_resolution" => :manage_historical_time_reconciliation,
     "api/v1/admin/aire_payroll_cockpits#finalize" => :manage_client_configuration,
-    "api/v1/admin/payroll_go_live#preview_setup" => :manage_client_configuration,
+    "api/v1/admin/payroll_go_live#preview_setup" => :manage_payroll_go_live_setup,
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
     "api/v1/admin/payroll_filing_responsibilities#upsert" => :manage_filing_review,
     "api/v1/admin/payroll_filing_records#create_event" => :manage_filing_review,
@@ -149,7 +158,8 @@ class StaffRolePolicy
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#reject" => :manage_client_configuration,
-    "api/v1/admin/employee_intake_settings#update" => :manage_organization,
+    "api/v1/admin/employee_intake_settings#update" => :manage_client_administration,
+    "api/v1/admin/reports#w2_gu_mark_ready" => :manage_client_administration,
     "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#reactivate" => :manage_client_configuration,
@@ -181,10 +191,30 @@ class StaffRolePolicy
     ACTION_CAPABILITIES["#{controller_path}##{action_name}"] || CONTROLLER_CAPABILITIES[controller_path]
   end
 
-  def self.allowed?(user, capability)
+  def self.allowed?(user, capability, company: nil)
     return false unless user
 
-    CAPABILITY_ROLES.fetch(capability).include?(user.role)
+    return true if CAPABILITY_ROLES.fetch(capability).include?(user.role)
+    return false unless DELEGATABLE_CAPABILITIES.include?(capability) && company
+
+    client_management_allowed?(user, company)
+  end
+
+  # Never use a memoized user, company, assignment collection or home-company
+  # fallback to establish a delegated privilege. Revocation takes effect on the
+  # next check, including service checks made after a request was authorized.
+  def self.client_management_allowed?(user, company)
+    return false unless user&.accountant? && company
+
+    User.uncached do
+      actor = User.find_by(id: user&.id)
+      target = Company.includes(:organization).find_by(id: company&.id)
+      next false unless actor&.accountant? && actor.payroll_access_allowed? &&
+        target&.active? && target.organization&.active? && target.live_payroll? &&
+        target.test_workspace_archived_at.nil? && actor.organization_id == target.organization_id
+
+      CompanyAssignment.active_access.exists?(user_id: actor.id, company_id: target.id, client_management: true)
+    end
   end
 
   # Historical approvals are separate from source/calendar configuration and
@@ -202,8 +232,10 @@ class StaffRolePolicy
       company.test_workspace_archived_at.nil? && user.accessible_company_ids.include?(company.id)
   end
 
-  def self.capabilities_for(user)
-    CAPABILITY_ROLES.keys.select { |capability| allowed?(user, capability) }.map(&:to_s)
+  def self.capabilities_for(user, company: nil)
+    capabilities = (CAPABILITY_ROLES.keys - ROLE_ONLY_CAPABILITIES).select { |capability| allowed?(user, capability) }
+    capabilities |= DELEGATABLE_CAPABILITIES if company && client_management_allowed?(user, company)
+    capabilities.map(&:to_s)
   end
 
   def self.error_message(capability)
