@@ -62,16 +62,15 @@ module Api
           return render json: { error: "Assignment not found" }, status: :not_found unless assignment
           return render json: { error: "Cannot change your own grant" }, status: :forbidden if assignment.user_id == current_user.id
 
-          attributes = params.require(:company_assignment).permit(:client_management, :expires_at)
+          grant_params = params.require(:company_assignment)
+          # Membership expiry is independent of this on/off privilege. Changing
+          # it here could remove ordinary payroll access or renew expired access.
+          if grant_params.key?(:expires_at)
+            return render json: { error: "Client management updates cannot change assignment expiry" }, status: :unprocessable_entity
+          end
+          attributes = grant_params.permit(:client_management)
           unless [ true, false ].include?(attributes[:client_management])
             return render json: { error: "client_management must be a boolean" }, status: :unprocessable_entity
-          end
-          if attributes.key?(:expires_at) && !attributes[:expires_at].nil? && attributes[:expires_at] != ""
-            begin
-              attributes[:expires_at] = Time.iso8601(attributes[:expires_at].to_s)
-            rescue ArgumentError
-              return render json: { error: "expires_at must be an ISO 8601 timestamp" }, status: :unprocessable_entity
-            end
           end
           CompanyAssignment.transaction do
             actor = User.lock.find(current_user.id)
@@ -93,7 +92,7 @@ module Api
           skip_default_audit_log!
           render json: { data: serialize_assignment(assignment) }
         rescue ActiveRecord::RecordInvalid => e
-          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/company_assignments/:id

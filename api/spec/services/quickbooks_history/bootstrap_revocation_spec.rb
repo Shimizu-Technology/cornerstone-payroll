@@ -88,7 +88,7 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
 
   # The holder commits revocation on one connection only after PostgreSQL proves
   # the previously authorized operation is waiting on its business row lock.
-  def revoke_while_blocked(record, &operation)
+  def revoke_while_blocked(record, error_class: QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized, &operation)
     waiting = Queue.new
     result = Queue.new
     connection = ActiveRecord::Base.connection
@@ -116,7 +116,7 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
       assignment.update!(client_management: false)
     end
     Timeout.timeout(10) { thread.join }
-    expect(result.pop).to be_a(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized)
+    expect(result.pop).to be_a(error_class)
     expect(assignment.reload.client_management).to be(false)
   ensure
     Timeout.timeout(10) { thread&.join }
@@ -162,6 +162,24 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
     expect(EmployeePayrollField.count).to eq(0)
     expect(batch.historical_workers.where.not(employee_id: nil)).to be_empty
     expect(batch.historical_paychecks.where.not(employee_id: nil)).to be_empty
+    expect(AuditLog.where(company_id: company.id).count).to eq(audits)
+  end
+
+  it "preserves cutover evidence and audit after revocation during verification's final batch lock wait" do
+    review_historical_workers_as_archive_only(batch, actor: admin)
+    QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
+      acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+    )
+    review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+    before_state = review.attributes
+    audits = AuditLog.where(company_id: company.id).count
+    revoke_while_blocked(batch, error_class: QuickbooksHistory::CutoverVerificationService::UnauthorizedVerificationAttempt) do
+      QuickbooksHistory::CutoverVerificationService.new(
+        batch: HistoricalImportBatch.find(batch.id), actor: User.find(actor.id),
+        expected_verification_started_at: review.verification_started_at.iso8601(6)
+      ).call
+    end
+    expect(review.reload.attributes).to eq(before_state)
     expect(AuditLog.where(company_id: company.id).count).to eq(audits)
   end
 
@@ -270,6 +288,43 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
     expect(bootstrap.reload).to be_pending
     expect(company.employees).to be_empty
     expect(AuditLog.where(company_id: company.id).count).to eq(audits)
+  end
+
+  [ false, true ].each do |first_send_accepted|
+    it "lets an admin resume and apply a revoked accountant's #{first_send_accepted ? 'accepted' : 'unsent'} pending attempt" do
+      bootstrap = preview_bootstrap
+      unless first_send_accepted
+        allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_raise("Synthetic queue outage")
+      end
+      expect(enqueue_service(bootstrap).call.enqueued).to be(first_send_accepted)
+      dispatch = bootstrap.historical_client_bootstrap_dispatches.sole
+      original_token = dispatch.attempt_token
+      queue_audit = AuditLog.find_by!(company_id: company.id, action: "historical_imports#queue_client_bootstrap")
+      expect(queue_audit.user_id).to eq(actor.id)
+      assignment.update!(client_management: false)
+      dispatch.update!(enqueued_at: 31.minutes.ago) if first_send_accepted
+      allow(QuickbooksHistory::ClientBootstrapJob).to receive(:perform_later).and_call_original
+
+      expect(enqueue_service(bootstrap, admin).call.enqueued).to be(true)
+
+      expect(dispatch.reload).to have_attributes(requested_by_id: admin.id, attempt_token: original_token)
+      expect(bootstrap.historical_client_bootstrap_dispatches.count).to eq(1)
+      expect(QuickbooksHistory::ClientBootstrapJob).to have_received(:perform_later).with(bootstrap.id, admin.id, original_token)
+      expect(queue_audit.reload.user_id).to eq(actor.id)
+      resume_audit = AuditLog.find_by!(company_id: company.id, action: "historical_imports#resume_client_bootstrap")
+      expect(resume_audit.user_id).to eq(admin.id)
+      expect(resume_audit.metadata).to include("previous_requester_id" => actor.id, "requested_by_id" => admin.id)
+
+      # Durable recovery also retains the replacement operator, rather than
+      # reverting to the original revoked requester on the next retry.
+      dispatch.update!(enqueued_at: 31.minutes.ago)
+      expect(dispatch.dispatch!).to be(true)
+      expect(QuickbooksHistory::ClientBootstrapJob).to have_received(:perform_later).with(bootstrap.id, admin.id, original_token).twice
+      QuickbooksHistory::ClientBootstrapJob.perform_now(bootstrap.id, admin.id, original_token)
+      expect(bootstrap.reload).to have_attributes(status: "applied", applied_by_id: admin.id)
+      expect(company.employees.count).to eq(2)
+      expect(dispatch.reload.completed_at).to be_present
+    end
   end
 
   it "keeps delegated employee preparation and historical YTD activation available with a live exact grant" do

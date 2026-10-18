@@ -55,6 +55,18 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
           fail_attempt!(bootstrap, MISSING_REQUESTER_ERROR)
           next false
         end
+        # The durable requester is the current executor; the original queue
+        # audit remains attributed to the operator who initiated the attempt.
+        if authorization_actor && requested_by_id != authorization_actor.id
+          previous_requester_id = requested_by_id
+          update!(requested_by: authorization_actor)
+          AuditLog.record!(
+            user: authorization_actor, organization_id: bootstrap.company.organization_id, company_id: bootstrap.company_id,
+            action: "historical_imports#resume_client_bootstrap", record_type: "historical_client_bootstraps", record_id: bootstrap.id,
+            metadata: { dispatch_id: id, attempt_token: attempt_token, previous_requester_id: previous_requester_id,
+              requested_by_id: authorization_actor.id }
+          )
+        end
         true
       end
       next false unless prepared
@@ -74,7 +86,7 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   private
 
   def submit_job!(bootstrap, authorization_actor)
-    QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, requested_by_id, attempt_token)
+    QuickbooksHistory::ClientBootstrapJob.perform_later(bootstrap.id, authorization_actor&.id || requested_by_id, attempt_token)
     with_lock do
       # The worker can finish before the adapter returns. Preserve its terminal
       # evidence while recording that this submission was accepted.

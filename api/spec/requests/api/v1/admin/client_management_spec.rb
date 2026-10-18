@@ -26,10 +26,12 @@ RSpec.describe "Admin-delegated accountant client management", type: :request do
 
   it "lets an administrator explicitly grant and revoke with attributed before/after audit evidence" do
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin)
-    update_grant(true, extra: { expires_at: 1.day.from_now.iso8601 })
+    expiry = 1.day.from_now.change(usec: 0)
+    assignment.update!(expires_at: expiry)
+    update_grant(true)
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("data", "client_management")).to be(true)
-    expect(assignment.reload.expires_at).to be > Time.current
+    expect(assignment.reload.expires_at).to eq(expiry)
     audit = AuditLog.find_by!(action: "company_assignments#client_management_updated", record_id: assignment.id.to_s)
     expect(audit.user_id).to eq(admin.id)
     expect(audit.company_id).to eq(company.id)
@@ -39,6 +41,8 @@ RSpec.describe "Admin-delegated accountant client management", type: :request do
     update_grant(false)
     expect(response).to have_http_status(:ok)
     expect(assignment.reload.client_management).to be(false)
+    expect(assignment.expires_at).to eq(expiry)
+    expect(accountant.can_access_company?(company.id)).to be(true)
   end
 
   it "rejects self grant by an accountant even with a current grant" do
@@ -70,13 +74,34 @@ RSpec.describe "Admin-delegated accountant client management", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
   end
 
-  it "rejects a malformed expiry instead of creating an unlimited grant" do
+  it "rejects expiry changes without changing membership, grant attribution or audit" do
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin)
-    [ "not-a-date", false ].each do |expiry|
-      update_grant(true, extra: { expires_at: expiry })
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(assignment.reload.client_management).to be(false)
+    original = assignment.attributes
+    [ 1.day.from_now.iso8601, 1.day.ago.iso8601, nil, "", "not-a-date", false, {} ].each do |expiry|
+      [ true, false ].each do |value|
+        update_grant(value, extra: { expires_at: expiry })
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("cannot change assignment expiry")
+        expect(assignment.reload.attributes).to eq(original)
+      end
     end
+    expect(AuditLog.where(action: "company_assignments#client_management_updated")).to be_empty
+  end
+
+  it "revokes an expired inactive accountant without renewing their ordinary access" do
+    grant!
+    expiry = 1.minute.ago.change(usec: 0)
+    assignment.update!(expires_at: expiry)
+    accountant.update!(active: false)
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin)
+    update_grant(false)
+    expect(response).to have_http_status(:ok)
+    expect(assignment.reload).to have_attributes(client_management: false, expires_at: expiry)
+    expect(accountant.can_access_company?(company.id)).to be(false)
+    update_grant(true)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to include("error" => "Validation failed", "details" => include("client_management"))
+    expect(assignment.reload).to have_attributes(client_management: false, expires_at: expiry)
   end
 
   it "does not elevate an assignment through the create endpoint" do
@@ -100,6 +125,15 @@ RSpec.describe "Admin-delegated accountant client management", type: :request do
     patch "/api/v1/admin/companies/check_settings", params: { bank_name: "Revoked Bank" }, headers: headers, as: :json
     expect(response).to have_http_status(:forbidden)
     expect(company.reload.bank_name).to eq("Synthetic Bank")
+  end
+
+  it "reports intake review authority once for an employee page in the selected client" do
+    grant!
+    create_list(:employee, 3, company: company)
+    expect(StaffRolePolicy).to receive(:allowed?).with(accountant, :manage_client_configuration, company: company).once.and_call_original
+    get "/api/v1/admin/employees", headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").map { |row| row.dig("intake_readiness", "can_review") }).to eq([ true, true, true ])
   end
 
   it "allows delegated core company edits for the actual resource" do
