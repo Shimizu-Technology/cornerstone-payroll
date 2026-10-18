@@ -15,7 +15,7 @@ module QuickbooksHistory
         actor: actor,
         expected_verification_started_at: verification_started_at
       ).call
-    rescue CutoverVerificationService::StaleVerificationAttempt
+    rescue CutoverVerificationService::StaleVerificationAttempt, CutoverVerificationService::UnauthorizedVerificationAttempt
       nil
     rescue StandardError => e
       persist_failure(batch_id, actor_id, verification_started_at, e)
@@ -35,11 +35,11 @@ module QuickbooksHistory
       review.with_lock do
         return unless current_attempt?(review, verification_started_at)
 
+        actor = CutoverVerificationService.ensure_authorized!(batch: batch, actor: User.find_by(id: actor_id), lock: true)
         review.update!(
           status: "failed",
           verification_error: "Cutover verification could not be completed. Review the source files and try again."
         )
-        actor = User.find_by(id: actor_id)
         AuditLog.record!(
           user: actor,
           organization_id: batch.company.organization_id,
@@ -55,6 +55,8 @@ module QuickbooksHistory
           }
         )
       end
+    rescue CutoverVerificationService::UnauthorizedVerificationAttempt
+      nil
     rescue StandardError => persistence_error
       Rails.logger.error(
         "Historical cutover verification failure could not be persisted for batch #{batch_id}: " \
