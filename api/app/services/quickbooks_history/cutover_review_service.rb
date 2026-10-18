@@ -10,6 +10,7 @@ module QuickbooksHistory
     def save!(exception_dispositions:, attestations:, approval_notes:)
       ensure_authorized!
       review.with_lock do
+        ensure_authorized!(lock: true)
         raise ArgumentError, "Run cutover verification before completing the checklist" unless review.status == "verified"
 
         review.update!(
@@ -25,6 +26,7 @@ module QuickbooksHistory
     def approve!(acknowledgement:)
       ensure_authorized!
       review.with_lock do
+        ensure_authorized!(lock: true)
         return review if review.approved?
         unless review.historical_import_batch.reload.applied?
           raise ArgumentError, "The historical import must remain applied until cutover approval"
@@ -49,10 +51,14 @@ module QuickbooksHistory
 
     attr_reader :review, :actor
 
-    def ensure_authorized!
+    def ensure_authorized!(lock: false)
+      if lock
+        @actor = User.lock.find_by(id: actor&.id)
+        review.company.company_assignments.where(user_id: actor&.id).lock.load
+      end
       batch = review.historical_import_batch
       authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
       return if authorized
 
       raise ArgumentError, "A manager or administrator with company access is required"

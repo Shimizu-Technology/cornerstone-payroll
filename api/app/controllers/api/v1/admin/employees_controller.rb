@@ -464,6 +464,12 @@ module Api
           }
         end
 
+        def can_review_employee_intake?
+          return @can_review_employee_intake if defined?(@can_review_employee_intake)
+
+          @can_review_employee_intake = StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company)
+        end
+
         def serialize_employee(
           employee,
           include_department: false,
@@ -478,7 +484,7 @@ module Api
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
-          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: StaffRolePolicy.allowed?(current_user, :manage_client_configuration))
+          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["tax_classification"] = employee.tax_classification

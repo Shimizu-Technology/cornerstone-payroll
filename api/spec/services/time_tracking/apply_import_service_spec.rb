@@ -72,6 +72,8 @@ RSpec.describe TimeTracking::ApplyImportService do
               "employee_id" => employee.id,
               "regular_hours" => 72.0,
               "overtime_hours" => 4.0,
+              "categories" => [ { "source_category_id" => "regular", "name" => "Regular",
+                "regular_hours" => 72.0, "overtime_hours" => 4.0, "total_hours" => 76.0 } ],
               "warnings" => []
             }
           ]
@@ -88,7 +90,8 @@ RSpec.describe TimeTracking::ApplyImportService do
         overtime_hours: 0
       )
 
-      described_class.new(import: import, mappings: [], applied_by: user).call
+      described_class.new(import: import, mappings: [ { source_user_id: "source-1", employee_id: employee.id,
+        wage_rate_mappings: [ { source_category_id: "regular", employee_wage_rate_id: nil } ] } ], applied_by: user).call
 
       item.reload
       expect(item.hours_worked).to eq(72.0)
@@ -379,9 +382,11 @@ RSpec.describe TimeTracking::ApplyImportService do
       company = create(:company)
       department = create(:department, company: company)
       employee = create(:employee, company: company, department: department)
-      nil_rate = employee.employee_wage_rates.create!(label: "Unconfigured", rate: nil, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Unconfigured", rate: nil, is_primary: true, active: true)
       ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
       pay_period = create(:pay_period, company: company)
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        hours_worked: 0, holiday_hours: 8, pto_hours: 4)
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
@@ -418,9 +423,9 @@ RSpec.describe TimeTracking::ApplyImportService do
       results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
 
       expect(results[:errors]).to be_empty
-      expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours).to include(
-        include("employee_wage_rate_id" => nil_rate.id, "rate" => 0.0, "regular_hours" => 0.0),
-        include("employee_wage_rate_id" => ground_rate.id, "rate" => 45.0, "regular_hours" => 10.0)
+      expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours).to contain_exactly(
+        include("employee_wage_rate_id" => ground_rate.id, "rate" => 45.0, "regular_hours" => 10.0,
+          "holiday_hours" => 8.0, "pto_hours" => 4.0)
       )
     end
 

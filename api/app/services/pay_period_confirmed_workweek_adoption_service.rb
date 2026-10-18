@@ -33,6 +33,7 @@ class PayPeriodConfirmedWorkweekAdoptionService
 
   def call!
     pay_period.with_lock do
+      raise AdoptionError, "Client configuration access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: pay_period.company)
       validate_draft!
 
       candidate = self.class.candidate_for(pay_period)

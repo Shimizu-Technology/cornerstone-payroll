@@ -14,7 +14,7 @@ class EmployeeDocumentRequirementReviewService
   def call!
     status = attributes[:status].to_s
     raise Error, "Choose a supported readiness status" unless status.in?(UPDATABLE_STATUSES)
-    if REVIEWED_STATUSES.include?(status) && !(actor.organization_admin? || actor.manager?)
+    if REVIEWED_STATUSES.include?(status) && !StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: requirement.company)
       raise Error, "Manager or administrator access required for reviewed outcomes"
     end
     raise Error, "Include the current checklist version" if attributes[:lock_version].blank?
@@ -26,7 +26,7 @@ class EmployeeDocumentRequirementReviewService
         raise ActiveRecord::StaleObjectError.new(requirement, "update")
       end
 
-      if REVIEWED_STATUSES.include?(requirement.status) && !(actor.organization_admin? || actor.manager?)
+      if (REVIEWED_STATUSES.include?(status) || REVIEWED_STATUSES.include?(requirement.status)) && !StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: requirement.company)
         raise Error, "Manager or administrator access required to change a reviewed outcome"
       end
       document = selected_document

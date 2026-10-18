@@ -18,6 +18,7 @@ RSpec.describe StaffRolePolicy do
       view_record_activity: %w[super_admin org_admin admin manager accountant],
       manage_filing_review: %w[super_admin org_admin admin manager accountant],
       manage_client_configuration: %w[super_admin org_admin admin manager],
+      manage_client_administration: %w[super_admin org_admin admin],
       manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
       manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
       manage_organization: %w[super_admin org_admin admin],
@@ -129,7 +130,7 @@ RSpec.describe StaffRolePolicy do
       %w[save_delegation destroy_delegation].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/time_tracking_sources", action_name: action_name
-        )).to eq(:manage_client_configuration)
+        )).to eq(:manage_source_delegations)
       end
       %w[create_manual_allocation retry_manual_allocation].each do |action_name|
         expect(described_class.capability_for(

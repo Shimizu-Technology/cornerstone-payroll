@@ -28,13 +28,12 @@ module Api
         # Call after locking the company, inside the business write transaction.
         # Use fresh identity/assignment records instead of a request's memoized
         # access list so expiry or revocation cannot race an employee save.
-        def revalidate_current_company_write_access!
+        def revalidate_current_company_write_access!(company: current_company, capability: nil)
           actor = User.lock.find_by(id: current_user&.id)
-          company = current_company
           company.company_assignments.where(user_id: actor&.id).lock.load if company
-          capability = StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name)
+          capability ||= StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name)
           allowed = StaffRolePolicy.allowed?(actor, :staff_workspace) &&
-            (!capability || StaffRolePolicy.allowed?(actor, capability)) &&
+            (!capability || StaffRolePolicy.allowed?(actor, capability, company: company)) &&
             actor&.payroll_access_allowed? && company && actor.can_access_company?(company.id) &&
             TestWorkspaceAccessPolicy.allowed?(user: actor, company: company, request_method: request.request_method, capability: capability)
           raise CompanyWriteAccessChanged unless allowed
@@ -158,11 +157,18 @@ module Api
         end
 
         def require_capability!(capability, error: nil)
-          return if StaffRolePolicy.allowed?(current_user, capability)
+          company = capability_company if StaffRolePolicy::DELEGATABLE_CAPABILITIES.include?(capability)
+          return if StaffRolePolicy.allowed?(current_user, capability, company: company)
 
           render json: {
             error: error || StaffRolePolicy.error_message(capability)
           }, status: :forbidden
+        end
+
+        def capability_company
+          # Company routes identify their resource independently of the header.
+          target_id = params[:id] if controller_path == "api/v1/admin/companies"
+          target_id.present? ? Company.find_by(id: target_id) : current_company
         end
 
         def require_historical_payroll_enabled!

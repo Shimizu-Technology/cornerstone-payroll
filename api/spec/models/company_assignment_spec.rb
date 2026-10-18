@@ -84,3 +84,55 @@ RSpec.describe CompanyAssignment, type: :model do
     end
   end
 end
+
+RSpec.describe "CompanyAssignment client management integrity", type: :model do
+  let(:company) { create(:company) }
+  let(:accountant) { create(:user, company: company, role: "accountant") }
+  let(:admin) { create(:user, company: company) }
+
+  it "defaults new and existing ordinary assignments to no grant" do
+    assignment = create(:company_assignment, user: accountant, company: company)
+    expect(assignment.reload.client_management).to be(false)
+    expect(CompanyAssignment.columns_hash.fetch("client_management").null).to be(false)
+    expect(CompanyAssignment.columns_hash.fetch("client_management").default).to be(false)
+  end
+
+  it "requires an active administrator grantor other than the recipient" do
+    assignment = build(:company_assignment, user: accountant, company: company, client_management: true, granted_by: accountant)
+    expect(assignment).not_to be_valid
+    assignment.granted_by = create(:user, company: company, role: "manager")
+    expect(assignment).not_to be_valid
+    assignment.granted_by = admin
+    expect(assignment).to be_valid
+    admin.update!(active: false)
+    expect(assignment).not_to be_valid
+  end
+
+  it "rejects grants to other roles, expired memberships and inactive recipients" do
+    assignment = build(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin)
+    assignment.expires_at = 1.second.ago
+    expect(assignment).not_to be_valid
+    assignment.expires_at = nil
+    accountant.active = false
+    expect(assignment).not_to be_valid
+    accountant.active = true
+    accountant.role = "manager"
+    expect(assignment).not_to be_valid
+  end
+
+  it "rejects null at both model and database boundaries" do
+    assignment = create(:company_assignment, user: accountant, company: company)
+    assignment.client_management = nil
+    expect(assignment).not_to be_valid
+    expect do
+      CompanyAssignment.transaction(requires_new: true) { assignment.update_columns(client_management: nil) }
+    end.to raise_error(ActiveRecord::NotNullViolation)
+  end
+
+  it "enforces the live grant shape even for a raw write" do
+    assignment = create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin)
+    expect do
+      CompanyAssignment.transaction(requires_new: true) { assignment.update_columns(workspace_access_level: "workspace_admin") }
+    end.to raise_error(ActiveRecord::StatementInvalid, /company_assignments_client_management_live_shape/)
+  end
+end

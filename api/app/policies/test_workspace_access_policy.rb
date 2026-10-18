@@ -3,7 +3,7 @@
 class TestWorkspaceAccessPolicy
   ADMIN_ROLES = %w[super_admin org_admin admin].freeze
   GLOBAL_ADMIN_CAPABILITIES = %i[manage_organization manage_platform].freeze
-  PROTECTED_CAPABILITIES = %i[manage_client_configuration manage_organization manage_platform].freeze
+  PROTECTED_CAPABILITIES = %i[manage_client_administration manage_client_configuration manage_source_delegations manage_payroll_go_live_setup manage_organization manage_platform].freeze
 
   # These POST endpoints only render plain-paper earnings statements. They do
   # not prepare/issue checks, persist artifacts, upload, or dispatch providers.
