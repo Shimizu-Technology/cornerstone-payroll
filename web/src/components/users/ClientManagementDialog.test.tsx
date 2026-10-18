@@ -64,6 +64,42 @@ describe('explicit accountant client management', () => {
     await user.click(await screen.findByRole('button', { name: 'Grant Client management for Client 10' }));
     await screen.findByText('Could not confirm saved access');
     expect(screen.queryByText('Client management granted for Client 10.')).toBeNull();
+    const stale = screen.getByRole('button', { name: 'Grant Client management for Client 10' });
+    expect(stale.getAttribute('aria-disabled')).toBe('true');
+    await user.click(stale);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    mocks.list.mockResolvedValue({ data: [assignment(10, true)] });
+    await user.click(screen.getByRole('button', { name: 'Reload client access' }));
+    expect(await screen.findByRole('button', { name: 'Revoke Client management for Client 10' })).toBeTruthy();
+  });
+
+  it('keeps the same focused client action mounted through delayed authoritative grant and revoke confirmation', async () => {
+    const user = userEvent.setup();
+    let finish!: (value: { data: CompanyAssignment[] }) => void;
+    mocks.list.mockResolvedValueOnce({ data: [assignment(10), assignment(20)] })
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    render(<ClientManagementDialog accountant={accountant} onClose={vi.fn()} />);
+    const button = await screen.findByRole('button', { name: 'Grant Client management for Client 20' });
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(button.isConnected).toBe(true);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    await user.keyboard('{Enter}');
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(20, true);
+    await act(async () => finish({ data: [assignment(10), assignment(20, true)] }));
+    expect(screen.getByRole('button', { name: 'Revoke Client management for Client 20' })).toBe(button);
+    expect(document.activeElement).toBe(button);
+
+    mocks.list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await user.keyboard('{Enter}');
+    expect(button.isConnected).toBe(true);
+    expect(document.activeElement).toBe(button);
+    await act(async () => finish({ data: [assignment(10), assignment(20)] }));
+    expect(screen.getByRole('button', { name: 'Grant Client management for Client 20' })).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(mocks.update).toHaveBeenNthCalledWith(2, 20, false);
   });
   it('keeps revocation available for expired grants and denies new grants at their deadline', async () => {
     const user = userEvent.setup();
