@@ -14,6 +14,7 @@ interface User {
   company_name: string | null;
   assigned_company_ids: number[];
   capabilities: string[];
+  company_capabilities?: Record<string, string[]>;
 }
 
 interface AuthContextType {
@@ -45,6 +46,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     company_name: user.company_name,
     assigned_company_ids: user.assigned_company_ids || [],
     capabilities: user.capabilities || [],
+    company_capabilities: user.company_capabilities || {},
   };
 }
 

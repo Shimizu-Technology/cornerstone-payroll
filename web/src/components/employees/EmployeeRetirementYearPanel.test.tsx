@@ -6,7 +6,7 @@ import { EmployeeRetirementYearPanel } from './EmployeeRetirementYearPanel';
 import type { Employee, HistoricalRetirementReview, HistoricalRetirementSource } from '@/types';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), inputs: vi.fn(), create: vi.fn(), canManage: true, activeCompany: null as import('@/services/api').CompanyListItem | null }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, client_capabilities: mocks.canManage ? ['manage_client_configuration'] : [], ...mocks.activeCompany }, activeCompanyId: 1 }) }));
 vi.mock('@/services/api', () => ({
   annualRetirementLimitsApi: { list: mocks.list },
   employeesApi: { retirementYearInputs: mocks.inputs, createRetirementYearInput: mocks.create },

@@ -5,7 +5,7 @@ import { EmployeeIntakePanel } from './EmployeeIntakePanel';
 import type { Employee } from '@/types';
 
 const mocks = vi.hoisted(() => ({ update: vi.fn(), canReview: true, activeCompany: null as import('@/services/api').CompanyListItem | null }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, client_capabilities: mocks.canReview ? ['manage_client_configuration'] : [], ...mocks.activeCompany }, activeCompanyId: 1 }) }));
 vi.mock('@/services/employee-intake-api', () => ({ employeeIntakeApi: { updateException: mocks.update } }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => mocks.canReview }) }));
 

@@ -3756,6 +3756,8 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  client_capabilities?: string[];
+  client_management?: boolean;
   id: number;
   organization_id: number;
   organization_name?: string;
@@ -3985,6 +3987,7 @@ interface AuthApiUser {
   home_company_id: number;
   assigned_company_ids: number[];
   capabilities: string[];
+  company_capabilities?: Record<string, string[]>;
 }
 
 export const companiesApi = {
@@ -4277,6 +4280,7 @@ export interface Form500Fields {
 // Company Assignments (RBAC)
 // ============================================================
 export interface CompanyAssignment {
+  client_management?: boolean;
   id: number;
   user_id: number;
   user_name: string;
@@ -4296,6 +4300,10 @@ export const companyAssignmentsApi = {
     api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
   create: (data: { user_id: number; company_id: number; workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin'; expires_at?: string }) =>
     api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
+  updateClientManagement: (id: number, enabled: boolean) =>
+    api.patch<{ data: CompanyAssignment }>(`/admin/company_assignments/${id}`, {
+      company_assignment: { client_management: enabled },
+    }),
   remove: (id: number) =>
     api.delete(`/admin/company_assignments/${id}`),
   bulkUpdate: (userId: number, companyIds: number[]) =>

@@ -19,6 +19,7 @@ import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
 import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
 import {
   assignmentCompanyIdsForRole,
@@ -42,7 +43,7 @@ const allRoleOptions: RoleOption[] = [
   { value: 'org_admin', label: 'Organization Admin', scope: 'Every client in their organization', can: 'Manage users, clients, tax configuration, audit history, client check controls, and payroll operations.', cannot: 'Cannot manage other organizations or platform-wide settings.', assignment: 'Automatically receives all organization clients.' },
   { value: 'admin', label: 'Organization Admin (legacy)', scope: 'Every client in their organization', can: 'Same access as Organization Admin.', cannot: 'Legacy role name retained for existing accounts; use Organization Admin for new invitations.', assignment: 'Automatically receives all organization clients.', legacy: true },
   { value: 'manager', label: 'Manager', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, configure client settings, and manage the shared printer-profile library.', cannot: 'Cannot manage users, organization tax configuration, or organization-wide audit history.', assignment: 'At least one payroll client should be assigned.' },
-  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Cannot change other client-wide settings, manage users, or edit another person’s printer profile.', assignment: 'At least one payroll client should be assigned.' },
+  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Client management is off by default. An administrator can grant it separately for each assigned client. This never grants Users, source credentials, firm-wide settings, or another person’s printer-profile access.', assignment: 'At least one payroll client should be assigned.' },
   { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'Maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
   { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
@@ -86,6 +87,10 @@ export function Users() {
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [managementUser, setManagementUser] = useState<User | null>(null);
+  const canDelegate = ['admin', 'org_admin', 'super_admin'].includes(currentUser?.role ?? '');
+  const managementAction = (user: User) => canDelegate && user.role === 'accountant' && user.id !== currentUser?.id
+    ? <Button size="sm" variant="outline" onClick={() => setManagementUser(user)}>Client management</Button> : null;
   const [activityUser, setActivityUser] = useState<User | null>(null);
   const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
@@ -575,6 +580,7 @@ export function Users() {
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
                           <MobileCardActions>
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {managementAction(user)}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
@@ -673,6 +679,7 @@ export function Users() {
                         ) : (
                           <div className="flex justify-end gap-2">
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {managementAction(user)}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button
@@ -748,6 +755,7 @@ export function Users() {
           </>
         )}
       </div>
+      {managementUser && <ClientManagementDialog key={managementUser.id} accountant={managementUser} onClose={() => setManagementUser(null)} />}
       {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}
     </div>
   );

@@ -1,6 +1,7 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
+import { useSelectedCompanyCapability, type ClientCapability } from '@/hooks/useSelectedCompanyCapability';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
@@ -127,25 +128,13 @@ function AuditHistoryRoute({ children }: { children: React.ReactNode }): ReactEl
   return <>{children}</>;
 }
 
-function ManagerOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { isManager, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <PageLoader />;
-  }
-
-  if (!isManager) {
-    return <Navigate to="/app" replace />;
-  }
-
-  return <>{children}</>;
-}
-
-function CapabilityRoute({ children, capability }: { children: React.ReactNode; capability: string }) {
+function CapabilityRoute({ children, capability, clientCapability }: { children: React.ReactNode; capability: string; clientCapability?: ClientCapability }) {
   const { hasCapability, isLoading } = useAuth();
 
-  if (isLoading) return <PageLoader />;
-  if (!hasCapability(capability)) return <Navigate to="/app" replace />;
+  const hasClientCapability = useSelectedCompanyCapability(clientCapability ?? 'manage_client_configuration');
+  const { loading: companyLoading } = useCompany();
+  if (isLoading || (clientCapability && companyLoading)) return <PageLoader />;
+  if (!(clientCapability ? hasClientCapability : hasCapability(capability))) return <Navigate to="/app" replace />;
 
   return <>{children}</>;
 }
@@ -367,11 +356,11 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
-        <Route path="settings/client-change-requests" element={<ManagerOnlyRoute><AdminEmployeeChangeRequestsPage /></ManagerOnlyRoute>} />
+        <Route path="settings/client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
         <Route path="check-settings" element={<CapabilityRoute capability="use_printer_profiles"><CheckSettingsPage /></CapabilityRoute>} />
-        <Route path="payroll-reminders" element={<ManagerOnlyRoute><PayrollReminders /></ManagerOnlyRoute>} />
+        <Route path="payroll-reminders" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayrollReminders /></CapabilityRoute>} />
         <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
-        <Route path="pay-schedule-settings" element={<ManagerOnlyRoute><PayScheduleSettings /></ManagerOnlyRoute>} />
+        <Route path="pay-schedule-settings" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><PayScheduleSettings /></CapabilityRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>
 

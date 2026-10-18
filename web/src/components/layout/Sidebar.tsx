@@ -35,6 +35,7 @@ import {
   Route,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
@@ -241,7 +242,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
-  const canManageClientConfiguration = isAdmin || user?.role === 'manager';
+  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
   const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -256,8 +257,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/app/aire-account-connection') return hasCapability('manage_own_aire_account_link');
     if (item.href === '/check-settings') return canUsePrinterProfiles;
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
-    if (!canManageClientConfiguration) return false;
     if (item.href === '/time-tracking-sources') return isAdmin;
+    if (!canManageClientConfiguration) return false;
     return true;
   });
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {

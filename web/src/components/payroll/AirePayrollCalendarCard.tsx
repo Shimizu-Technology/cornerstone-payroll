@@ -10,7 +10,9 @@ import {
   Send,
   ShieldCheck,
 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { cutoffDistance, lockedBatchCopy } from '@/lib/aire-payroll-calendar';
 import { formatGuamDateTime } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
@@ -50,7 +52,10 @@ function statusTone(state: AirePayrollCalendarState['cutoff_state']) {
 }
 
 export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Props) {
-  const { isManager } = useAuth();
+  const { activeCompany, activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
+  const canManageCalendar = hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [busy, setBusy] = useState<'publish' | 'retry' | 'refresh' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -67,6 +72,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   }, []);
 
   const run = async (action: 'publish' | 'retry' | 'refresh') => {
+    if (action !== 'refresh' && !canManageCalendar) return;
+    if (action === 'publish' && (!calendar.can_publish || cutoffPassed)) return;
+    if (action === 'retry' && !calendar.can_retry) return;
     setBusy(action);
     setError(null);
     try {
@@ -114,13 +122,13 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
               <RefreshCw className={`mr-2 h-4 w-4 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            {isManager && calendar.can_retry && (
+            {canManageCalendar && calendar.can_retry && (
               <Button className="max-sm:min-h-[44px]" type="button" variant="outline" size="sm" onClick={() => void run('retry')} disabled={busy !== null}>
                 <RefreshCw className="mr-2 h-4 w-4" />
                 {busy === 'retry' ? 'Retrying…' : 'Retry sync'}
               </Button>
             )}
-            {isManager && !cutoffPassed && calendar.can_publish && calendar.needs_revision && (
+            {canManageCalendar && !cutoffPassed && calendar.can_publish && calendar.needs_revision && (
               <Button className="max-sm:min-h-[44px]" type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null}>
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : primaryAction}
@@ -182,13 +190,13 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 This sends the pay-period dates and cutoff to time tracking so it can lock time automatically at {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}. It does not lock hours now or run payroll.
               </p>
             </div>
-            {isManager ? (
+            {canManageCalendar && calendar.can_publish ? (
               <Button type="button" size="sm" onClick={() => void run('publish')} disabled={busy !== null} className="max-sm:min-h-[44px] shrink-0">
                 <Send className="mr-2 h-4 w-4" />
                 {busy === 'publish' ? 'Publishing…' : 'Publish cutoff to time tracking'}
               </Button>
             ) : (
-              <p className="shrink-0 text-xs font-semibold text-primary-800">A manager can publish this cutoff.</p>
+              <p className="shrink-0 text-xs font-semibold text-primary-800">An authorized operator can publish this cutoff.</p>
             )}
           </div>
         )}
