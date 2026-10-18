@@ -15,8 +15,11 @@ test('keyboard focus stays on the same client through delayed grant and revoke c
     if (path.endsWith('/companies')) return route.fulfill({ json: { companies: clients, current_company_id: 1, can_switch_company: true } });
     if (path.endsWith('/admin/users')) return route.fulfill({ json: { data: [accountant] } });
     if (path.endsWith('/company_assignments')) {
-      reads += 1;
-      if (reads > 1) await new Promise<void>(resolve => { release = resolve; });
+      // StrictMode may read twice on mount; pause only mutation confirmation.
+      if (patches.length > 0) {
+        reads += 1;
+        await new Promise<void>(resolve => { release = resolve; });
+      }
       return route.fulfill({ json: { data: assignments } });
     }
     if (/\/company_assignments\/\d+$/.test(path)) {
@@ -35,7 +38,7 @@ test('keyboard focus stays on the same client through delayed grant and revoke c
     await action.focus();
     for (const [index, enabled] of [true, false].entries()) {
       await page.keyboard.press('Enter');
-      await expect.poll(() => reads).toBe(index + 2);
+      await expect.poll(() => reads).toBe(index + 1);
       await expect(action).toBeFocused();
       await expect(action).toHaveAttribute('aria-disabled', 'true');
       await page.keyboard.press('Enter');
