@@ -19,6 +19,8 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => authState,
 }));
 
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1, activeCompany: { id: 1, client_capabilities: authState.isManager ? ['manage_client_configuration'] : [] } }) }));
+
 vi.mock('@/services/api', () => ({
   payPeriodsApi: {
     publishAireCalendar: apiMocks.publish,
@@ -237,4 +239,12 @@ describe('AirePayrollCalendarCard', () => {
     expect(apiMocks.retry).toHaveBeenCalledWith(42);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('time tracking is temporarily unavailable'));
   });
+  it('keeps source publication denied when client configuration is granted but the server denies publishing', () => {
+    render(createElement(MemoryRouter, null, createElement(AirePayrollCalendarCard, {
+      payPeriodId: 7, calendar: { ...baseCalendar, can_publish: false }, onRefresh: vi.fn(),
+    })));
+    expect(screen.queryByRole('button', { name: 'Publish cutoff to time tracking' })).toBeNull();
+    expect(apiMocks.publish).not.toHaveBeenCalled();
+  });
+
 });

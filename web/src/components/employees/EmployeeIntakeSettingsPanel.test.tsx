@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeIntakeSettingsPanel } from './EmployeeIntakeSettingsPanel';
 
 const mocks = vi.hoisted(() => ({ settings: vi.fn(), update: vi.fn(), activeCompany: null as import('@/services/api').CompanyListItem | null }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 4, client_capabilities: ['manage_client_administration'], ...mocks.activeCompany }, activeCompanyId: 4 }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({}) }));
 vi.mock('@/services/employee-intake-api', () => ({ employeeIntakeApi: { settings: mocks.settings, updateSettings: mocks.update } }));
 const strict = { enabled: false, can_manage: true, expires_at: null, reason: null, enabled_by_name: null };
 
@@ -12,8 +13,8 @@ describe('Company-scoped incomplete entry window', () => {
   afterEach(cleanup);
   beforeEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); mocks.activeCompany = null; mocks.settings.mockResolvedValue({ data: strict }); mocks.update.mockResolvedValue({ data: strict }); });
 
-  it('requires effective organization permission even when the global settings response allows management', async () => {
-    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_organization: false } } as unknown as import('@/services/api').CompanyListItem;
+  it('requires effective client administration permission even when the global settings response allows management', async () => {
+    mocks.activeCompany = { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { manage_client_administration: false } } as unknown as import('@/services/api').CompanyListItem;
     render(<EmployeeIntakeSettingsPanel companyId={4} isClient={false} />);
     await screen.findByText('Full employee details required');
     expect(screen.queryByRole('button', { name: 'Allow incomplete entry temporarily' })).toBeNull();

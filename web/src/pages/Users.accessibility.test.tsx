@@ -13,11 +13,13 @@ const apiMocks = vi.hoisted(() => ({
     activate: vi.fn(), deactivate: vi.fn(), resendInvitation: vi.fn(),
   },
   companies: { list: vi.fn() },
+  assignments: { list: vi.fn(), updateClientManagement: vi.fn() },
 }));
 
 vi.mock('@/services/api', () => ({
   usersApi: apiMocks.users,
   companiesApi: apiMocks.companies,
+  companyAssignmentsApi: apiMocks.assignments,
   auditLogsApi: { list: vi.fn() },
   ApiError: class ApiError extends Error {},
 }));
@@ -59,6 +61,7 @@ afterEach(() => {
 beforeEach(() => {
   vi.resetAllMocks();
   apiMocks.users.list.mockResolvedValue({ data: [originalUser] });
+  apiMocks.assignments.list.mockResolvedValue({ data: [{ id: 40, user_id: 2, company_id: 1, company_name: 'Operator QA Live Client', client_management: true }] });
   apiMocks.companies.list.mockResolvedValue({ companies: [
     { id: 1, name: 'Operator QA Live Client', active_employees: 5, payroll_environment: 'live' },
     { id: 2, name: 'Operator QA Sandbox', active_employees: 5, payroll_environment: 'migration_rehearsal', test_workspace: true },
@@ -94,9 +97,10 @@ describe('Users accessible account controls', () => {
     await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(2, {
       name: 'Ari Verified', role: 'manager', company_ids: [1, 2],
     }));
+    expect(apiMocks.assignments.updateClientManagement).not.toHaveBeenCalled();
     await screen.findAllByText('Ari Verified');
     expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
-  });
+  }, 15000);
 
   it('lets an administrator choose the invitation role by name and cancel without creating a user', async () => {
     const user = userEvent.setup();
@@ -119,4 +123,22 @@ describe('Users accessible account controls', () => {
     expect(apiMocks.users.delete).not.toHaveBeenCalled();
     expect(screen.getByRole('table')).toBeTruthy();
   });
+  it.each(['mobile', 'desktop'] as const)('keeps client grants separate from ordinary profile Save in the %s presentation', async (presentation) => {
+    const user = userEvent.setup();
+    apiMocks.users.update.mockResolvedValue({ data: originalUser });
+    render(<Users />);
+    await user.click(inPresentation(await screen.findAllByRole('button', { name: 'Client management' }), presentation));
+    await screen.findByRole('button', { name: 'Revoke Client management for Operator QA Live Client' });
+    expect(screen.queryByRole('combobox', { name: 'Role' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(inPresentation(screen.getAllByRole('button', { name: 'Edit' }), presentation));
+    await user.click(inPresentation(screen.getAllByRole('button', { name: 'Save' }), presentation));
+    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(2, {
+      name: 'Ari Ledger', role: 'accountant', company_ids: [1, 2],
+    }));
+    expect(apiMocks.assignments.updateClientManagement).not.toHaveBeenCalled();
+    await user.click(inPresentation(await screen.findAllByRole('button', { name: 'Client management' }), presentation));
+    await screen.findByRole('button', { name: 'Revoke Client management for Operator QA Live Client' });
+  });
+
 });

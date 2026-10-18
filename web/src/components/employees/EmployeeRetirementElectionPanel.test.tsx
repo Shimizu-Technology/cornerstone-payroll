@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeRetirementElectionPanel } from './EmployeeRetirementElectionPanel';
 import type { Employee, EmployeeRetirementElection } from '@/types';
 const mocks = vi.hoisted(() => ({ create: vi.fn(), activeCompany: null as import('@/services/api').CompanyListItem | null }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, client_capabilities: ['manage_client_configuration'], ...mocks.activeCompany }, activeCompanyId: 1 }) }));
 vi.mock('@/services/api', () => ({ employeesApi: { createRetirementElection: mocks.create }, ApiError: class ApiError extends Error { fieldErrors = {}; } }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
 

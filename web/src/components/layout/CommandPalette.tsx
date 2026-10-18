@@ -27,6 +27,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
@@ -81,7 +82,8 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isManager, isAccountant, isClient, hasCapability } = useAuth();
+  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
+  const { isAdmin, isSuperAdmin, isAccountant, isClient, hasCapability } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const activeCompanyId = activeCompany?.id;
   const [query, setQuery] = useState('');
@@ -246,7 +248,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         });
       }
 
-      if (isManager) {
+      if (canManageClientConfiguration) {
         add({
           id: 'pay-schedule-settings',
           label: 'Pay Schedule',
@@ -442,7 +444,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, canManageClientConfiguration, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

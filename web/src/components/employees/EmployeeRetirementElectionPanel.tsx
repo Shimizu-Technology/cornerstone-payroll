@@ -12,7 +12,7 @@ import { Select } from '@/components/ui/select';
 import { employeesApi } from '@/services/api';
 import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
 import { retirementErrorMessage } from '@/lib/retirement-error';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import type { Employee, EmployeeRetirementElection, EmployeeRetirementElectionInput } from '@/types';
 
 interface Props {
@@ -75,10 +75,10 @@ function initialDraft(employee: Employee): EmployeeRetirementElectionInput {
 }
 
 export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): ReactElement {
-  const { hasCapability } = useAuth();
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', employee.company_id);
   const { notify } = useFeedback();
   const { activeCompany } = useCompany();
-  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasCapability('manage_client_configuration');
+  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasConfigurationAccess;
   const hasDatedElection = Boolean(employee.current_retirement_election || employee.upcoming_retirement_election || employee.retirement_elections?.length);
   const legacySplitMatch = !employee.current_retirement_election && !employee.upcoming_retirement_election && Number(employee.employer_retirement_match_rate || 0) > 0 && Number(employee.employer_roth_match_rate || 0) > 0;
   const [editing, setEditing] = useState(false);

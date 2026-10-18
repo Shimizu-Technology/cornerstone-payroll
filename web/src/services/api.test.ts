@@ -13,7 +13,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, resolveApiUrl, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
+import { apiClient, companyAssignmentsApi, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, resolveApiUrl, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
 
 describe('API URL resolution', (): void => {
   it('resolves a same-origin API path against the current origin', (): void => {
@@ -459,5 +459,18 @@ describe('actionable API errors', () => {
     expect(errorRecovery('Review the applied historical 401(k) classification')).toContain('Yearly retirement checks');
     expect(errorRecovery('Resolve required new-hire documents')).toContain('Manage documents');
     expect(errorRecovery('Choose the first pay date.')).toBeNull();
+  });
+});
+
+
+describe('explicit client management transport', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  it.each([true, false])('patches only the selected assignment and client_management=%s', async enabled => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: { id: 42, client_management: enabled } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await companyAssignmentsApi.updateClientManagement(42, enabled);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/admin/company_assignments/42');
+    expect(options?.method).toBe('PATCH');
+    expect(JSON.parse(String(options?.body))).toEqual({ company_assignment: { client_management: enabled } });
   });
 });

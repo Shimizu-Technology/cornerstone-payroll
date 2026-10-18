@@ -7,7 +7,8 @@ import type { CompanyListItem } from '@/services/api';
 import { EmployeeWorkProfilePanel } from './EmployeeWorkProfilePanel';
 
 const mocks = vi.hoisted(() => ({ activeCompany: null as CompanyListItem | null, create: vi.fn() }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.activeCompany }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 1, client_capabilities: ['manage_client_configuration'], ...mocks.activeCompany }, activeCompanyId: 1 }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({}) }));
 vi.mock('@/services/api', () => ({ employeesApi: { createWorkProfile: mocks.create } }));
 vi.mock('./EmployeeTimeRecordsDialog', () => ({ EmployeeTimeRecordsDialog: () => null }));
 const employee = { id: 5, employment_type: 'salary', hire_date: '2026-01-01' } as Employee;

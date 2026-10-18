@@ -607,4 +607,23 @@ describe('Client create/edit field labels', () => {
     expect(apiMocks.update).not.toHaveBeenCalled();
     expect(apiMocks.create).not.toHaveBeenCalled();
   });
+  it('uses the client-specific editable fields for a delegated accountant and sends only those fields', async () => {
+    const user = userEvent.setup();
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.get.mockResolvedValue({ company: { ...target, editable_fields: ['name', 'ein', 'phone'] } });
+    apiMocks.update.mockResolvedValue({ company: target });
+    render(<Clients />);
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    const name = await screen.findByRole('textbox', { name: /Client Name/ });
+    expect(name.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('combobox', { name: 'Pay Frequency' }).hasAttribute('disabled')).toBe(true);
+    await user.clear(name);
+    await user.type(name, 'Delegated client name');
+    await user.click(screen.getByRole('button', { name: 'Update Client' }));
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(target.id, {
+      name: 'Delegated client name', ein: '', phone: '',
+    }));
+    expect(screen.queryByRole('button', { name: 'Create test workspace' })).toBeNull();
+  });
+
 });

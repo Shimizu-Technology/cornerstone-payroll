@@ -11,7 +11,7 @@ import { Select } from '@/components/ui/select';
 import { annualRetirementLimitsApi, employeesApi } from '@/services/api';
 import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { retirementErrorMessage } from '@/lib/retirement-error';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import type { AnnualRetirementLimit, Employee, EmployeeRetirementYearInput, EmployeeRetirementYearInputDraft, HistoricalRetirementReportingGroup, HistoricalRetirementReview, HistoricalRetirementSource } from '@/types';
 
 const blank = (taxYear: number): EmployeeRetirementYearInputDraft => ({
@@ -37,10 +37,10 @@ function isCurrentReview(review: HistoricalRetirementReview | undefined, source:
 }
 
 export function EmployeeRetirementYearPanel({ employee, initialYear }: { employee: Employee; initialYear?: number }): ReactElement {
-  const { hasCapability } = useAuth();
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', employee.company_id);
   const { notify } = useFeedback();
   const { activeCompany } = useCompany();
-  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasCapability('manage_client_configuration');
+  const canManage = canWriteCompany(activeCompany, 'manage_client_configuration') && hasConfigurationAccess;
   const [year, setYear] = useState(() => initialYear != null && Number.isInteger(initialYear) && initialYear >= 2000 && initialYear <= 2200 ? initialYear : new Date().getFullYear());
   const [records, setRecords] = useState<EmployeeRetirementYearInput[]>([]);
   const [historicalSources, setHistoricalSources] = useState<HistoricalRetirementSource[]>([]);
