@@ -183,6 +183,54 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
     expect(AuditLog.where(company_id: company.id).count).to eq(audits)
   end
 
+  %i[verify enqueue].each do |operation|
+    it "locks the existing review before actor authorization during cutover #{operation}" do
+      review_historical_workers_as_archive_only(batch, actor: admin)
+      QuickbooksHistory::LifecycleService.new(batch: batch, actor: admin).apply!(
+        acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT
+      )
+      review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+      review.update!(verification_started_at: 16.minutes.ago) if operation == :enqueue
+      entered = Queue.new
+      result = Queue.new
+      connection = ActiveRecord::Base.connection
+      thread = nil
+      review.with_lock do
+        thread = Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection do |worker_connection|
+            entered << worker_connection.select_value("SELECT pg_backend_pid()")
+            target = HistoricalImportBatch.find(batch.id)
+            operator = User.find(actor.id)
+            if operation == :verify
+              QuickbooksHistory::CutoverVerificationService.new(batch: target, actor: operator).call
+            else
+              QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: target, actor: operator).call
+            end
+            result << :completed
+          rescue StandardError => error
+            result << error
+          end
+        end
+        blocked_pid = Timeout.timeout(10) { entered.pop }
+        Timeout.timeout(10) do
+          until connection.select_value("SELECT cardinality(pg_blocking_pids(#{Integer(blocked_pid)})) > 0")
+            sleep 0.01
+          end
+        end
+        # A checklist/failure writer holding this review must be able to
+        # authorize; verification must not hold actor while waiting on review.
+        actor.lock!("FOR UPDATE NOWAIT")
+        assignment.lock!("FOR UPDATE NOWAIT")
+        QuickbooksHistory::CutoverVerificationService.ensure_authorized!(batch: batch, actor: actor, lock: true)
+      end
+      Timeout.timeout(10) { thread.join }
+      expect(result.pop).to eq(:completed)
+      expect(review.reload.status).to eq(operation == :verify ? "verified" : "pending")
+    ensure
+      Timeout.timeout(10) { thread&.join }
+    end
+  end
+
   it "preserves the YTD preview, revision and audit after revocation during the batch lock wait" do
     bridge = preview_bridge
     before_state = bridge.attributes
@@ -322,7 +370,7 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
       expect(QuickbooksHistory::ClientBootstrapJob).to have_received(:perform_later).with(bootstrap.id, admin.id, original_token).twice
       QuickbooksHistory::ClientBootstrapJob.perform_now(bootstrap.id, admin.id, original_token)
       expect(bootstrap.reload).to have_attributes(status: "applied", applied_by_id: admin.id)
-      expect(company.employees.count).to eq(2)
+      expect(company.employees.count).to eq(3)
       expect(dispatch.reload.completed_at).to be_present
     end
   end

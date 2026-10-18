@@ -42,11 +42,13 @@ module QuickbooksHistory
 
     def prepare_pending_review!
       batch.with_lock do
+        batch.reload
+        review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
+        review.lock! if review.persisted?
         ensure_authorized!(lock: true)
         batch.reload
         raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
 
-        review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
         raise ArgumentError, "The approved cutover review is sealed" if review.approved?
         if review.pending? && review.verification_started_at.present? &&
            review.verification_started_at > PENDING_RETRY_AFTER.ago
