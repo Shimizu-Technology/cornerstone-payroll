@@ -37,7 +37,7 @@ test('check settings previews draft test checks and alignment PDFs before option
       assigned_company_ids: [1],
       capabilities: ['use_printer_profiles', 'manage_printer_profile_library', 'manage_client_check_settings'],
     } } });
-    if (path.endsWith('/companies')) return route.fulfill({ json: { companies: [{ id: 1, name: 'Synthetic Review Company', active: true }], can_switch_company: false, current_company_id: 1 } });
+    if (path.endsWith('/companies')) return route.fulfill({ json: { companies: [{ id: 1, name: 'Synthetic Review Company', active: true, client_capabilities: ['manage_client_check_settings'] }], can_switch_company: false, current_company_id: 1 } });
     if (path.endsWith('/check_settings')) {
       if (route.request().method() !== 'GET') settingsSaves += 1;
       return route.fulfill({ json: { check_settings: {

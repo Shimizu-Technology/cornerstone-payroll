@@ -19,7 +19,7 @@ async function fixture(page: Page, enabled = false, canManage = true): Promise<R
     const method = route.request().method();
     let body: unknown = { data: [], meta: { total_pages: 1, current_page: 1, total_count: 0 } };
     if (path.endsWith('/auth/me')) body = { user: { id: 1, email: 'intake@example.test', name: 'Synthetic Admin', role: canManage ? 'org_admin' : 'accountant', company_id: 1, organization_id: 1, assigned_company_ids: [1], capabilities: canManage ? ['manage_client_configuration', 'manage_organization'] : [] } };
-    else if (path.endsWith('/companies')) body = { companies: [{ id: 1, name: 'Synthetic Intake Client', active: true, payroll_environment: 'live', pay_frequency: 'biweekly' }], can_manage_clients: canManage, can_switch_company: false, current_company_id: 1 };
+    else if (path.endsWith('/companies')) body = { companies: [{ id: 1, name: 'Synthetic Intake Client', active: true, payroll_environment: 'live', pay_frequency: 'biweekly', client_capabilities: canManage ? ['manage_client_configuration', 'manage_client_administration'] : [] }], can_manage_clients: canManage, can_switch_company: false, current_company_id: 1 };
     else if (path.endsWith('/employee_intake_settings')) {
       if (method === 'PATCH') {
         const input = route.request().postDataJSON().employee_intake_settings;
