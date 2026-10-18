@@ -17,7 +17,7 @@ async function setup(page: Page) {
     const path = new URL(route.request().url()).pathname;
     let body: unknown = { data: [], meta: { total_pages: 1 } };
     if (path.endsWith('/auth/me')) body = { user: { id: 1, email: 'retirement@example.test', name: 'Review Admin', role: 'org_admin', organization_id: 1, company_id: 1, assigned_company_ids: [1], capabilities: ['manage_client_configuration', 'payroll_operations'] } };
-    else if (path.endsWith('/companies')) body = { companies: [{ id: 1, name: 'Retirement QA Client', active: true, payroll_environment: 'live', pay_frequency: 'biweekly' }], can_manage_clients: true, can_switch_company: false, current_company_id: 1 };
+    else if (path.endsWith('/companies')) body = { companies: [{ id: 1, name: 'Retirement QA Client', active: true, payroll_environment: 'live', pay_frequency: 'biweekly', client_capabilities: ['manage_client_configuration'] }], can_manage_clients: true, can_switch_company: false, current_company_id: 1 };
     else if (path.endsWith('/employees/31')) body = { data: employee };
     else if (path.endsWith('/annual_retirement_limits')) body = { data: [{ id: 1, tax_year: year, elective_deferral_limit: '24500.0', catch_up_limit: '8000.0', enhanced_catch_up_limit: '11250.0', roth_catch_up_wage_threshold: '150000.0', annual_additions_limit: '72000.0', compensation_limit: '360000.0', source_name: 'IRS Notice 2025-67', source_url: 'https://www.irs.gov/pub/irs-drop/n-25-67.pdf' }], can_manage: false };
     else if (path.endsWith('/retirement_year_inputs')) {

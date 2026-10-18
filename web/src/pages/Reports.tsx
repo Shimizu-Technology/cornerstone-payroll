@@ -18,6 +18,8 @@ import {
 import { reportsApi, payrollHistoryApi, employeesApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { PdfPreviewProvider, usePdfPreview } from '@/components/documents/PdfPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
@@ -624,6 +626,10 @@ function TaxSummaryPanel() {
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
 export function W2GuPanel() {
+  const { activeCompany } = useCompany();
+  const hasClientAdministration = useSelectedCompanyCapability('manage_client_administration');
+  const workspaceCanAdminister = canWriteCompany(activeCompany, 'manage_client_administration');
+  const canMarkFilingReady = hasClientAdministration && workspaceCanAdminister;
   const previewPdf = usePdfPreview();
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
@@ -706,6 +712,7 @@ export function W2GuPanel() {
   }
 
   async function markFilingReady() {
+    if (!canMarkFilingReady) return;
     setMarkingReady(true);
     setMarkReadyError(null);
     try {
@@ -861,9 +868,13 @@ export function W2GuPanel() {
             </Button>
             <Button
               onClick={markFilingReady}
-              disabled={busy || !filing || filing.preflight_current === false || filing.blocking_count > 0 || filing.status === 'filing_ready' || !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready}
+              disabled={busy || !canMarkFilingReady || !filing || filing.preflight_current === false || filing.blocking_count > 0 || filing.status === 'filing_ready' || !filingGate?.filings.w2_gu?.capabilities.can_mark_filing_ready}
               title={
-                !filing
+                !hasClientAdministration
+                  ? 'Client management or administrator access required'
+                  : !workspaceCanAdminister
+                    ? companyReadOnlyMessage(activeCompany)
+                  : !filing
                   ? 'Run preflight first'
                   : filing.preflight_current === false
                     ? 'Filing inputs changed. Run preflight and review again'

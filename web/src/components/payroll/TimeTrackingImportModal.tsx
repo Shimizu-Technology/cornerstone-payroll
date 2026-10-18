@@ -298,7 +298,7 @@ export function TimeTrackingImportModal({
 
   const activeWageRatesFor = (employeeId: number | null | undefined) => {
     const employee = employeeId ? employeeById.get(employeeId) : null;
-    return (employee?.wage_rates || []).filter((rate) => rate.active !== false && rate.id != null);
+    return (employee?.wage_rates || []).filter((rate) => rate.active !== false && rate.id != null && rate.rate != null);
   };
 
   const employeeNeedsRateMapping = (employeeId: number | null | undefined) => {
@@ -307,10 +307,16 @@ export function TimeTrackingImportModal({
       (employee?.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
   };
 
+  const requiresCategoryMapping = (employeeId: number | null | undefined, finalized = isFinalizedBatch) => {
+    const employee = employeeId ? employeeById.get(employeeId) : null;
+    const rates = (employee?.wage_rates || []).filter(rate => rate.active !== false && rate.id != null);
+    return finalized || rates.length > 1 || rates.some(rate => rate.rate == null);
+  };
+
   const defaultWageRateMappingFor = (row: TimeTrackingPreviewRow, employeeId: number | null, finalized: boolean) => {
     const activeRates = activeWageRatesFor(employeeId);
     const ratesByLabel = new Map(activeRates.map((rate) => [normalizeMatchKey(rate.label), rate.id ?? null]));
-    const onlyRateId = !finalized && activeRates.length === 1 ? activeRates[0]?.id ?? null : null;
+    const onlyRateId = !finalized && !requiresCategoryMapping(employeeId, finalized) && activeRates.length === 1 ? activeRates[0]?.id ?? null : null;
 
     return (row.categories || []).reduce<Record<string, number | null>>((acc, category) => {
       const backendMatch = activeRates.some((rate) => rate.id === category.employee_wage_rate_id) ? category.employee_wage_rate_id ?? null : null;
@@ -334,10 +340,10 @@ export function TimeTrackingImportModal({
     if (categories.length === 0) return true;
 
     const activeRates = activeWageRatesFor(employeeId);
-    if (!isFinalizedBatch && activeRates.length <= 1) return true;
+    if (!requiresCategoryMapping(employeeId)) return true;
     if (activeRates.length === 0) return false;
     const rowMappings = wageRateMappings.get(row.source_user_id) || {};
-    return categories.every((category) => Boolean(rowMappings[categoryMappingKey(category)]));
+    return categories.every((category) => activeRates.some(rate => rate.id === rowMappings[categoryMappingKey(category)]));
   };
 
   const mappedGrossEstimate = (row: TimeTrackingPreviewRow): number | null => {
@@ -828,10 +834,10 @@ export function TimeTrackingImportModal({
                   const effectiveWarnings = effectiveWarningsFor(row);
                   const activeWageRates = activeWageRatesFor(mappedEmployeeId);
                   const categories = rowCategories(row);
-                  const lacksActiveWageRates = Boolean(!isHistoricalReconciliation && isFinalizedBatch && included && mapped &&
+                  const lacksActiveWageRates = Boolean(!isHistoricalReconciliation && requiresCategoryMapping(mappedEmployeeId) && included && mapped &&
                     employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 && activeWageRates.length === 0);
                   const needsRateMapping = !isHistoricalReconciliation && included && mapped && employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 &&
-                    (isFinalizedBatch || activeWageRates.length > 1);
+                    requiresCategoryMapping(mappedEmployeeId);
                   const rowRateMappings = wageRateMappings.get(row.source_user_id) || {};
 
                   return (
@@ -942,7 +948,7 @@ export function TimeTrackingImportModal({
                                 </div>
                                 {needsRateMapping && lacksActiveWageRates && (
                                   <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-2 text-xs font-medium text-warning-900">
-                                    Add an active wage rate for this employee before applying the finalized batch.
+                                    Add an active wage rate with an amount for this employee before importing.
                                   </p>
                                 )}
                                 {needsRateMapping && !lacksActiveWageRates && (

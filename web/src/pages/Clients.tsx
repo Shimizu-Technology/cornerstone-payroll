@@ -93,13 +93,14 @@ const testWorkspaceOpenLabel = (company: CompanyListItem): string => {
 };
 
 interface SettingToggleProps {
+  disabled?: boolean;
   checked: boolean;
   label: string;
   description?: string;
   onToggle: () => void;
 }
 
-function SettingToggle({ checked, label, description, onToggle }: SettingToggleProps): ReactElement {
+function SettingToggle({ checked, label, description, onToggle, disabled }: SettingToggleProps): ReactElement {
   const switchId = useId();
   const labelId = `${switchId}-label`;
   const descriptionId = description ? `${switchId}-description` : undefined;
@@ -114,6 +115,7 @@ function SettingToggle({ checked, label, description, onToggle }: SettingToggleP
         aria-labelledby={labelId}
         aria-describedby={descriptionId}
         onClick={onToggle}
+        disabled={disabled}
         className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 ${
           checked ? 'bg-blue-600' : 'bg-gray-300'
         }`}
@@ -177,6 +179,9 @@ export function Clients() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editableFields, setEditableFields] = useState<string[] | null>(null);
+  const canEditField = (field: keyof CompanyFormData) => editableFields ? editableFields.includes(field) : canManageClients || ['phone', 'email', 'address_line1', 'address_line2', 'city', 'state', 'zip'].includes(field);
+  const canEditCore = canEditField('bank_name') || canEditField('check_stock_type') || canEditField('simple_payroll_register_enabled');
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError, formErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -556,6 +561,7 @@ export function Clients() {
     try {
       const data = await companiesApi.get(id);
       const c = data.company;
+      setEditableFields(c.editable_fields ?? null);
       setForm({
         name: c.name || '',
         ein: c.ein || '',
@@ -650,6 +656,7 @@ export function Clients() {
 
   const handleCancel = () => {
     setShowForm(false);
+    setEditableFields(null);
     setEditingId(null);
     setForm({ ...emptyForm });
     setFormError(null);
@@ -666,7 +673,8 @@ export function Clients() {
 
     try {
       if (editingId) {
-        await companiesApi.update(editingId, form);
+        const payload = editableFields ? Object.fromEntries(Object.entries(form).filter(([field]) => editableFields.includes(field))) : form;
+        await companiesApi.update(editingId, payload);
       } else {
         await companiesApi.create(form);
       }
@@ -1163,7 +1171,7 @@ export function Clients() {
                     value={form.name}
                     onChange={(e) => updateField('name', e.target.value)}
                     placeholder="e.g. MoSa's Hotbox, Inc."
-                    disabled={!canManageClients}
+                    disabled={!canEditField('name')}
                   />
                   <p className="mt-1 text-xs text-neutral-500">Shown on reports and earnings statements.</p>
                 </div>
@@ -1174,7 +1182,7 @@ export function Clients() {
                     value={form.ein || ''}
                     onChange={(e) => updateField('ein', formatEIN(e.target.value))}
                     placeholder="XX-XXXXXXX"
-                    disabled={!canManageClients}
+                    disabled={!canEditField('ein')}
                   />
                 </div>
                 <div>
@@ -1183,7 +1191,7 @@ export function Clients() {
                     id={`${clientFormId}-pay_frequency`}
                     value={form.pay_frequency}
                     onChange={(e) => updateField('pay_frequency', e.target.value)}
-                    disabled={!canManageClients}
+                    disabled={!canEditField('pay_frequency')}
                   >
                     {payFrequencyOptions.map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1199,6 +1207,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-phone`} className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
                   <Input
                     id={`${clientFormId}-phone`}
+                    disabled={!canEditField('phone')}
                     value={form.phone || ''}
                     onChange={(e) => updateField('phone', e.target.value)}
                     placeholder="(671) 555-1234"
@@ -1208,6 +1217,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-email`} className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <Input
                     id={`${clientFormId}-email`}
+                    disabled={!canEditField('email')}
                     type="email"
                     value={form.email || ''}
                     onChange={(e) => updateField('email', e.target.value)}
@@ -1223,6 +1233,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-address_line1`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
                   <Input
                     id={`${clientFormId}-address_line1`}
+                    disabled={!canEditField('address_line1')}
                     value={form.address_line1 || ''}
                     onChange={(e) => updateField('address_line1', e.target.value)}
                     placeholder="123 Main St"
@@ -1232,6 +1243,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-address_line2`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
                   <Input
                     id={`${clientFormId}-address_line2`}
+                    disabled={!canEditField('address_line2')}
                     value={form.address_line2 || ''}
                     onChange={(e) => updateField('address_line2', e.target.value)}
                     placeholder="Suite 100"
@@ -1243,6 +1255,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-city`} className="block text-sm font-medium text-gray-700 mb-1">City</label>
                   <Input
                     id={`${clientFormId}-city`}
+                    disabled={!canEditField('city')}
                     value={form.city || ''}
                     onChange={(e) => updateField('city', e.target.value)}
                     placeholder="Tamuning"
@@ -1252,6 +1265,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-state`} className="block text-sm font-medium text-gray-700 mb-1">State</label>
                   <Input
                     id={`${clientFormId}-state`}
+                    disabled={!canEditField('state')}
                     value={form.state || ''}
                     onChange={(e) => updateField('state', e.target.value)}
                     placeholder="GU"
@@ -1261,6 +1275,7 @@ export function Clients() {
                   <label htmlFor={`${clientFormId}-zip`} className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
                   <Input
                     id={`${clientFormId}-zip`}
+                    disabled={!canEditField('zip')}
                     value={form.zip || ''}
                     onChange={(e) => updateField('zip', e.target.value)}
                     placeholder="96913"
@@ -1268,7 +1283,7 @@ export function Clients() {
                 </div>
               </div>
 
-              {canManageClients && (
+              {canEditCore && (
                 <>
                   {/* Bank Info */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
@@ -1277,6 +1292,7 @@ export function Clients() {
                       <label htmlFor={`${clientFormId}-bank_name`} className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
                       <Input
                         id={`${clientFormId}-bank_name`}
+                        disabled={!canEditField('bank_name')}
                         value={form.bank_name || ''}
                         onChange={(e) => updateField('bank_name', e.target.value)}
                         placeholder="Bank of Guam"
@@ -1286,6 +1302,7 @@ export function Clients() {
                       <label htmlFor={`${clientFormId}-bank_address`} className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
                       <Input
                         id={`${clientFormId}-bank_address`}
+                        disabled={!canEditField('bank_address')}
                         value={form.bank_address || ''}
                         onChange={(e) => updateField('bank_address', e.target.value)}
                         placeholder="111 Chalan Santo Papa"
@@ -1296,6 +1313,7 @@ export function Clients() {
                   {/* Payroll Reporting */}
                   <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
                   <SettingToggle
+                    disabled={!canEditField('simple_payroll_register_enabled')}
                     checked={form.simple_payroll_register_enabled === true}
                     label="Simple payroll register Excel format"
                     description="Adds a compact payroll register as the first worksheet while preserving the detailed payroll sheets. Leave this off for clients that require a different register format."
@@ -1303,6 +1321,7 @@ export function Clients() {
                   />
 
                   <SettingToggle
+                    disabled={!canEditField('historical_payroll_enabled')}
                     checked={form.historical_payroll_enabled === true}
                     label="Historical payroll workspace"
                     description="Opens the protected QuickBooks migration workspace for this client. Keep this off until the source bundle is ready for review."
@@ -1310,6 +1329,7 @@ export function Clients() {
                   />
 
                   <SettingToggle
+                    disabled={!canEditField('client_payroll_approval_required')}
                     checked={form.client_payroll_approval_required === true}
                     label="Require client approval before payroll approval"
                     description="Shares each calculated revision in the client portal. Cornerstone cannot approve or commit the run until an assigned client user approves that exact revision, either in the portal or through a retained email attestation."
@@ -1323,6 +1343,7 @@ export function Clients() {
                       <label htmlFor={`${clientFormId}-check_stock_type`} className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
                       <Select
                         id={`${clientFormId}-check_stock_type`}
+                        disabled={!canEditField('check_stock_type')}
                         value={form.check_stock_type || 'bottom_check'}
                         onChange={(e) => updateField('check_stock_type', e.target.value)}
                       >
@@ -1335,6 +1356,7 @@ export function Clients() {
                       <label htmlFor={`${clientFormId}-next_check_number`} className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
                       <NumericInput
                         id={`${clientFormId}-next_check_number`}
+                        disabled={!canEditField('next_check_number')}
                         value={form.next_check_number ?? 1001}
                         onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
                         min={1}
@@ -1346,7 +1368,7 @@ export function Clients() {
               )}
 
               {/* Active toggle (edit only) */}
-              {editingId && canManageClients && (
+              {editingId && canEditField('active') && (
                 <SettingToggle
                   checked={form.active !== false}
                   label="Active client"

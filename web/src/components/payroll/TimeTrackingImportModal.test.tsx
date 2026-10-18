@@ -397,6 +397,38 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(screen.getByText('Earning type mapping required')).toBeTruthy();
   });
 
+  it.each(['payroll_batch_v2', 'time_summary_v1'] as const)('excludes the exact unset option and keeps %s mapping blocked until a configured rate is selected', async (validationVersion) => {
+    // The API/model permits null; the existing shared form type declares number.
+    const unset = { id: 23, label: 'Regular', rate: null, is_primary: true, active: true };
+    const zero = { id: 24, label: 'Intentional Zero', rate: 0, is_primary: false, active: true };
+    const unsafeRow = { ...row, warnings: [{ code: 'unmapped_wage_rate', message: 'Map Regular before importing' }],
+      categories: [{ ...row.categories![0], employee_wage_rate_id: unset.id }] };
+    const { data } = await review({ validation_version: validationVersion, rows: [unsafeRow] }, payPeriod,
+      [{ ...employee, wage_rates: [unset, zero] } as unknown as Employee]);
+    const select = screen.getByRole('combobox', { name: 'Payroll earning type' }) as HTMLSelectElement;
+    const apply = screen.getByRole('button', { name: validationVersion === 'payroll_batch_v2' ? 'Add time tracking Hours to Payroll' : 'Apply Import' }) as HTMLButtonElement;
+    expect(Array.from(select.options).map(option => [option.value, option.textContent])).toEqual([
+      ['', 'Select earning type'], ['24', 'Intentional Zero ($0.00/hr)'],
+    ]);
+    expect(select.value).toBe('');
+    expect(apply.disabled).toBe(true);
+    expect(screen.getByText('Earning type mapping required')).toBeTruthy();
+    await userEvent.selectOptions(select, '24');
+    expect(apply.disabled).toBe(false);
+    expect(screen.queryByText('Earning type mapping required')).toBeNull();
+    apiMocks.apply.mockResolvedValue({ import: { ...data, status: 'applied' }, results: { applied: [{}], skipped: [], errors: [] } });
+    await userEvent.click(apply);
+    expect(apiMocks.apply.mock.calls[0][1].mappings[0].wage_rate_mappings[0].employee_wage_rate_id).toBe(24);
+  });
+
+  it.each(['payroll_batch_v2', 'time_summary_v1'] as const)('blocks %s when the sole active wage rate is unset', async (validationVersion) => {
+    await review({ validation_version: validationVersion }, payPeriod,
+      [{ ...employee, wage_rates: [{ id: 22, label: 'Regular', rate: null, active: true, is_primary: true }] } as unknown as Employee]);
+    expect(screen.queryByRole('option', { name: 'Regular ($0.00/hr)' })).toBeNull();
+    expect((screen.getByRole('button', { name: validationVersion === 'payroll_batch_v2' ? 'Add time tracking Hours to Payroll' : 'Apply Import' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Active wage rate required')).toBeTruthy();
+  });
+
   it('continues to require confirmation and a meaningful note for negative adjustments', async () => {
     await review({ negative_adjustment_count: 1 });
     const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' }) as HTMLButtonElement;

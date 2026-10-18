@@ -1,5 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +13,9 @@ import { adminEmployeeChangeRequestsApi } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 
 export function AdminEmployeeChangeRequestsPage() {
+  const { activeCompany, activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const canReview = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
   const [status, setStatus] = useState('pending');
@@ -76,7 +81,7 @@ export function AdminEmployeeChangeRequestsPage() {
   }, [status, load, invalidateRequests]);
 
   const updateRequest = async (action: 'approve' | 'reject') => {
-    if (!selected) return;
+    if (!selected || !canReview) return;
     try {
       setSaving(true);
       setError(null);
@@ -201,10 +206,10 @@ export function AdminEmployeeChangeRequestsPage() {
                   </div>
                   {selected.status === 'pending' ? (
                     <div className="flex gap-3">
-                      <Button disabled={saving} onClick={() => void updateRequest('approve')}>
+                      <Button disabled={saving || !canReview} onClick={() => void updateRequest('approve')}>
                         {saving ? 'Saving...' : 'Approve'}
                       </Button>
-                      <Button variant="outline" disabled={saving} onClick={() => void updateRequest('reject')}>
+                      <Button variant="outline" disabled={saving || !canReview} onClick={() => void updateRequest('reject')}>
                         Reject
                       </Button>
                     </div>

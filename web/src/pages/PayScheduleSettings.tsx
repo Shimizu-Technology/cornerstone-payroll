@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { payScheduleSettingsApi, type PayScheduleSettingsResponse } from '@/services/api';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
@@ -72,10 +73,11 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
 }
 
 export function PayScheduleSettings() {
-  const { hasCapability, isLoading: authLoading } = useAuth();
+  const { isLoading: authLoading } = useAuth();
   const { activeCompany, activeCompanyId, loading: companyLoading } = useCompany();
   const companyReady = !authLoading && !companyLoading && activeCompany != null && activeCompanyId != null && activeCompany.id === activeCompanyId;
-  const hasConfigurationAccess = hasCapability('manage_client_configuration');
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
   const canConfigure = companyReady && hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
   const readOnlyReason = !companyReady
     ? 'Access to the selected company is still being checked. You can review the schedule; your entries are preserved.'

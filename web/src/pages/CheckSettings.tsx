@@ -19,7 +19,9 @@ import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile, PrinterProfileSelection } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 import { selectedPrinterProfileLockVersion } from './checkSettingsPrinterProfile';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 
 type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
 
@@ -105,8 +107,10 @@ function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentP
 }
 
 export function CheckSettingsPage() {
-  const { hasCapability } = useAuth();
-  const canManageClientCheckSettings = hasCapability('manage_client_check_settings');
+  const { activeCompany, activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const hasClientCheckAccess = useSelectedCompanyCapability('manage_client_check_settings', scopeCompanyId);
+  const canManageClientCheckSettings = hasClientCheckAccess && canWriteCompany(activeCompany, 'manage_client_check_settings');
   const skipNextLayoutEffectRef = useRef(false);
   const newProfileNameInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -346,7 +350,7 @@ export function CheckSettingsPage() {
 
   const handleSaveSettings = async () => {
     if (!canManageClientCheckSettings) {
-      setError('Your role can manage personal printer profiles, but only managers and organization admins can change client check controls.');
+      setError('Your role can manage personal printer profiles, but client check controls require permission for the selected client.');
       return;
     }
     setSaving(true);
@@ -396,7 +400,7 @@ export function CheckSettingsPage() {
 
   const handleUpdateNextCheckNumber = async () => {
     if (!canManageClientCheckSettings) {
-      setError('Only managers and organization admins can change the client check-number sequence.');
+      setError('Changing the client check-number sequence requires permission for the selected client.');
       return;
     }
     const num = parseInt(nextCheckNumber, 10);
@@ -753,7 +757,7 @@ export function CheckSettingsPage() {
             <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
             <div>
               <p className="font-semibold text-slate-900">Your printer choice is personal</p>
-              <p className="mt-1 leading-5">You can use, create, and copy profiles shared by your organization. Managers and organization admins control check stock, bank text, automation, and check numbering for the client.</p>
+              <p className="mt-1 leading-5">You can use, create, and copy profiles shared by your organization. Client check stock, bank text, automation, and numbering require client management access granted by an administrator.</p>
             </div>
           </div>
         )}
