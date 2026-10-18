@@ -375,7 +375,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       data: { pay_schedule_settings: {} },
     });
     expect(rejectedUpdate.status()).toBe(403);
-    expect((await responseJson(rejectedUpdate)).error).toBe('Manager or admin access required');
+    expect((await responseJson(rejectedUpdate)).error).toBe('Manager, admin, or Client management access required');
 
     const accountantContext = await browser.newContext({
       extraHTTPHeaders: {
