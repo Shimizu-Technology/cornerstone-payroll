@@ -371,7 +371,8 @@ RSpec.describe "QuickBooks bootstrap authorization at delayed boundaries", :post
       QuickbooksHistory::ClientBootstrapJob.perform_now(bootstrap.id, admin.id, original_token)
       expect(bootstrap.reload).to have_attributes(status: "applied", applied_by_id: admin.id)
       expect(company.employees.count).to eq(3)
-      expect(dispatch.reload.completed_at).to be_present
+      expect(dispatch.reload.enqueued_at).to be_present
+      expect(HistoricalClientBootstrapDispatch.due_for_dispatch).not_to include(dispatch)
     end
   end
 
