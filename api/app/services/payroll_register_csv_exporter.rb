@@ -257,11 +257,7 @@ class PayrollRegisterCsvExporter
   end
 
   def rate_basis(employee)
-    return "Source rate unavailable" if employee[:pay_rate].nil?
-    return "USD/hour (primary rate; see earnings detail for all rates)" unless employee[:employment_type].to_s == "salary"
-
-    { "annual" => "USD/year (annual salary)", "per_period" => "USD/pay period", "variable" => "USD/pay period (variable salary)" }
-      .fetch(employee[:salary_type].to_s, "USD (salary basis not recorded)")
+    PayrollRateBasis.describe(employee)
   end
 
   def summary_label(summary)
