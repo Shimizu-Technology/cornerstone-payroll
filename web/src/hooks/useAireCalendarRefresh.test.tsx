@@ -6,10 +6,10 @@ import { useAireCalendarRefresh } from './useAireCalendarRefresh';
 const api = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: api }));
 const calendar = { enabled: true, source_id: 3, cutoff_state: 'batch_verifying', publication: { delivery_status: 'delivered' } } as AirePayrollCalendarState;
-const response = (value = calendar, id = 2, companyId = 1) => ({ pay_period: { id, company_id: companyId, time_tracking: { aire_calendar: value } } });
+const response = (value = calendar, id = 2, companyId = 1): { pay_period: { id: number; company_id: number; time_tracking: { aire_calendar: AirePayrollCalendarState } } } => ({ pay_period: { id, company_id: companyId, time_tracking: { aire_calendar: value } } });
 beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); api.get.mockResolvedValue(response()); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
-const advance = async (ms = 5_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const advance = async (ms = 5_000): Promise<void> => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 it('follows verification automatically and stops after a verified batch', async () => {
   const onUpdated = vi.fn();
   const verified = { ...calendar, cutoff_state: 'batch_verified' } as AirePayrollCalendarState;

@@ -9,10 +9,10 @@ export function useAireCalendarRefresh({ companyId, payPeriodId, calendar, enabl
   calendar?: AirePayrollCalendarState | null;
   enabled: boolean;
   onUpdated: (calendar: AirePayrollCalendarState) => void;
-}) {
+}): string | null {
   const [error, setError] = useState<string | null>(null);
   const onUpdatedRef = useRef(onUpdated);
-  onUpdatedRef.current = onUpdated;
+  useEffect(() => { onUpdatedRef.current = onUpdated; }, [onUpdated]);
   const snapshot = JSON.stringify(calendar);
   const state = calendar?.cutoff_state;
   const sourceId = calendar?.source_id;

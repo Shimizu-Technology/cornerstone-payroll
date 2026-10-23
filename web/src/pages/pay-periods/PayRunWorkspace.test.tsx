@@ -50,7 +50,10 @@ vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
   UnifiedCheckPrintDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Print prepared checks">Print prepared checks</div> : null,
 }));
 
-vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => <div>Tax and other checks</div> }));
+vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: ({ onChecksLoaded }: { onChecksLoaded?: (checks: { voided: boolean }[]) => void }) => <div>Tax and other checks
+  <button onClick={() => onChecksLoaded?.([{ voided: true }])}>Load only voided tax checks</button>
+  <button onClick={() => onChecksLoaded?.([{ voided: false }])}>Load active tax checks</button>
+</div> }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
   ChecksPanel: ({ onChecksChanged }: { onChecksChanged?: () => Promise<void> }) => (
@@ -534,4 +537,21 @@ describe('PayRunWorkspace check status refresh', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
   });
+});
+
+it('keeps printing disabled for only voided non-employee checks and enables an active check', async () => {
+  vi.clearAllMocks();
+  apiMocks.activeCompany = { id: 7, payroll_environment: 'live', workspace_can_write: true };
+  apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, status: 'committed', parallel_run: false, payroll_items: [] } });
+  apiMocks.printQueue.mockResolvedValue({ items: [] });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+  </Routes></MemoryRouter>);
+  const print = await screen.findByRole('button', { name: 'Print checks' }) as HTMLButtonElement;
+  await waitFor(() => expect(apiMocks.printQueue).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Load only voided tax checks' }));
+  expect(print.disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Load active tax checks' }));
+  expect(print.disabled).toBe(false);
+  cleanup();
 });
