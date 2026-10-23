@@ -158,6 +158,7 @@ describe('PayrollItemDetail payment labels', () => {
 
 
 it('reviews the exact scoped payroll item in context and closes without losing the filter or focus', async () => {
+  vi.clearAllMocks();
   apiMocks.payPeriod.mockResolvedValue({ pay_period: { id: 2, company_id: 1, start_date: '2026-11-01', end_date: '2026-11-15', pay_date: '2026-11-30', status: 'committed', payroll_items: [baseItem] } });
   apiMocks.payrollItem.mockResolvedValue({ payroll_item: baseItem });
   apiMocks.employee.mockResolvedValue({ data: employee });

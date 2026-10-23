@@ -576,7 +576,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
             payPeriodId={payRun.id} companyId={companyId} payPeriodStatus={payRun.status}
             payPeriodVoided={payRun.correction_status === 'voided'} payDate={payRun.pay_date}
             refreshToken={checkPrintRefreshToken}
-            onChecksLoaded={checks => setHasNonEmployeeChecks(checks.length > 0)}
+            onChecksLoaded={checks => setHasNonEmployeeChecks(checks.some(check => !check.voided))}
             onChecksChanged={() => { setCheckPrintRefreshToken(value => value + 1); void refreshPayRunSummary(); }}
           />
           <UnifiedCheckPrintDialog
