@@ -10,6 +10,25 @@ class TransmittalLogPdfGenerator
   HEADER_COLOR = "2B4090"
   TEXT_MUTED   = "666666"
 
+  REPORT_LIST = [
+    "Payroll Summary by Employee",
+    "Deductions and Contributions Report",
+    "Paycheck History",
+    "Retirement Plans Report",
+    "Employee Installment Loan Report"
+  ].freeze
+
+  def self.default_notes(pay_period, include_additional: true)
+    items = pay_period.payroll_items.not_voided.reportable
+    fit = include_additional ? items.sum { |item| item.total_income_tax_withheld } : items.sum(:withholding_tax)
+    fica = items.sum(:social_security_tax) + items.sum(:employer_social_security_tax) +
+      items.sum(:medicare_tax) + items.sum(:employer_medicare_tax)
+    notes = []
+    notes << "FICA Obligation (Social Security & Medicare): #{ActiveSupport::NumberHelper.number_to_currency(fica)}" if fica.positive?
+    notes << "FIT Deposit Total: #{ActiveSupport::NumberHelper.number_to_currency(fit)} — check to Treasurer of Guam for DRT" if fit.positive?
+    notes
+  end
+
   attr_reader :pay_period, :company, :options
 
   # @param pay_period [PayPeriod]
@@ -74,7 +93,7 @@ class TransmittalLogPdfGenerator
       pdf.text_box "Pay Day:", at: [ 0, pdf.cursor ], width: label_width
       pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [ label_width, pdf.cursor ]
       pdf.move_down 16
-      pdf.text_box "PPE:", at: [ 0, pdf.cursor ], width: label_width
+      pdf.text_box "Work Period:", at: [ 0, pdf.cursor ], width: label_width
       pdf.text_box "#{pay_period.start_date.strftime('%m/%d/%Y')} - #{pay_period.end_date.strftime('%m/%d/%Y')}", at: [ label_width, pdf.cursor ]
       pdf.move_down 16
     end
@@ -263,7 +282,7 @@ class TransmittalLogPdfGenerator
   end
 
   def render_notes(pdf)
-    notes = options[:notes]
+    notes = options.key?(:notes) ? options[:notes] : self.class.default_notes(pay_period)
     return if notes.blank?
 
     pdf.stroke_horizontal_rule
@@ -281,13 +300,7 @@ class TransmittalLogPdfGenerator
   end
 
   def default_report_list
-    [
-      "Payroll Summary by Employee",
-      "Deductions and Contributions Report",
-      "Paycheck History",
-      "Retirement Plans Report",
-      "Employee Installment Loan Report"
-    ]
+    REPORT_LIST
   end
 
   def fmt(value)

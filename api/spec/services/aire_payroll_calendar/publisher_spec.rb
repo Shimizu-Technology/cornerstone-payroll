@@ -3,6 +3,11 @@
 require "rails_helper"
 
 RSpec.describe AirePayrollCalendar::Publisher do
+  # These fixtures describe publication before the October 22 cutoff.
+  # Model validations use Time.current as well as the presenter's explicit clock.
+  before { travel_to(Time.find_zone!("Pacific/Guam").local(2026, 10, 17, 9)) }
+  after { travel_back }
+
   include ActiveSupport::Testing::TimeHelpers
 
   let(:company) { create(:company, pay_frequency: "semimonthly") }

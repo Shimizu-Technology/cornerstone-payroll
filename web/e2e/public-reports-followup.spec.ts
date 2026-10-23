@@ -109,6 +109,9 @@ test('preview failure clears prior initialized notes and leaves no fallback inst
   failPreview();
   await openEditor(page, false);
   await expectNotes(page, []);
+  await expect(page.getByRole('alert')).toContainText('Saved cover details could not load');
+  await expect(page.getByRole('button', { name: 'Retry cover details', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate Full Print Package', exact: true })).toBeDisabled();
 });
 
 for (const width of [320, 390, 768]) {

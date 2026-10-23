@@ -1009,4 +1009,128 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     expect(import.reload.status).to eq("applied")
     expect(pay_period.payroll_items).to be_empty
   end
+
+  describe "regular salary roster after a connected import", type: :request do
+    def prepare_regular_roster(import_hours: true, **period_attributes)
+      company, period, source = setup_records
+      period.update!(period_attributes) if period_attributes.any?
+      actor = create(:user, company: company, role: "admin")
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
+      create(:tax_table, tax_year: 2026)
+      hourly = create(:employee, company: company, email: "hourly-roster@example.com", pay_rate: 25)
+      create(:employee_wage_rate, employee: hourly, label: "Flight Hours", rate: 25, is_primary: true)
+      salary = create(:employee, :salary, company: company, first_name: "Dana", last_name: "SyntheticSalary", pay_rate: 52_000)
+      import = nil
+      if import_hours
+        confirm_mapping!(company: company, source: source, employee: hourly)
+        adjustments = [ {
+          "source_time_entry_id" => "salary-roster-hours", "line_key" => "flight:2500",
+          "source_kind" => "current", "original_work_date" => "2026-08-20", "original_week_start" => "2026-08-16",
+          "source_category_id" => "flight", "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+          "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0
+        } ]
+        payload = payload_for(pay_period: period, employee: hourly, adjustments: adjustments)
+        import = preview_import(pay_period: period, source: source, payload: payload)
+        result = TimeTracking::ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
+        expect(result[:errors]).to be_empty
+        expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      end
+      [ company, period, hourly, salary, import ]
+    end
+
+    def calculate_roster(period, **inputs)
+      post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", params: inputs, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+    end
+
+    it "exposes initial salary defaults after real finalized import application and calculates them once" do
+      company, period, hourly, salary, import = prepare_regular_roster
+      create(:employee, company: company) # An hourly employee absent from the import.
+      frozen_payload = import.reload.raw_payload.deep_dup
+      frozen_checksum = import.external_batch_checksum
+      frozen_allocations = import.time_tracking_entry_allocations.map(&:attributes)
+
+      get "/api/v1/admin/pay_periods/#{period.id}"
+      expect(response).to have_http_status(:ok)
+      ids = response.parsed_body.dig("pay_period", "default_employee_ids")
+      expect(ids).to contain_exactly(hourly.id, salary.id)
+      expect(period.payroll_items.count).to eq(1) # Reading defaults must not persist wages.
+      calculate_roster(period, employee_ids: ids)
+      expect(period.payroll_items.find_by!(employee: salary).gross_pay).to eq(2000.to_d)
+      expect(period.payroll_items.find_by!(employee: hourly).gross_pay).to eq(200.to_d)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to contain_exactly(hourly.id, salary.id)
+      expect(period.payroll_items.find_by!(employee: salary).gross_pay).to eq(2000.to_d)
+      expect(import.reload.raw_payload).to eq(frozen_payload)
+      expect(import.external_batch_checksum).to eq(frozen_checksum)
+      expect(import.time_tracking_entry_allocations.map(&:attributes)).to eq(frozen_allocations)
+    end
+
+    it "uses the same salary amount in an ordinary manual run" do
+      _company, period, _hourly, salary = prepare_regular_roster(import_hours: false)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ salary.id ])
+      expect(period.payroll_items.first.gross_pay).to eq(2000.to_d)
+    end
+
+    it "keeps deliberate exclusions through repeated calculation and import retry" do
+      _company, period, hourly, salary, import = prepare_regular_roster
+      PayPeriodExcludedEmployee.create!(pay_period: period, employee: salary)
+      calculate_roster(period)
+      repeated_preview = preview_import(pay_period: period, source: import.time_tracking_source, payload: import.raw_payload)
+      expect(repeated_preview).to eq(import)
+      expect do
+        TimeTracking::ApplyImportService.new(import: repeated_preview, mappings: [], applied_by: import.applied_by).call
+      end.to raise_error(ArgumentError, "Only previewed time tracking imports can be applied")
+      calculate_roster(period, employee_ids: [ hourly.id, salary.id ])
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(response.parsed_body.dig("pay_period", "default_employee_ids")).to eq([ hourly.id ])
+    end
+
+    it "preserves explicit selection and does not expand it after calculation invalidation" do
+      company, period, hourly, salary = prepare_regular_roster
+      calculate_roster(period, employee_ids: [ hourly.id ])
+      create(:employee, :salary, company: company)
+      period.reload.invalidate_calculation!(reason: "Synthetic setup change")
+      expect(period.reload).to have_attributes(status: "draft", calculated_at: nil)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    it "does not default salary into a regular run with base salary disabled" do
+      _company, period, hourly, salary = prepare_regular_roster(includes_base_salary: false)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    it "keeps an adjustment run selected-only even when base salary is enabled" do
+      _company, period, hourly, salary = prepare_regular_roster(run_purpose: "adjustment", includes_base_salary: true)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    [ true, false ].each do |recurring|
+      it "preserves entered salary and recurring setup policy (#{recurring}) on repeat calculation" do
+        company, period, hourly, salary = prepare_regular_roster(includes_recurring_items: recurring)
+        field = create(:payroll_field_definition, company: company, name: "Synthetic rent", kind: "deduction",
+          tax_treatment: "post_tax_deduction", category: "rent", default_amount: 25)
+        EmployeePayrollField.create!(employee: salary, payroll_field_definition: field, active: true,
+          start_date: period.start_date)
+        calculate_roster(period, salary_overrides: { salary.id.to_s => 725 })
+        item = period.payroll_items.find_by!(employee: salary)
+        expect(item).to have_attributes(salary_override: 725.to_d, gross_pay: 725.to_d)
+        expect(item.payroll_item_field_entries.sum(:amount)).to eq(recurring ? 25.to_d : 0.to_d)
+        calculate_roster(period)
+        expect(item.reload).to have_attributes(salary_override: 725.to_d, gross_pay: 725.to_d)
+        expect(item.payroll_item_field_entries.sum(:amount)).to eq(recurring ? 25.to_d : 0.to_d)
+        expect(period.payroll_items.pluck(:employee_id)).to contain_exactly(hourly.id, salary.id)
+      end
+    end
+  end
 end

@@ -97,8 +97,8 @@ class PayrollRegisterPdfGenerator
 
     rows = [
       [ "Pay Period ID", pp[:id].to_s ],
-      [ "Start Date",    pp[:start_date].to_s ],
-      [ "End Date",      pp[:end_date].to_s ],
+      [ "Work Period Start", pp[:start_date].to_s ],
+      [ "Work Period End", pp[:end_date].to_s ],
       [ "Pay Date",      pp[:pay_date].to_s ],
       [ "Status",        pp[:status].to_s.capitalize ],
       [ "Source",        source[:label].to_s ],
@@ -128,19 +128,19 @@ class PayrollRegisterPdfGenerator
   def render_summary_block(pdf)
     s = report[:summary] || {}
 
-    pdf.font_size(11) { pdf.text "Summary Totals", style: :bold }
-    pdf.move_down 4
-
     rows = [
       [ "W-2 Employee Count",  s[:employee_count].to_s ],
       [ "1099 Contractor Count", s[:contractor_count].to_s ],
-      [ "Total Hours",          decimal(s[:total_hours]) ],
-      [ "Total OT Hours",       decimal(s[:total_overtime_hours]) ],
+      [ "Regular Hours",        decimal(s[:total_hours]) ],
+      [ "Overtime Hours",       decimal(s[:total_overtime_hours]) ],
+      [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| worker[key].to_f } }) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
       [ "Bonus",                fmt(s[:total_bonus]) ],
       [ "Reported Tips",        fmt(s[:total_reported_tips]) ],
       [ "Tips Paid Out",        fmt(s[:total_tips_paid_out]) ],
-      [ "Total Withholding",    fmt(s[:total_withholding]) ],
+      [ "Base FIT",             fmt(s[:total_withholding]) ],
+      [ "Additional FIT Withholding", fmt(s[:total_additional_withholding]) ],
+      [ "Total FIT (Base + Additional)", fmt(s[:total_withholding].to_d + s[:total_additional_withholding].to_d) ],
       [ "Total Social Security", fmt(s[:total_social_security]) ],
       [ "Total Medicare",       fmt(s[:total_medicare]) ],
       [ "Total Retirement",     fmt(s[:total_retirement]) ],
@@ -156,16 +156,21 @@ class PayrollRegisterPdfGenerator
     rows.insert(2, [ "Custom Earnings", fmt(s[:total_custom_earnings]) ]) if custom_earnings_column?
     rows.insert(-3, [ "Custom Deductions", fmt(s[:total_custom_deductions]) ]) if custom_deductions_column?
 
+    # Keep the summary together with its heading on a fresh page when needed.
+    pdf.start_new_page if pdf.cursor < rows.length * 18 + 35
+    pdf.font_size(11) { pdf.text "Summary Totals", style: :bold }
+    pdf.move_down 4
+
     table_data = rows.map { |k, v|
       [ { content: k, font_style: :bold }, { content: v, align: :right } ]
     }
 
     pdf.table(table_data,
-      width: pdf.bounds.width / 2,
-      cell_style: { size: 9, padding: [ 4, 8 ], border_color: BORDER_GRAY }
+      width: pdf.bounds.width,
+      cell_style: { size: 9, padding: [ 3, 8 ], border_color: BORDER_GRAY }
     ) do
       column(0).background_color = SECTION_BG
-      column(0).width = 200
+      column(0).width = 450
       column(0).text_color = TEXT_DARK
       column(1).text_color = TEXT_DARK
     end
@@ -460,53 +465,38 @@ class PayrollRegisterPdfGenerator
   end
 
   def render_worker_table(pdf, workers:, title:, totals:, empty_message: nil, note: nil)
-    pdf.start_new_page if pdf.cursor < 140
-    pdf.font_size(11) { pdf.text title, style: :bold }
-    if note.present?
-      pdf.move_down 2
-      pdf.font_size(7) { pdf.text note, color: TEXT_MUTED }
-    end
-    pdf.move_down 6
-
     if workers.empty?
+      pdf.start_new_page if pdf.cursor < 100
+      pdf.font_size(11) { pdf.text title, style: :bold }
+      pdf.move_down 6
       pdf.font_size(9) { pdf.text empty_message, style: :italic, color: TEXT_MUTED }
       return
     end
 
-    columns = employee_table_columns
-    header = columns.map do |column|
-      {
-        content: column[:label],
-        background_color: HEADER_BG,
-        text_color: "FFFFFF",
-        font_style: :bold,
-        align: column[:align]
-      }.compact
-    end
-
-    rows = workers.map { |worker| employee_table_row(worker, columns) }
-    totals_row = columns.map { |column| total_table_cell(column, totals) }
-
-    table_data = [ header ] + rows + [ totals_row ]
-
-    page_width = pdf.bounds.width
-    total_weight = columns.sum { |column| column[:weight] }
-    col_widths = columns.map { |column| page_width * (column[:weight] / total_weight.to_f) }
-    # Ensure widths sum to exactly page_width (float drift safety)
-    col_widths[-1] = page_width - col_widths[0..-2].sum
-
-    pdf.table(
-      table_data,
-      width: page_width,
-      column_widths: col_widths,
-      cell_style: {
-        size: 7,
-        padding: [ 3, 4 ],
-        border_color: BORDER_GRAY,
-        overflow: :shrink_to_fit
-      }
-    ) do
-      row(0).height = 22
+    # Repeat worker identity on every section and column headers on every page.
+    # Five values per section leave room for complete currency amounts and words.
+    employee_table_columns.drop(1).each_slice(5).with_index do |metrics, index|
+      pdf.start_new_page if pdf.cursor < [ workers.length + 2, 6 ].min * 24 + 40
+      pdf.font_size(11) { pdf.text "#{title} — Section #{index + 1}", style: :bold }
+      if note.present? && index.zero?
+        pdf.move_down 3
+        pdf.font_size(8) { pdf.text note, color: TEXT_MUTED }
+      end
+      pdf.move_down 6
+      columns = [ employee_table_columns.first ] + metrics
+      header = columns.map do |column|
+        { content: column[:label], background_color: HEADER_BG, text_color: "FFFFFF",
+          font_style: :bold, align: column[:align] }.compact
+      end
+      rows = workers.map { |worker| employee_table_row(worker, columns) }
+      totals_row = columns.map { |column| total_table_cell(column, totals) }
+      metric_width = (pdf.bounds.width - 160) / metrics.length
+      pdf.table([ header ] + rows + [ totals_row ],
+        header: true, width: pdf.bounds.width,
+        column_widths: [ 160 ] + Array.new(metrics.length, metric_width),
+        cell_style: { size: 8, padding: [ 5, 6 ], border_color: BORDER_GRAY,
+          overflow: :shrink_to_fit, min_font_size: 7, disable_wrap_by_char: true })
+      pdf.move_down 16
     end
 
     pdf.fill_color TEXT_DARK
@@ -553,14 +543,14 @@ class PayrollRegisterPdfGenerator
     columns = [
       { key: :employee_name, label: "Employee", weight: 13 },
       { key: :employment_type, label: "Type", weight: 5 },
-      { key: :hours_worked, label: "Hours", weight: 5, align: :right },
+      { key: :hours_worked, label: "Regular Hours", weight: 5, align: :right },
       { key: :overtime_hours, label: "OT Hrs", weight: 5, align: :right },
       { key: :gross_pay, label: "Gross Pay", weight: 8, align: :right },
       { key: :reported_tips, label: "Tips", weight: 6, align: :right },
       { key: :tips_paid_out, label: "Tips Out", weight: 6, align: :right },
       { key: :bonus, label: "Bonus", weight: 6, align: :right },
-      { key: :withholding_tax, label: "Withholding", weight: 8, align: :right },
-      { key: :additional_withholding, label: "Addtl W/H", weight: 7, align: :right },
+      { key: :withholding_tax, label: "Base FIT", weight: 8, align: :right },
+      { key: :additional_withholding, label: "Additional FIT", weight: 7, align: :right },
       { key: :social_security_tax, label: "Soc Sec", weight: 7, align: :right },
       { key: :medicare_tax, label: "Medicare", weight: 7, align: :right },
       { key: :retirement_payment, label: "Retirement", weight: 7, align: :right },

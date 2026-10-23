@@ -885,7 +885,7 @@ module Api
           check_numbers = saved&.payroll_check_numbers.nil? ? live_check_numbers : Array(saved&.payroll_check_numbers)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
-          total_fit  = items.sum(:withholding_tax)
+          total_fit  = items.sum { |item| item.total_income_tax_withheld }
           emp_ss     = items.sum(:social_security_tax)
           er_ss      = items.sum(:employer_social_security_tax)
           emp_med    = items.sum(:medicare_tax)
@@ -922,7 +922,7 @@ module Api
             },
             saved_transmittal: saved ? {
               preparer_name: saved.preparer_name,
-              notes: saved.notes,
+              notes: resolved_transmittal_notes(pp, saved.notes),
               report_list: saved.report_list,
               transmittal_date: saved.transmittal_date&.iso8601,
               check_number_first: saved.check_number_first,
@@ -967,6 +967,8 @@ module Api
           return if performed?
 
           t_options = resolve_transmittal_defaults(pp, t_options)
+          # This cover describes the reports actually attached by this endpoint.
+          t_options[:report_list] = TransmittalLogPdfGenerator::REPORT_LIST
           save_transmittal_state!(pp, t_options)
 
           generators = [
@@ -974,13 +976,9 @@ module Api
             PayrollSummaryByEmployeePdfGenerator.new(pp),
             DeductionsContributionsReportPdfGenerator.new(pp),
             PaycheckHistoryPdfGenerator.new(pp),
-            RetirementPlansReportPdfGenerator.new(pp)
+            RetirementPlansReportPdfGenerator.new(pp),
+            InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
           ]
-
-          # Add installment loans if company has any active loans
-          if company.employee_loans.active.where(tracking_mode: "balance_tracked").any?
-            generators << InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
-          end
 
           generators.each do |gen|
             individual_pdf = CombinePDF.parse(gen.generate)
@@ -1252,7 +1250,7 @@ module Api
         def transmittal_options
           opts = {}
           opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
-          opts[:notes] = Array(params[:notes]) if params[:notes].present?
+          opts[:notes] = Array(params[:notes]) if params.key?(:notes)
           opts[:report_list] = Array(params[:report_list]) if params.key?(:report_list)
           if params[:transmittal_date].present?
             opts[:transmittal_date] = parse_optional_iso_date(params[:transmittal_date], param_name: "transmittal_date")
@@ -1263,10 +1261,10 @@ module Api
           end
           opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
           opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
-          if params[:non_employee_check_numbers].present?
-            opts[:non_employee_check_numbers] = params[:non_employee_check_numbers].to_unsafe_h.transform_keys(&:to_i)
+          if params.key?(:non_employee_check_numbers)
+            opts[:non_employee_check_numbers] = (params[:non_employee_check_numbers]&.to_unsafe_h || {}).transform_keys(&:to_i)
           end
-          if params[:custom_entries].present?
+          if params.key?(:custom_entries)
             opts[:custom_entries] = Array(params[:custom_entries]).map { |e| e.permit(:title, details: []).to_h }
           end
           opts
@@ -1275,6 +1273,22 @@ module Api
         def resolve_transmittal_defaults(pay_period, options)
           transmittal = pay_period.transmittal
           options = options.dup
+          # Omitted fields reuse the saved cover; explicit empty arrays clear edits.
+          %i[preparer_name notes report_list check_number_first check_number_last non_employee_check_numbers custom_entries].each do |key|
+            next if options.key?(key) || transmittal.nil?
+
+            saved_value = transmittal.public_send(key)
+            options[key] = saved_value unless saved_value.nil?
+          end
+          if options[:non_employee_check_numbers]
+            options[:non_employee_check_numbers] = options[:non_employee_check_numbers].transform_keys(&:to_i)
+          end
+          options[:notes] = if options.key?(:notes)
+            resolved_transmittal_notes(pay_period, options[:notes])
+          else
+            TransmittalLogPdfGenerator.default_notes(pay_period)
+          end
+          options[:report_list] = TransmittalLogPdfGenerator::REPORT_LIST unless options.key?(:report_list)
           options[:transmittal_date] = if options.key?(:transmittal_date)
             options[:transmittal_date]
           else
@@ -1286,6 +1300,13 @@ module Api
             transmittal&.payroll_check_numbers.nil? ? pay_period.payroll_items.not_voided.reportable.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] } : Array(transmittal.payroll_check_numbers)
           end
           options
+        end
+
+        def resolved_transmittal_notes(pay_period, notes)
+          # Upgrade only an exact match for the old app-generated defaults.
+          # Custom wording, amounts, extra notes, and deliberately empty lists stay intact.
+          legacy = TransmittalLogPdfGenerator.default_notes(pay_period, include_additional: false)
+          notes.present? && notes == legacy ? TransmittalLogPdfGenerator.default_notes(pay_period) : notes
         end
 
         def save_transmittal_state!(pay_period, options)
@@ -2223,6 +2244,8 @@ module Api
             employment_type: item.employment_type,
             worker_classification: employment_type_label(item.employment_type),
             pay_rate: item.pay_rate,
+            salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"],
+            contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type"),
             scheduled_hours: item.scheduled_hours&.to_f,
             hours_worked: item.hours_worked&.to_f,
             overtime_hours: item.overtime_hours&.to_f,
@@ -2506,6 +2529,7 @@ module Api
               total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
               total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
               total_withholding: w2_items.sum(&:withholding_tax),
+              total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
               total_traditional_retirement: w2_items.sum(&:retirement_payment),
@@ -2943,10 +2967,10 @@ module Api
           "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
           "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Non-Taxable Pay",
-          "Gross Pay", "FIT", "Additional W/H", "SS Tax", "Medicare Tax",
+          "Gross Pay", "Base FIT", "Additional W/H", "SS Tax", "Medicare Tax",
           "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
           "Employer Match", "Employer Roth Match", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
-          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
+          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date", "Rate Basis", "Total FIT (Base + Additional)", "Combined Hours"
         ].freeze
 
         CEO_PAYROLL_REGISTER_HINTS = [
@@ -2986,8 +3010,8 @@ module Api
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
-          sheets << { name: "Employees", rows: [ detail_headers ] + employee_rows }
-          sheets << { name: "Contractors", rows: [ detail_headers ] + contractor_rows } if contractor_rows.any?
+          sheets << payroll_register_detail_sheet(report, "Employees", detail_headers, employee_rows)
+          sheets << payroll_register_detail_sheet(report, "Contractors", detail_headers, contractor_rows) if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_adjustment_breakdown_sheet(report)
@@ -2997,6 +3021,41 @@ module Api
           sheets << payroll_register_review_sheet(simple_register) if simple_register
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
+        end
+
+        def payroll_register_detail_sheet(report, name, headers, data_rows)
+          pp = report[:pay_period] || {}
+          context = "Work period: #{pp[:start_date]} to #{pp[:end_date]} | Pay date: #{pp[:pay_date]}"
+          # Sum saved numeric amounts, hours, and disclosure columns, never rates/IDs.
+          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours" ]
+          totals = headers.each_with_index.map do |header, index|
+            if header == "Employee Name"
+              "TOTALS"
+            elsif numeric_headers.include?(header) || header.start_with?("Payroll Field -", "Payroll Adjustment -")
+              data_rows.sum(BigDecimal("0")) { |row| row[index].to_d }
+            end
+          end
+          types = headers.map do |header|
+            if header.include?("Hours")
+              :hours
+            elsif numeric_headers.include?(header) || header == "Pay Rate" || header.start_with?("Payroll Field -", "Payroll Adjustment -")
+              :money
+            else
+              :text
+            end
+          end
+          {
+            name: name,
+            rows: [ [ report.dig(:meta, :company_name), "Payroll Register — #{name}" ], [ context ], [], headers ] + data_rows + [ totals ],
+            column_widths: headers.map { |header| header.include?("Name") || header == "Rate Basis" ? 32 : 20 },
+            styles: {
+              title: { b: true, sz: 12 }, header: { b: true, bg_color: "2B4090", fg_color: "FFFFFF", alignment: { wrap_text: true } },
+              text: {}, hours: { format_code: "0.00" }, money: { format_code: "$#,##0.00;[Red]-$#,##0.00" }
+            },
+            row_style_rules: [ { rows: 0, style: :title }, { rows: 3, style: :header },
+              { rows: 4..(4 + data_rows.length), styles: types } ],
+            row_heights: { 3 => 42 }, show_grid_lines: false
+          }
         end
 
         def payroll_field_export_columns(workers)
@@ -3498,10 +3557,10 @@ module Api
         PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS = [
           "Last Name", "First Name", "Employee Name", "Type", "Gross Pay",
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings",
-          "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
+          "Base FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
           "Loan Deduction", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay",
           "Employer SS", "Employer Medicare", "Employer Match",
-          "Employer Roth Match", "Total Payroll Cost"
+          "Employer Roth Match", "Total Payroll Cost", "Additional FIT Withholding", "Total FIT (Base + Additional)"
         ].freeze
 
         def payroll_summary_by_employee_sheets(report, pay_period = nil)
@@ -3607,7 +3666,8 @@ module Api
             emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
             emp[:custom_deductions_total], emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
             emp[:employer_medicare_tax], emp[:employer_retirement_match],
-            emp[:employer_roth_retirement_match], total_payroll_cost
+            emp[:employer_roth_retirement_match], total_payroll_cost, emp[:additional_withholding],
+            money(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d)
           ]
         end
 
@@ -3626,7 +3686,9 @@ module Api
             [ "Payroll Field Pre-Tax Deductions", summary[:total_payroll_field_pre_tax_deductions] ],
             [ "Payroll Field Post-Tax Deductions", summary[:total_payroll_field_post_tax_deductions] ],
             [ "Payroll Field Employer Contributions", summary[:total_payroll_field_employer_contributions] ],
-            [ "FIT", summary[:total_withholding] ],
+            [ "Base FIT", summary[:total_withholding] ],
+            [ "Additional FIT Withholding", summary[:total_additional_withholding] ],
+            [ "Total FIT (Base + Additional)", money(summary[:total_withholding].to_d + summary[:total_additional_withholding].to_d) ],
             [ "SS Tax", summary[:total_social_security] ],
             [ "Medicare Tax", summary[:total_medicare] ],
             [ "401(k)", summary[:total_traditional_retirement] ],
@@ -3654,6 +3716,7 @@ module Api
             total_payroll_field_post_tax_deductions: items.sum { |item| item[:payroll_field_post_tax_deductions_total].to_f },
             total_payroll_field_employer_contributions: items.sum { |item| item[:payroll_field_employer_contributions_total].to_f },
             total_withholding: items.sum { |item| item[:withholding_tax].to_f },
+            total_additional_withholding: items.sum { |item| item[:additional_withholding].to_f },
             total_social_security: items.sum { |item| item[:social_security_tax].to_f },
             total_medicare: items.sum { |item| item[:medicare_tax].to_f },
             total_traditional_retirement: items.sum { |item| item[:retirement_payment].to_f },
@@ -3677,8 +3740,14 @@ module Api
             emp[:employer_retirement_match], emp[:employer_roth_retirement_match],
             emp[:straight_loan_deduction], emp[:installment_loan_payment], emp[:employer_contributions_total], emp[:employer_payroll_cost],
             emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
-            emp[:net_pay], emp[:check_number], emp[:check_date]
+            emp[:net_pay], emp[:check_number], emp[:check_date],
+            payroll_rate_basis(emp), money(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
+            emp[:hours_worked].to_f + emp[:overtime_hours].to_f + emp[:holiday_hours].to_f + emp[:pto_hours].to_f
           ]
+        end
+
+        def payroll_rate_basis(employee)
+          PayrollRateBasis.describe(employee)
         end
 
         def earnings_breakdown_sheet(report)
@@ -4286,7 +4355,7 @@ module Api
             qb.paycheck_history_rows(include_voided: true).map do |row|
               [ row[:pay_date], row[:employee_name], row[:total_pay], row[:net_pay], row[:pay_method], row[:check_number], row[:status] ]
             end
-          detail_rows = [ [ "Pay Date", "Name", "Gross Pay", "Taxes", "Deductions", "Net Pay", "Employer Cost", "Check #", "Status" ] ] +
+          detail_rows = [ [ "Pay Date", "Name", "Gross Pay", "Taxes (included in total deductions)", "Total Deductions (includes taxes)", "Net Pay", "Employer Cost", "Check #", "Status" ] ] +
             qb.paycheck_history_rows(include_voided: true).map do |row|
               [ row[:pay_date], row[:employee_name], row[:gross_pay], row[:taxes], row[:deductions], row[:net_pay], row[:employer_cost], row[:check_number], row[:status] ]
             end

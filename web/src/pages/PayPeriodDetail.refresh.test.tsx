@@ -1492,7 +1492,7 @@ it.each(['draft', 'calculated', 'committed'])('shows retained correction holds a
     expect(apiMocks.runPayroll).not.toHaveBeenCalled();
     if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
   } else {
-    expect(screen.getAllByRole('link', { name: 'View details' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'View details' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
   }
 });
@@ -1652,4 +1652,53 @@ it('names each ordinary regular and overtime hours input for its employee on pho
   expect(regular.every(input => (input as HTMLInputElement).value === '80.3')).toBe(true);
   expect(overtime.every(input => (input as HTMLInputElement).value === '14')).toBe(true);
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+
+it('submits initial server roster defaults alongside connected hourly items without selecting other employees', async () => {
+  vi.clearAllMocks();
+  const period = { ...initialPayPeriod, status: 'draft', cycle: 'regular', includes_base_salary: true,
+    default_employee_ids: [30, 31], payroll_items: [{ id: 101, employee_id: 30, employee_name: 'Ben Imported', employment_type: 'hourly', hours_worked: 4, overtime_hours: 0, pay_rate: 25 }] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [
+    { id: 30, first_name: 'Ben', last_name: 'Imported', employment_type: 'hourly', pay_rate: 25 },
+    { id: 31, first_name: 'Dana', last_name: 'Salary', employment_type: 'salary', salary_type: 'annual', pay_rate: 52000, pay_frequency: 'biweekly' },
+    { id: 32, first_name: 'Not', last_name: 'Selected', employment_type: 'hourly', pay_rate: 25 },
+  ], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('button', { name: 'Calculate Payroll' });
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids.sort()).toEqual([30, 31]);
+});
+
+it('honors a server default roster on an empty regular draft without expanding to every employee', async () => {
+  vi.clearAllMocks();
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'regular', cycle: 'regular',
+    includes_base_salary: false, default_employee_ids: [30], payroll_items: [] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [
+    { id: 30, first_name: 'Ben', last_name: 'Hourly', employment_type: 'hourly', pay_rate: 25 },
+    { id: 31, first_name: 'Dana', last_name: 'Salary', employment_type: 'salary', pay_rate: 52000 },
+  ], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Calculate Payroll' }));
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
+  expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids).toEqual([30]);
+});
+
+it('keeps whole-period AIRE readiness out of a selected-only adjustment', async () => {
+  vi.clearAllMocks();
+  const period = { ...initialPayPeriod, run_purpose: 'adjustment', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Manual adjustment · selected employees only');
+  expect(screen.queryByTestId('source-cockpit-revision')).toBeNull();
+  expect(screen.getByTestId('source-reconciliation-revision')).toBeTruthy();
 });
