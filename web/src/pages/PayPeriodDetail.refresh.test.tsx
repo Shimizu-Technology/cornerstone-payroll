@@ -1465,7 +1465,7 @@ it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and
   expect(screen.queryByText('Hours must be between 0 and 200 per period')).toBeNull();
 });
 
-it.each([false, true])('shows committed legacy imports with server correction hold %s without inventing missing evidence', async held => {
+it.each([false, true])('shows committed legacy imports with server correction hold %s without inventing missing evidence', async (held): Promise<void> => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
     pay_rate: 99, pay_frequency: 'semimonthly', status: 'active' } as Employee;
@@ -1490,7 +1490,7 @@ it.each([false, true])('shows committed legacy imports with server correction ho
   expect(within(totals).getByText('$5.74')).toBeTruthy();
   expect(within(totals).getByText('$69.26')).toBeTruthy();
   expect(Boolean(within(totals).queryByText(/held correction records/))).toBe(held);
-  expect(Boolean(screen.queryAllByText(text => text.includes(reason)).length)).toBe(held);
+  expect(Boolean(screen.queryAllByText((text): boolean => text.includes(reason)).length)).toBe(held);
   expect(screen.queryByText(/Retained Source earning evidence is unavailable/)).toBeNull();
   expect(screen.getByText(historicalWarning, { exact: false })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Calculate Payroll' })).toBeNull();
@@ -1498,7 +1498,7 @@ it.each([false, true])('shows committed legacy imports with server correction ho
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
 
-it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async status => {
+it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async (status): Promise<void> => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary', salary_type: 'annual', pay_rate: 52000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const reason = 'Review original payroll evidence: retained hourly pay basis differs from current salary setup.';
@@ -1535,7 +1535,7 @@ it.each([
   { status: 'calculated', shape: 'changed basis' },
   { status: 'draft', shape: 'missing legacy buckets' },
   { status: 'calculated', shape: 'missing legacy buckets' },
-])('holds $status imported $shape without synthesizing profile rates or new salary forecasts', async ({ status, shape }) => {
+])('holds $status imported $shape without synthesizing profile rates or new salary forecasts', async ({ status, shape }): Promise<void> => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: shape === 'changed basis' ? 'salary' : 'hourly',
     salary_type: 'annual', pay_rate: shape === 'changed basis' ? 52000 : 99, pay_frequency: 'semimonthly', status: 'active',
