@@ -1362,7 +1362,11 @@ export function PayPeriodDetail({
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
-  const hasCorrectionPayBasisHold = reportablePayrollItems.some(item => worksheetPayBasisHold(item, employees.find(employee => employee.id === item.employee_id)));
+  // Committed history may predate captured earning evidence. Only explicit
+  // server holds apply there; worksheet fallbacks still protect editable runs.
+  const hasCorrectionPayBasisHold = reportablePayrollItems.some((item): boolean => isCommitted
+    ? Boolean(item.correction_pay_basis_hold)
+    : Boolean(worksheetPayBasisHold(item, employees.find((employee): boolean => employee.id === item.employee_id))));
   const correctionCalculationHeld = !isCommitted && hasCorrectionPayBasisHold;
   const financialActionsHeld = correctionCalculationHeld || savedImportReloadRequired;
   const hasLinkedAireRecord = linkedAireRecords.length > 0;
