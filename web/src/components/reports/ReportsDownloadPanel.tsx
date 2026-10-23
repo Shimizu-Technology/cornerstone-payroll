@@ -553,7 +553,6 @@ export function TransmittalEditorModal({
 
   const handleGenerate = () => {
     if (!initialized || loadingPreview || previewError || !preview) return;
-    const hasNeOverrides = Object.values(neCheckNumbers).some(v => v.trim());
     const validEntries = customEntries.filter(e => e.title.trim());
     onGenerate({
       preparerName: preparerName.trim() || undefined,
@@ -563,7 +562,7 @@ export function TransmittalEditorModal({
       checkNumberFirst: checkFirst.trim() || undefined,
       checkNumberLast: checkLast.trim() || undefined,
       payrollCheckNumbers: payrollCheckNumbers.map(n => n.trim()).filter(Boolean),
-      nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
+      nonEmployeeCheckNumbers: neCheckNumbers,
       customEntries: validEntries,
     });
   };

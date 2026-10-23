@@ -1581,3 +1581,16 @@ it.each(['regular', 'not_payable'] as const)('scopes correction routing copy wit
   expect(apiMocks.correct).not.toHaveBeenCalled();
   expect(apiMocks.finalize).not.toHaveBeenCalled();
 });
+
+it('keeps source failures visible outside a collapsed verified timecard disclosure', async () => {
+  apiMocks.overview.mockRejectedValueOnce(new Error('Source unavailable'));
+  const verified: AirePayrollCalendarState = { ...calendar, cutoff_state: 'batch_verified', finalized_batch: {
+    event_id: 'failure-event', verification_status: 'verified', verification_attempts: 1,
+    payroll_batch_id: 'synthetic-verified', payroll_batch_checksum: 'checksum',
+    summary: { employee_count: 1, total_hours: 4, regular_hours: 4, overtime_hours: 0, exclusion_count: 0 },
+  } };
+  render(<AirePayrollCockpit payPeriodId={17} calendar={verified} onRefresh={vi.fn()} onReviewFinalizedBatch={vi.fn()} />);
+  const alert = await screen.findByText('Source unavailable');
+  expect(alert.closest('details')).toBeNull();
+  expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
+});

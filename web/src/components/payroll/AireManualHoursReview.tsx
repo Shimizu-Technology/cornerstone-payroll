@@ -208,6 +208,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </table>
             </div>
 
+            </details>
+
             {(review.payment_attestations?.length || 0) > 0 && (
               <section className="border-t border-warning-200 bg-warning-50/60 px-6 py-6" aria-label="Payment evidence pending">
                 <h4 className="font-semibold text-neutral-950">Payment reported; check evidence pending</h4>
@@ -250,8 +252,6 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                 ))}
               </section>
             )}
-
-            </details>
 
             {review.exclusions.length > 0 && (
               <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">

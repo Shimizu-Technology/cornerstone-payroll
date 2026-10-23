@@ -42,3 +42,13 @@ it('blocks generation on an unavailable saved cover and allows retry', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Generate Full Print Package' }));
   expect(generate).toHaveBeenCalledTimes(1);
 });
+
+it('submits an explicitly cleared final non-employee check override', async () => {
+  api.preview.mockResolvedValue({ ...preview, non_employee_checks: [{ id: 8, payable_to: 'Synthetic Treasurer', amount: 207.09, check_type: 'tax_deposit', check_number: null }],
+    saved_transmittal: { ...preview.saved_transmittal, non_employee_check_numbers: { '8': 'MANUAL987' } } });
+  const generate = vi.fn();
+  render(<TransmittalEditorModal open onClose={vi.fn()} onGenerate={generate} targetLabel="Full Print Package" fixedReports payPeriodId={2} onOpenForm500={vi.fn()} />);
+  fireEvent.change(await screen.findByDisplayValue('MANUAL987'), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Generate Full Print Package' }));
+  expect(generate.mock.calls[0][0].nonEmployeeCheckNumbers).toEqual({ 8: '' });
+});
