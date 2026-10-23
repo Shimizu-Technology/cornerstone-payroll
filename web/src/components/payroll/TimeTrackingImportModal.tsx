@@ -617,7 +617,7 @@ export function TimeTrackingImportModal({
               {isFinalizedBatch
                 ? isHistoricalReconciliation
                   ? 'Link the committed payroll to this cutoff. Pay will stay unchanged.'
-                  : 'Check the hours, employee links, and held entries before adding them.'
+                  : 'Review approved source hours, employee links, pay rates and held entries. Adding hours does not approve payroll or record payment.'
                 : 'Pull approved hours from this client’s configured time tracking source.'}
             </p>
           </div>
@@ -791,7 +791,7 @@ export function TimeTrackingImportModal({
                   </div>
                 </div>
                 <p className="mt-2 text-xs text-neutral-600">
-                  {includedPreviewRows.length} included · {readyRows} ready
+                  {includedPreviewRows.length} employee rows included · {readyRows} mappings ready
                   {excludedCount > 0 && ` · ${excludedCount} skipped`}
                   {unmappedIncludedCount > 0 && ` · ${unmappedIncludedCount} unmapped`}
                   {warningCount > 0 && ` · ${warningCount} warning${warningCount === 1 ? '' : 's'}`}
@@ -997,7 +997,7 @@ export function TimeTrackingImportModal({
                           ))
                         ) : (
                           <span className="inline-flex items-center gap-2 rounded-full bg-success-100 px-2 py-2 text-xs font-semibold text-success-800">
-                            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Ready
+                            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Mappings ready
                           </span>
                         )}
                       </div>

@@ -358,11 +358,12 @@ function SignoffEditorModal({
   );
 }
 
-function TransmittalEditorModal({
+export function TransmittalEditorModal({
   open,
   onClose,
   onGenerate,
   targetLabel,
+  fixedReports = false,
   payPeriodId,
   onOpenForm500,
 }: {
@@ -370,6 +371,7 @@ function TransmittalEditorModal({
   onClose: () => void;
   onGenerate: (options: TransmittalOptions) => void;
   targetLabel: string;
+  fixedReports?: boolean;
   payPeriodId: number;
   onOpenForm500: () => void;
 }) {
@@ -387,6 +389,7 @@ function TransmittalEditorModal({
   };
   const [preview, setPreview] = useState<TransmittalPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [transmittalDate, setTransmittalDate] = useState(localDateString);
   const [checkFirst, setCheckFirst] = useState('');
@@ -413,6 +416,7 @@ function TransmittalEditorModal({
     let cancelled = false;
     const requestTimer = window.setTimeout(() => {
       setLoadingPreview(true);
+      setPreviewError(null);
       setNewNote('');
       setNewReport('');
       transmittalApi.preview(payPeriodId).then((data) => {
@@ -426,7 +430,7 @@ function TransmittalEditorModal({
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
           setTransmittalDate(saved.transmittal_date || localDateString());
           setNotes([...(saved.notes || [])]);
-          setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
+          setReportList(fixedReports ? [...DEFAULT_REPORT_LIST] : saved.report_list ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
           setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
           setPayrollCheckNumbers(saved.payroll_check_numbers !== null ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
@@ -460,10 +464,7 @@ function TransmittalEditorModal({
         setInitialized(true);
       }).catch(() => {
         if (cancelled) return;
-
-        setPreparerName('Cornerstone Tax Services');
-        setReportList([...DEFAULT_REPORT_LIST]);
-        setNotes([]);
+        setPreviewError('Saved cover details could not load. Retry before generating so existing notes and check selections are preserved.');
         setInitialized(true);
       }).finally(() => {
         if (!cancelled) setLoadingPreview(false);
@@ -474,7 +475,7 @@ function TransmittalEditorModal({
       cancelled = true;
       window.clearTimeout(requestTimer);
     };
-  }, [open, payPeriodId, initialized]);
+  }, [open, payPeriodId, initialized, fixedReports]);
 
   if (!open) return null;
 
@@ -543,18 +544,19 @@ function TransmittalEditorModal({
   };
 
   const handleGenerate = () => {
+    if (!initialized || loadingPreview || previewError || !preview) return;
     const hasNeOverrides = Object.values(neCheckNumbers).some(v => v.trim());
     const validEntries = customEntries.filter(e => e.title.trim());
     onGenerate({
       preparerName: preparerName.trim() || undefined,
       transmittalDate: transmittalDate || undefined,
-      notes: notes.length > 0 ? notes : undefined,
+      notes,
       reportList: reportList,
       checkNumberFirst: checkFirst.trim() || undefined,
       checkNumberLast: checkLast.trim() || undefined,
       payrollCheckNumbers: payrollCheckNumbers.map(n => n.trim()).filter(Boolean),
       nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
-      customEntries: validEntries.length > 0 ? validEntries : undefined,
+      customEntries: validEntries,
     });
   };
 
@@ -906,7 +908,7 @@ function TransmittalEditorModal({
             {/* Report List */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Reports Included</label>
-              <p className="text-xs text-gray-500 mb-2">Listed on the transmittal as documents provided to client</p>
+              <p className="text-xs text-gray-500 mb-2">{fixedReports ? 'These five reports are attached automatically. The cover lists the actual package contents.' : 'Listed on the transmittal as documents provided to client'}</p>
               <div className="space-y-2">
                 {reportList.map((report, idx) => (
                   <div key={idx} className="flex items-center gap-2 group">
@@ -914,6 +916,8 @@ function TransmittalEditorModal({
                     <input
                       type="text"
                       value={report}
+                      readOnly={fixedReports}
+                      aria-label={`Included report ${idx + 1}`}
                       onChange={(e) => {
                         const updated = [...reportList];
                         updated[idx] = e.target.value;
@@ -921,7 +925,7 @@ function TransmittalEditorModal({
                       }}
                       className="flex-1 border rounded-md px-3 py-1.5 text-sm"
                     />
-                    <button
+                    {!fixedReports && <button
                       onClick={() => handleRemoveReport(idx)}
                       className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
                       title="Remove"
@@ -929,10 +933,10 @@ function TransmittalEditorModal({
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                    </button>
+                    </button>}
                   </div>
                 ))}
-                <div className="flex items-center gap-2">
+                {!fixedReports && <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-400 w-6 text-right">{reportList.length + 1}.</span>
                   <input
                     type="text"
@@ -949,15 +953,18 @@ function TransmittalEditorModal({
                   >
                     + Add
                   </button>
-                </div>
+                </div>}
               </div>
             </div>
           </div>
         </>)}
 
+        {previewError && <div role="alert" className="mx-6 mb-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">
+          <p>{previewError}</p><Button variant="outline" className="mt-3" onClick={() => setInitialized(false)}>Retry cover details</Button>
+        </div>}
         <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleGenerate} disabled={loadingPreview}>
+          <Button onClick={handleGenerate} disabled={loadingPreview || !initialized || !!previewError}>
             {savedState?.generated_at ? 'Regenerate' : 'Generate'} {targetLabel}
           </Button>
         </div>
@@ -1275,7 +1282,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     return {
       preparerName: saved.preparer_name || undefined,
       transmittalDate: saved.transmittal_date || undefined,
-      notes: saved.notes?.length ? saved.notes : undefined,
+      notes: saved.notes ?? undefined,
       reportList: saved.report_list || [],
       checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
       checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
@@ -1624,6 +1631,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         open={transmittalEditor.open}
         onClose={() => setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' })}
         onGenerate={handleTransmittalGenerate}
+        fixedReports={transmittalEditor.key === 'fullPrintPackage'}
         targetLabel={transmittalEditor.label}
         payPeriodId={payPeriodId}
         onOpenForm500={() => setForm500Open(true)}

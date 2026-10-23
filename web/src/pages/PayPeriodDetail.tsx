@@ -1,6 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
 import { NamedLoanInputs, type NamedLoanDraft } from '@/components/payroll/NamedLoanInputs';
+import { PayrollItemReviewDialog } from '@/components/payroll/PayrollItemReviewDialog';
 import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
@@ -54,12 +55,13 @@ import { AireManualPaymentReconciliation } from '@/components/payroll/AireManual
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollCommitDialog } from '@/components/payroll/PayrollCommitDialog';
+import { useAireCalendarRefresh } from '@/hooks/useAireCalendarRefresh';
 import { useCompany } from '@/contexts/CompanyContext';
 import { PayrollFinalRecordPanel } from '@/components/payroll/PayrollFinalRecordPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
-import { currentAppPath, employeePath, newEmployeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
+import { currentAppPath, employeePath, newEmployeePath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose, NamedLoanOption } from '@/types';
 
 const payrollHoursInputLabel = (employee: Employee, kind: 'Regular' | 'Overtime', rate?: PayrollItemWageRateHours) => (
@@ -345,12 +347,14 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
 };
 
 interface PayPeriodDetailProps {
+  active?: boolean;
   initialPayPeriod?: PayPeriod;
   onPayPeriodChange?: (payPeriod: PayPeriod) => void;
   refreshToken?: number;
 }
 
 export function PayPeriodDetail({
+  active = true,
   initialPayPeriod,
   onPayPeriodChange,
   refreshToken = 0,
@@ -430,6 +434,7 @@ export function PayPeriodDetail({
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
   const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');
   const [payDateCorrectionSubmitting, setPayDateCorrectionSubmitting] = useState(false);
+  const [reviewingItem, setReviewingItem] = useState<PayrollItem | null>(null);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
@@ -596,6 +601,7 @@ export function PayPeriodDetail({
     // momentarily render against the previous period's checks while the
     // new panel loads.
     setPayPeriod(null);
+    setReviewingItem(null);
     setCommitPeriodId(null);
     setRefreshSetupOpen(false);
     if (refreshInFlightRouteRef.current !== null) {
@@ -648,6 +654,18 @@ export function PayPeriodDetail({
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);
   }, [onPayPeriodChange, payPeriod]);
+
+  const calendarRefreshError = useAireCalendarRefresh({
+    companyId, payPeriodId: payRunId,
+    calendar: payPeriod?.time_tracking?.aire_calendar,
+    enabled: active && payPeriod?.run_purpose === 'regular',
+    onUpdated: calendar => {
+      setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
+        ? { ...current, time_tracking: { ...current.time_tracking!, aire_calendar: calendar } }
+        : current);
+      invalidateAireSource();
+    },
+  });
 
   const loadComparison = useCallback(async (payPeriodId: number) => {
     setComparisonLoading(true);
@@ -844,8 +862,8 @@ export function PayPeriodDetail({
         return;
       }
 
-      const selectedEmployeeIds = new Set([...payrollItems.map(item => item.employee_id), ...additionalEmployeeIds]);
-      if (payPeriod.status === 'draft' && payrollItems.length === 0 && payPeriod.run_purpose === 'regular') {
+      const selectedEmployeeIds = new Set([...(payPeriod.default_employee_ids || []), ...payrollItems.map(item => item.employee_id), ...additionalEmployeeIds]);
+      if (!Array.isArray(payPeriod.default_employee_ids) && payPeriod.status === 'draft' && payrollItems.length === 0 && payPeriod.run_purpose === 'regular') {
         employees.forEach(employee => {
           if (!(payPeriod.excluded_employee_ids || []).includes(employee.id)) selectedEmployeeIds.add(employee.id);
         });
@@ -1726,16 +1744,17 @@ export function PayPeriodDetail({
   const workflowActions = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
       {hasLinkedAireRecord && (
-        <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View time tracking Record</Button>
+        <Button variant="outline" onClick={() => setAireRecordsOpen(true)}>View linked time record</Button>
       )}
       {isCommitted && !isVoided && (
         <>
+          <Link className="inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'checks', { returnTo })}>Review checks and payments</Link>
           {canLinkAireRecord && !hasLinkedAireRecord && (
             <Button variant="outline" onClick={() => {
               setTimeTrackingAutoPreview(false);
               setTimeTrackingImportOpen(true);
             }}>
-              Link time tracking Record
+              Link time tracking record
             </Button>
           )}
           <Button variant="outline" onClick={openPayDateCorrection}>
@@ -1915,41 +1934,61 @@ export function PayPeriodDetail({
         const result = await loadPayPeriod(payPeriod.id, true);
         if (result === 'failed') throw new Error('Saved payment method could not refresh.');
       }} />
+      <PayrollItemReviewDialog companyId={companyId} payRunId={payRunId} item={reviewingItem} returnTo={currentPath} onClose={() => setReviewingItem(null)} />
+      <section aria-label="Saved payroll totals" className="mb-5">
+        {hasCorrectionPayBasisHold && <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Saved payroll amounts are retained. Review the source evidence and pay setup for held correction records before recalculating or approving. These totals are saved amounts, not a new-pay forecast.</div>}
+        {/* Summary Cards */}
+        {payrollItems.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 lg:gap-4">
+            <Card>
+              <CardContent className="pt-5 pb-4">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
+                <p className="mt-1 text-2xl font-semibold text-gray-900">{payrollItems.length}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5 pb-4">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved gross pay' : 'Gross Pay'}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5 pb-4">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved deductions' : 'Total Deductions'}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5 pb-4">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved net pay' : 'Net Pay'}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
+              </CardContent>
+            </Card>
+            <Card className="border-amber-200 bg-amber-50">
+              <CardContent className="pt-5 pb-4">
+                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved DRT deposit' : 'DRT Deposit'}</p>
+                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
+              </CardContent>
+            </Card>
+            {contractorItems.length > 0 && (
+              <Card className="border-emerald-200 bg-emerald-50">
+                <CardContent className="pt-5 pb-4">
+                  <p className="text-xs font-medium text-emerald-700 uppercase tracking-wider">1099 Contractors ({contractorItems.length})</p>
+                  <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-emerald-800 sm:text-2xl">{formatCurrency(totalContractorPay)}</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
+      </section>
       <section className="mb-6 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4 xl:flex-row xl:items-center xl:justify-between" aria-label="Payroll processing actions">
         <div>
-          <p className="font-display text-base font-bold text-neutral-950">Processing controls</p>
-          <p className="mt-1 text-sm text-neutral-500">Import inputs, calculate the run, and advance it through approval.</p>
+          <p className="font-display text-base font-bold text-neutral-950">{isCommitted ? 'Payroll committed' : isApproved ? 'Ready to finalize' : isCalculated ? 'Review calculated pay' : 'Prepare this payroll'}</p>
+          <p className="mt-1 text-sm text-neutral-600">{isCommitted ? 'Pay is saved. Prepare checks and record delivery separately in Checks & direct deposit.' : isApproved ? 'Confirm the approved amounts, then commit this run.' : isCalculated ? 'Review employees and resolve any warnings before approval.' : 'Review source hours or enter pay, then calculate the selected employees.'}</p>
         </div>
         {workflowActions}
       </section>
-
-      {!isCommitted && payableItems.length > 0 && (
-        <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Payment methods for this pay period">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="font-semibold text-neutral-950">Payment methods for this run</p>
-              <p className="mt-1 text-sm text-neutral-700">
-                {paperCheckCount} paper checks · {directDepositCount} direct deposits. This changes the delivery method only; pay and taxes stay the same.
-              </p>
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {payableItems.map((item) => (
-              <div key={item.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm sm:flex-row sm:items-center">
-                <span className="min-w-0 sm:flex-1">
-                  <span className="block break-words font-medium text-neutral-950 sm:truncate">{item.employee_name}</span>
-                  {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
-                </span>
-                <div className="text-right sm:shrink-0">
-                  <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
-                  <Button size="sm" variant="outline" className="min-h-11 w-full sm:w-auto" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}>
         <p>{error}</p>
@@ -1964,6 +2003,7 @@ export function PayPeriodDetail({
         <p>Saved source hours need a current payroll reload before processing. The last saved payroll remains visible for context.</p>
         <Button className="mt-3 min-h-11" variant="outline" disabled={processing || timeTrackingImportOpen} onClick={() => void reloadSavedSourceImport()}>Reload saved payroll</Button>
       </ActionFeedback>}
+      {calendarRefreshError && <ActionFeedback tone="warning" message={calendarRefreshError} />}
       {worksheetRefreshWarning && <ActionFeedback tone="warning" message={worksheetRefreshWarning} />}
       {calculationFailures.length > 0 && <PayrollCalculationIssues failures={calculationFailures} companyId={companyId} year={Number(payPeriod.pay_date.slice(0, 4))} returnTo={currentPath} names={new Map([
         ...payrollItems.map((item): [number, string] => [item.employee_id, item.employee_name || `Employee #${item.employee_id}`]),
@@ -2080,7 +2120,13 @@ export function PayPeriodDetail({
         ))}
 
         <div id="time-tracking-sync" tabIndex={-1} className="scroll-mt-24">
-        {payPeriod.time_tracking?.aire_calendar && (
+        {payPeriod.run_purpose !== 'regular' && payPeriod.time_tracking?.aire_calendar && (
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+            <h3 className="font-semibold text-neutral-950">Manual {runPurposeLabels[payPeriod.run_purpose]?.toLowerCase() || 'special run'} · selected employees only</h3>
+            <p className="mt-1">Only entered pay belongs to this run. The regular time tracking cutoff and full-period hours do not apply. After commitment, link exact source hours below when they are covered by this payroll.</p>
+          </div>
+        )}
+        {payPeriod.run_purpose === 'regular' && payPeriod.time_tracking?.aire_calendar && (
           <AirePayrollCockpit
             key={payPeriod.id}
             payPeriodId={payPeriod.id}
@@ -2101,28 +2147,8 @@ export function PayPeriodDetail({
           />
         )}
 
-        {(payPeriod.time_tracking?.active_source_capabilities?.includes('payroll_cockpit') || payPeriod.time_tracking?.active_source_types.includes('aire_services')) && (
-          <div className="space-y-4">
-            <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
-              refreshToken={aireSourceRefreshToken}
-              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
-            <AireManualPaymentReconciliation key={`manual-reconciliation-${payPeriod.id}`} payPeriodId={payPeriod.id}
-              payPeriodStatus={payPeriod.status} payPeriodVoided={isVoided} payrollItems={payrollItems}
-              refreshToken={aireSourceRefreshToken}
-              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
-          </div>
-        )}
 
         </div>
-
-        {payPeriod.notes && (
-          <Card className="border-blue-100 bg-blue-50/60">
-            <CardContent className="py-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Pay Period Notes</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-blue-950">{payPeriod.notes}</p>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Status Bar */}
         <div className="flex flex-wrap items-center gap-3">
@@ -2216,32 +2242,6 @@ export function PayPeriodDetail({
           </Card>
         )}
 
-        <Card>
-          <div className="border-b px-4 py-3">
-            <h3 className="text-base font-semibold text-gray-900">Processing Timeline</h3>
-            <p className="text-sm text-gray-500">
-              Guam timestamps for payroll lifecycle and operator actions.
-            </p>
-          </div>
-          <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
-            {lifecycleItems.map((item) => (
-              <div key={item.label} className="min-w-0 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <Badge variant={item.timestamp ? item.tone : 'outline'}>
-                    {item.label}
-                  </Badge>
-                </div>
-                <p className="text-sm font-medium text-gray-900">
-                  {item.timestamp ? formatGuamDateTime(item.timestamp) : 'Not recorded'}
-                </p>
-                <p className={`mt-1 text-xs ${item.timestamp ? 'text-gray-500' : 'text-gray-400'}`}>
-                  {item.timestamp ? item.actor : 'No audit timestamp yet'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </Card>
-
         {refreshSetupOpen && (
           <Dialog open onOpenChange={open => { if (!processing) setRefreshSetupOpen(open); }}>
             <DialogContent>
@@ -2307,51 +2307,6 @@ export function PayPeriodDetail({
                 ))}
             </div>
           </section>
-        )}
-
-        {hasCorrectionPayBasisHold && <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Saved payroll amounts are retained. Review the source evidence and pay setup for held correction records before recalculating or approving. These totals are saved amounts, not a new-pay forecast.</div>}
-        {/* Summary Cards */}
-        {payrollItems.length > 0 && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 lg:gap-4">
-            <Card>
-              <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
-                <p className="mt-1 text-2xl font-semibold text-gray-900">{payrollItems.length}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved gross pay' : 'Gross Pay'}</p>
-                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved deductions' : 'Total Deductions'}</p>
-                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved net pay' : 'Net Pay'}</p>
-                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
-              </CardContent>
-            </Card>
-            <Card className="border-amber-200 bg-amber-50">
-              <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">{hasCorrectionPayBasisHold ? 'Saved DRT deposit' : 'DRT Deposit'}</p>
-                <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
-              </CardContent>
-            </Card>
-            {contractorItems.length > 0 && (
-              <Card className="border-emerald-200 bg-emerald-50">
-                <CardContent className="pt-5 pb-4">
-                  <p className="text-xs font-medium text-emerald-700 uppercase tracking-wider">1099 Contractors ({contractorItems.length})</p>
-                  <p className="mt-1 whitespace-nowrap tabular-nums text-xl font-semibold text-emerald-800 sm:text-2xl">{formatCurrency(totalContractorPay)}</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
         )}
 
         {/* Previous Period Comparison */}
@@ -3224,7 +3179,7 @@ export function PayPeriodDetail({
                   {item.correction_pay_basis_hold && <p className="text-xs text-amber-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
                   {item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}
                   <div className="grid grid-cols-2 gap-2">
-                    <Link className="inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700" to={payrollItemPath(companyId, payPeriod.id, item.id, { returnTo: currentPath })}>View details</Link>
+                    <button type="button" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700" onClick={() => setReviewingItem(item)}>View details</button>
                     {isCalculated && <Button variant="outline" size="sm" className="min-h-11" onClick={() => setEditingItem(item)}>Edit payroll</Button>}
                     {canCorrect && <Button variant="outline" size="sm" className="min-h-11" onClick={() => setCorrectingItem(item)}>Correct</Button>}
                     {canReplace && <Button variant="outline" size="sm" className="min-h-11" onClick={() => setReplacingItem(item)}>Replace check</Button>}
@@ -3376,12 +3331,12 @@ export function PayPeriodDetail({
                                     </span>
                                   )}
                             </div>
-                            <Link
-                              className="mt-1 inline-flex min-h-9 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900"
-                              to={payrollItemPath(companyId, payRunId, item.id, { returnTo: currentPath })}
+                            <button type="button"
+                              className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900"
+                              onClick={() => setReviewingItem(item)}
                             >
                               Open payroll item <ArrowRight className="h-3.5 w-3.5" />
-                            </Link>
+                            </button>
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
                             {isSalary ? (
@@ -3922,6 +3877,90 @@ export function PayPeriodDetail({
             </div>
           </Card>
         )}
+
+        <section aria-label="Supporting payroll details" className="space-y-4">
+      {!isCommitted && payableItems.length > 0 && (
+        <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Payment methods for this pay period">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold text-neutral-950">Payment methods for this run</p>
+              <p className="mt-1 text-sm text-neutral-700">
+                {paperCheckCount} paper checks · {directDepositCount} direct deposits. This changes the delivery method only; pay and taxes stay the same.
+              </p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-neutral-600">A change here affects this run only. Change the employee profile to set the default for future runs. Unreviewed profiles safely default to paper check.</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {payableItems.map((item) => (
+              <div key={item.id} className="flex min-w-0 flex-col items-stretch justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm sm:flex-row sm:items-center">
+                <span className="min-w-0 sm:flex-1">
+                  <span className="block break-words font-medium text-neutral-950 sm:truncate">{item.employee_name}</span>
+                  {!item.employee_payment_delivery_method && <span className="block text-xs text-amber-700">Profile default not reviewed</span>}
+                </span>
+                <div className="text-right sm:shrink-0">
+                  <p className="mb-1 text-xs text-neutral-600">{paymentMethodLabel(item.effective_payment_delivery_method || 'paper_check')}</p>
+                  <Button size="sm" variant="outline" className="min-h-11 w-full sm:w-auto" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setPaymentMethodItem(item)}>Change payment method</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+          <div id="manual-time-reconciliation" tabIndex={-1} className="scroll-mt-24 space-y-4">
+        {(payPeriod.time_tracking?.active_source_capabilities?.includes('payroll_cockpit') || payPeriod.time_tracking?.active_source_types.includes('aire_services')) && (
+          <div className="space-y-4">
+            <AirePaymentEvidenceHolds key={`payment-evidence-${payPeriod.id}`} payPeriodId={payPeriod.id}
+              refreshToken={aireSourceRefreshToken}
+              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
+            <AireManualPaymentReconciliation key={`manual-reconciliation-${payPeriod.id}`} payPeriodId={payPeriod.id}
+              payPeriodStatus={payPeriod.status} payPeriodVoided={isVoided} payrollItems={payrollItems}
+              refreshToken={aireSourceRefreshToken}
+              onChanged={() => { invalidateAireSource(); void loadPayPeriod(payPeriod.id, true, true); }} />
+          </div>
+        )}
+          </div>
+          <details className="rounded-2xl border border-neutral-200 bg-white p-4">
+            <summary className="cursor-pointer py-1 font-semibold text-primary-800">Run notes and processing history</summary>
+            <div className="mt-4 space-y-4">
+        {payPeriod.notes && (
+          <Card className="border-blue-100 bg-blue-50/60">
+            <CardContent className="py-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Pay Period Notes</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-blue-950">{payPeriod.notes}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <div className="border-b px-4 py-3">
+            <h3 className="text-base font-semibold text-gray-900">Processing Timeline</h3>
+            <p className="text-sm text-gray-500">
+              Guam timestamps for payroll lifecycle and operator actions.
+            </p>
+          </div>
+          <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
+            {lifecycleItems.map((item) => (
+              <div key={item.label} className="min-w-0 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <Badge variant={item.timestamp ? item.tone : 'outline'}>
+                    {item.label}
+                  </Badge>
+                </div>
+                <p className="text-sm font-medium text-gray-900">
+                  {item.timestamp ? formatGuamDateTime(item.timestamp) : 'Not recorded'}
+                </p>
+                <p className={`mt-1 text-xs ${item.timestamp ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {item.timestamp ? item.actor : 'No audit timestamp yet'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+            </div>
+          </details>
+        </section>
 
         {/* Timecard OCR Panel — for draft pay periods */}
         {isDraft && (

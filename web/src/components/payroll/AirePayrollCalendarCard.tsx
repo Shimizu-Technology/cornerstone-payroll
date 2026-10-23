@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowRight,
   CalendarClock,
-  CheckCircle2,
   Clock3,
   RefreshCw,
   Send,
@@ -100,19 +99,19 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   return (
     <Card className="overflow-hidden border-primary-200 bg-gradient-to-br from-primary-50/90 via-white to-white">
       <CardContent className="p-0">
-        <div className="flex flex-col gap-6 border-b border-primary-100 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4 border-b border-primary-100 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex max-w-3xl items-start gap-4">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-800">
               <CalendarClock className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-display text-base font-bold text-neutral-950">Time tracking payroll cutoff</h3>
+                <h3 className="font-display text-base font-bold text-neutral-950">Time tracking cutoff</h3>
                 <Badge variant={statusTone(calendar.cutoff_state)}>{stateLabels[calendar.cutoff_state]}</Badge>
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                Cornerstone sets the payroll calendar. Time tracking independently locks eligible time at the cutoff, records held hours, and sends the immutable batch back here.
+                {calendar.cutoff_at ? `Cutoff ${formatGuamDateTime(calendar.cutoff_at)}. ` : ''}Approved hours are frozen at cutoff; held time stays separate.
               </p>
             </div>
           </div>
@@ -137,6 +136,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         </div>
 
+        <details className="group"><summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800">Cutoff and connection details</summary>
         <div className="grid divide-y divide-primary-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0" aria-live="polite">
           <div className="px-6 py-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Cutoff</p>
@@ -162,6 +162,8 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             <p className="mt-2 text-xs text-neutral-500">{batchCopy.detail}</p>
           </div>
         </div>
+
+        </details>
 
         {!calendar.eligible && calendar.eligibility_error && (
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
@@ -208,23 +210,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         )}
 
-        {batch?.verification_status === 'verified' && (
-          <div className="border-t border-success-200 bg-success-50/80 px-6 py-4">
-            <div className="flex items-start gap-4">
-              <CheckCircle2 className="h-5 w-5 shrink-0 text-success-700" aria-hidden="true" />
-              <div className="min-w-0">
-                <p className="font-semibold text-success-800">the source’s finalized batch is verified and ready to review</p>
-                <p className="mt-2 text-sm leading-6 text-success-700">
-                  Batch <span className="font-mono font-semibold">{batch.payroll_batch_id}</span> · checksum <span className="font-mono">{batch.payroll_batch_checksum.slice(0, 12)}…</span>
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         <div className="flex items-start gap-2 border-t border-primary-100 bg-white/70 px-6 py-4 text-xs leading-5 text-neutral-500">
           <ShieldCheck className="h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />
-          <p>{transitionInProgress ? 'Cornerstone is waiting for the integration worker. Refresh in a moment.' : 'Scheduling and finalization do not import hours, calculate payroll, issue checks, or mark anyone paid.'}</p>
+          <p>{transitionInProgress ? 'Cornerstone is waiting for the integration worker. The status updates automatically while this page is open.' : 'Scheduling and finalization do not import hours, calculate payroll, issue checks, or mark anyone paid.'}</p>
         </div>
       </CardContent>
     </Card>

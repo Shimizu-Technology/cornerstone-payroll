@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { PayrollItemReviewDialog } from '@/components/payroll/PayrollItemReviewDialog';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
@@ -152,4 +154,27 @@ describe('PayrollItemDetail payment labels', () => {
     expect(screen.getByText('Available to print; bank transfer not confirmed')).toBeDefined();
     expect(screen.queryByText('Earnings statement only')).toBeNull();
   });
+});
+
+
+it('reviews the exact scoped payroll item in context and closes without losing the filter or focus', async () => {
+  apiMocks.payPeriod.mockResolvedValue({ pay_period: { id: 2, company_id: 1, start_date: '2026-11-01', end_date: '2026-11-15', pay_date: '2026-11-30', status: 'committed', payroll_items: [baseItem] } });
+  apiMocks.payrollItem.mockResolvedValue({ payroll_item: baseItem });
+  apiMocks.employee.mockResolvedValue({ data: employee });
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <><input aria-label="Employee filter" defaultValue="Casey" /><button onClick={() => setOpen(true)}>Review Casey</button>
+      <PayrollItemReviewDialog companyId={1} payRunId={2} item={open ? { id: 3, employee_name: 'Casey Employee' } : null} returnTo="/companies/1/pay-runs/2/work" onClose={() => setOpen(false)} /></>;
+  }
+  render(<MemoryRouter initialEntries={['/companies/1/pay-runs/2/work']}><Harness /></MemoryRouter>);
+  const trigger = screen.getByRole('button', { name: 'Review Casey' }); trigger.focus(); fireEvent.click(trigger);
+  expect(await screen.findByRole('dialog', { name: 'Casey Employee · Payroll details' })).toBeTruthy();
+  await screen.findByText('Gross pay');
+  expect(apiMocks.payrollItem).toHaveBeenCalledWith(2, 3, 1);
+  expect(screen.getByRole('link', { name: 'Open full payroll record' }).getAttribute('href')).toContain('/companies/1/pay-runs/2/payroll-items/3');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByRole('textbox', { name: 'Employee filter' }) as HTMLInputElement).value).toBe('Casey');
+  expect(document.activeElement).toBe(trigger);
+  cleanup();
 });
