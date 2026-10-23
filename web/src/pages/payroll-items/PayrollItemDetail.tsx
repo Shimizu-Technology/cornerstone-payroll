@@ -37,7 +37,12 @@ import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payrol
 import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
-export function PayrollItemDetail(): ReactElement {
+interface PayrollItemDetailProps {
+  record?: { companyId: number; payRunId: number; payrollItemId: number };
+  embedded?: boolean;
+}
+
+export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetailProps = {}): ReactElement {
   const { activeCompany } = useCompany();
   const readOnly = !canWriteCompany(activeCompany);
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
@@ -45,9 +50,9 @@ export function PayrollItemDetail(): ReactElement {
     id: string;
     payrollItemId: string;
   }>();
-  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
-  const payRunId = parsePositiveRouteId(payRunIdParam) ?? 0;
-  const payrollItemId = parsePositiveRouteId(payrollItemIdParam) ?? 0;
+  const companyId = record?.companyId ?? parsePositiveRouteId(companyIdParam) ?? 0;
+  const payRunId = record?.payRunId ?? parsePositiveRouteId(payRunIdParam) ?? 0;
+  const payrollItemId = record?.payrollItemId ?? parsePositiveRouteId(payrollItemIdParam) ?? 0;
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [payRun, setPayRun] = useState<PayPeriod | null>(null);
@@ -161,11 +166,11 @@ export function PayrollItemDetail(): ReactElement {
   return (
     <div>
       {readOnly && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 lg:px-8">{companyReadOnlyMessage(activeCompany)}</p>}
-      <Header
+      {!embedded && <Header
         title={`${employeeName} · ${formatDate(payRun.pay_date)}`}
         description={`${formatDateRange(payRun.start_date, payRun.end_date)} · Payroll item #${payrollItem.id}`}
         actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link><Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeePath(companyId, employee.id, 'pay-history', { returnTo: currentPath })}><UserRound className="h-4 w-4" />Employee workspace</Link></div>}
-      />
+      />}
 
       <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-4 sm:px-6 lg:px-8" aria-label="Payroll item identity">
         <div className="flex flex-wrap items-center gap-2">
@@ -176,11 +181,11 @@ export function PayrollItemDetail(): ReactElement {
         </div>
       </section>
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        <nav aria-label="Payroll item relationships" className="grid gap-4 sm:grid-cols-2">
+      <div className={embedded ? "space-y-5 pt-4" : "space-y-6 p-4 sm:p-6 lg:p-8"}>
+        {!embedded && <nav aria-label="Payroll item relationships" className="grid gap-4 sm:grid-cols-2">
           <RelationshipLink icon={UserRound} eyebrow="Employee" title={employeeName} detail="Open pay setup, history, and activity" href={employeePath(companyId, employee.id, 'overview', { returnTo: currentPath })} />
           <RelationshipLink icon={CalendarDays} eyebrow="Source pay run" title={formatDateRange(payRun.start_date, payRun.end_date)} detail={`Pay date ${formatDate(payRun.pay_date)} · ${payRun.status}`} href={payRunPath(companyId, payRun.id, 'overview', { returnTo: currentPath })} />
-        </nav>
+        </nav>}
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
@@ -189,6 +194,7 @@ export function PayrollItemDetail(): ReactElement {
           <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? bankPaymentDescription : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
+        <details open={!embedded}><summary className="mb-4 cursor-pointer py-2 font-semibold text-primary-800">Source and payment details</summary>
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader><CardTitle>Input and calculation context</CardTitle><p className="mt-2 text-sm text-neutral-500">The source signals behind this exact payroll result.</p></CardHeader>
@@ -234,6 +240,8 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
         </div>
 
+        </details>
+
         {importedComponents.length > 0 && (
           <Card>
             <CardHeader><CardTitle>Typed one-time items</CardTitle><p className="mt-2 text-sm text-neutral-500">Period-only components retained from the reviewed MoSa change workbook.</p></CardHeader>
@@ -257,11 +265,13 @@ export function PayrollItemDetail(): ReactElement {
         )}
 
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
-        {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} provenance={disclosure?.w4_provenance} />}
-        {payrollItem.employment_type !== 'contractor' && <PaycheckRetirementContext item={payrollItem} />}
+        {payrollItem.employment_type !== 'contractor' && <details open={!embedded}>
+          <summary className="cursor-pointer py-2 font-semibold text-primary-800">Withholding and retirement setup</summary>
+          <div className="mt-4 space-y-4"><PaycheckWithholdingContext item={payrollItem} provenance={disclosure?.w4_provenance} /><PaycheckRetirementContext item={payrollItem} /></div>
+        </details>}
 
         <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
-      </main>
+      </div>
     </div>
   );
 }

@@ -139,6 +139,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </div>
             </div>
 
+            <details open={mismatchCount > 0}>
+              <summary className="cursor-pointer px-6 py-3 text-sm font-semibold text-primary-800">Compare employee hours · {mismatchCount} differences</summary>
             <div className="divide-y divide-neutral-100 lg:hidden">
               {rows.map(({ employee, payrollRegular, payrollOvertime, carryover, corrections, categories, matched }) => (
                 <article key={`compact-${employee.source_user_id}`} className={`px-6 py-6 ${matched ? 'bg-white' : 'bg-warning-50/40'}`}>
@@ -249,6 +251,8 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </section>
             )}
 
+            </details>
+
             {review.exclusions.length > 0 && (
               <div className="border-t border-warning-200 bg-warning-50/60 px-6 py-6">
                 <h4 className="font-semibold text-neutral-950">Held outside the current payable total</h4>
@@ -264,15 +268,15 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               </div>
             )}
 
-            <div className="border-t border-neutral-200 bg-neutral-950 px-6 py-6 text-sm text-neutral-200">
-              <p className="font-semibold text-white">What happens at cutoff</p>
+            <div className="border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-sm text-neutral-700">
+              <p className="font-semibold text-neutral-950">What happens at cutoff</p>
               <ol className="mt-2 grid gap-2 leading-5 md:grid-cols-4">
-                <li><span className="font-semibold text-white">1.</span> Time tracking freezes eligible time.</li>
-                <li><span className="font-semibold text-white">2.</span> Cornerstone verifies the batch.</li>
-                <li><span className="font-semibold text-white">3.</span> Review and add the hours once.</li>
-                <li><span className="font-semibold text-white">4.</span> Calculate the payroll.</li>
+                <li><span className="font-semibold text-neutral-950">1.</span> Time tracking freezes eligible time.</li>
+                <li><span className="font-semibold text-neutral-950">2.</span> Cornerstone verifies the batch.</li>
+                <li><span className="font-semibold text-neutral-950">3.</span> Review and add the hours once.</li>
+                <li><span className="font-semibold text-neutral-950">4.</span> Calculate the payroll.</li>
               </ol>
-              <p className="mt-4 text-xs leading-5 text-neutral-300">
+              <p className="mt-4 text-xs leading-5 text-neutral-600">
                 {isCommitted
                   ? aireRecordLinked
                     ? 'Cornerstone reports check preparation and delivery back to time tracking automatically.'

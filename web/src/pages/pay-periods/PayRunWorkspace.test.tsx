@@ -50,6 +50,8 @@ vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
   UnifiedCheckPrintDialog: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="Print prepared checks">Print prepared checks</div> : null,
 }));
 
+vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecksPanel: () => <div>Tax and other checks</div> }));
+
 vi.mock('@/components/payroll/ChecksPanel', () => ({
   ChecksPanel: ({ onChecksChanged }: { onChecksChanged?: () => Promise<void> }) => (
     <div>
@@ -167,7 +169,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Read-only workspace')).toBeTruthy();
     expect(screen.queryByText('Process payroll')).toBeNull();
     expect(screen.queryByText('Open processing')).toBeNull();
-    expect(screen.getByRole('link', { name: 'Open payroll item for Alice Reyes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open payroll item for Alice Reyes' })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Checks & direct deposit/ })).toBeTruthy();
   });
 

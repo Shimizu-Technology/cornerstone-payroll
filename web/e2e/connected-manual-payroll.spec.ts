@@ -20,6 +20,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(user.capabilities).not.toContain('manage_client_configuration');
   const path = `/companies/${fixture.company_id}/pay-runs/${periodId}/work`;
   await page.goto(path);
+  await page.getByText('Run notes and processing history', { exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Processing Timeline', exact: true })).toBeVisible({ timeout: 30_000 });
   const selection = page.getByRole('listitem').filter({ has: page.getByText(fixture.manual_employee_name, { exact: true }) });
   await expect(selection).toHaveCount(1);

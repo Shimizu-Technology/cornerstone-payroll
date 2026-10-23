@@ -765,9 +765,14 @@ function AirePayrollCockpitWorkspace({
 
   return (
     <div className="space-y-4">
+      {verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">
+        <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-primary-800">Verified cutoff · connection details</summary>
       <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
-      }} />
+      }} />      </details> : (
+      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
+        if (await onRefresh() !== true) await load();
+      }} />      )}
 
       {verifiedBatch ? (
         <AireFinalizedBatchAction
@@ -796,7 +801,13 @@ function AirePayrollCockpitWorkspace({
       )}
 
       {supportsCockpit && calendar.external_pay_period_id && cockpitPublished && (
-        <Card className="overflow-hidden">
+        <details open={!verifiedBatch} className="rounded-2xl border border-neutral-200 bg-white">
+          <summary className="cursor-pointer px-5 py-4 font-semibold text-primary-800">
+            Review timecards, held hours and team
+            {overview && <span className="ml-3 text-sm font-normal text-neutral-600">{overview.readiness.pending_approvals + overview.readiness.pending_overtime} approvals needed · {heldEntries ?? '—'} held timecards{unmappedCount > 0 ? ` · ${unmappedCount} visible people need mapping` : ''}</span>}
+          </summary>
+          {visibleError && <div className="px-5"><ActionFeedback tone="error" message={visibleError} /></div>}
+        <Card className="overflow-hidden border-0 shadow-none">
           <CardContent className="p-0">
             <div className="border-b border-neutral-200 bg-neutral-950 px-5 py-5 text-white sm:px-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -831,10 +842,6 @@ function AirePayrollCockpitWorkspace({
                 </div>
               </div>
             </div>
-
-            {visibleError && (
-              <ActionFeedback tone="error" message={visibleError} />
-            )}
 
             {commandSuccess && !visibleError && (
               <ActionFeedback tone="success" message={commandSuccess} />
@@ -1165,6 +1172,7 @@ function AirePayrollCockpitWorkspace({
             )}
           </CardContent>
         </Card>
+        </details>
       )}
 
       <Dialog

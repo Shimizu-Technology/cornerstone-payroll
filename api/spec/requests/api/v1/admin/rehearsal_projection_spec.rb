@@ -115,8 +115,8 @@ RSpec.describe "Migration rehearsal payroll projection", type: :request do
     file.write(response.body)
     file.close
     workbook = Roo::Excelx.new(file.path)
-    expect(workbook.sheet("Employees").row(1).first).to eq("Payroll Status")
-    expect(workbook.sheet("Employees").row(2).first).to include("TEST ONLY")
+    expect(workbook.sheet("Employees").row(4).first).to eq("Payroll Status")
+    expect(workbook.sheet("Employees").row(5).first).to include("TEST ONLY")
     expect(workbook.sheet("Report Info").to_a.flatten).to include(a_string_matching(/TEST ONLY/))
     expect(first_period.reload).to be_calculated
   ensure

@@ -92,6 +92,11 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
           )}
         </div>
 
+        <p className="border-t border-neutral-200 px-5 py-3 text-sm text-neutral-700 sm:px-6">
+          <span className="font-semibold">{hours(summary.total_hours)} hours</span> · {hours(summary.regular_hours)} regular + {hours(summary.overtime_hours)} overtime · {employeeCount} employees · {exclusionCount} held entries excluded
+        </p>
+        <details>
+          <summary className="cursor-pointer border-t border-neutral-200 px-5 py-3 text-sm font-semibold text-primary-800 sm:px-6">Source and payment totals</summary>
         <div className="grid divide-y divide-neutral-200 bg-white sm:grid-cols-4 sm:divide-x sm:divide-y-0">
           <div className="px-5 py-4 sm:px-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{includesCorrections ? 'Signed batch hours' : 'Payable hours'}</p>
@@ -128,6 +133,8 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             ))}
           </div>
         )}
+
+        </details>
 
         <div className="flex items-start gap-3 border-t border-neutral-200 bg-neutral-50 px-5 py-4 text-xs leading-5 text-neutral-600 sm:px-6">
           <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-primary-700" aria-hidden="true" />

@@ -1713,7 +1713,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview`);
     await expect(page.getByLabel('Pay run identity')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Open payroll item for Avery Example' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open payroll item for Avery Example' })).toBeVisible();
     await expectNoPageOverflow();
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
