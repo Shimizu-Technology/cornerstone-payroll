@@ -1465,7 +1465,40 @@ it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and
   expect(screen.queryByText('Hours must be between 0 and 200 per period')).toBeNull();
 });
 
-it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async status => {
+it.each([false, true])('shows committed legacy imports with server correction hold %s without inventing missing evidence', async (held): Promise<void> => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
+    pay_rate: 99, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const reason = 'Review retained original pay basis before recalculation.';
+  const historicalWarning = 'Historical workweek evidence requires review.';
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 25,
+    hours_worked: 3, overtime_hours: 0, gross_pay: 75, total_deductions: 5.74, net_pay: 69.26,
+    withholding_tax: 0, additional_withholding: 0, import_source: 'time_tracking:custom:1:LEGACY',
+    correction_pay_basis_hold: held ? { reason } : null };
+  const period = { ...initialPayPeriod, cycle: 'regular', payroll_items: [item], compliance_warnings: [historicalWarning] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('button', { name: 'View details' });
+  const totals = screen.getByRole('region', { name: 'Saved payroll totals' });
+  for (const label of held ? ['Saved gross pay', 'Saved deductions', 'Saved net pay', 'Saved DRT deposit']
+    : ['Gross Pay', 'Total Deductions', 'Net Pay', 'DRT Deposit']) {
+    expect(within(totals).getByText(label)).toBeTruthy();
+  }
+  expect(within(totals).getByText('$75.00')).toBeTruthy();
+  expect(within(totals).getByText('$5.74')).toBeTruthy();
+  expect(within(totals).getByText('$69.26')).toBeTruthy();
+  expect(Boolean(within(totals).queryByText(/held correction records/))).toBe(held);
+  expect(Boolean(screen.queryAllByText((text): boolean => text.includes(reason)).length)).toBe(held);
+  expect(screen.queryByText(/Retained Source earning evidence is unavailable/)).toBeNull();
+  expect(screen.getByText(historicalWarning, { exact: false })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Calculate Payroll' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it.each(['draft', 'calculated', 'committed'])('shows retained correction holds and saved amounts without current salary forecasts in %s', async (status): Promise<void> => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary', salary_type: 'annual', pay_rate: 52000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
   const reason = 'Review original payroll evidence: retained hourly pay basis differs from current salary setup.';
@@ -1497,7 +1530,12 @@ it.each(['draft', 'calculated', 'committed'])('shows retained correction holds a
   }
 });
 
-it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without synthesizing profile rates or new salary forecasts', async shape => {
+it.each([
+  { status: 'draft', shape: 'changed basis' },
+  { status: 'calculated', shape: 'changed basis' },
+  { status: 'draft', shape: 'missing legacy buckets' },
+  { status: 'calculated', shape: 'missing legacy buckets' },
+])('holds $status imported $shape without synthesizing profile rates or new salary forecasts', async ({ status, shape }): Promise<void> => {
   vi.clearAllMocks();
   const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: shape === 'changed basis' ? 'salary' : 'hourly',
     salary_type: 'annual', pay_rate: shape === 'changed basis' ? 52000 : 99, pay_frequency: 'semimonthly', status: 'active',
@@ -1506,7 +1544,7 @@ it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without 
   const item = { id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 25, hours_worked: 3, overtime_hours: 0, gross_pay: 75, net_pay: 69.26,
     import_source: 'time_tracking:custom:1:BATCH', wage_rate_hours: shape === 'changed basis' ? [{ employee_wage_rate_id: 1, label: 'Retained regular', rate: 25,
       source_bucket_key: 'retained', regular_hours: 3, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] : [] };
-  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
+  const period = { ...initialPayPeriod, status, run_purpose: 'adjustment', includes_base_salary: true, includes_recurring_items: false, payroll_items: [item] } as unknown as PayPeriod;
   apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
@@ -1521,8 +1559,12 @@ it.each(['changed basis', 'missing legacy buckets'])('holds imported %s without 
   expect(screen.queryByText('$1.04/period')).toBeNull();
   expect(screen.queryByText('Current primary profile')).toBeNull();
   expect(screen.queryByText('Current secondary profile')).toBeNull();
-  expect((screen.getByRole('button', { name: 'Calculate Payroll' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect(screen.getByText('Saved gross pay')).toBeTruthy();
+  expect(screen.getByText(/held correction records/)).toBeTruthy();
+  const calculate = screen.getByRole('button', { name: status === 'draft' ? 'Calculate Payroll' : 'Recalculate' });
+  expect((calculate as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(calculate);
+  if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
 
