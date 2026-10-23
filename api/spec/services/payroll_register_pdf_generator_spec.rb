@@ -158,7 +158,7 @@ RSpec.describe PayrollRegisterPdfGenerator do
     it "renders Mark's requested report totals and split loan labels" do
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
-      expect(text).to include("Total Hours", "80.00", "Total OT Hours", "2.00", "Bonus", "$100.00")
+      expect(text).to include("Regular Hours", "80.00", "Overtime Hours", "2.00", "Bonus", "$100.00")
       expect(text).to include("Straight Loans", "$25.00", "Installment Loans", "$50.00")
       expect(text).to include("Employer Contributions", "$60.00", "Employer Payroll Cost", "$2213.00")
     end

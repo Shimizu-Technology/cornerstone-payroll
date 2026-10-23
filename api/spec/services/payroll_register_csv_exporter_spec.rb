@@ -256,7 +256,7 @@ RSpec.describe PayrollRegisterCsvExporter do
       totals = rows[-1]
 
       expect(totals.fields.length).to eq(described_class::HEADERS.length)
-      expect(totals["Hours Worked"]).to eq("80.0")
+      expect(totals["Regular Hours"]).to eq("80.0")
       expect(totals["Overtime Hours"]).to eq("5.0")
       expect(totals["Reported Tips"]).to eq("100.00")
       expect(totals["PTO Hours"]).to eq("0.0")
@@ -272,6 +272,18 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(totals["Total Deductions"]).to eq("932.50")
       expect(totals["Net Pay"]).to eq("4067.50")
       expect(totals["Check Number"]).to eq("")
+    end
+
+    it "distinguishes base FIT, additional FIT, combined hours, and salary rate units" do
+      report_data[:employees].last[:salary_type] = "annual"
+      rows = CSV.parse(exporter.generate, headers: true)
+      expect(rows.first["Base FIT"]).to eq("140.00")
+      expect(rows.first["Total FIT (Base + Additional)"]).to eq("145.00")
+      expect(rows.first["Combined Hours"]).to eq("85.0")
+      expect(rows.first["Rate Basis"]).to include("USD/hour", "primary rate")
+      expect(rows[1]["Rate Basis"]).to eq("USD/year (annual salary)")
+      expect(rows[-1]["Total FIT (Base + Additional)"]).to eq("365.00")
+      expect(rows[-1]["Combined Hours"]).to eq("85.0")
     end
 
     it "handles nil hours gracefully (salary employee)" do
