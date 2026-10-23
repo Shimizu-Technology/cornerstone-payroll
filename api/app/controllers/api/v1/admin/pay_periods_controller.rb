@@ -336,11 +336,9 @@ module Api
           PayrollGoLiveGate.new(company: @pay_period.company, pay_date: @pay_period.pay_date)
             .require_live_payroll!(parallel_run: @pay_period.parallel_run?)
 
-          # Determine which employees to calculate:
-          # 1. If explicit employee_ids are passed, use those
-          # 2. If imported payroll items exist, use imported employees + salary + contractors
-          #    (don't auto-create hourly employees not present in the import)
-          # 3. Otherwise, include all active employees for normal payroll runs/recalculations
+          # Explicit selections remain authoritative. The worksheet receives the
+          # same initial defaults below, including salary after hourly imports.
+          # Recalculations and special runs retain their selected roster.
           submitted_employee_ids = submitted_payroll_employee_ids
           excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id)
           if params.key?(:employee_ids) && Array(params[:employee_ids]).empty?
@@ -348,18 +346,8 @@ module Api
           end
           employee_ids = if params.key?(:employee_ids)
             Array(params[:employee_ids])
-          elsif @pay_period.correction_run?
-            @pay_period.payroll_items.pluck(:employee_id)
-          elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
-            imported_ids = @pay_period.payroll_items.pluck(:employee_id)
-            eligible = Employee.where(company_id: current_company_id).eligible_for_period(@pay_period.start_date, @pay_period.end_date)
-            salary_ids = eligible.where(employment_type: "salary").pluck(:id)
-            contractor_ids = eligible.where(employment_type: "contractor").pluck(:id)
-            (imported_ids + salary_ids + contractor_ids + submitted_employee_ids).uniq
           else
-            Employee.where(company_id: current_company_id)
-                    .eligible_for_period(@pay_period.start_date, @pay_period.end_date)
-                    .pluck(:id)
+            PayPeriodDefaultRoster.new(@pay_period).employee_ids(additional_employee_ids: submitted_employee_ids)
           end
           employee_ids = employee_ids.map(&:to_i).uniq - excluded_employee_ids
 
@@ -1390,6 +1378,7 @@ module Api
               payroll_item_json(item, print_activity: print_activity)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
+            json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids
           end
 
           json
