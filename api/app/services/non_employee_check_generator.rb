@@ -46,7 +46,7 @@ class NonEmployeeCheckGenerator
   end
 
   def filename
-    date_token = check.created_at.strftime("%Y%m%d")
+    date_token = check.created_at.in_time_zone("Pacific/Guam").strftime("%Y%m%d")
     safe_payee = check.payable_to.gsub(/[^a-zA-Z0-9_-]/, "_").first(30)
     "ne_check_#{check.check_number || check.id}_#{safe_payee}_#{date_token}.pdf"
   end
@@ -65,7 +65,9 @@ class NonEmployeeCheckGenerator
       "payment_detail_rows" => payment_detail_rows,
       "check_info_rows" => check_info_rows,
       "memo_rows" => memo_rows,
-      "reference_rows" => reference_rows
+      # Keep the original source-date encoding in sealed input fingerprints so a
+      # display-only timezone correction does not invalidate saved PDF packages.
+      "reference_rows" => reference_rows(created_at: check.created_at)
     }
   end
 
@@ -328,7 +330,7 @@ class NonEmployeeCheckGenerator
     rows
   end
 
-  def reference_rows
+  def reference_rows(created_at: check.created_at.in_time_zone("Pacific/Guam"))
     rows = []
     rows << [ "Reference #", check.reference_number ] if check.reference_number.present?
     rows << [ "Confirmation #", check.confirmation_number ] if check.respond_to?(:confirmation_number) && check.confirmation_number.present?
@@ -337,7 +339,7 @@ class NonEmployeeCheckGenerator
     if check.pay_period.present?
       rows << [ "Pay Period", "#{format_date(check.pay_period.start_date)} - #{format_date(check.pay_period.end_date)}" ]
     end
-    rows << [ "Created", check.created_at.strftime("%m/%d/%Y") ]
+    rows << [ "Created", created_at.strftime("%m/%d/%Y") ]
     rows
   end
 

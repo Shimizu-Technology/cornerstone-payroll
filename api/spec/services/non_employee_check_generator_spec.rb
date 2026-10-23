@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe NonEmployeeCheckGenerator do
   let(:company) do
@@ -58,5 +59,18 @@ RSpec.describe NonEmployeeCheckGenerator do
     pdf = described_class.new(check, layout_config: company.check_layout_config).generate
 
     expect(pdf).to start_with("%PDF")
+  end
+  it "uses the Guam created date in newly rendered stubs and filenames across UTC midnight" do
+    check.update_columns(created_at: Time.utc(2026, 10, 21, 14, 42, 58))
+    original_attributes = check.reload.attributes
+    generator = described_class.new(check)
+    bytes = generator.generate
+    text = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join(" ").gsub(/\s+/, " ")
+    expect(text).to include("Created 10/22/2026")
+    expect(generator.filename).to end_with("_20261022.pdf")
+    # Existing sealed packages fingerprinted the UTC source date; the new display
+    # must not make their immutable saved bytes stale or require regeneration.
+    expect(generator.render_input_payload.fetch("reference_rows")).to include([ "Created", "10/21/2026" ])
+    expect(check.reload.attributes).to eq(original_attributes)
   end
 end
