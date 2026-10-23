@@ -20,7 +20,7 @@ class PayrollRegisterCsvExporter
     "Department",
     "Employment Type",
     "Pay Rate",
-    "Hours Worked",
+    "Regular Hours",
     "Overtime Hours",
     "Holiday Hours",
     "PTO Hours",
@@ -30,7 +30,7 @@ class PayrollRegisterCsvExporter
     "Custom Earnings",
     "Non-Taxable Pay",
     "Gross Pay",
-    "Withholding Tax",
+    "Base FIT",
     "Addtl Withholding",
     "Social Security Tax",
     "Medicare Tax",
@@ -48,7 +48,10 @@ class PayrollRegisterCsvExporter
     "Custom Deductions",
     "Total Deductions",
     "Net Pay",
-    "Check Number"
+    "Check Number",
+    "Rate Basis",
+    "Total FIT (Base + Additional)",
+    "Combined Hours"
   ].freeze
 
   attr_reader :report
@@ -195,7 +198,10 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:custom_deductions_total]),
       format_currency(emp[:total_deductions]),
       format_currency(emp[:net_pay]),
-      sanitize_csv_field(emp[:check_number])
+      sanitize_csv_field(emp[:check_number]),
+      rate_basis(emp),
+      format_currency(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| emp[key].to_f }
     ]
     (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + payroll_adjustment_export.values_for(emp).map do |amount|
       amount.nil? ? "" : format_currency(amount)
@@ -243,9 +249,15 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:custom_deductions_total)),
       format_currency(total_for(:total_deductions)),
       format_currency(total_for(:net_pay)),
-      ""
+      "", "",
+      format_currency(total_for(:withholding_tax) + total_for(:additional_withholding)),
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| total_for(key) }
     ] + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
       payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
+  end
+
+  def rate_basis(employee)
+    PayrollRateBasis.describe(employee)
   end
 
   def summary_label(summary)

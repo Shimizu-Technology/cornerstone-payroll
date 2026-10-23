@@ -201,6 +201,7 @@ it('shows historical evidence and wage differences without claiming another paym
   expect(screen.getByText(/does not create another paycheck/)).toBeTruthy();
   expect(screen.getByText(/Gross wage difference: \+\$5.00/)).toBeTruthy();
   expect(screen.getByText(/wage split still needs review/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Historical classification reviews' }).closest('details')).toBeNull();
 });
 
 it('shows the direction when issued check wages exceed the source estimate', async () => {
@@ -224,6 +225,7 @@ it('keeps owner-reported historical payments visibly held pending check evidence
   expect(screen.getByText(/excluded from payable hours/)).toBeTruthy();
   expect(screen.getByText(/Supply the issued check/)).toBeTruthy();
   expect(screen.getByText(/source changed after/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Payment evidence pending' }).closest('details')).toBeNull();
 });
 
 

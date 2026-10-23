@@ -729,7 +729,7 @@ export function PayPeriods() {
     <div>
       <Header
         title="Pay Periods"
-        description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
+        description="Choose a pay period to review its employees, totals and next step. Imported QuickBooks history is read-only."
         actions={
           readOnlyWorkspace || trainingReplayWorkspace ? undefined : (
             <Button onClick={openCreateModal}>
@@ -1066,9 +1066,10 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-8">
-          <div className="p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
+        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-6">
+          <details className="p-4">
+            <summary className="cursor-pointer py-1 font-semibold text-primary-800">How payroll moves from draft to payment</summary>
+            <h3 className="sr-only">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
@@ -1110,7 +1111,8 @@ export function PayPeriods() {
                 </div>
               </div>
             </div>
-          </div>
+            <p className="mt-4 text-sm text-neutral-600">Committed payroll is saved. Prepare checks and record issuance or bank confirmation separately in Checks & direct deposit.</p>
+          </details>
         </Card>}
       </div>
 

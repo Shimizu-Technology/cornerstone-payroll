@@ -49,7 +49,7 @@ class PaycheckHistoryPdfGenerator
     pdf.move_down 12
     pdf.font_size(20) { pdf.text "Paycheck history report", align: :center }
     pdf.move_down 12
-    pdf.font_size(14) { pdf.text "Paychecks #{data.qb_date_range_label.sub(/\AFrom/, 'from')}", align: :center }
+    pdf.font_size(14) { pdf.text "Pay date: #{data.pay_date_label} | Work period: #{data.pay_period_label}", align: :center }
     pdf.move_down 24
   end
 
@@ -77,9 +77,11 @@ class PaycheckHistoryPdfGenerator
   def render_detail_table(pdf, rows)
     start_new_page_if_needed(pdf, 150)
     pdf.font_size(12) { pdf.text "Payroll detail", style: :bold, color: TEXT }
+    pdf.move_down 4
+    pdf.font_size(8) { pdf.text "Taxes are included in total deductions. Gross pay minus total deductions equals net pay.", color: MUTED }
     pdf.move_down 8
 
-    table_rows = [ [ "Employee", "Gross pay", "Taxes", "Deductions", "Net pay", "Employer cost" ] ]
+    table_rows = [ [ "Employee", "Gross pay", "Taxes (included)", "Total deductions (includes taxes)", "Net pay", "Employer cost" ] ]
     rows.each do |row|
       table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
     end
@@ -187,6 +189,6 @@ class PaycheckHistoryPdfGenerator
         pdf.font_size(8) { pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ] }
       end
     end
-    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, -12 ], size: 8, align: :right, color: MUTED
   end
 end

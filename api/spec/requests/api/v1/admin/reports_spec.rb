@@ -2812,9 +2812,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
 
       employee_sheet = workbook.sheet("Employees")
-      headers = employee_sheet.row(1)
-      hourly_row = employee_sheet.row(2)
-      salary_row = employee_sheet.row(3)
+      headers = employee_sheet.row(4)
+      hourly_row = employee_sheet.row(5)
+      salary_row = employee_sheet.row(6)
       treatments.each do |label, (kind, treatment, amount)|
         effect = case kind
         when "deduction" then "in deductions"
@@ -2867,7 +2867,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         workbook.sheet("Payroll Adjustments Detail").row(row_number)
       end
       expect(detail_rows).to include(include(hourly_employee.full_name, "Employee loan", "manual", 40.0))
-      employee_headers = workbook.sheet("Employees").row(1)
+      employee_headers = workbook.sheet("Employees").row(4)
       expect(employee_headers).to include(a_string_matching(/Payroll Adjustment - Employee loan \(Post tax deduction; manual pay-period entry; item #\d+\/4\)/))
     end
 

@@ -2139,6 +2139,55 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
       expect(fit_check.amount).to eq(125.00)
       expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(125.00)
+
+      retained_check = fit_check.attributes
+      retained_allocations = fit_check.payroll_liability_check_allocations.map(&:attributes)
+      next_number = company.reload.next_check_number
+      posting_ids = pay_period.payroll_liability_postings.pluck(:id)
+
+      # A repeated commit is refused; a subsequent explicit Generate FIT retry
+      # reuses the existing automatic check and its liability reservations.
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+      expect(response).to have_http_status(:unprocessable_content)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.non_employee_checks.where(auto_generated_type: "fit_deposit").count).to eq(1)
+      expect(fit_check.reload.attributes).to eq(retained_check)
+      expect(fit_check.payroll_liability_check_allocations.map(&:attributes)).to eq(retained_allocations)
+      expect(company.reload.next_check_number).to eq(next_number)
+      expect(pay_period.payroll_liability_postings.pluck(:id)).to eq(posting_ids)
+    end
+
+    it "rolls back a failed automatic FIT reservation and creates one complete payment on commit retry" do
+      company.update!(auto_create_fit_check: true)
+      item = pay_period.payroll_items.first
+      item.update!(additional_withholding: 25)
+      next_number = company.reload.next_check_number
+      retained_ytd = EmployeeYtdTotal.where(employee: employee).map(&:attributes)
+      allow(PayrollLiabilityFitPaymentConnector).to receive(:connect!)
+        .and_raise(PayrollLiabilityCheckAllocationService::Error, "Synthetic reservation failure")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Synthetic reservation failure")
+      expect(pay_period.reload).to be_approved
+      expect(pay_period.non_employee_checks).to be_empty
+      expect(pay_period.payroll_liability_postings).to be_empty
+      expect(company.reload.next_check_number).to eq(next_number)
+      expect(item.reload.check_number).to be_nil
+      expect(EmployeeYtdTotal.where(employee: employee).map(&:attributes)).to eq(retained_ytd)
+
+      allow(PayrollLiabilityFitPaymentConnector).to receive(:connect!).and_call_original
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to be_committed
+      fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
+      expect(pay_period.non_employee_checks.count).to eq(1)
+      expect(fit_check.amount).to eq(125.to_d)
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(125.to_d)
+      expect(pay_period.payroll_liability_postings.where(posting_type: "commit").count).to eq(1)
     end
 
     it "rolls back the payroll commit when liability posting fails" do

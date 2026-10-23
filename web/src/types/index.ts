@@ -1209,6 +1209,8 @@ export interface AirePayrollCommandResponse {
 }
 
 export interface PayPeriod {
+  /** Initial roster defaults; explicit operator selections remain authoritative. */
+  default_employee_ids?: number[];
   id: number;
   company_id?: number;
   start_date: string;

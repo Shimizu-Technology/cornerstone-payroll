@@ -53,6 +53,8 @@ function renderCard(calendar: AirePayrollCalendarState, onRefresh = vi.fn()) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-17T00:00:00Z'));
   authState.isManager = true;
   vi.clearAllMocks();
 });

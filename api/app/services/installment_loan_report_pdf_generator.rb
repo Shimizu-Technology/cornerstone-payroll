@@ -40,7 +40,6 @@ class InstallmentLoanReportPdfGenerator
 
     if loans.empty?
       pdf.text "No employee loans found.", style: :italic, color: TEXT_MUTED
-      return
     end
 
     loans.group_by { |snapshot| snapshot[:employee] }.each do |employee, emp_loans|
