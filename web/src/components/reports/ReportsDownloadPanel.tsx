@@ -417,6 +417,14 @@ export function TransmittalEditorModal({
     const requestTimer = window.setTimeout(() => {
       setLoadingPreview(true);
       setPreviewError(null);
+      setPreview(null);
+      setSavedState(null);
+      setNotes([]);
+      setPayrollCheckNumbers([]);
+      setNeCheckNumbers({});
+      setCustomEntries([]);
+      setCheckFirst('');
+      setCheckLast('');
       setNewNote('');
       setNewReport('');
       transmittalApi.preview(payPeriodId).then((data) => {
