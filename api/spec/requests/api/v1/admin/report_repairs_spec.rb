@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "csv"
 require "pdf/reader"
 require "roo"
 
@@ -33,6 +34,16 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
 
   def pdf_text
     pdf_reader.pages.map(&:text).join(" ").gsub(/\s+/, " ")
+  end
+
+  def with_workbook
+    expect(response).to have_http_status(:ok)
+    Tempfile.create([ "report-repairs", ".xlsx" ]) do |file|
+      file.binmode
+      file.write(response.body)
+      file.flush
+      yield Roo::Excelx.new(file.path)
+    end
   end
 
   shared_examples "consistent transmittal generation" do |endpoint|
@@ -101,10 +112,118 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
       expect(pdf_text).not_to include("FIT Deposit Total:")
     end
+
+    it "uses generated defaults for nullable saved notes and report lists" do
+      saved = Transmittal.create!(company: company, pay_period: period, notes: nil, report_list: nil)
+
+      post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
+
+      expect(pdf_text).to include("FIT Deposit Total: $207.09", "Payroll Summary by Employee")
+      expect(saved.reload.notes).to eq(TransmittalLogPdfGenerator.default_notes(period))
+      expect(saved.report_list).to eq(TransmittalLogPdfGenerator::REPORT_LIST)
+    end
+
+    it "clears saved nonemployee overrides over JSON and retains the empty map on later generation" do
+      check = create(:non_employee_check, company: company, pay_period: period,
+        payable_to: "Synthetic Payee", check_number: "ORIGINAL987")
+      saved = Transmittal.create!(company: company, pay_period: period,
+        non_employee_check_numbers: { check.id.to_s => "OVERRIDE987" })
+
+      post "/api/v1/admin/reports/#{endpoint}", params: {
+        pay_period_id: period.id, non_employee_check_numbers: {}
+      }, as: :json
+
+      expect(pdf_text).to include("ORIGINAL987")
+      expect(pdf_text).not_to include("OVERRIDE987")
+      expect(saved.reload.non_employee_check_numbers).to eq({})
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: period.id }
+      expect(response.parsed_body.dig("saved_transmittal", "non_employee_check_numbers")).to eq({})
+      post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
+      expect(pdf_text).to include("ORIGINAL987")
+      expect(saved.reload.non_employee_check_numbers).to eq({})
+    end
   end
 
   include_examples "consistent transmittal generation", "transmittal_log_pdf"
   include_examples "consistent transmittal generation", "full_print_package_pdf"
+
+  it "retains explicitly empty report lists on standalone transmittals" do
+    saved = Transmittal.create!(company: company, pay_period: period, report_list: [ "Previously enclosed" ])
+    post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: period.id, report_list: [] }, as: :json
+    expect(pdf_text).not_to include("Previously enclosed", "Payroll Summary by Employee")
+    expect(saved.reload.report_list).to eq([])
+    post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: period.id }
+    expect(pdf_text).not_to include("Payroll Summary by Employee")
+    expect(saved.reload.report_list).to eq([])
+  end
+
+  it "returns signoff notes verbatim even when they match legacy transmittal defaults" do
+    notes = TransmittalLogPdfGenerator.default_notes(period, include_additional: false)
+    saved = CheckSignoffSheet.create!(company: company, pay_period: period,
+      entries: [ { "name" => "Fixture, Casey", "check_number" => "123" } ], notes: notes)
+    original = saved.attributes
+
+    get "/api/v1/admin/reports/check_signoff_preview", params: { pay_period_id: period.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("saved_signoff", "notes")).to eq(notes)
+    expect(saved.reload.attributes).to eq(original)
+    post "/api/v1/admin/reports/check_signoff_pdf", params: { pay_period_id: period.id }
+    expect(pdf_text).to include("FIT Deposit Total: $197.09")
+    expect(pdf_text).not_to include("FIT Deposit Total: $207.09")
+    expect(saved.reload.attributes).to eq(original)
+  end
+
+  it "exports additional and combined FIT in the downloaded Employee Summary Totals sheet" do
+    create(:payroll_item, company: company, employee: create(:employee, company: company), pay_period: period,
+      gross_pay: 100, withholding_tax: 2.91, additional_withholding: 7.25)
+    create(:payroll_item, company: company, employee: create(:employee, :contractor, company: company),
+      pay_period: period, employment_type: "contractor", gross_pay: 200, withholding_tax: 0, additional_withholding: 99)
+    create(:payroll_item, :voided, company: company, employee: create(:employee, company: company),
+      pay_period: period, withholding_tax: 1000, additional_withholding: 1000)
+
+    get "/api/v1/admin/reports/payroll_summary_by_employee_xlsx", params: { pay_period_id: period.id }
+
+    with_workbook do |workbook|
+      totals = workbook.sheet("Totals").to_a.drop(1).to_h
+      expect(totals).to include("Employees" => 2, "Base FIT" => 200,
+        "Additional FIT Withholding" => 17.25, "Total FIT (Base + Additional)" => 217.25)
+      contractor_totals = workbook.sheet("Contractor Totals").to_a.drop(1).to_h
+      expect(contractor_totals).to include("Additional FIT Withholding" => 99, "Total FIT (Base + Additional)" => 99)
+    end
+  end
+
+  it "uses saved contractor rate bases consistently in CSV and XLSX after employee profile changes" do
+    expected = {}
+    [ [ "flat_fee", "hourly", "USD/flat fee" ],
+      [ "hourly", "flat_fee", "USD/hour (primary rate; see Earnings Detail for all rates)" ],
+      [ nil, "hourly", "USD (contractor rate basis not recorded)" ] ].each do |saved_type, current_type, basis|
+      worker = create(:employee, :contractor, company: company, contractor_pay_type: saved_type || "flat_fee")
+      create(:payroll_item, company: company, employee: worker, pay_period: period,
+        employment_type: "contractor", pay_rate: 500, gross_pay: 500,
+        calculation_context_snapshot: { "employee" => { "contractor_pay_type" => saved_type }.compact })
+      worker.update!(contractor_pay_type: current_type)
+      expected[worker.full_name] = basis
+    end
+
+    get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: period.id }
+    expect(response).to have_http_status(:ok)
+    csv_rows = CSV.parse(response.body, headers: true)
+    expected.each do |name, basis|
+      expect(csv_rows.find { |row| row["Employee Name"] == name }["Rate Basis"]).to eq(basis)
+    end
+
+    get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: period.id }
+    with_workbook do |workbook|
+      rows = workbook.sheet("Contractors").to_a
+      header_index = rows.index { |row| row.include?("Rate Basis") }
+      headers = rows.fetch(header_index)
+      values = rows.drop(header_index + 1).map { |row| headers.zip(row).to_h }
+      expected.each do |name, basis|
+        expect(values.find { |row| row["Employee Name"] == name }["Rate Basis"]).to eq(basis)
+      end
+    end
+  end
 
   it "includes the advertised empty loan report in the actual package" do
     post "/api/v1/admin/reports/full_print_package_pdf", params: { pay_period_id: period.id, report_list: [ "Not attached" ] }

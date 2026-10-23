@@ -99,7 +99,7 @@ class PayrollSummaryByEmployeePdfGenerator
       "Total",
       lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total hours", hours: summary.total_hours) ] + aggregate_hours_lines),
       gross_cell(summary.gross_pay, aggregate_earnings_lines, pre_tax_lines, data.items.sum { |item| data.employee_adjusted_gross(item) }),
-      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: summary.other_pay) ] + aggregate_other_pay_lines),
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: summary.other_pay) ] + aggregate_other_pay_lines, hide_zero_hours: true),
       employee_taxes_cell(summary.employee_taxes, tax_lines, summary.after_tax_deductions, after_tax_lines),
       money(summary.net_pay),
       employer_cell(
@@ -122,7 +122,7 @@ class PayrollSummaryByEmployeePdfGenerator
       data.qb_employee_name(item.employee),
       lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total hours", hours: item.total_hours.to_f) ]),
       gross_cell(item.gross_pay.to_f, employee_earnings_lines(item), pre_tax_lines, data.employee_adjusted_gross(item)),
-      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: data.other_pay_lines_for(item).sum { |line| line.amount.to_f }) ] + data.other_pay_lines_for(item)),
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: data.other_pay_lines_for(item).sum { |line| line.amount.to_f }) ] + data.other_pay_lines_for(item), hide_zero_hours: true),
       employee_taxes_cell(data.employee_tax_total(item), tax_lines, data.employee_after_tax_total(item), after_tax_lines),
       money(item.net_pay),
       employer_cell(data.employer_tax_total(item), employer_lines, ss: item.employer_social_security_tax.to_f, medicare: item.employer_medicare_tax.to_f),
@@ -181,7 +181,7 @@ class PayrollSummaryByEmployeePdfGenerator
     lines_cell(lines)
   end
 
-  def lines_cell(lines, negative: false, negative_labels: [])
+  def lines_cell(lines, negative: false, negative_labels: [], hide_zero_hours: false)
     present = lines.select { |line| line.amount.present? || line.hours.present? }
     return "" if present.empty?
 
@@ -189,7 +189,7 @@ class PayrollSummaryByEmployeePdfGenerator
       amount = if line.amount.present?
         money(line.amount.to_f, negative: negative || negative_labels.include?(line.label))
       end
-      hours = hours_text(line.hours)
+      hours = hours_text(line.hours) unless hide_zero_hours && line.hours.to_f.zero?
       values = [ hours, amount ].compact.join("  ")
       values.present? ? "#{line.label}    #{values}" : line.label
     end.join("\n")
@@ -206,7 +206,11 @@ class PayrollSummaryByEmployeePdfGenerator
   end
 
   def aggregate_other_pay_lines
-    data.aggregate_lines(data.items.flat_map { |item| data.other_pay_lines_for(item) })
+    data.items.flat_map { |item| data.other_pay_lines_for(item) }.group_by(&:label).map do |label, lines|
+      hours = lines.sum { |line| line.hours.to_f }
+      QuickbooksPayrollReportData::Line.new(label: label, amount: lines.sum { |line| line.amount.to_f },
+        hours: hours.zero? ? nil : hours)
+    end.sort_by(&:label)
   end
 
   def aggregate_tax_lines

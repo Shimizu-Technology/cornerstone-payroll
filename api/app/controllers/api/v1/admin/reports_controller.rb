@@ -1053,7 +1053,7 @@ module Api
             entries: payroll_entries,
             saved_signoff: saved ? {
               entries: saved.entries,
-              notes: resolved_transmittal_notes(pp, saved.notes),
+              notes: saved.notes,
               generated_at: saved.generated_at,
               updated_at: saved.updated_at
             } : nil
@@ -1275,7 +1275,10 @@ module Api
           options = options.dup
           # Omitted fields reuse the saved cover; explicit empty arrays clear edits.
           %i[preparer_name notes report_list check_number_first check_number_last non_employee_check_numbers custom_entries].each do |key|
-            options[key] = transmittal.public_send(key) if !options.key?(key) && transmittal
+            next if options.key?(key) || transmittal.nil?
+
+            saved_value = transmittal.public_send(key)
+            options[key] = saved_value unless saved_value.nil?
           end
           if options[:non_employee_check_numbers]
             options[:non_employee_check_numbers] = options[:non_employee_check_numbers].transform_keys(&:to_i)
@@ -2242,6 +2245,7 @@ module Api
             worker_classification: employment_type_label(item.employment_type),
             pay_rate: item.pay_rate,
             salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"],
+            contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type"),
             scheduled_hours: item.scheduled_hours&.to_f,
             hours_worked: item.hours_worked&.to_f,
             overtime_hours: item.overtime_hours&.to_f,
@@ -2525,6 +2529,7 @@ module Api
               total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
               total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
               total_withholding: w2_items.sum(&:withholding_tax),
+              total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
               total_traditional_retirement: w2_items.sum(&:retirement_payment),
@@ -3742,12 +3747,7 @@ module Api
         end
 
         def payroll_rate_basis(employee)
-          return "Source rate unavailable" if employee[:pay_rate].nil?
-
-          return "USD/hour (primary rate; see Earnings Detail for all rates)" unless employee[:employment_type].to_s == "salary"
-
-          { "annual" => "USD/year (annual salary)", "per_period" => "USD/pay period", "variable" => "USD/pay period (variable salary)" }
-            .fetch(employee[:salary_type].to_s, "USD (salary basis not recorded)")
+          PayrollRateBasis.describe(employee)
         end
 
         def earnings_breakdown_sheet(report)
