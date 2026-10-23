@@ -1585,7 +1585,7 @@ it.each(['regular', 'not_payable'] as const)('scopes correction routing copy wit
 it('keeps source failures visible outside a collapsed verified timecard disclosure', async () => {
   apiMocks.overview.mockRejectedValueOnce(new Error('Source unavailable'));
   const verified: AirePayrollCalendarState = { ...calendar, cutoff_state: 'batch_verified', finalized_batch: {
-    event_id: 'failure-event', verification_status: 'verified', verification_attempts: 1,
+    event_id: 'failure-event', verification_status: 'verified', verification_attempts: 1, occurred_at: '2026-10-23T00:01:00+10:00',
     payroll_batch_id: 'synthetic-verified', payroll_batch_checksum: 'checksum',
     summary: { employee_count: 1, total_hours: 4, regular_hours: 4, overtime_hours: 0, exclusion_count: 0 },
   } };
