@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class OrganizationsController < BaseController
+        include InvitationDeliveryOutcome
         skip_before_action :enforce_company_access!
         before_action :require_super_admin!
         before_action :set_organization, only: [ :show, :update, :create_admin_user ]
@@ -53,12 +54,12 @@ module Api
           end
 
           invitation_result = admin_user ? safe_invite_user(admin_user) : { success: false, error: nil }
+          invitation_delivery = invitation_delivery_response(admin_user, invitation_result)
 
           render json: {
             data: serialize_organizations([ organization.reload ], detailed: true).first,
             admin_user: admin_user && user_json(admin_user),
-            invitation_sent: invitation_result[:success] && invitation_result[:url].present?,
-            invitation_error: invitation_result[:success] ? nil : invitation_result[:error]
+            **invitation_delivery
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -84,11 +85,11 @@ module Api
 
           admin_user = build_org_admin!(@organization, primary_company, admin_user_params)
           invitation_result = safe_invite_user(admin_user)
+          invitation_delivery = invitation_delivery_response(admin_user, invitation_result)
 
           render json: {
             data: user_json(admin_user),
-            invitation_sent: invitation_result[:success] && invitation_result[:url].present?,
-            invitation_error: invitation_result[:success] ? nil : invitation_result[:error]
+            **invitation_delivery
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -209,7 +210,6 @@ module Api
 
           if result[:success]
             user.update!(clerk_invitation_id: result[:invitation_id])
-            SendUserInviteEmailJob.perform_later(user.id, current_user&.id, result[:url]) if result[:url].present?
           end
 
           result

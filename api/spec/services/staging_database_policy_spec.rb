@@ -3,6 +3,13 @@
 require "rails_helper"
 
 RSpec.describe "staging database routing" do
+  it "configures encryption before the staging guard first loads Active Record" do
+    files = Rails.root.join("config/initializers").children.sort
+    encryption = files.index { |path| path.basename.to_s.end_with?("active_record_encryption.rb") }
+    containment = files.index { |path| path.basename.to_s == "00_staging_containment.rb" }
+    expect(encryption).to be < containment
+  end
+
   let(:env) { { "DEPLOYMENT_ENV" => "staging", "DATABASE_URL" => "postgresql://staging-db.example.test/synthetic?sslmode=require", "STAGING_DATABASE_HOSTS" => "staging-db.example.test", "PRODUCTION_DATABASE_HOSTS" => "production-db.example.test,192.0.2.10" } }
 
   %w[hostaddr host port service servicefile options dbname load_balance_hosts target_session_attrs].each do |key|
@@ -16,6 +23,16 @@ RSpec.describe "staging database routing" do
     it "rejects inherited routing override #{key}" do
       env[key] = "private-routing-value"
       expect { StagingOutboundPolicy.validate_database!(env: env) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /routing/)
+    end
+  end
+
+  it "accepts only the exact bounded predeploy timeout options" do
+    options = "-c lock_timeout=10s -c statement_timeout=15min -c idle_in_transaction_session_timeout=5min"
+    expect(StagingDatabasePolicy.validate_config!(env: env.merge("PGOPTIONS" => options))).to eq(true)
+    expect(StagingDatabasePolicy.validate_parameters!({ host: "staging-db.example.test", dbname: "synthetic", options: options }, env: env.merge("PGOPTIONS" => options))).to eq(true)
+    [ "#{options} -c search_path=public", "#{options} -c role=postgres", "#{options} hostaddr=192.0.2.10", "-c statement_timeout=0", " #{options}" ].each do |unsafe|
+      expect { StagingDatabasePolicy.validate_config!(env: env.merge("PGOPTIONS" => unsafe)) }.to raise_error(StagingOutboundPolicy::ConfigurationError)
+      expect { StagingDatabasePolicy.validate_parameters!({ host: "staging-db.example.test", dbname: "synthetic", options: unsafe }, env: env) }.to raise_error(StagingOutboundPolicy::ConfigurationError)
     end
   end
 

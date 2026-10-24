@@ -3,6 +3,7 @@
 require "uri"
 require "ipaddr"
 require "socket"
+require_relative "database_connection_timeouts"
 
 # Reject libpq routing indirection before opening a socket, then verify the
 # selected live peer and backend with read-only information before any writes.
@@ -14,7 +15,10 @@ class StagingDatabasePolicy
   class << self
     def validate_config!(env: ENV)
       fail!("Clone containment requires DEPLOYMENT_ENV=staging") unless env["DEPLOYMENT_ENV"] == "staging"
-      ROUTING_ENV.each { |name| fail!("Remove #{name}: staging database routing overrides are forbidden") unless env[name].to_s.empty? }
+      ROUTING_ENV.each do |name|
+        next if env[name].to_s.empty? || (name == "PGOPTIONS" && env[name] == DatabaseConnectionTimeouts::PG_OPTIONS)
+        fail!("Remove #{name}: staging database routing overrides are forbidden")
+      end
       allowed, denied = host_lists!(env)
       StagingOutboundPolicy.require_setting!("DATABASE_URL", env)
       urls = StagingOutboundPolicy::DATABASE_SETTINGS.filter_map do |name|
@@ -33,7 +37,10 @@ class StagingDatabasePolicy
       return true unless env["DEPLOYMENT_ENV"] == "staging"
       validate_config!(env: env)
       values = parameters.stringify_keys
-      ROUTING_PARAMETERS.each { |name| fail!("Staging database routing parameter #{name} is forbidden") unless values[name].to_s.empty? }
+      ROUTING_PARAMETERS.each do |name|
+        next if values[name].to_s.empty? || (name == "options" && values[name] == DatabaseConnectionTimeouts::PG_OPTIONS)
+        fail!("Staging database routing parameter #{name} is forbidden")
+      end
       allowed, denied = host_lists!(env)
       host = single_host!(values["host"])
       fail!("Actual database connection settings failed STAGING_DATABASE_HOSTS assertion") unless allowed.include?(host) && !denied.include?(host)
