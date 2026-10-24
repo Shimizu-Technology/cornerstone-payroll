@@ -19,10 +19,10 @@ export function PayRunEmployerTaxes({
 }: PayRunSectionProps<'employerTaxes'>) {
   return (<>
 {!isDraft && payrollItems.length > 0 && (
-          <Card className="border-warning-200">
-            <div className="p-4 border-b border-warning-200 bg-warning-50">
-              <h3 className="font-semibold text-warning-900">Employer Tax Obligations</h3>
-              <p className="text-sm text-warning-700 mt-1">
+          <Card className="border-neutral-200">
+            <div className="p-4 border-b border-neutral-200 bg-neutral-50">
+              <h3 className="font-semibold text-neutral-950">Employer Tax Obligations</h3>
+              <p className="text-sm text-neutral-700 mt-1">
                 Guam FIT deposit plus related FICA obligations for this pay period
               </p>
             </div>
@@ -41,7 +41,7 @@ export function PayRunEmployerTaxes({
                       <span>{formatCurrency(totalDRTDeposit)}</span>
                     </div>
                     {fitDivergence && (
-                      <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2.5 py-2 text-xs text-orange-900">
+                      <div className="mt-2 rounded-md border border-warning-300 bg-warning-50 px-2.5 py-2 text-xs text-warning-900">
                         <div className="flex items-start gap-1.5">
                           <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -89,10 +89,10 @@ export function PayRunEmployerTaxes({
               {/* Grand total */}
               <div className="mt-6 flex flex-col gap-3 border-t-2 border-warning-300 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-lg font-bold text-warning-900">Total DRT deposit</p>
-                  <p className="text-sm text-warning-700">Base plus W-4 Step 4(c) additional withholding</p>
+                  <p className="text-lg font-bold text-neutral-950">Total DRT deposit</p>
+                  <p className="text-sm text-neutral-700">Base plus W-4 Step 4(c) additional withholding</p>
                 </div>
-                <p className="wrap-break-word text-2xl font-bold text-warning-900">{formatCurrency(totalDRTDeposit)}</p>
+                <p className="wrap-break-word text-2xl font-bold text-neutral-950">{formatCurrency(totalDRTDeposit)}</p>
               </div>
               {fitDivergence && (
                 <p className="mt-3 text-xs text-orange-800">
