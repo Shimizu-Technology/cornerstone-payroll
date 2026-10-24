@@ -1,12 +1,12 @@
 
 
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 
 import { Link } from 'react-router';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { PayRunResultsView } from './PayRunResultsView';
 
 import { Select } from '@/components/ui/select';
 
@@ -22,6 +22,7 @@ import { TABLE_STICKY_TOP_CLASS, adjustmentTreatmentLabels, toNumber, effectiveL
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunEmployeeResults({
+  action,
   companyId,
   currentPath,
   departmentFilter,
@@ -54,7 +55,7 @@ export function PayRunEmployeeResults({
   setSearchTerm,
   sortPayrollItems,
   visiblePayrollFields
-}: PayRunSectionProps<'results'>) {
+}: PayRunSectionProps<'results'> & { action?: ReactNode }) {
   return (<>
 {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
@@ -66,21 +67,12 @@ export function PayRunEmployeeResults({
           const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + visiblePayrollFields.length + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 12 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
-          <Card className="overflow-hidden">
-            <div className="border-b p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-neutral-900">Employee payroll</h3>
-                  <p className="mt-1 text-sm text-neutral-600">
-                    W-2 employees are listed alphabetically, with 1099 contractors grouped separately.
-                  </p>
-                </div>
-                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:shrink-0 lg:grid-cols-none lg:flex lg:flex-wrap lg:items-center">
-                  <Select
+          <PayRunResultsView primaryAction={action} companyId={companyId} currentPath={currentPath} isCalculated={isCalculated} isCommitted={isCommitted} payPeriod={payPeriod} payrollItems={payrollItems} sortPayrollItems={sortPayrollItems} registerTotals={registerTotals} payrollItemDisplayedHours={payrollItemDisplayedHours} setReviewingItem={setReviewingItem} setEditingItem={setEditingItem} setCorrectingItem={setCorrectingItem} setReplacingItem={setReplacingItem}
+            filters={<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">                  <Select
                     aria-label="Employee type"
                     value={employeeTypeFilter}
                     onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
-                    className="w-full lg:w-36"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="all">All Types</option>
                     <option value="salary">Salary</option>
@@ -91,7 +83,7 @@ export function PayRunEmployeeResults({
                     aria-label="Department"
                     value={departmentFilter}
                     onChange={(event) => setDepartmentFilter(event.target.value)}
-                    className="w-full lg:w-44"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="all">All Departments</option>
                     {departmentOptions.map(([deptId, deptName]) => (
@@ -106,7 +98,7 @@ export function PayRunEmployeeResults({
                       setResultsSortBy(sortBy);
                       setResultsSortDirection(direction);
                     }}
-                    className="w-full lg:w-44"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="name:asc">Name A-Z</option>
                     <option value="name:desc">Name Z-A</option>
@@ -121,23 +113,20 @@ export function PayRunEmployeeResults({
                     <option value="fit:desc">FIT High-Low</option>
                     <option value="fit:asc">FIT Low-High</option>
                   </Select>
-                  <div className="relative sm:col-span-2 lg:col-span-1">
+                  <div className="relative min-w-0 sm:min-w-48 sm:flex-1">
                     <input
                       type="text"
                       aria-label="Search employees"
-                      placeholder="Search employees and checks..."
+                      placeholder="Search name or check #"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full rounded-lg border border-neutral-300 py-2.5 pl-8 pr-3 text-base sm:text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 lg:w-56"
+                      className="w-full rounded-lg border border-neutral-300 py-2.5 pl-8 pr-3 text-base sm:text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                     />
                     <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-3 p-3 sm:hidden" aria-label="Employee payroll results">
+                  </div></div>}
+            fullDetail={<>            <div className="space-y-3 p-3 sm:hidden" aria-label="Employee payroll results">
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                 <div><p className="text-xs text-neutral-600">Gross total</p><p className="font-semibold tabular-nums">{formatCurrency(registerTotals.gross)}</p></div>
                 <div><p className="text-xs text-neutral-600">Net total</p><p className="font-bold tabular-nums text-neutral-950">{formatCurrency(registerTotals.net)}</p></div>
@@ -146,13 +135,17 @@ export function PayRunEmployeeResults({
                 const canCorrect = isCommitted && item.employment_type !== 'contractor' && Boolean(payPeriod?.can_issue_corrective_paycheck);
                 const canReplace = isCommitted && item.employment_type !== 'contractor' && payPeriod?.cycle !== 'supplemental' && !item.voided && Boolean(item.check_number);
                 return <section key={item.id} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll result for ${item.employee_name}`}>
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}>{item.employee_name}</Link><p className="mt-1 text-xs capitalize text-neutral-600">{item.employment_type}{item.department_name ? ` · ${item.department_name}` : ''}{item.import_source ? ` · ${item.import_source.replaceAll('_', ' ')}` : ''}</p></div>{item.voided && <Badge variant="danger">Voided</Badge>}</div>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}>{item.employee_name}</Link><p className="mt-1 text-xs capitalize text-neutral-600">{item.employment_type}{item.department_name ? ` · ${item.department_name}` : ''}{item.import_source ? ` · ${item.import_source.replaceAll('_', ' ')}` : ''}</p></div><div className="max-w-[50%] shrink-0 break-words text-right"><p className="text-xs text-neutral-600">Net pay</p><p className="text-lg font-semibold tabular-nums text-neutral-950">{formatCurrency(toNumber(item.net_pay))}</p>{item.voided && <Badge variant="danger">Voided</Badge>}</div></div>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
                     <div><dt className="text-xs text-neutral-600">Hours</dt><dd className="font-medium tabular-nums">{payrollItemDisplayedHours(item).toFixed(2)}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Gross</dt><dd className="font-medium tabular-nums">{formatCurrency(toNumber(item.gross_pay))}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Employee taxes</dt><dd className="tabular-nums">{formatCurrency(payrollTaxSummary(item).total)}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Total deductions</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.total_deductions))}</dd></div>
-                    <div className="col-span-2 border-t border-neutral-100 pt-2"><dt className="text-xs text-neutral-600">Net pay</dt><dd className="text-lg font-bold tabular-nums text-neutral-950">{formatCurrency(toNumber(item.net_pay))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">FIT</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.withholding_tax))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Additional withholding</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.additional_withholding))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Social Security</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.social_security_tax))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Employee Medicare</dt><dd className="tabular-nums">{formatCurrency(payrollTaxSummary(item).totalMedicare)}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Employer Medicare</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.employer_medicare_tax))}</dd></div>
                   </dl>
                   {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {toNumber(rate.regular_hours)} REG / {toNumber(rate.overtime_hours)} OT{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
                   {item.correction_pay_basis_hold && <p className="text-xs text-warning-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
@@ -168,7 +161,7 @@ export function PayRunEmployeeResults({
               {sortPayrollItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-600">No employees match these filters.</p>}
             </div>
             <div className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
-              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1900px] text-neutral-950 tabular-nums">
+              <Table stickyHeader containerClassName="h-[min(28rem,50vh)]" className="min-w-[1900px] text-neutral-950 tabular-nums">
                 <TableHeader>
                   <TableRow>
                     <TableHead stickyLeft className={`w-[170px] min-w-[170px] bg-neutral-50 ${TABLE_STICKY_TOP_CLASS}`}>Last name</TableHead>
@@ -204,7 +197,7 @@ export function PayRunEmployeeResults({
                     </TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Net pay</TableHead>
-                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-neutral-50 text-center"></TableHead>}
+                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-neutral-50 text-center"><span className="sr-only">Details</span></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -639,8 +632,8 @@ export function PayRunEmployeeResults({
                   })()}
                 </TableFooter>
               </Table>
-            </div>
-          </Card>
+            </div></>}
+          />
           );
         })()}
   </>);
