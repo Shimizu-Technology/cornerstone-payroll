@@ -96,16 +96,19 @@ class AnnualTaxConfig < ApplicationRecord
     "#{year} tax tables have not been verified. An administrator must verify them before #{year} payroll can be calculated."
   end
 
-  def self.verified_for_year?(year)
-    config = for_year(year)
+  def self.verified_for_year?(year, lock: false)
+    config = for_year(year, lock: lock)
     return config.verified? if config
 
     # Only grandfathered legacy years can use the legacy calculation path.
-    year.to_i <= 2026 && TaxTable.where(tax_year: year, verification_status: "verified").exists?
+    return false if year.to_i > 2026
+
+    legacy = TaxTable.where(tax_year: year, verification_status: "verified")
+    lock ? legacy.lock("FOR SHARE").first.present? : legacy.exists?
   end
 
-  def self.require_verified!(year)
-    raise ArgumentError, unverified_message(year) unless verified_for_year?(year)
+  def self.require_verified!(year, lock: false)
+    raise ArgumentError, unverified_message(year) unless verified_for_year?(year, lock: lock)
   end
 
   def invalidate_verification!
@@ -147,14 +150,15 @@ class AnnualTaxConfig < ApplicationRecord
   scope :active, -> { where(is_active: true) }
 
   # Get config for a specific year (returns single record or nil)
-  def self.for_year(year)
-    find_by(tax_year: year)
+  # Financial callers hold a shared rules lock for their payroll transaction.
+  def self.for_year(year, lock: false)
+    lock ? where(tax_year: year).lock("FOR SHARE").first : find_by(tax_year: year)
   end
 
   # Select rules strictly by the requested tax year. `is_active` controls the
   # admin UI/default setup flow; it must never override a pay date's year.
-  def self.current(year = Date.current.year)
-    for_year(year)&.then { |config| config if config.verified? }
+  def self.current(year = Date.current.year, lock: false)
+    for_year(year, lock: lock)&.then { |config| config if config.verified? }
   end
 
   # The importer must reproduce retained history before a client's tax setup

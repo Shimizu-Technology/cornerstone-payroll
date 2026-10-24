@@ -66,7 +66,7 @@ export function TaxYearVerification({ config, previous, onSaved }: {
       onCancel={() => setEditingTables(false)} />}
     {config.verification_status !== 'verified' && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(() => taxConfigsApi.verify(config.id, sourceNote)); }}>
       <label htmlFor="tax-source-note" className="block text-sm font-medium">Verification source note (required)</label>
-      <p className="text-sm">Record the year, publication URLs and what you checked, including all withholding schedules. Verification authorizes live payroll for this year.</p>
+      <p className="text-sm">Record the year, publication URLs and what you checked, including all withholding schedules. Verification authorizes live payroll for this year. Recalculate existing drafts after verification, before approval.</p>
       <textarea id="tax-source-note" required value={sourceNote} onChange={event => setSourceNote(event.target.value)} className="w-full rounded border border-neutral-300 p-2 text-base" rows={3} />
       <Button type="submit" disabled={saving || !sourceNote.trim()}>{saving ? 'Saving…' : `Verify ${config.tax_year} tax tables`}</Button>
     </form>}

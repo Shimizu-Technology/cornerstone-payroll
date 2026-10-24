@@ -118,6 +118,42 @@ RSpec.describe "Tax-year verification" do
     expect(TaxYearReadiness.new(today: Date.new(2026, 10, 24)).as_json[:warnings].map { |warning| warning[:tax_year] }).to include(2027)
   end
 
+  it "requires recalculation of pre-verification results and rejects a stale verified version at commit" do
+    config = complete_config(2027)
+    config.update!(ss_wage_base: 192_300)
+    period = create(:pay_period, :calculated, start_date: Date.new(2027, 1, 1), end_date: Date.new(2027, 1, 14), pay_date: Date.new(2027, 1, 15))
+    employee = create(:employee, company: period.company)
+    item = create(:payroll_item, employee: employee, pay_period: period, hours_worked: 40,
+      tax_rule_snapshot: { "engine" => "annual_tax_config_v2", "tax_year" => 2027 })
+    admin = create(:user, role: "admin")
+    config.verify!(actor: admin, source_note: "Synthetic January review")
+    expect { period.update!(status: "approved") }.to raise_error(ActiveRecord::RecordInvalid, /Recalculate payroll/)
+
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    period.reload.update!(status: "calculated")
+    period.update!(status: "approved")
+    expect(item.tax_rule_snapshot["tax_year_verification_at"]).to eq(config.verified_at.utc.iso8601(6))
+
+    config.update!(ss_wage_base: 192_400)
+    config.verify!(actor: admin, source_note: "Synthetic revised review")
+    expect { period.update!(status: "committed") }.to raise_error(ActiveRecord::RecordInvalid, /Recalculate payroll/)
+    expect(period.reload.status).to eq("approved")
+  end
+
+  it "records the same verification version for a contractor-only future run" do
+    config = complete_config(2027)
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic January review")
+    period = create(:pay_period, :calculated, start_date: Date.new(2027, 1, 1), end_date: Date.new(2027, 1, 14), pay_date: Date.new(2027, 1, 15))
+    employee = create(:employee, :contractor, company: period.company)
+    item = create(:payroll_item, employee: employee, pay_period: period)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    config.activate!
+    expect(item.tax_rule_snapshot["tax_year_verification_at"]).to eq(config.verified_at.utc.iso8601(6))
+    expect { period.reload.update!(status: "approved") }.not_to raise_error
+  end
+
   it "blocks approval and commit with a draft without changing the saved state" do
     complete_config(2026)
     AnnualTaxConfig.create_from_previous(2027, source_year: 2026)

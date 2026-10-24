@@ -30,7 +30,7 @@ class GuamTaxCalculatorV2
     if @source_rule_snapshot.present?
       build_config_from_snapshot!
     else
-      @annual_config = AnnualTaxConfig.current(tax_year) ||
+      @annual_config = AnnualTaxConfig.current(tax_year, lock: true) ||
                        raise(ArgumentError, AnnualTaxConfig.unverified_message(tax_year))
       normalized_filing_status = FilingStatusConfig.normalize(filing_status)
       @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
@@ -59,7 +59,7 @@ class GuamTaxCalculatorV2
   def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil, w4_dependent_credit: 0,
                 reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
     unless @source_rule_snapshot.present?
-      current = AnnualTaxConfig.current(annual_config.tax_year)
+      current = AnnualTaxConfig.current(annual_config.tax_year, lock: true)
       raise ArgumentError, AnnualTaxConfig.unverified_message(annual_config.tax_year) unless current
       if current.verified_at != annual_config.verified_at
         raise ArgumentError, "#{annual_config.tax_year} tax verification changed. Calculate payroll again using the reviewed rules."
@@ -99,6 +99,7 @@ class GuamTaxCalculatorV2
     snapshot = {
       "engine" => "annual_tax_config_v2",
       "annual_tax_config_id" => annual_config.id,
+      "tax_year_verification_at" => annual_config.verified_at&.utc&.iso8601(6),
       "tax_year" => annual_config.tax_year,
       "annual_tax_config_updated_at" => annual_config.updated_at&.iso8601,
       "social_security_wage_base" => annual_config.ss_wage_base.to_f,

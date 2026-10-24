@@ -54,7 +54,7 @@ class GuamTaxCalculator
                 reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
     unless @source_rule_snapshot.present?
       AnnualTaxConfig.require_verified!(tax_table.tax_year)
-      current = TaxTable.find(tax_table.id)
+      current = TaxTable.lock("FOR SHARE").find(tax_table.id)
       unless current.verification_status == "verified" && current.updated_at == tax_table.updated_at
         raise ArgumentError, AnnualTaxConfig.unverified_message(tax_table.tax_year)
       end
