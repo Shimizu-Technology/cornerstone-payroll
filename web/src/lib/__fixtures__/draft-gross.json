@@ -1,0 +1,679 @@
+[
+  {
+    "name": "holiday hours",
+    "expected": 120,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {
+      "holiday_hours": 8
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "PTO hours",
+    "expected": 60,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {
+      "pto_hours": 4
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "regular and overtime",
+    "expected": 165,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 8,
+      "overtime": 2
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "per-period salary override",
+    "expected": 725,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 1000,
+      "pay_frequency": "biweekly",
+      "salary_type": "per_period"
+    },
+    "item": {
+      "salary_override": 725
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "annual salary override",
+    "expected": 725,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 52000,
+      "pay_frequency": "biweekly",
+      "salary_type": "annual"
+    },
+    "item": {
+      "salary_override": 725
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "annual salary",
+    "expected": 2000,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 52000,
+      "pay_frequency": "biweekly",
+      "salary_type": "annual"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "variable salary",
+    "expected": 725,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 0,
+      "pay_frequency": "biweekly",
+      "salary_type": "variable"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [],
+    "salaryOverride": 725
+  },
+  {
+    "name": "disabled base salary preserves explicit extras",
+    "expected": 35,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 1000,
+      "pay_frequency": "biweekly",
+      "salary_type": "per_period"
+    },
+    "item": {
+      "salary_override": 725,
+      "service_charge_wages": 25
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": false,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [],
+    "bonus": 10
+  },
+  {
+    "name": "service charges and tips paid out",
+    "expected": 70,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {
+      "service_charge_wages": 25
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [],
+    "reportedTips": 20,
+    "tipsPaidOut": 40,
+    "bonus": 5
+  },
+  {
+    "name": "preserved custom and adjustment",
+    "expected": 185,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly",
+      "default_custom_earnings": [
+        {
+          "label": "Profile earning",
+          "amount": 99
+        }
+      ]
+    },
+    "item": {
+      "custom_earnings": [
+        {
+          "label": "Imported work",
+          "amount": 120
+        }
+      ],
+      "payroll_adjustments": [
+        {
+          "label": "Manual allowance",
+          "amount": 40,
+          "treatment": "taxable_addition",
+          "active": true
+        }
+      ],
+      "draft_earning_sources": {
+        "custom_earnings": "manual",
+        "payroll_adjustments_overridden": true
+      }
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": [],
+    "bonus": 25
+  },
+  {
+    "name": "enabled employee defaults",
+    "expected": 160,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly",
+      "default_custom_earnings": [
+        {
+          "label": "Default earning",
+          "amount": 120
+        }
+      ],
+      "default_payroll_adjustments": [
+        {
+          "label": "Allowance",
+          "amount": 40,
+          "treatment": "taxable_addition",
+          "active": true
+        }
+      ]
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "disabled recurring defaults",
+    "expected": 0,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly",
+      "default_custom_earnings": [
+        {
+          "label": "Default earning",
+          "amount": 120
+        }
+      ],
+      "default_payroll_adjustments": [
+        {
+          "label": "Allowance",
+          "amount": 40,
+          "treatment": "taxable_addition",
+          "active": true
+        }
+      ]
+    },
+    "item": {
+      "custom_earnings": [
+        {
+          "label": "Default earning",
+          "amount": 120
+        }
+      ],
+      "draft_earning_sources": {
+        "custom_earnings": "employee_default"
+      }
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "taxable percentage uses rounded base before fields",
+    "expected": 133,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 8,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "percentage",
+        "percentage": 10,
+        "editable": true,
+        "mode": "default"
+      },
+      {
+        "id": 2,
+        "amountType": "fixed",
+        "amount": 1,
+        "editable": true,
+        "mode": "default"
+      }
+    ]
+  },
+  {
+    "name": "explicit field with recurring disabled",
+    "expected": 25,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "fixed",
+        "amount": 25,
+        "editable": true,
+        "mode": "override"
+      }
+    ]
+  },
+  {
+    "name": "preserved imported field",
+    "expected": 35,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "fixed",
+        "currentAmount": 35,
+        "source": "import",
+        "editable": false,
+        "mode": "default"
+      }
+    ]
+  },
+  {
+    "name": "single imported wage bucket includes holiday PTO",
+    "expected": 97.5,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {
+      "import_source": "time_tracking:synthetic"
+    },
+    "hours": {
+      "regular": 2,
+      "overtime": 1,
+      "wage_rates": [
+        {
+          "label": "Imported",
+          "rate": 15,
+          "regular_hours": 2,
+          "overtime_hours": 1,
+          "holiday_hours": 1,
+          "pto_hours": 2,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "multiple rate buckets retain inactive earned work",
+    "expected": 125,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "First",
+          "rate": 10,
+          "regular_hours": 3,
+          "overtime_hours": 1,
+          "holiday_hours": 1,
+          "pto_hours": 1,
+          "active": true
+        },
+        {
+          "label": "Original second",
+          "rate": 20,
+          "regular_hours": 3,
+          "active": false
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "salary covered and uncovered overtime",
+    "expected": 2100,
+    "employee": {
+      "employment_type": "salary",
+      "pay_rate": 52000,
+      "pay_frequency": "biweekly",
+      "salary_type": "annual"
+    },
+    "item": {
+      "overtime_hours": 4,
+      "timekeeping_context_snapshot": {
+        "overtime_status": "nonexempt",
+        "salary_type": "annual",
+        "pay_frequency": "biweekly",
+        "salary_covers_weekly_hours": 40,
+        "salary_covered_overtime_hours": 2,
+        "salary_uncovered_overtime_hours": 2
+      }
+    },
+    "hours": {
+      "regular": 80,
+      "overtime": 4
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "contractor flat override excludes tips",
+    "expected": 725,
+    "employee": {
+      "employment_type": "contractor",
+      "pay_rate": 1000,
+      "pay_frequency": "biweekly",
+      "contractor_pay_type": "flat_fee"
+    },
+    "item": {
+      "salary_override": 725,
+      "reported_tips": 100
+    },
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "tips-only contractor excludes automatic fee",
+    "expected": 30,
+    "employee": {
+      "employment_type": "contractor",
+      "pay_rate": 1000,
+      "pay_frequency": "biweekly",
+      "contractor_pay_type": "flat_fee"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": false,
+      "includes_recurring_items": true,
+      "run_purpose": "off_cycle_tips"
+    },
+    "fields": [],
+    "bonus": 30
+  },
+  {
+    "name": "cents round once after component sum",
+    "expected": 0.05,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 0.05,
+      "pay_frequency": "biweekly"
+    },
+    "item": {
+      "holiday_hours": 0.5
+    },
+    "hours": {
+      "regular": 0.5,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "hidden automatic addition",
+    "expected": 145,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 8,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "fixed",
+        "amount": 25,
+        "editable": false,
+        "mode": "default",
+        "automatic": true
+      }
+    ]
+  },
+  {
+    "name": "disabled hidden automatic addition",
+    "expected": 120,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 8,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "fixed",
+        "amount": 25,
+        "editable": false,
+        "mode": "default",
+        "automatic": true
+      }
+    ]
+  },
+  {
+    "name": "inactive hidden imported field stays excluded",
+    "expected": 0,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 15,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0,
+      "overtime": 0
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": false,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 1,
+        "amountType": "fixed",
+        "currentAmount": 35,
+        "source": "import",
+        "editable": false,
+        "mode": "default",
+        "automatic": true,
+        "currentActive": false
+      }
+    ]
+  }
+]
