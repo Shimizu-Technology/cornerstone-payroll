@@ -217,4 +217,23 @@ RSpec.describe "PR376 independent review edges" do
     expect(q2[:lines][:line5a_ss_wages]).to eq(50)
     expect(q2[:lines][:line5b_ss_tips]).to eq(0)
   end
+  it "invalidates approval when the evidence used to recover a legacy base changes" do
+    legacy = calc(period("2024-01-19"), 1000)
+    legacy.update_columns(social_security_taxable_wages: nil, social_security_taxable_tips: nil)
+    pending = period("2024-02-02", status: "calculated")
+    calc(pending, 75)
+    service = PayPeriodLifecycleService.new(pay_period: pending, actor: actor)
+    service.approve!
+    legacy.update_columns(tax_rule_snapshot: legacy.tax_rule_snapshot.except("annual_fica_context"))
+    expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate/)
+    expect(pending.reload.status).to eq("approved")
+  end
+
+  it "holds malformed legacy fingerprint evidence with a reviewed reconciliation message" do
+    legacy = calc(period("2024-01-19"), 1000)
+    legacy.update_columns(social_security_taxable_wages: nil, social_security_taxable_tips: nil,
+      tax_rule_snapshot: { "annual_fica_context" => "unknown" })
+    expect { calc(period("2024-02-02", status: "draft"), 75) }
+      .to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /explicit reviewed annual reconciliation/)
+  end
 end
