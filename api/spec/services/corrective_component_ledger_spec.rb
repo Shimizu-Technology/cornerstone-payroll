@@ -164,7 +164,7 @@ RSpec.describe "Corrective component ledger" do
   it "renders signed negative tax/contribution/other-pay detail with opposite cash effects" do
     add_deduction(category: "pre_tax", sub_category: "retirement", reporting_group: "401k_pre_tax")
     original!(non_taxable_pay: 100)
-    correction = issue(hours_worked: 55, non_taxable_pay: 50, additional_withholding: 5)
+    correction = issue(hours_worked: 55, non_taxable_pay: 50, additional_withholding_override: 5)
     assert_cash(correction)
     generator = PayrollSummaryByEmployeePdfGenerator.new(correction.pay_period)
     expect(generator.send(:money, -5, negative: true)).to eq("$5.00")
@@ -272,12 +272,43 @@ RSpec.describe "Corrective component ledger" do
     expect(period.supplemental_pay_periods).to be_empty
   end
 
+
+  it "preserves signed regular, overtime, holiday and PTO earnings across a void" do
+    original = original!(overtime_hours: 5, holiday_hours: 3, pto_hours: 2)
+    first = issue(hours_worked: 65, overtime_hours: 7, holiday_hours: 4, pto_hours: 1)
+    second = issue(hours_worked: 55, overtime_hours: 1, holiday_hours: 1, pto_hours: 0)
+    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse all hour changes")
+    target = { hours_worked: 70, overtime_hours: 8, holiday_hours: 5, pto_hours: 4 }
+    repair = issue(target)
+    [ original, second, repair ].each { |item| assert_cash(item) }
+    target.each do |field, amount|
+      expect([ original, second, repair ].sum { |item| item.public_send(field).to_d }).to eq(amount)
+    end
+    expect(employee.ytd_totals_for(2024).reload.overtime_pay).to eq(180)
+  end
+
+  it "retains salary nonexempt overtime as signed earning deltas from the saved coverage" do
+    employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52000)
+    original = original!(employment_type: "salary", pay_rate: 52000, hours_worked: 0, overtime_hours: 5,
+      timekeeping_context_snapshot: { "overtime_status" => "nonexempt", "salary_covers_weekly_hours" => 40,
+        "salary_type" => "annual", "pay_frequency" => "biweekly", "salary_uncovered_overtime_hours" => 5 })
+    first = issue(pay_rate: 54600)
+    second = issue(pay_rate: 46800)
+    expect(first.overtime_pay).to eq(9.38)
+    expect(second.overtime_pay).to eq(-28.13)
+    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse salary overtime delta")
+    repair = issue(pay_rate: 54600)
+    expect { issue(overtime_hours: 8) }.to raise_error(IssueCorrectivePaycheckService::UnsupportedEmployeeError, /daily salary-coverage/)
+    [ original, second, repair ].each { |item| assert_cash(item) }
+    expect(employee.ytd_totals_for(2024).reload.overtime_pay).to eq(196.88)
+  end
+
   describe "negative full package", type: :request do
     it "renders the real endpoint with signed summary, deductions, retirement and paycheck history" do
       add_deduction(category: "pre_tax", sub_category: "retirement", reporting_group: "401k_pre_tax")
       add_deduction(category: "employer_contribution", sub_category: "benefit")
-      original!(non_taxable_pay: 100, additional_withholding: 10)
-      correction = issue(hours_worked: 55, non_taxable_pay: 50, additional_withholding: 5)
+      original!(non_taxable_pay: 100, additional_withholding_override: 10)
+      correction = issue(hours_worked: 55, non_taxable_pay: 50, additional_withholding_override: 5)
       allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id).and_return(company.id)
       allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(actor)
       post "/api/v1/admin/reports/full_print_package_pdf", params: { pay_period_id: correction.pay_period_id }
@@ -302,5 +333,4 @@ RSpec.describe "Corrective component ledger" do
       File.binwrite(Rails.root.join("tmp", "corrective-ledger-negative-summary.pdf"), PayrollSummaryByEmployeePdfGenerator.new(correction.pay_period).generate)
     end
   end
-
 end
