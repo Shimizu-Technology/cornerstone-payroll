@@ -11,19 +11,30 @@ const fields = [
   ['additional_medicare_threshold', 'Additional Medicare threshold', 'money'],
 ] as const;
 
-export function TaxYearVerification({ config, previous, onSaved }: {
-  config: TaxConfig; previous: TaxConfig | null; onSaved: () => Promise<void>;
+export function TaxYearVerification({ config, previous, onSaved, onReload }: {
+  config: TaxConfig; previous: TaxConfig | null; onSaved: () => Promise<void>; onReload?: () => Promise<void>;
 }) {
   const [sourceNote, setSourceNote] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [editingTables, setEditingTables] = useState(false);
+  const [needsReviewRefresh, setNeedsReviewRefresh] = useState(false);
   const format = (value: number, kind: string) => kind === 'percent'
     ? `${(value * 100).toFixed(2)}%` : value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
   const act = async (action: () => Promise<unknown>) => {
     setSaving(true); setError('');
     try { await action(); setSourceNote(''); setEditingTables(false); await onSaved(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save. Try again.'); }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not save. Try again.';
+      setError(message);
+      if (message.includes('changed after')) setNeedsReviewRefresh(true);
+    }
+    finally { setSaving(false); }
+  };
+  const reloadReview = async () => {
+    setSaving(true);
+    try { await (onReload ?? onSaved)(); setNeedsReviewRefresh(false); setError(''); setEditingTables(false); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not reload. Try again.'); }
     finally { setSaving(false); }
   };
   return <section aria-label="Tax year verification" className="mb-6 space-y-4 rounded-lg border border-neutral-200 p-4">
@@ -64,12 +75,13 @@ export function TaxYearVerification({ config, previous, onSaved }: {
     {editingTables && <TaxWithholdingEditor config={config} saving={saving}
       onSave={tables => void act(() => taxConfigsApi.replaceWithholding(config.id, tables))}
       onCancel={() => setEditingTables(false)} />}
-    {config.verification_status !== 'verified' && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(() => taxConfigsApi.verify(config.id, sourceNote)); }}>
+    {config.verification_status !== 'verified' && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(() => taxConfigsApi.verify(config.id, sourceNote, config.review_digest ?? '')); }}>
       <label htmlFor="tax-source-note" className="block text-sm font-medium">Verification source note (required)</label>
       <p className="text-sm">Record the year, publication URLs and what you checked, including all withholding schedules. Verification authorizes live payroll for this year. Recalculate existing drafts after verification, before approval.</p>
       <textarea id="tax-source-note" required value={sourceNote} onChange={event => setSourceNote(event.target.value)} className="w-full rounded border border-neutral-300 p-2 text-base" rows={3} />
-      <Button type="submit" disabled={saving || !sourceNote.trim()}>{saving ? 'Saving…' : `Verify ${config.tax_year} tax tables`}</Button>
+      <Button type="submit" disabled={saving || needsReviewRefresh || !config.review_digest || !sourceNote.trim()}>{saving ? 'Saving…' : `Verify ${config.tax_year} tax tables`}</Button>
     </form>}
     {error && <p role="alert" className="text-danger-700">{error}</p>}
+    {needsReviewRefresh && <Button variant="outline" disabled={saving} onClick={() => void reloadReview()}>Reload values for review</Button>}
   </section>;
 }

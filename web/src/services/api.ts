@@ -975,6 +975,7 @@ export interface TaxConfig {
   verified_by: string | null;
   verified_at: string | null;
   source_references: string | null;
+  review_digest?: string | null;
 }
 
 export interface TaxConfigAuditLog {
@@ -1005,8 +1006,8 @@ export const taxConfigsApi = {
     api.get<{ audit_logs: TaxConfigAuditLog[] }>(`/admin/tax_configs/${id}/audit_logs`),
   create: (data: { tax_year: number; copy_from_year?: number | null }) =>
     api.post<{ tax_config: TaxConfig; message: string }>('/admin/tax_configs', data),
-  verify: (id: number, source_note: string) =>
-    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/verify`, { source_note }),
+  verify: (id: number, source_note: string, reviewed_digest: string) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/verify`, { source_note, reviewed_digest }),
   replaceWithholding: (id: number, filing_statuses: unknown) =>
     api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/replace_withholding`, { filing_statuses }),
   activate: (id: number) =>

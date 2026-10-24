@@ -54,13 +54,15 @@ module Api
         # POST /api/v1/admin/tax_configs/:id/verify
         def verify
           @config.with_lock do
-            @config.verify!(actor: current_user, source_note: params[:source_note])
+            @config.verify!(actor: current_user, source_note: params[:source_note], reviewed_digest: params[:reviewed_digest])
             TaxConfigAuditLog.log_updated(
               @config, field_name: "verification_status", old_value: "draft", new_value: "verified: #{params[:source_note]}",
               user_id: current_user_id, ip_address: request.remote_ip
             )
           end
           render json: { tax_config: serialize_config(@config, include_brackets: true), message: "#{@config.tax_year} tax tables verified" }
+        rescue AnnualTaxConfig::StaleReviewError => e
+          render json: { error: e.message, code: "tax_configuration_changed" }, status: :conflict
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
@@ -239,6 +241,14 @@ module Api
         end
 
         def serialize_config(config, include_brackets: false)
+          return serialize_config_values(config, include_brackets: false) unless include_brackets
+
+          # All rule writers lock the year. Return the displayed values and their
+          # review token from the same shared-lock snapshot.
+          config.with_lock("FOR SHARE") { serialize_config_values(config, include_brackets: true) }
+        end
+
+        def serialize_config_values(config, include_brackets:)
           {
             id: config.id,
             tax_year: config.tax_year,
@@ -252,6 +262,7 @@ module Api
             verified_by: config.verified_by,
             verified_at: config.verified_at,
             source_references: config.source_references,
+            review_digest: include_brackets ? config.review_digest : nil,
             created_at: config.created_at,
             updated_at: config.updated_at,
             filing_statuses: config.filing_status_configs.map { |fsc| serialize_filing_status(fsc, include_brackets: include_brackets) }

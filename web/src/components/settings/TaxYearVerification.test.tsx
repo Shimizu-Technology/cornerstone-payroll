@@ -13,7 +13,7 @@ vi.mock('@/services/api', () => ({
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const config: TaxConfig = {
   id: 7, tax_year: 2027, verification_status: 'draft', verified_by: null, verified_at: null,
-  source_references: 'FICA only; withholding held', ss_wage_base: 192300, ss_rate: 0.062,
+  review_digest: 'review-digest', source_references: 'FICA only; withholding held', ss_wage_base: 192300, ss_rate: 0.062,
   medicare_rate: 0.0145, additional_medicare_rate: 0.009, additional_medicare_threshold: 200000,
   is_active: false, created_at: '2026-10-24', updated_at: '2026-10-24', filing_statuses: [],
 };
@@ -33,8 +33,26 @@ describe('tax year operator guidance', () => {
     fireEvent.change(screen.getByLabelText('Verification source note (required)'), { target: { value: 'SSA synthetic review source' } });
     fireEvent.click(screen.getByRole('button', { name: 'Verify 2027 tax tables' }));
     await screen.findByRole('alert');
-    expect(mocks.verify).toHaveBeenCalledWith(7, 'SSA synthetic review source');
+    expect(mocks.verify).toHaveBeenCalledWith(7, 'SSA synthetic review source', 'review-digest');
     expect((screen.getByLabelText('Verification source note (required)') as HTMLTextAreaElement).value).toBe('SSA synthetic review source');
+  });
+
+  it('requires renewed review after a concurrent edit and preserves the source note while reloading', async () => {
+    mocks.verify.mockRejectedValueOnce(new Error('These tax tables changed after you opened the review. Reload them and review the current values before verifying.'));
+    const onReload = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<TaxYearVerification config={config} previous={null} onSaved={vi.fn()} onReload={onReload} />);
+    fireEvent.change(screen.getByLabelText('Verification source note (required)'), { target: { value: 'Review source retained' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verify 2027 tax tables' }));
+    await screen.findByRole('alert');
+    expect((screen.getByRole('button', { name: 'Verify 2027 tax tables' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reload values for review' }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+    rerender(<TaxYearVerification config={{ ...config, review_digest: 'fresh-review', ss_rate: 0.07 }} previous={null} onSaved={vi.fn()} onReload={onReload} />);
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect((screen.getByLabelText('Verification source note (required)') as HTMLTextAreaElement).value).toBe('Review source retained');
+    mocks.verify.mockResolvedValueOnce({});
+    fireEvent.click(screen.getByRole('button', { name: 'Verify 2027 tax tables' }));
+    await waitFor(() => expect(mocks.verify).toHaveBeenLastCalledWith(7, 'Review source retained', 'fresh-review'));
   });
 
   it('warns for a selected January pay date even before the calendar lookahead begins', async () => {

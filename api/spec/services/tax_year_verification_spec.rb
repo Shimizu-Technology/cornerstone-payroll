@@ -36,7 +36,7 @@ RSpec.describe "Tax-year verification" do
     config = complete_config(2027)
     config.update!(ss_wage_base: 192_300)
     admin = create(:user, role: "admin")
-    config.verify!(actor: admin, source_note: "Synthetic fixture: SSA https://www.ssa.gov/oact/COLA/cbb.html")
+    config.verify!(actor: admin, source_note: "Synthetic fixture: SSA https://www.ssa.gov/oact/COLA/cbb.html", reviewed_digest: config.review_digest)
 
     expect(config.verified_by).to eq(admin.id.to_s)
     expect(config.verified_at).to be_present
@@ -52,7 +52,7 @@ RSpec.describe "Tax-year verification" do
 
   it "preserves inactive historical snapshot replay after current rules become draft" do
     config = complete_config(2026)
-    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic historical rules")
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic historical rules", reviewed_digest: config.review_digest)
     original = calculator(2026)
     snapshot = original.rule_snapshot
     expected = original.calculate(gross_pay: 2000)
@@ -64,7 +64,7 @@ RSpec.describe "Tax-year verification" do
 
   it "invalidates verification when a rate or bracket changes" do
     config = complete_config(2027)
-    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic review")
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic review", reviewed_digest: config.review_digest)
     config.tax_brackets.first.update!(rate: 0.22)
     expect(config.reload).not_to be_verified
   end
@@ -107,7 +107,7 @@ RSpec.describe "Tax-year verification" do
 
   it "checks verification again when a live calculator was initialized before an edit" do
     config = complete_config(2027)
-    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic review")
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic review", reviewed_digest: config.review_digest)
     live = calculator(2027)
     config.update!(ss_wage_base: 192_300)
     expect { live.calculate(gross_pay: 1000) }.to raise_error(ArgumentError, /2027 tax tables have not been verified/)
@@ -127,7 +127,7 @@ RSpec.describe "Tax-year verification" do
       item = create(:payroll_item, employee: employee, pay_period: period, hours_worked: 40,
         tax_rule_snapshot: { "engine" => "annual_tax_config_v2", "tax_year" => 2027 })
       admin = create(:user, role: "admin")
-      config.verify!(actor: admin, source_note: "Synthetic January review")
+      config.verify!(actor: admin, source_note: "Synthetic January review", reviewed_digest: config.review_digest)
       expect { period.update!(status: "approved") }.to raise_error(ActiveRecord::RecordInvalid, /Recalculate payroll/)
 
       PayrollCalculator.for(employee, item).calculate
@@ -137,7 +137,7 @@ RSpec.describe "Tax-year verification" do
       expect(item.tax_rule_snapshot["tax_year_verification_at"]).to eq(config.verified_at.utc.iso8601(6))
 
       config.update!(ss_wage_base: 192_400)
-      config.verify!(actor: admin, source_note: "Synthetic revised review")
+      config.verify!(actor: admin, source_note: "Synthetic revised review", reviewed_digest: config.review_digest)
       expect { period.update!(status: "committed") }.to raise_error(ActiveRecord::RecordInvalid, /Recalculate payroll/)
       expect(period.reload.status).to eq("approved")
     end
@@ -145,7 +145,7 @@ RSpec.describe "Tax-year verification" do
 
   it "records the same verification version for a contractor-only future run" do
     config = complete_config(2027)
-    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic January review")
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic January review", reviewed_digest: config.review_digest)
     period = create(:pay_period, :calculated, start_date: Date.new(2027, 1, 1), end_date: Date.new(2027, 1, 14), pay_date: Date.new(2027, 1, 15))
     employee = create(:employee, :contractor, company: period.company)
     item = create(:payroll_item, employee: employee, pay_period: period)
