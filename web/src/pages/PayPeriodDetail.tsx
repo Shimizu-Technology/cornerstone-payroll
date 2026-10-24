@@ -1,3 +1,4 @@
+import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
@@ -375,6 +376,7 @@ export function PayPeriodDetail({
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
+  const [estimateOnlyAssignments, setEstimateOnlyAssignments] = useState<NonNullable<PayPeriodPayrollFieldInputs['estimate_only_assignments']>>([]);
   const [payrollFieldAssignments, setPayrollFieldAssignments] = useState<PayPeriodPayrollFieldAssignment[]>([]);
   const [retainedRetirementEntries, setRetainedRetirementEntries] = useState<NonNullable<PayPeriodPayrollFieldInputs['retained_manual_entries']>>([]);
   const [payrollFieldDrafts, setPayrollFieldDrafts] = useState<Record<string, PayrollFieldDraftEntry>>({});
@@ -503,6 +505,7 @@ export function PayPeriodDetail({
     }, {}));
     setPayrollFields(worksheet.fields);
     setPayrollFieldAssignments(worksheet.assignments);
+    setEstimateOnlyAssignments(worksheet.estimate_only_assignments || []);
     setRetainedRetirementEntries(worksheet.retained_manual_entries || []);
     setShowPayrollFields(worksheet.assignments.length > 0);
     setPayrollFieldDrafts(Object.fromEntries(worksheet.assignments.map((assignment) => {
@@ -1505,34 +1508,32 @@ export function PayPeriodDetail({
       && !hasStagedNamedRepayment
       && !(mode === 'override' && requestedAmount != null && toNumber(requestedAmount) === 0);
   });
-  const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
-    payrollFields.reduce((total, field) => {
-      if (field.tax_treatment !== 'taxable_addition') return total;
-
-      const key = `${employeeId}:${field.id}`;
-      const assignment = payrollFieldAssignmentLookup.get(key);
-      if (!assignment || !assignment.editable) return total;
-
-      const draft = payrollFieldDrafts[key];
-      if (draft?.mode === 'override') return total + Math.max(0, toNumber(draft.amount));
-      if (payPeriod.includes_recurring_items === false) return total;
-
-      if (assignment.amount_type === 'percentage') {
-        const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
-        return total + (grossBeforeFields * percentage / 100);
-      }
-
-      return total + Math.max(0, toNumber(assignment.assigned_amount ?? assignment.default_amount));
-    }, 0)
-  );
-
-  const recurringTaxableAdditions = (employee: Employee) => (
-    payPeriod.includes_recurring_items === false ? 0 :
-    (employee.default_custom_earnings || []).reduce((total, earning) => total + toNumber(earning.amount), 0)
-    + (employee.default_payroll_adjustments || []).reduce((total, adjustment) => (
-      adjustment.active !== false && adjustment.treatment === 'taxable_addition' ? total + toNumber(adjustment.amount) : total
-    ), 0)
-  );
+  const estimateWorksheetGross = (employee: Employee): number | null => {
+    const item = payrollItemByEmployeeId.get(employee.id);
+    if ((isCalculated || worksheetPayBasisHold(item, employee)) && item) return toNumber(item.gross_pay);
+    const key = String(employee.id);
+    return estimateDraftGross({
+      employee, item, period: payPeriod, hours: hoursMap[key],
+      salaryOverride: salaryOverrideMap[key], bonus: bonusMap[key],
+      reportedTips: tipsMap[key]?.amount, tipsPaidOut: tipsPaidOutMap[key],
+      fields: [...payrollFields.flatMap(field => {
+        const assignment = payrollFieldAssignmentLookup.get(`${employee.id}:${field.id}`);
+        if (!assignment) return [];
+        const draft = payrollFieldDrafts[`${employee.id}:${field.id}`];
+        return [{ id: field.id, taxTreatment: field.tax_treatment, amountType: assignment.amount_type,
+          editable: assignment.editable, mode: draft?.mode ?? 'default', source: assignment.current_source,
+          currentAmount: assignment.current_amount,
+          amount: draft?.mode === 'override' ? draft.amount : assignment.assigned_amount ?? assignment.default_amount,
+          percentage: assignment.assigned_percentage ?? assignment.default_percentage }];
+      }), ...estimateOnlyAssignments.filter(assignment => assignment.employee_id === employee.id).map(assignment => ({
+        id: assignment.payroll_field_definition_id, taxTreatment: assignment.tax_treatment,
+        amountType: assignment.amount_type, editable: false, automatic: true, mode: 'default' as const,
+        source: assignment.current_source, currentAmount: assignment.current_amount, currentActive: assignment.current_active,
+        amount: assignment.assigned_amount ?? assignment.default_amount,
+        percentage: assignment.assigned_percentage ?? assignment.default_percentage,
+      }))],
+    });
+  };
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
@@ -1909,49 +1910,10 @@ export function PayPeriodDetail({
             }
 
             if (hoursSortBy === 'gross') {
-              const estimateGross = (employee: Employee) => {
-                const calculatedItem = payrollItemByEmployeeId.get(employee.id);
-                if ((isCalculated || worksheetPayBasisHold(calculatedItem, employee)) && calculatedItem) return toNumber(calculatedItem.gross_pay);
-
-                const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
-                const rate = toNumber(calculatedItem?.timekeeping_source === 'correction_reference' ? calculatedItem.pay_rate : employee.pay_rate);
-                const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
-                const isFlatContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type !== 'hourly';
-                const activeRates = (entry.wage_rates || []).filter((row) => row.active !== false);
-                const usesMultipleRates = (employee.employment_type === 'hourly' || isHourlyContractor) && activeRates.length > 1;
-                const variableSalary = employee.employment_type === 'salary' && employee.salary_type === 'variable';
-                const perPeriodSalary = employee.employment_type === 'salary' && employee.salary_type === 'per_period';
-                const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[employee.pay_frequency] || 26;
-                const override = salaryOverrideMap[String(employee.id)] || 0;
-
-                const excludesAutomaticContractorFee = payPeriod.run_purpose === 'off_cycle_tips' && isFlatContractor;
-                const baseGross = employee.employment_type === 'salary' && !payPeriod.includes_base_salary
-                  ? 0
-                  : excludesAutomaticContractorFee
-                  ? 0
-                  : variableSalary
-                  ? override
-                  : perPeriodSalary
-                  ? rate
-                  : employee.employment_type === 'salary'
-                  ? rate / periodsPerYear
-                  : isFlatContractor
-                  ? rate
-                  : usesMultipleRates
-                  ? activeRates.reduce(
-                      (sum, row) => sum + (toNumber(row.regular_hours) * toNumber(row.rate)) + (toNumber(row.overtime_hours) * toNumber(row.rate) * 1.5),
-                      0
-                    )
-                  : (toNumber(entry.regular) * rate) + (toNumber(entry.overtime) * rate * 1.5);
-                const tipGross = employee.employment_type === 'contractor'
-                  ? 0
-                  : Math.max(toNumber(tipsMap[String(employee.id)]?.amount), toNumber(tipsPaidOutMap[String(employee.id)]));
-
-                const grossBeforeFields = baseGross + tipGross + toNumber(bonusMap[String(employee.id)]) + recurringTaxableAdditions(employee);
-                return grossBeforeFields + estimatedTaxablePayrollFieldAdditions(employee.id, grossBeforeFields);
-              };
-
-              return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection) || nameTieBreak();
+              const left = estimateWorksheetGross(a);
+              const right = estimateWorksheetGross(b);
+              if (left == null || right == null) return Number(left == null) - Number(right == null) || nameTieBreak();
+              return compareDirectional(left, right, hoursSortDirection) || nameTieBreak();
             }
 
             return compareDirectional(
@@ -2712,6 +2674,7 @@ export function PayPeriodDetail({
                     <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-600">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
+                  <p className="text-sm font-semibold tabular-nums text-neutral-950">{isCalculated || correctionHold ? 'Saved gross' : 'Estimated gross'}: {estimateWorksheetGross(emp) == null ? 'Unavailable — review pay setup' : formatCurrency(estimateWorksheetGross(emp)!)}</p>
                   {correctionHold && <div role="note" className="rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-warning-950"><p className="font-semibold">Retained saved gross {formatCurrency(toNumber(savedItem?.gross_pay))}</p><p className="mt-1">{correctionHold.reason}</p></div>}
                   {!hasMultiRate && activeRates.map(({ rate, index }) => capturedSourceContext(rate) && <p key={rate.source_bucket_key || index} className="text-xs text-neutral-600">{capturedSourceContext(rate)}</p>)}
                   {sourceHoursLocked && <p className="text-xs text-neutral-600">Imported work is read-only. Use Source review and the correction workflow to change work.</p>}
@@ -2762,7 +2725,7 @@ export function PayPeriodDetail({
                         }`}
                       >
                         <span className="block text-xs font-semibold leading-tight">{field.name}</span>
-                        <span className="mt-1 block text-xs font-normal opacity-70">
+                        <span className="mt-1 block text-xs font-normal text-neutral-700">
                           {field.amount_type === 'percentage' ? 'Automatic %' : field.amount_type}
                         </span>
                       </TableHead>
@@ -2791,35 +2754,10 @@ export function PayPeriodDetail({
                       const isPerPeriodSalary = emp.employment_type === 'salary' && emp.salary_type === 'per_period';
                       const noHoursType = emp.employment_type === 'salary' || isContractorFlat;
                       const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
-                      const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                       const rowTone = rowIndex % 2 === 0 ? 'bg-white' : 'bg-neutral-100';
-                      const excludesAutomaticContractorFee = payPeriod.run_purpose === 'off_cycle_tips' && isContractorFlat;
-                      const baseEstGross = emp.employment_type === 'salary' && !payPeriod.includes_base_salary
-                        ? 0
-                        : excludesAutomaticContractorFee
-                        ? 0
-                        : isVariableSalary
-                        ? salaryOverride
-                        : isPerPeriodSalary
-                        ? payRate
-                        : emp.employment_type === 'salary'
-                        ? payRate / periodsPerYear
-                        : isContractorFlat
-                        ? payRate
-                        : hasMultiRate
-                        ? activeWageRates.reduce(
-                            (sum, { rate }) => sum + (toNumber(rate.regular_hours) * toNumber(rate.rate)) + (toNumber(rate.overtime_hours) * toNumber(rate.rate) * 1.5),
-                            0
-                          )
-                        : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
-                      const reportedTipGross = emp.employment_type === 'contractor'
-                        ? 0
-                        : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
-                      const grossBeforeFields = baseEstGross + reportedTipGross + toNumber(bonusMap[String(emp.id)]) + recurringTaxableAdditions(emp);
-                      const calculatedItem = payrollItemByEmployeeId.get(emp.id);
-                      const estGross = (isCalculated || correctionHold) && calculatedItem
-                        ? toNumber(calculatedItem.gross_pay)
-                        : grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
+                      const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
+                      const calculatedItem = savedItem;
+                      const estGross = estimateWorksheetGross(emp);
                       return (
                       <Fragment key={emp.id}>
                       {showDivider && (() => {
@@ -3130,9 +3068,9 @@ export function PayPeriodDetail({
                           );
                         })}
                         <TableCell className={`text-right font-medium text-neutral-700 ${rowTone}`}>
-                          {formatCurrency(estGross)}
+                          {estGross == null ? 'Estimate unavailable' : formatCurrency(estGross)}
                           <p className="mt-1 text-xs font-normal text-neutral-600">
-                            {correctionHold ? 'Retained saved gross · pay setup review required' : isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · final gross calculated on save'}
+                            {correctionHold ? 'Retained saved gross · pay setup review required' : isCalculated ? 'Last calculated gross · recalculate after edits' : 'Estimate · confirmed when payroll is calculated'}
                           </p>
                         </TableCell>
                       </TableRow>

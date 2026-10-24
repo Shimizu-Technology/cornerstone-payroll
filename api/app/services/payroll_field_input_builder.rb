@@ -14,11 +14,15 @@ class PayrollFieldInputBuilder
       .where(employees: { company_id: company_id, status: "active" })
       .where(payroll_field_definitions: {
         company_id: company_id,
-        active: true,
-        show_in_payroll_grid: true
+        active: true
       })
       .includes(:employee, :payroll_field_definition)
       .to_a
+    estimate_assignments = assignments.select do |assignment|
+      field = assignment.payroll_field_definition
+      !field.show_in_payroll_grid? && field.tax_treatment == "taxable_addition"
+    end
+    assignments = assignments.select { |assignment| assignment.payroll_field_definition.show_in_payroll_grid? }
 
     saved_field_ids = PayrollItemFieldEntry
       .active
@@ -36,7 +40,7 @@ class PayrollFieldInputBuilder
       .joins(:payroll_item)
       .includes(:payroll_item)
       .where(payroll_items: { pay_period_id: pay_period.id, company_id: company_id })
-      .where(payroll_field_definition_id: fields.map(&:id))
+      .where(payroll_field_definition_id: fields.map(&:id) | estimate_assignments.map(&:payroll_field_definition_id))
       .index_by { |entry| [ entry.payroll_item.employee_id, entry.payroll_field_definition_id ] }
     {
       fields: fields.map { |field| field_payload(field) },
@@ -44,6 +48,11 @@ class PayrollFieldInputBuilder
         assignment_payload(
           assignment,
           entries[[ assignment.employee_id, assignment.payroll_field_definition_id ]]
+        )
+      end,
+      estimate_only_assignments: estimate_assignments.map do |assignment|
+        assignment_payload(assignment, entries[[ assignment.employee_id, assignment.payroll_field_definition_id ]]).merge(
+          tax_treatment: "taxable_addition", editable: false
         )
       end,
       retained_manual_entries: retained_manual_entries
@@ -122,6 +131,7 @@ class PayrollFieldInputBuilder
       current_amount: decimal(entry&.amount),
       requested_amount: decimal(entry&.active? ? PayrollFieldRequestIntent.requested_amount(entry) : nil),
       current_source: entry&.source,
+      current_active: entry&.active?,
       overridden: entry&.source.in?(%w[manual import]),
       editable: true,
       skipped_reason: nil
