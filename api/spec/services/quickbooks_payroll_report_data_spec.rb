@@ -140,6 +140,10 @@ RSpec.describe QuickbooksPayrollReportData do
       reporting_group: field.reporting_group
     )
 
+    mirror_entry = payroll_item.payroll_item_field_entries.sole
+    PayrollComponentMirrors.record!(mirror_entry, payroll_item.payroll_item_deductions.sole)
+    mirror_entry.save!
+
     data = described_class.new(pay_period)
     entry = data.aggregate_deduction_contribution_rows.find { |candidate| candidate.reporting_group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }
     retirement_row = data.retirement_rows.find { |candidate| candidate.group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }

@@ -82,14 +82,14 @@ class QuickbooksPayrollReportData
       hours = earnings.sum { |earning| earning.hours.to_f }
       next if amount.zero? && hours.zero?
 
-      lines << Line.new(label: label, amount: amount, hours: hours.positive? ? hours : nil,
+      lines << Line.new(label: label, amount: amount, hours: hours.nonzero? ? hours : nil,
         source: earnings.all? { |earning| earning.category == "bonus" } ? "one_time" : "saved_earning")
     end
     categories = remaining.map(&:category)
-    if item.bonus.to_f.positive? && !categories.include?("bonus")
+    if item.bonus.to_f.nonzero? && !categories.include?("bonus")
       lines << Line.new(label: "Bonus", amount: item.bonus.to_f, source: "one_time")
     end
-    if item.reported_tips.to_f.positive? && !categories.include?("tips")
+    if item.reported_tips.to_f.nonzero? && !categories.include?("tips")
       lines << Line.new(label: "Paycheck Tips", amount: item.reported_tips.to_f)
     end
     lines + flexible
@@ -97,7 +97,7 @@ class QuickbooksPayrollReportData
 
   def other_pay_lines_for(item)
     flexible = flexible_addition_lines(item, "non_taxable_addition")
-    if item.non_taxable_pay.to_f.positive?
+    if item.non_taxable_pay.to_f.nonzero?
       flexible << Line.new(label: "Non-Taxable Pay", amount: item.non_taxable_pay.to_f, source: "manual")
     end
     remaining = item.payroll_item_earnings.select { |earning| earning.category == "non_taxable" }
@@ -109,13 +109,13 @@ class QuickbooksPayrollReportData
 
   def pre_tax_retirement_deduction_lines_for(item)
     deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.employee_amount.to_f.positive? && entry.bucket == "pre_tax" }
+      .select { |entry| entry.employee_amount.to_f.nonzero? && entry.bucket == "pre_tax" }
       .map { |entry| Line.new(label: entry.description, amount: entry.employee_amount.to_f) }
   end
 
   def after_tax_deduction_lines_for(item)
     deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.employee_amount.to_f.positive? && entry.bucket == "post_tax" }
+      .select { |entry| entry.employee_amount.to_f.nonzero? && entry.bucket == "post_tax" }
       .map { |entry| Line.new(label: entry.description, amount: entry.employee_amount.to_f) }
   end
 
@@ -125,12 +125,12 @@ class QuickbooksPayrollReportData
       Line.new(label: "Social Security", amount: item.social_security_tax.to_f),
       Line.new(label: "Medicare", amount: item.medicare_tax.to_f),
       Line.new(label: "Additional Withholding", amount: item.additional_withholding.to_f)
-    ].select { |line| line.amount.to_f.positive? }
+    ].select { |line| line.amount.to_f.nonzero? }
   end
 
   def employer_contribution_lines_for(item)
     entries = deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.company_amount.to_f.positive? }
+      .select { |entry| entry.company_amount.to_f.nonzero? }
       .map { |entry| Line.new(label: entry.description, amount: entry.company_amount.to_f) }
 
     entries
@@ -181,7 +181,7 @@ class QuickbooksPayrollReportData
       Line.new(
         label: label,
         amount: grouped.sum { |line| line.amount.to_f },
-        hours: grouped.sum { |line| line.hours.to_f }.then { |hours| hours.positive? ? hours : nil }
+        hours: grouped.sum { |line| line.hours.to_f }.then { |hours| hours.nonzero? ? hours : nil }
       )
     end.sort_by(&:label)
   end
@@ -214,7 +214,7 @@ class QuickbooksPayrollReportData
 
   def retirement_rows
     deduction_contribution_entries
-      .select { |entry| entry.reporting_group.present? && (entry.employee_amount.to_f.positive? || entry.company_amount.to_f.positive?) }
+      .select { |entry| entry.reporting_group.present? && (entry.employee_amount.to_f.nonzero? || entry.company_amount.to_f.nonzero?) }
       .group_by { |entry| [ entry.reporting_group, entry.employee_name ] }
       .map do |(group, employee_name), grouped|
         RetirementRow.new(
@@ -277,13 +277,13 @@ class QuickbooksPayrollReportData
     lines = []
     if treatment == "taxable_addition"
       Array(item.custom_earnings).each do |entry|
-        next unless entry["amount"].to_f.positive?
+        next unless entry["amount"].to_f.nonzero?
 
         lines << Line.new(label: entry["label"].presence || "Other Earning", amount: entry["amount"].to_f, source: "manual")
       end
     end
     payroll_field_entries_for(item, treatment).each do |entry|
-      next unless entry.amount.to_f.positive?
+      next unless entry.amount.to_f.nonzero?
 
       lines << Line.new(label: entry.label, amount: entry.amount.to_f, source: entry.source)
     end
@@ -303,7 +303,7 @@ class QuickbooksPayrollReportData
 
     item.payroll_item_deductions.each do |deduction|
       next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
-      next if payroll_field_mirrored_deduction?(deduction, field_entries_by_treatment[deduction.category] || [])
+      next if PayrollComponentMirrors.field_for(item, deduction)
 
       group = reporting_group_for_deduction(deduction)
       description = group ? PayrollReportingGroups.label(group) : deduction.label
@@ -323,7 +323,7 @@ class QuickbooksPayrollReportData
     end
 
     field_entries_by_treatment.values.flatten.each do |entry|
-      next unless entry.amount.to_f.positive?
+      next unless entry.amount.to_f.nonzero?
 
       group = reporting_group_for_field_entry(entry)
       description = group ? PayrollReportingGroups.label(group) : entry.label
@@ -368,7 +368,7 @@ class QuickbooksPayrollReportData
 
   def legacy_retirement_entries(item)
     entries = []
-    if item.retirement_payment.to_f.positive?
+    if item.retirement_payment.to_f.nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -382,7 +382,7 @@ class QuickbooksPayrollReportData
       )
     end
 
-    if item.roth_retirement_payment.to_f.positive?
+    if item.roth_retirement_payment.to_f.nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -396,7 +396,7 @@ class QuickbooksPayrollReportData
       )
     end
 
-    if item.employer_retirement_match.to_f.positive?
+    if item.employer_retirement_match.to_f.nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -410,7 +410,7 @@ class QuickbooksPayrollReportData
       )
     end
 
-    if item.employer_roth_retirement_match.to_f.positive?
+    if item.employer_roth_retirement_match.to_f.nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -430,7 +430,7 @@ class QuickbooksPayrollReportData
   def legacy_special_deduction_entries(item)
     entries = []
 
-    if visible_legacy_loan_payment(item).positive?
+    if visible_legacy_loan_payment(item).nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -443,7 +443,7 @@ class QuickbooksPayrollReportData
       )
     end
 
-    if visible_legacy_insurance_payment(item).positive?
+    if visible_legacy_insurance_payment(item).nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -456,7 +456,7 @@ class QuickbooksPayrollReportData
       )
     end
 
-    if item.tips_paid_out.to_f.positive?
+    if item.tips_paid_out.to_f.nonzero?
       entries << DeductionContributionEntry.new(
         item: item,
         employee_name: qb_employee_name(item.employee),
@@ -475,7 +475,7 @@ class QuickbooksPayrollReportData
   def custom_deduction_entries(item)
     Array(item.custom_deductions).filter_map do |deduction|
       amount = deduction["amount"].to_f
-      next unless amount.positive?
+      next unless amount.nonzero?
 
       DeductionContributionEntry.new(
         item: item,
@@ -496,7 +496,7 @@ class QuickbooksPayrollReportData
 
   def payroll_adjustments_for(item, *treatments)
     item.active_payroll_adjustments.select do |adjustment|
-      treatments.include?(adjustment["treatment"]) && adjustment["amount"].to_f.positive?
+      treatments.include?(adjustment["treatment"]) && adjustment["amount"].to_f.nonzero?
     end
   end
 
@@ -514,26 +514,6 @@ class QuickbooksPayrollReportData
       "Payroll adjustment (legacy snapshot)"
     end
   end
-
-  def payroll_field_mirrored_deduction?(deduction, field_entries)
-    return false if field_entries.empty?
-
-    deduction_type_name = deduction.deduction_type&.name.to_s
-    if deduction_type_name.match?(/Payroll Field/i)
-      return field_entries.any? { |entry| entry.label == deduction.label }
-    end
-
-    return false unless deduction.employer_contribution?
-
-    field_entries.any? { |entry| payroll_field_employer_contribution_matches_deduction?(entry, deduction) }
-  end
-
-  def payroll_field_employer_contribution_matches_deduction?(entry, deduction)
-    entry.label.to_s == deduction.label.to_s &&
-      entry.amount.to_f.round(2) == deduction.amount.to_f.round(2) &&
-      PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
-  end
-
 
   def reporting_group_for_deduction(deduction)
     PayrollReportingGroups.infer_retirement_group(
@@ -554,7 +534,7 @@ class QuickbooksPayrollReportData
   end
 
   def visible_legacy_loan_payment(item)
-    return item.loan_deduction.to_d if item.loan_deduction.to_d.positive?
+    return item.loan_deduction.to_d if item.loan_deduction.to_d.nonzero?
     return 0.to_d if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.loan? }
 
     item.loan_payment.to_d

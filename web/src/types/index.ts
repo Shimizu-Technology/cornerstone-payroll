@@ -1677,6 +1677,20 @@ export interface CorrectivePaycheckPreview {
     employee_id: number;
     employee_name: string;
     active_corrective_count?: number;
+    legacy_unposted_employer_component?: Array<{
+      payroll_item_id: number;
+      component_key: string;
+      label: string;
+      amount: string;
+      reason: string;
+      source_posting_ids: number[];
+    }>;
+    legacy_employer_posting_compatibility?: Array<{
+      payroll_item_id: number;
+      source_posting_ids: number[];
+      evidence_digest: string;
+      legacy_insurance_classification: string;
+    }>;
     review_digest?: string;
     will_generate_check: boolean;
     is_zero_change: boolean;

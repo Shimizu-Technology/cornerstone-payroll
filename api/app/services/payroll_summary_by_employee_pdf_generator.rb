@@ -200,7 +200,7 @@ class PayrollSummaryByEmployeePdfGenerator
   end
 
   def aggregate_hours_lines
-    aggregate_earnings_lines.select { |line| line.hours.to_f.positive? }.map do |line|
+    aggregate_earnings_lines.select { |line| line.hours.to_f.nonzero? }.map do |line|
       QuickbooksPayrollReportData::Line.new(label: line.label, hours: line.hours)
     end
   end
@@ -227,7 +227,8 @@ class PayrollSummaryByEmployeePdfGenerator
     val = value.to_f
     return "$0.00" if val.zero?
 
-    prefix = negative || val.negative? ? "-" : ""
+    val = -val if negative
+    prefix = val.negative? ? "-" : ""
     "#{prefix}$#{format('%.2f', val.abs)}"
   end
 

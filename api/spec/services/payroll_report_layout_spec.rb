@@ -92,7 +92,7 @@ RSpec.describe "Payroll report layout regressions" do
       content = text(PaycheckHistoryPdfGenerator.new(period).generate)
       expect(content).to include("Pay date: 10/15/2026", "Work period: 09/16/2026 - 09/30/2026", "Taxes (included)")
       expect(content).to include("Total deductions", "includes taxes", "$512.84", "$3483.83")
-      expect(content).to include("Gross pay minus total deductions equals net pay")
+      expect(content).to include("Gross pay plus other pay minus total deductions equals net pay")
       expect(item.reload.attributes).to eq(original)
     end
   end

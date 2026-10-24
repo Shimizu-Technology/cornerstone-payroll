@@ -78,16 +78,17 @@ class PaycheckHistoryPdfGenerator
     start_new_page_if_needed(pdf, 150)
     pdf.font_size(12) { pdf.text "Payroll detail", style: :bold, color: TEXT }
     pdf.move_down 4
-    pdf.font_size(8) { pdf.text "Taxes are included in total deductions. Gross pay minus total deductions equals net pay.", color: MUTED }
+    pdf.font_size(8) { pdf.text "Taxes are included in total deductions. Gross pay plus other pay minus total deductions equals net pay.", color: MUTED }
     pdf.move_down 8
 
-    table_rows = [ [ "Employee", "Gross pay", "Taxes (included)", "Total deductions (includes taxes)", "Net pay", "Employer cost" ] ]
+    table_rows = [ [ "Employee", "Gross pay", "Other pay", "Taxes (included)", "Total deductions (includes taxes)", "Net pay", "Employer cost" ] ]
     rows.each do |row|
-      table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
+      table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:total_pay].to_d - row[:gross_pay].to_d), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
     end
     table_rows << [
       "Total",
       money(rows.sum { |row| row[:gross_pay].to_f }),
+      money(rows.sum { |row| row[:total_pay].to_d - row[:gross_pay].to_d }),
       money(rows.sum { |row| row[:taxes].to_f }),
       money(rows.sum { |row| row[:deductions].to_f }),
       money(rows.sum { |row| row[:net_pay].to_f }),
@@ -101,7 +102,7 @@ class PaycheckHistoryPdfGenerator
       cells.size = 8
       row(0).background_color = QB_HEADER_BG
       row(-1).background_color = QB_TOTAL_BG
-      columns(1..5).align = :right
+      columns(1..6).align = :right
     end
   end
 
