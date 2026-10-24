@@ -47,3 +47,26 @@ it('retains every combined flag and the contractor correction guards', () => {
   expect(within(row).queryByText('Correct', { exact: true })).toBeNull();
   expect(within(row).queryByText('Replace check', { exact: true })).toBeNull();
 });
+
+it.each([
+  { employmentType: 'hourly', regular: 16, overtime: 2, displayed: 18, split: true },
+  { employmentType: 'hourly', regular: 16, overtime: 2, displayed: 20, split: false },
+  { employmentType: 'salary', regular: 16, overtime: 0, displayed: 0, split: false },
+  { employmentType: 'salary', regular: 16, overtime: 0, displayed: 16, split: false },
+  { employmentType: 'contractor', regular: 16, overtime: 0, displayed: 0, split: false },
+  { employmentType: 'contractor', regular: 0, overtime: 0, displayed: 0, split: false },
+])('keeps desktop and phone hours consistent for $employmentType ($regular + $overtime → $displayed)', ({ employmentType, regular, overtime, displayed, split }) => {
+  const item = { ...props.sortPayrollItems[0], employment_type: employmentType as PayrollItem['employment_type'], hours_worked: regular, overtime_hours: overtime };
+  render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} payrollItemDisplayedHours={() => displayed} /></MemoryRouter>);
+  const row = screen.getByRole('row', { name: /Maya Manual/ });
+  const desktopHours = within(row).getAllByRole('cell')[1];
+  const phone = screen.getByRole('region', { name: 'Payroll result for Maya Manual' });
+  const phoneHours = within(phone).getByText('Hours').nextElementSibling!;
+  const expectedSplit = `${regular.toFixed(2)} reg + ${overtime.toFixed(2)} OT`;
+  for (const hours of [desktopHours, phoneHours]) {
+    expect(hours.textContent).toContain(displayed.toFixed(2));
+    expect(within(hours as HTMLElement).queryByText(expectedSplit) !== null).toBe(split);
+  }
+  // Display rules must not change the saved register totals.
+  expect(screen.getByRole('row', { name: /Totals \(1\)/ }).textContent).toContain('42.00');
+});
