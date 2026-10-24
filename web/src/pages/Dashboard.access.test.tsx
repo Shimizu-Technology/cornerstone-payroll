@@ -23,8 +23,9 @@ it.each([
   mocks.company = { id: 11, ...access };
   render(<MemoryRouter><Dashboard /></MemoryRouter>);
   expect(await screen.findByText('Review preserved payroll records')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Add employee' })).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Create pay period' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Add employee' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Run payroll' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Create the next pay period' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Process payroll' })).toBeNull();
   expect(screen.getByText('Browse employees')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Browse Pay Periods' })).toBeTruthy();
@@ -59,6 +60,8 @@ it('does not offer processing of a draft after effective access becomes read-onl
   expect(screen.getByText('Last regular payroll')).toBeTruthy();
   expect(screen.getByText('Last adjustment payroll')).toBeTruthy();
   expect(screen.getByText('$92.35')).toBeTruthy();
-  expect(screen.queryByText(/0 employees.*net pay/)).toBeNull();
+  expect(screen.getByText('Time tracking hours have not been added.')).toBeTruthy();
+  expect(screen.queryByText('Gross pay')).toBeNull();
+  expect(screen.queryByText('Net pay')).toBeNull();
   expect(screen.queryByText(/fewer handoffs/)).toBeNull();
 });

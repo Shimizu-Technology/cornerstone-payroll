@@ -985,6 +985,19 @@ describe('AirePayrollCockpit', () => {
     expect(payload).not.toHaveProperty('breaks');
   });
 
+  it('distinguishes batch inclusion from a recorded payment when processing is absent', async (): Promise<void> => {
+    const user = userEvent.setup();
+    const data = fixtures();
+    data.settlements.settlement_cases[0].included_payroll_batch_id = 'included-batch';
+    apiMocks.settlements.mockResolvedValue(data.settlements);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await screen.findByText('Malia Cruz');
+    await user.click(screen.getByRole('button', { name: /Held time 1/i }));
+    expect(screen.getByText('Included in payroll batch')).toBeTruthy();
+    expect(screen.getByText('No payment has been recorded')).toBeTruthy();
+    expect(screen.queryByText('Not imported into payroll')).toBeNull();
+  });
+
   it('shows the held-time evidence and routes it to a published future payroll', async () => {
     const user = userEvent.setup();
     const onSourceChanged = vi.fn();
