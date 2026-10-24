@@ -115,7 +115,9 @@ module TimeTracking
       raise Error, "#{path}.source_kind is invalid" unless source_kind.in?(SOURCE_KINDS)
       work_date = iso_date!(adjustment["original_work_date"], "#{path}.original_work_date")
       week_start = iso_date!(adjustment["original_week_start"], "#{path}.original_week_start")
-      raise Error, "#{path}.original_work_date cannot be after the batch end date" if work_date > end_date
+      supplemental_split = payload["purpose"] == "supplemental" && payload["target_external_pay_period_id"].present? &&
+        source_kind == "carryover" && work_date == end_date + 1.day
+      raise Error, "#{path}.original_work_date cannot be after the batch end date" if work_date > end_date && !supplemental_split
       if source_kind == "current" && !work_date.between?(start_date, end_date)
         raise Error, "#{path}.current work must fall inside the nominal batch dates"
       end

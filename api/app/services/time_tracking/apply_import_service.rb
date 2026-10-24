@@ -194,8 +194,8 @@ module TimeTracking
             time_tracking_import: @import,
             status: "imported",
             occurred_at: @import.applied_at
-          )
-          acknowledgement_ids[:batch] << acknowledgement.id
+          ) unless @import.supplemental_batch?
+          acknowledgement_ids[:batch] << acknowledgement.id if acknowledgement
           acknowledgement_ids[:entries].concat(
             AirePayrollEntryAcknowledgement.record_for_import!(
               time_tracking_import: @import,
@@ -323,7 +323,7 @@ module TimeTracking
           category.merge("source_lines" => frozen["source_lines"])
         end
       end
-      active_rates = employee.active_wage_rates.to_a
+      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates.to_a
       if finalized_batch?
         supplied_keys = wage_rate_overrides_by_category_key(override).keys
         known_keys = categories.flat_map { |category| category_override_keys(category) }

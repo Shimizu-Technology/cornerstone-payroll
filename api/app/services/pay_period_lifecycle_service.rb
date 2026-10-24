@@ -109,7 +109,7 @@ class PayPeriodLifecycleService
       acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
     end
 
-    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
+    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
     AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
 
     pay_period
@@ -230,7 +230,7 @@ class PayPeriodLifecycleService
         time_tracking_import: import,
         status: "committed",
         occurred_at: pay_period.committed_at
-      ).id
+      ).id unless import.supplemental_batch?
       result[:entries].concat(
         AirePayrollEntryAcknowledgement.record_for_import!(
           time_tracking_import: import,

@@ -36,6 +36,10 @@ class TimeTrackingImport < ApplicationRecord
   validate :finalized_batch_snapshot_is_immutable, on: :update
   validate :reconciliation_evidence_is_immutable, on: :update
 
+  def supplemental_batch?
+    raw_payload["purpose"] == "supplemental"
+  end
+
   def finalized_batch?
     external_batch_id.present? || external_batch_checksum.present? || contract_version.present? || source_cutoff_at.present?
   end
