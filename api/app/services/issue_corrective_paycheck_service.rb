@@ -276,6 +276,10 @@ class IssueCorrectivePaycheckService
       raise UnsupportedEmployeeError,
             "Contractor payroll items don't have a tax surface to correct; edit the contractor item directly"
     end
+    if original_item.salary? && original_item.timekeeping_context_snapshot["overtime_status"] == "nonexempt" &&
+        @corrected_inputs.key?(:overtime_hours) && @corrected_inputs[:overtime_hours].to_d != original_item.overtime_hours.to_d
+      raise UnsupportedEmployeeError, "Nonexempt salary overtime hour changes require a reviewed daily salary-coverage correction"
+    end
     columns = @corrected_inputs[:custom_columns_data]
     categorized_target = columns.is_a?(Hash) && (columns["wage_rate_hours"].present? || columns[:wage_rate_hours].present?)
     if categorized_target
