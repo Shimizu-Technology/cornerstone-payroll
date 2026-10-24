@@ -36,8 +36,11 @@ module TimeTracking
     end
 
     def self.validate!(item, calculated: false)
-      return true unless item.persisted?
-      rows = item.time_tracking_entry_allocations.includes(:time_tracking_import).to_a
+      rows = item.persisted? ? item.time_tracking_entry_allocations.includes(:time_tracking_import).to_a : []
+      if rows.empty? && item.pay_period&.run_purpose == "adjustment" &&
+          TimeTrackingLateHoursRun.where(adjustment_pay_period_id: item.pay_period_id).where.not(applied_at: nil).exists?
+        raise ArgumentError, "This late-hours adjustment contains only its selected source hours. Create a separate run for other pay."
+      end
       return true if rows.empty?
 
       valid = rows.all? { |row| frozen_line_matches?(row, item) } &&

@@ -34,6 +34,15 @@ RSpec.describe TimeTracking::Client do
     end
     let(:external_id) { SecureRandom.uuid }
 
+    it "treats a lost late-hours POST response as an ambiguous source error without replaying the claim" do
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      request = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}/late_hours")
+        .to_raise(EOFError.new("end of file reached after remote acceptance"))
+      expect { client_for(source, actor: actor).create_payroll_late_hours(external_pay_period_id: external_id, command_id: SecureRandom.uuid) }
+        .to raise_error(TimeTracking::Client::Error, /Could not securely reach/)
+      expect(request).to have_been_requested.once
+    end
+
     it "reads all employee holds for one verified period while requiring the exact installation descriptor" do
       actor = create(:user, company: source.company, organization: source.company.organization)
       instance_id = SecureRandom.uuid
