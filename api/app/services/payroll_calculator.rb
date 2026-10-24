@@ -18,25 +18,26 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil, annual_fica_context: nil)
     AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
     TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
-      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "salary"
-      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "contractor"
-      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     else
       raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
-  def initialize(employee, payroll_item, calculation_context: nil)
+  def initialize(employee, payroll_item, calculation_context: nil, annual_fica_context: nil)
     @employee = employee
     @payroll_item = payroll_item
     @calculation_context = calculation_context&.deep_stringify_keys
+    @annual_fica_context = annual_fica_context
   end
 
   def calculate
@@ -132,6 +133,14 @@ class PayrollCalculator
     end
 
     taxes = tax_calculator.calculate(**tax_args)
+    unless historical_calculation?
+      taxes.merge!(annual_fica_context.increment(
+        wages_delta: payroll_item.gross_pay, tips_delta: payroll_item.cash_tips_reported,
+        rules: tax_calculator.rule_snapshot
+      ).transform_keys { |key| { social_security_tax: :social_security,
+        employer_social_security_tax: :employer_social_security, medicare_tax: :medicare,
+        employer_medicare_tax: :employer_medicare, additional_medicare_tax: :additional_medicare }.fetch(key, key) })
+    end
 
     calculated_withholding = taxes[:withholding].to_f
     if payroll_item.withholding_tax_override.present?
@@ -158,6 +167,7 @@ class PayrollCalculator
     end
     sync_additional_withholding_from_employee!
     payroll_item.tax_rule_snapshot = rule_snapshot.merge(employee_w4_snapshot)
+    payroll_item.tax_rule_snapshot["annual_fica_context"] = annual_fica_context.snapshot unless historical_calculation?
   end
 
   def capture_payroll_reporting_components!
@@ -530,6 +540,11 @@ class PayrollCalculator
         "legacy_allowances" => employee_value(:allowances)
       }
     }
+  end
+
+  def annual_fica_context
+    @annual_fica_context ||= EmployeeYearFicaContext.new(employee: employee, year: pay_period.pay_date.year,
+      excluding_pay_period_id: pay_period.id)
   end
 
   def ytd_before_totals

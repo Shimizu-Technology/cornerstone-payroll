@@ -9,6 +9,7 @@ class PayrollItem < ApplicationRecord
   MANUAL_ADJUSTMENTS_SOURCE = "manual"
 
   belongs_to :pay_period
+  has_one :fica_basis_proof, class_name: "PayrollItemFicaBasisProof", dependent: :restrict_with_exception
   belongs_to :employee
   belongs_to :company
   belongs_to :annual_tax_config, optional: true
@@ -627,7 +628,7 @@ class PayrollItem < ApplicationRecord
   end
 
   # Calculate and store all values
-  def calculate!
+  def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
       PayrollCorrectionPayBasisGuard.validate!(self)
       # Validate a clean copy of the persisted period. Calculating an item built
@@ -645,7 +646,7 @@ class PayrollItem < ApplicationRecord
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
       end
 
-      calculator = PayrollCalculator.for(employee, self)
+      calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
       calculator.calculate
       save!
       TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)

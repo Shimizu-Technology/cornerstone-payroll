@@ -179,6 +179,10 @@ export function CorrectivePaycheckModal({
     .some(([, value]) => value !== '' && (!Number.isFinite(Number(value)) || !/^-?\d+(?:\.\d{1,2})?$/.test(value)))
     ? 'Hours and money must use no more than two decimal places. Review the value before requesting a preview or issuing.' : null;
 
+  const payDateError = form.pay_date && form.pay_date.slice(0, 4) !== originalPayPeriod.pay_date.slice(0, 4)
+    ? 'Prior-year corrections require a separately reviewed prior-year process; this paycheck cannot move wages between tax years.'
+    : null;
+
   const correctedInputs: CorrectivePaycheckInputs = useMemo(
     () => ({
       hours_worked: num(form.hours_worked),
@@ -210,7 +214,7 @@ export function CorrectivePaycheckModal({
 
   // Debounced preview fetch when corrected inputs change.
   const fetchPreview = useCallback(async (force = false) => {
-    if (precisionError) return;
+    if (precisionError || payDateError) return;
     if ((!baseline || !inputsChanged) && !force) {
       setPreview(null);
       setPreviewError(null);
@@ -223,6 +227,7 @@ export function CorrectivePaycheckModal({
       const result = baseline ? await payPeriodsApi.correctivePaycheckPreview(originalPayPeriod.id, {
         employee_id: originalItem.employee_id,
         corrected_inputs: correctedInputs,
+        pay_date: form.pay_date,
       }) : await fetchRecordedBaseline(originalPayPeriod.id, originalItem);
       if (generation === previewGeneration.current) {
         setPreview(result);
@@ -242,11 +247,11 @@ export function CorrectivePaycheckModal({
     } finally {
       if (generation === previewGeneration.current) setPreviewLoading(false);
     }
-  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs, precisionError]);
+  }, [baseline, inputsChanged, setPreviewError, originalPayPeriod.id, originalItem, correctedInputs, precisionError, form.pay_date, payDateError]);
 
   useEffect(() => {
     if (!open || !baseline || !baselineLoaded.current) return;
-    if (precisionError) {
+    if (precisionError || payDateError) {
       previewGeneration.current += 1;
       setPreview(null);
       setPreviewLoading(false);
@@ -262,11 +267,11 @@ export function CorrectivePaycheckModal({
     setPreviewLoading(inputsChanged);
     const handle = setTimeout(fetchPreview, 350);
     return () => clearTimeout(handle);
-  }, [open, baseline, baselinePreview, inputsChanged, fetchPreview, precisionError]);
+  }, [open, baseline, baselinePreview, inputsChanged, fetchPreview, precisionError, payDateError]);
 
   const canSubmit =
     !!baseline &&
-    !precisionError &&
+    !precisionError && !payDateError &&
     !!preview &&
     /^[0-9a-f]{64}$/.test(preview.meta.review_digest ?? '') &&
     Object.entries(correctedInputs).every(([key, value]) => preview.corrected[key as keyof CorrectivePaycheckSnapshot] === value) &&
@@ -496,9 +501,10 @@ export function CorrectivePaycheckModal({
               type="date"
               value={form.pay_date}
               onChange={e => setForm(f => ({ ...f, pay_date: e.target.value }))}
-              min={originalPayPeriod.end_date}
+              min={originalPayPeriod.pay_date}
             />
-            <p className="mt-1 text-xs text-gray-500">Must be on or after the original period's end date ({originalPayPeriod.end_date}).</p>
+            {payDateError && <ActionFeedback tone="error" message={payDateError} />}
+            <p className="mt-1 text-xs text-gray-500">Must be in the original tax year and on or after the original period's pay date ({originalPayPeriod.pay_date}).</p>
           </div>
         </div>
 
