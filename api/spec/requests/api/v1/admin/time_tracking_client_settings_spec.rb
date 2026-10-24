@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Per-client time tracking settings", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:company) { create(:company) }
   let!(:admin) { create(:user, company: company, role: "admin") }
   let!(:period) { create(:pay_period, company: company) }

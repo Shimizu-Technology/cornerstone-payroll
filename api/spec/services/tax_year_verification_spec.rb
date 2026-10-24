@@ -105,6 +105,19 @@ RSpec.describe "Tax-year verification" do
     end
   end
 
+  it "checks verification again when a live calculator was initialized before an edit" do
+    config = complete_config(2027)
+    config.verify!(actor: create(:user, role: "admin"), source_note: "Synthetic review")
+    live = calculator(2027)
+    config.update!(ss_wage_base: 192_300)
+    expect { live.calculate(gross_pay: 1000) }.to raise_error(ArgumentError, /2027 tax tables have not been verified/)
+  end
+
+  it "includes already scheduled January pay dates before the 60-day window" do
+    create(:pay_period, start_date: Date.new(2027, 1, 1), end_date: Date.new(2027, 1, 14), pay_date: Date.new(2027, 1, 15))
+    expect(TaxYearReadiness.new(today: Date.new(2026, 10, 24)).as_json[:warnings].map { |warning| warning[:tax_year] }).to include(2027)
+  end
+
   it "blocks approval and commit with a draft without changing the saved state" do
     complete_config(2026)
     AnnualTaxConfig.create_from_previous(2027, source_year: 2026)
