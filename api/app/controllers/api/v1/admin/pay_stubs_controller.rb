@@ -87,7 +87,7 @@ module Api
           results = { success: [], errors: [] }
 
           all_items = pay_period.payroll_items
-                                .not_voided.reportable
+                                .financially_reportable.reportable
                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                                 .to_a
           eligible_items = all_items.select { |item| EarningsStatementEligibility.printable?(item) }
@@ -158,11 +158,11 @@ module Api
               return render json: { error: "One or more selected pay stubs were not found" }, status: :not_found
             end
 
-            voided_items = selected_items.select(&:voided?)
+            voided_items = selected_items.reject(&:payroll_included?)
             if voided_items.any?
               names = voided_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
               return render json: {
-                error: "Voided checks do not have printable pay stubs",
+                error: "Reversed payroll does not have printable pay stubs",
                 details: "Remove #{names} from the selection and try again."
               }, status: :unprocessable_entity
             end
@@ -191,7 +191,7 @@ module Api
 
             items = selected_items
           else
-            all_items = base_items.not_voided.reportable.to_a
+            all_items = base_items.financially_reportable.reportable.to_a
             items = all_items.select do |item|
               EarningsStatementEligibility.printable?(item) && (!deposit_only || (item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?))
             end
@@ -237,7 +237,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .not_voided.reportable
+                         .financially_reportable.reportable
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)
@@ -277,7 +277,7 @@ module Api
           return if EarningsStatementEligibility.printable?(@payroll_item)
 
           render json: {
-            error: @payroll_item.voided? ? "Voided payroll does not have a current earnings statement" : "This payroll record has no earnings-statement activity"
+            error: !@payroll_item.payroll_included? ? "Reversed payroll does not have a current earnings statement" : "This payroll record has no earnings-statement activity"
           }, status: :unprocessable_entity
         end
 

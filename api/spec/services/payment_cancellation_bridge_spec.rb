@@ -160,4 +160,36 @@ RSpec.describe "Connected payment cancellation" do
     expect(item.reload.check_number).to be_nil
     expect(company.reload.next_check_number).to eq(8001)
   end
+  it "voids only the instrument and keeps the exact imported line reserved" do
+    item.mark_package_prepared!(user: actor)
+    original = line.reload.attributes
+    item.void!(user: actor, reason: "Recovered damaged paper check")
+    expect(item.reload).to be_payroll_included
+    expect(line.reload.attributes).to eq(original)
+    expect { ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Requires reviewed source correction") }.to raise_error(ArgumentError, /source hours/)
+    cancelled = AirePayrollEntryAcknowledgement.where(status: "payment_cancelled").sole
+    expect(cancelled.cancellation_metadata).to include("payroll_obligation_retained" => true)
+    expect(AirePayrollEntryAcknowledgement.where(status: "payment_voided")).to be_empty
+    expect(TimeTracking::AllocationStatusSummary.call(import.reload)[:in_payroll]).to include(total_hours: 6.to_d)
+  end
+  it "retires an assigned never-prepared instrument without inventing a payment cancellation" do
+    source.update!(source_capabilities: [])
+    frozen = line.reload.attributes
+    item.void!(user: actor, reason: "Unused damaged check stock")
+    expect(item.reload).to be_payroll_included
+    expect(line.reload.attributes).to eq(frozen)
+    expect(item.aire_payroll_entry_acknowledgements.where(status: %w[payment_cancelled payment_voided])).to be_empty
+  end
+
+  it "records the later whole-payroll source reversal after an earlier instrument cancellation exactly once" do
+    item.mark_package_prepared!(user: actor)
+    item.void!(user: actor, reason: "Recovered damaged paper check")
+    expect(item.check_events.voids.last.payment_cancellation?).to be true
+    expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided")).to be_empty
+    event = PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Explicit whole payroll reversal")
+    expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+    TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: period.reload, void_event: event)
+    expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+    expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_cancelled").count).to eq(1)
+  end
 end
