@@ -921,14 +921,15 @@ class PayrollCalculator
   def capture_calculation_context!
     return if historical_calculation?
 
-    if pay_period.pay_date.year >= 2027 && payroll_item.tax_rule_snapshot["engine"] == "contractor_no_withholding"
+    if payroll_item.tax_rule_snapshot["engine"] == "contractor_no_withholding"
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year, lock: true)
       config = AnnualTaxConfig.current(pay_period.pay_date.year, lock: true)
-      raise ArgumentError, AnnualTaxConfig.unverified_message(pay_period.pay_date.year) unless config
-
-      payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge(
-        "tax_year_verification_at" => config.verified_at&.utc&.iso8601(6),
-        "tax_year_rules_digest" => config.rules_digest
-      )
+      if config
+        payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge(
+          "tax_year_verification_at" => config.verified_at&.utc&.iso8601(6),
+          "tax_year_rules_digest" => config.rules_digest
+        )
+      end
     end
 
     payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(
