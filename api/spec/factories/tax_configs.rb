@@ -19,7 +19,7 @@ FactoryBot.define do
   factory :filing_status_config do
     association :annual_tax_config
     # Nested factory rows intentionally form a verified synthetic fixture.
-    after(:create) { |row| row.annual_tax_config.update_columns(verification_status: "verified") }
+    after(:create) { |row| row.annual_tax_config.update_columns(verification_status: "verified", verified_at: Time.current, verified_by: "synthetic-fixture") }
     filing_status { "single" }
     standard_deduction { 14_600 }
 
@@ -41,7 +41,7 @@ FactoryBot.define do
 
   factory :tax_bracket do
     association :filing_status_config
-    after(:create) { |row| row.filing_status_config.annual_tax_config.update_columns(verification_status: "verified") }
+    after(:create) { |row| row.filing_status_config.annual_tax_config.update_columns(verification_status: "verified", verified_at: Time.current, verified_by: "synthetic-fixture") }
     sequence(:bracket_order) { |n| n }
     min_income { 0 }
     max_income { 11_600 }
