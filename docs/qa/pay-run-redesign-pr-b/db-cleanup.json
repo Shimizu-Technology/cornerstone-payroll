@@ -1,0 +1,44 @@
+[
+  {
+    "database": "payroll_redesign_fixture_20261024",
+    "asserted": "payroll_redesign_fixture_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "phase": "final"
+  },
+  {
+    "database": "aire_redesign_fixture_20261024",
+    "asserted": "aire_redesign_fixture_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "phase": "final"
+  },
+  {
+    "database": "payroll_redesign_test_20261024",
+    "asserted": "payroll_redesign_test_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "alreadyRemovedPriorPhase": true
+  },
+  {
+    "database": "payroll_redesign_release_20261024",
+    "asserted": "payroll_redesign_release_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "phase": "final"
+  },
+  {
+    "database": "payroll_redesign_refresh_20261024",
+    "asserted": "payroll_redesign_refresh_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "phase": "final"
+  },
+  {
+    "database": "payroll_redesign_pay_items_20261024",
+    "asserted": "payroll_redesign_pay_items_20261024",
+    "dropExit": 0,
+    "stderr": "",
+    "phase": "final"
+  }
+]

@@ -1,0 +1,16 @@
+{
+  "width": 1280,
+  "actions": [
+    {
+      "label": "Pay late hours",
+      "disabled": false,
+      "location": "Payroll → Hours → Review timecards, held hours and team → Held time",
+      "role": "org_admin"
+    },
+    {
+      "label": "Return to original payroll",
+      "href": "/companies/1/pay-runs/2/work",
+      "location": "Payroll → Hours → Late hours adjustment"
+    }
+  ]
+}

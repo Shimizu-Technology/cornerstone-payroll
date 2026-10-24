@@ -1,0 +1,229 @@
+{
+  "api": {
+    "duration": 698.025754,
+    "example_count": 5090,
+    "failure_count": 0,
+    "pending_count": 0,
+    "errors_outside_of_examples_count": 0
+  },
+  "rubocop": {
+    "files": 1481,
+    "offenses": 0
+  },
+  "web": {
+    "files": 125,
+    "tests": 1182,
+    "npm_ci": 0,
+    "npm_audit_moderate": 0,
+    "gate": 0
+  },
+  "browsers": {
+    "public": {
+      "startTime": "2026-10-24T08:50:49.092Z",
+      "duration": 382412.50100000005,
+      "expected": 131,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "release": {
+      "startTime": "2026-10-24T09:01:16.874Z",
+      "duration": 146745.565,
+      "expected": 45,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "refresh": {
+      "startTime": "2026-10-24T09:03:55.556Z",
+      "duration": 75982.32100000001,
+      "expected": 10,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "pay-items": {
+      "startTime": "2026-10-24T09:11:20.346Z",
+      "duration": 118518.884,
+      "expected": 24,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "axe": {
+    "captures": 13,
+    "required_family_violations": 0,
+    "details": "axe-summary.json"
+  },
+  "impeccable": [],
+  "ui_execution_records": [
+    {
+      "case": "header-tabs-dialog-context",
+      "width": 1280,
+      "reducedMotion": "no-preference",
+      "status": "passed",
+      "headerTotalsInFirstScreen": true,
+      "focusContained": true,
+      "focusReturned": true,
+      "filtersPreserved": true,
+      "scrollPreserved": true
+    },
+    {
+      "case": "header-tabs-dialog-context",
+      "width": 1280,
+      "reducedMotion": "reduce",
+      "status": "passed",
+      "headerTotalsInFirstScreen": true,
+      "focusContained": true,
+      "focusReturned": true,
+      "filtersPreserved": true,
+      "scrollPreserved": true
+    },
+    {
+      "case": "header-tabs-dialog-context",
+      "width": 390,
+      "reducedMotion": "no-preference",
+      "status": "passed",
+      "headerTotalsInFirstScreen": false,
+      "focusContained": true,
+      "focusReturned": true,
+      "filtersPreserved": true,
+      "scrollPreserved": true
+    },
+    {
+      "case": "header-tabs-dialog-context",
+      "width": 390,
+      "reducedMotion": "reduce",
+      "status": "passed",
+      "headerTotalsInFirstScreen": false,
+      "focusContained": true,
+      "focusReturned": true,
+      "filtersPreserved": true,
+      "scrollPreserved": true
+    },
+    {
+      "case": "worksheet-tabs-calculate-reload",
+      "width": 1280,
+      "reducedMotion": "no-preference",
+      "status": "passed",
+      "hours": 40,
+      "gross": 3000,
+      "items": [
+        {
+          "employee_id": 8,
+          "gross_pay": "1000.0",
+          "net_pay": "890.58",
+          "hours_worked": "40.0"
+        },
+        {
+          "employee_id": 9,
+          "gross_pay": "2000.0",
+          "net_pay": "1697.83",
+          "hours_worked": "0.0"
+        }
+      ]
+    },
+    {
+      "case": "worksheet-tabs-calculate-reload",
+      "width": 390,
+      "reducedMotion": "reduce",
+      "status": "passed",
+      "hours": 41,
+      "gross": 3025,
+      "items": [
+        {
+          "employee_id": 8,
+          "gross_pay": "1025.0",
+          "net_pay": "911.17",
+          "hours_worked": "41.0"
+        },
+        {
+          "employee_id": 9,
+          "gross_pay": "2000.0",
+          "net_pay": "1697.83",
+          "hours_worked": "0.0"
+        }
+      ]
+    },
+    {
+      "case": "alias-late-hours-entry-and-return",
+      "width": 1280,
+      "status": "passed",
+      "original": 2,
+      "closedEmptyNavigationFixture": 10,
+      "accountantPermissionGuard": true,
+      "adminEntryVerified": true,
+      "financialLateHoursExecution": "not_run (covered in merged #382; B verifies entry and saved return link)"
+    },
+    {
+      "case": "alias-late-hours-entry-and-return",
+      "width": 390,
+      "status": "passed",
+      "original": 2,
+      "closedEmptyNavigationFixture": 10,
+      "accountantPermissionGuard": true,
+      "adminEntryVerified": true,
+      "financialLateHoursExecution": "not_run (covered in merged #382; B verifies entry and saved return link)"
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "training_baseline",
+      "width": 1280,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "backup_snapshot",
+      "width": 1280,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "workspace_access",
+      "width": 1280,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "training_baseline",
+      "width": 390,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "backup_snapshot",
+      "width": 390,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    },
+    {
+      "case": "readonly-summary-alias-reports",
+      "mode": "workspace_access",
+      "width": 390,
+      "status": "passed",
+      "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+      "apiWrites": 0
+    }
+  ],
+  "runtime_action_rows": 525,
+  "unexplained_removals": 0,
+  "pending_C": [
+    "First-screen name/net without horizontal scrolling on connected run 2",
+    "Collapsed steps, merged source checkpoint, input prerequisites, compact results, phone filters/header collapse, totals-change highlight"
+  ],
+  "not_run": [
+    "Physical devices/printer, real payments/filing/email/providers",
+    "Separate two-application connected certification lane (outside four required browser lanes); navigation selectors maintained",
+    "Late-hours financial execution (owned by merged #382); B verifies guards, admin entry and saved return link"
+  ]
+}
