@@ -60,7 +60,7 @@ for (const scenario of [
     // Wait for the actual processing component, not just its loading container.
     await expect(page.getByRole('button', { name: scenario.status === 'draft' ? 'Calculate Payroll' : 'Correct Pay Date', exact: true })).toHaveCount(scenario.voided ? 0 : 1);
     await expect(page.getByRole('button', { name: 'Link time tracking record', exact: true })).toHaveCount(scenario.link ? 1 : 0);
-    await expect(page.getByRole('button', { name: 'Import Time Tracking', exact: true })).toHaveCount(scenario.import ? 1 : 0);
+    await expect(page.getByRole('button', { name: 'Import time tracking', exact: true })).toHaveCount(scenario.import ? 1 : 0);
     await expect(page.getByRole('button', { name: 'View linked time record', exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
