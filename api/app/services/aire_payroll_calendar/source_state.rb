@@ -14,9 +14,13 @@ module AirePayrollCalendar
 
     def refresh
       @source.with_lock do
-        publication = AirePayrollCalendarPublication.joins(:aire_payroll_calendar_period)
+        publication = AirePayrollCalendarPublication.joins(aire_payroll_calendar_period: :pay_period)
           .where(aire_payroll_calendar_periods: { time_tracking_source_id: @source.id })
-          .where(delivery_status: "delivered").order(Arel.sql("delivered_at DESC NULLS LAST, aire_payroll_calendar_publications.id DESC")).first
+          .where(delivery_status: "delivered")
+          .order(Arel.sql("pay_periods.start_date DESC NULLS LAST, pay_periods.end_date DESC NULLS LAST, " \
+            "pay_periods.pay_date DESC NULLS LAST, pay_periods.id DESC, " \
+            "aire_payroll_calendar_publications.schedule_version DESC, aire_payroll_calendar_publications.id DESC"))
+          .first
         raise TimeTracking::Client::Error, "No delivered calendar to refresh" unless publication
 
         period = publication.aire_payroll_calendar_period
@@ -60,9 +64,11 @@ module AirePayrollCalendar
     end
 
     def save(status, cutoff)
-      @source.update!(payroll_calendar_source_state: {
+      # Observations must remain writable even when source configuration is no
+      # longer valid (for example, after its host leaves the allowlist).
+      @source.update_columns(payroll_calendar_source_state: {
         "status" => status, "next_scheduled_cutoff_at" => cutoff, "refreshed_at" => Time.current.iso8601(6)
-      })
+      }, updated_at: Time.current)
       @source.payroll_calendar_source_state
     end
   end

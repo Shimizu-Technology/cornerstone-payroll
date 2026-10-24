@@ -566,7 +566,7 @@ function AirePayrollCockpitWorkspace({
     if (onSourceChanged?.() !== true) await load();
   };
 
-  const refreshCalendarAndSource = async () => {
+  const refreshCalendarAndSource = async (): Promise<void> => {
     const current = ++actionGeneration.current;
     setLoading(true);
     setRefreshError(null);
@@ -780,7 +780,7 @@ function AirePayrollCockpitWorkspace({
     }
   };
 
-  const openFinalize = () => {
+  const openFinalize = (): void => {
     const version = overview?.payroll_period.version;
     if (version != null) {
       setFinalizeCommand((current) => current?.version === version

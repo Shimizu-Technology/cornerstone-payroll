@@ -7,7 +7,7 @@ RSpec.describe AirePayrollCalendar::SourceState do
   let(:source) { create(:time_tracking_source, source_type: "aire_services") }
   let(:calendar) { create(:aire_payroll_calendar_period, company: source.company, time_tracking_source: source) }
   let!(:publication) do
-    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar, delivery_status: "delivered",
+    create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar, delivery_status: "delivered", delivered_at: Time.current,
       source_state: { "next_scheduled_cutoff_at" => "2026-11-07T17:00:00+10:00" })
   end
   let(:client) { instance_double(TimeTracking::Client) }
@@ -88,6 +88,52 @@ RSpec.describe AirePayrollCalendar::SourceState do
     expect(client).to have_received(:payroll_calendar_period).with(external_pay_period_id: newer.external_pay_period_id)
     expect(present[:next_scheduled_cutoff_at]).to eq(cutoff)
     expect(publication.reload.source_state["next_scheduled_cutoff_at"]).not_to eq(cutoff)
+  end
+
+  it "refreshes the highest delivered revision even when an older revision arrived later" do
+    newer_revision = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar,
+      schedule_version: 2, delivery_status: "delivered", delivered_at: 1.hour.ago)
+    remote.merge!("publication_id" => newer_revision.publication_id, "schedule_version" => 2)
+
+    expect(service.refresh).to include("status" => "available", "next_scheduled_cutoff_at" => cutoff)
+  end
+
+  it "prefers the latest chronological period even when an older period was delivered later" do
+    newer_pay_period = create(:pay_period, company: source.company, start_date: "2026-11-01",
+      end_date: "2026-11-15", pay_date: "2026-11-25")
+    newer_calendar = create(:aire_payroll_calendar_period, company: source.company,
+      time_tracking_source: source, pay_period: newer_pay_period)
+    newer_publication = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: newer_calendar,
+      delivery_status: "delivered", delivered_at: 1.hour.ago)
+    remote.merge!("external_pay_period_id" => newer_calendar.external_pay_period_id,
+      "publication_id" => newer_publication.publication_id, "schedule_version" => newer_publication.schedule_version)
+
+    expect(service.refresh).to include("status" => "available", "next_scheduled_cutoff_at" => cutoff)
+    expect(client).to have_received(:payroll_calendar_period).with(external_pay_period_id: newer_calendar.external_pay_period_id)
+  end
+
+  context "when an active production source host is removed from the allowlist" do
+    before do
+      source.update!(base_url: "https://removed.example.com")
+      source.update!(payroll_calendar_source_state: { "status" => "available", "next_scheduled_cutoff_at" => cutoff })
+      allow(Rails.env).to receive(:production?).and_return(true)
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with("TIME_TRACKING_ALLOWED_HOSTS", "").and_return("other.example.com")
+      expect(source).not_to be_valid
+      expect(source.errors[:base_url]).to include("host is not in TIME_TRACKING_ALLOWED_HOSTS")
+    end
+
+    it "persists an unavailable refresh without raising unrelated source validations" do
+      real_client = TimeTracking::Client.new(source)
+      result = described_class.new(source, client_factory: ->(*) { real_client }).refresh
+      expect(result).to include("status" => "unavailable", "next_scheduled_cutoff_at" => nil)
+      expect(source.reload.payroll_calendar_source_state).to eq(result)
+    end
+
+    it "invalidates stale state after finalization despite unrelated source validation failures" do
+      expect(service.invalidate).to include("status" => "unavailable", "next_scheduled_cutoff_at" => nil)
+      expect(source.reload.payroll_calendar_source_state["next_scheduled_cutoff_at"]).to be_nil
+    end
   end
 
   context "after a finalization callback" do
