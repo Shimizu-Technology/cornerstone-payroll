@@ -197,8 +197,12 @@ class PayrollLiabilityPostingService
     existing = PayrollLiabilityPosting.find_by(idempotency_key: key)
     return existing if existing
 
-    legacy_ids = posting_type.in?(%w[historical_backfill replacement]) ? ambiguous_insurance_item_ids(locked) : Set.new
-    metadata = metadata.merge("ambiguous_insurance_history" => true) if legacy_ids.any?
+    legacy_capture = posting_type.in?(%w[historical_backfill replacement])
+    insurance_ids = legacy_capture ? ambiguous_insurance_item_ids(locked) : Set.new
+    employer_ids = legacy_capture ? ambiguous_employer_item_ids(locked) : Set.new
+    legacy_ids = insurance_ids | employer_ids
+    metadata = metadata.merge("ambiguous_insurance_history" => true) if insurance_ids.any?
+    metadata = metadata.merge("ambiguous_employer_contribution_history" => true) if employer_ids.any?
     snapshot_builder = PayComponentRuleSnapshotBuilder.new(company: locked.company, effective_on: liability_date)
     posting = PayrollLiabilityPosting.create!(
       company: locked.company,
@@ -225,6 +229,9 @@ class PayrollLiabilityPostingService
 
     if source.metadata["ambiguous_insurance_history"] || source.entries.where(payroll_item_id: ambiguous_insurance_item_ids(locked).to_a).exists?
       metadata = metadata.merge("ambiguous_insurance_history" => true)
+    end
+    if source.metadata["ambiguous_employer_contribution_history"] || source.entries.where(payroll_item_id: ambiguous_employer_item_ids(locked).to_a).exists?
+      metadata = metadata.merge("ambiguous_employer_contribution_history" => true)
     end
     reversal = PayrollLiabilityPosting.create!(
       company: locked.company,
@@ -411,7 +418,18 @@ class PayrollLiabilityPostingService
     end.to_set
   end
 
-  # Exact pre-ledger insurance capture semantics, used only for explicitly
+  def ambiguous_employer_item_ids(locked)
+    locked.payroll_items.where(payroll_reversed_at: nil).includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type).filter_map do |item|
+      begin
+        PayrollEmployerContributions.sources(item)
+        nil
+      rescue PayrollComponentMirrors::AmbiguousHistoryError
+        item.id
+      end
+    end.to_set
+  end
+
+  # Exact pre-ledger component capture semantics, used only for explicitly
   # tagged void/restate history. Never use this as new-money source evidence.
   def legacy_field_mirror?(item, deduction)
     return false unless deduction.employer_contribution? || deduction.deduction_type&.name.to_s.match?(/\APayroll Field(?:\s|:)/)

@@ -8,7 +8,13 @@ RSpec.describe "Legacy insurance liability lifecycle" do
   def legacy_item!(kind)
     add_deduction(category: "employer_contribution", sub_category: "insurance") if kind == :employer_aggregate
     item = original!(post_liabilities: false, track_ytd: false)
-    if kind == :field_aggregate
+    if kind == :built_in_match
+      type = company.deduction_types.create!(name: "401(k) Employer Match", category: "employer_contribution",
+        sub_category: "retirement", reporting_group: "401k_pre_tax")
+      item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: type.category,
+        reporting_group: type.reporting_group, amount: 30)
+      item.update_columns(employer_retirement_match: 30)
+    elsif kind == :field_aggregate
       definition = create(:payroll_field_definition, company: company, name: "Legacy health", kind: "deduction",
         tax_treatment: "post_tax_deduction", category: "insurance", amount_type: "fixed", default_amount: 45)
       item.payroll_item_field_entries.create!(payroll_field_definition: definition, label: definition.name,
@@ -45,7 +51,7 @@ RSpec.describe "Legacy insurance liability lifecycle" do
     posting
   end
 
-  [ :employer_aggregate, :field_aggregate ].product([ false, true ], [ :void, :restate ]).each do |kind, existing, operation|
+  [ :employer_aggregate, :field_aggregate, :built_in_match ].product([ false, true ], [ :void, :restate ]).each do |kind, existing, operation|
     it "preserves #{kind} history during #{operation}, existing posting=#{existing}" do
       item = legacy_item!(kind)
       values = legacy_entry_values(item)
@@ -71,14 +77,15 @@ RSpec.describe "Legacy insurance liability lifecycle" do
       expected = values.to_h { |value| [ value[:component_key], value[:amount] ] }
       expect(source.entries.to_h { |entry| [ entry.component_key, entry.amount ] }).to eq(expected)
       expect(reversal.entries.to_h { |entry| [ entry.component_key, entry.amount ] }).to eq(expected.transform_values { |amount| -amount })
-      expect(reversal.metadata).to include("ambiguous_insurance_history" => true)
-      expect(source.metadata).to include("ambiguous_insurance_history" => true) unless existing
+      flag = kind == :built_in_match ? "ambiguous_employer_contribution_history" : "ambiguous_insurance_history"
+      expect(reversal.metadata).to include(flag => true)
+      expect(source.metadata).to include(flag => true) unless existing
       if operation == :void
         expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
       else
         replacement = period.payroll_liability_postings.find_by!(posting_type: "replacement")
         expect(replacement.entries.to_h { |entry| [ entry.component_key, entry.amount ] }).to eq(expected)
-        expect(replacement.metadata).to include("ambiguous_insurance_history" => true)
+        expect(replacement.metadata).to include(flag => true)
       end
       expect([ source.reload.attributes, source.entries.order(:id).map(&:attributes) ]).to eq(frozen_source) if existing
       expect(item.reload.attributes.slice(*money.keys)).to eq(money)
