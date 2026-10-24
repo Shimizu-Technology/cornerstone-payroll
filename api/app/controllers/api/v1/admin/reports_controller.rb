@@ -879,9 +879,9 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          items = pp.payroll_items.not_voided.reportable
+          items = pp.payroll_items.financially_reportable.reportable
           saved = pp.transmittal
-          live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] }
+          live_check_numbers = items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] }
           check_numbers = saved&.payroll_check_numbers.nil? ? live_check_numbers : Array(saved&.payroll_check_numbers)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
@@ -1421,7 +1421,7 @@ module Api
           @audit_report_period_subject = AuditRecordSnapshot.subject_name(pay_period)
 
           items = sorted_payroll_items(
-            pay_period.payroll_items.not_voided.reportable.includes(
+            pay_period.payroll_items.financially_reportable.reportable.includes(
               :payroll_item_earnings,
               { payroll_item_field_entries: :payroll_field_definition },
               { payroll_item_deductions: :deduction_type, employee: :department }
@@ -1853,9 +1853,9 @@ module Api
             period_description: pp.period_description,
             pay_date: pp.pay_date,
             status: pp.status,
-            employee_count: pp.payroll_items.not_voided.reportable.count,
-            total_gross: pp.payroll_items.not_voided.reportable.sum(:gross_pay),
-            total_net: pp.payroll_items.not_voided.reportable.sum(:net_pay)
+            employee_count: pp.payroll_items.financially_reportable.reportable.count,
+            total_gross: pp.payroll_items.financially_reportable.reportable.sum(:gross_pay),
+            total_net: pp.payroll_items.financially_reportable.reportable.sum(:net_pay)
           }
         end
 
@@ -1881,7 +1881,7 @@ module Api
         def reportable_payroll_items(period, pay_run: nil)
           PayrollItem.joins(:pay_period)
                      .includes(:employee, :pay_period, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type)
-                     .not_voided.reportable
+                     .financially_reportable.reportable
                      .where(pay_periods: { id: reportable_pay_periods(period, pay_run: pay_run).select(:id) })
         end
 
@@ -1889,7 +1889,7 @@ module Api
           scope = employee.payroll_items
                           .joins(:pay_period)
                           .includes(:pay_period, :payroll_item_field_entries, :check_events, :direct_deposit_payment_confirmation)
-                          .not_voided.reportable
+                          .financially_reportable.reportable
                           .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
                           .order("pay_periods.pay_date DESC, payroll_items.id DESC")
           scope
@@ -2491,7 +2491,7 @@ module Api
 
         def build_pay_period_payroll_items_report(pay_period)
           items = sorted_payroll_items(
-            pay_period.payroll_items.not_voided.reportable.includes(
+            pay_period.payroll_items.financially_reportable.reportable.includes(
               :payroll_item_earnings,
               :payroll_item_field_entries,
               payroll_item_deductions: :deduction_type,
@@ -2642,7 +2642,7 @@ module Api
                   .joins(:pay_period)
                   .includes(:payroll_item_field_entries)
                   .where(company_id: current_company_id)
-                  .not_voided.reportable
+                  .financially_reportable.reportable
                   .where(pay_periods: { id: reportable_period_ids })
                   .to_a
         end
@@ -2654,7 +2654,7 @@ module Api
 
           PayrollItem.joins(:pay_period)
                      .where(company_id: current_company_id)
-                     .not_voided.reportable
+                     .financially_reportable.reportable
                      .where(pay_periods: { id: reportable_period_ids })
                      .select(:employee_id, :total_deductions, :custom_earnings, :custom_deductions)
                      .to_a

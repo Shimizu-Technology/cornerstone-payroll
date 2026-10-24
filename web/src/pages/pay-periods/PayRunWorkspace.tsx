@@ -191,7 +191,7 @@ export function PayRunWorkspace(): ReactElement {
   }
 
   const items = [...(payRun.payroll_items || [])].sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || '') || a.id - b.id);
-  const reportableItems = items.filter((item) => !item.voided);
+  const reportableItems = items.filter((item) => item.payroll_included !== false);
   const statusConfig = payPeriodStatusConfig[payRun.status];
 
   return (
@@ -217,7 +217,7 @@ export function PayRunWorkspace(): ReactElement {
         ...tab,
         href: payRunPath(companyId, payRunId, tab.id, { returnTo }),
         count: tab.id === 'checks'
-          ? items.filter(item => !item.voided && (item.earnings_statement_eligible ?? (Number(item.gross_pay || 0) !== 0 || Number(item.net_pay || 0) !== 0 || Boolean(item.check_number)))).length
+          ? items.filter(item => item.payroll_included !== false && (item.earnings_statement_eligible ?? (Number(item.gross_pay || 0) !== 0 || Number(item.net_pay || 0) !== 0 || Boolean(item.check_number)))).length
           : undefined,
       }))} />
 

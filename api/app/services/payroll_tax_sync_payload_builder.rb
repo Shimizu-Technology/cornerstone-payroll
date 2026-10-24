@@ -24,7 +24,7 @@ class PayrollTaxSyncPayloadBuilder
   # correction_status describes the reversal. Check retirement must not erase them.
   def self.reportable_items(pay_period)
     rows = pay_period.payroll_items.reportable
-    pay_period.voided? ? rows : rows.not_voided
+    pay_period.voided? ? rows.where(payroll_reversed_at: nil) : rows.financially_reportable
   end
 
   private
@@ -40,7 +40,8 @@ class PayrollTaxSyncPayloadBuilder
       source_pay_period_id: pay_period.source_pay_period_id,
       superseded_by_id: pay_period.superseded_by_id,
       voided_at: pay_period.voided_at&.iso8601,
-      void_reason: pay_period.void_reason
+      void_reason: pay_period.void_reason,
+      reversed_payroll_item_ids: pay_period.payroll_items.reportable.where.not(payroll_reversed_at: nil).order(:id).pluck(:id)
     }
   end
 

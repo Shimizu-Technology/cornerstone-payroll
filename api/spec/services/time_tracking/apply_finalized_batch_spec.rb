@@ -578,7 +578,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   {
     "printed" => [ "payment_prepared", "printed" ],
     "delivered" => [ "payment_issued", "delivered" ],
-    "voided" => [ "payment_voided", "voided" ]
+    "voided" => [ nil, "voided" ]
   }.each do |check_status, (payment_status, event_type)|
     it "reconciles #{check_status} payment state using the matching check event timestamp" do
       company, pay_period, source = setup_records
@@ -595,10 +595,13 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "regular_hours" => 8.0,
         "overtime_hours" => 0.0
       }
+      payload = payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-#{check_status.upcase}")
+      payload.fetch("employees").first["source_user_uuid"] = SecureRandom.uuid
+      payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
       import = preview_import(
         pay_period: pay_period,
         source: source,
-        payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-#{check_status.upcase}")
+        payload: payload
       )
       item = create(
         :payroll_item,
@@ -639,12 +642,26 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         reconciliation_note: "Matched against the signed historical payroll register."
       ).call
 
-      acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
-      expect(acknowledgement).to have_attributes(
-        payment_reference: "7001",
-        source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment:flight-current"
-      )
-      expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
+      if payment_status
+        acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
+        expect(acknowledgement).to have_attributes(
+          payment_reference: "7001",
+          source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment:flight-current"
+        )
+        expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
+      else
+        # A legacy instrument void is not evidence of a wage/source reversal.
+        expect(item.reload.payroll_included?).to be(true)
+        expect(import.aire_payroll_entry_acknowledgements.pluck(:status)).to eq([ "committed" ])
+        expect(import.time_tracking_entry_allocations.pluck(:payroll_item_id, :total_hours)).to eq([ [ item.id, 8.to_d ] ])
+        actor = create(:user, company: company)
+        event = PayPeriodCorrectionService.void!(pay_period: pay_period, actor: actor, reason: "Reverse legacy retained payroll obligation")
+        acknowledgement = item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").sole
+        expect(acknowledgement.occurred_at).to be_within(1.second).of(event.created_at)
+        expect(acknowledgement.source_time_entry_id).to eq("historic-payment")
+        TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: pay_period.reload, void_event: event)
+        expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+      end
     end
   end
 

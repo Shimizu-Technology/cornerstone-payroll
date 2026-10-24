@@ -257,7 +257,7 @@ class Form941GuAggregator
     PayrollItem.includes(:pay_period)
                .where(company_id: company.id)
                .where(pay_period_id: committed_pay_periods.select(:id))
-               .not_voided.reportable
+               .financially_reportable.reportable
                .where.not(employment_type: "contractor")
   end
 
@@ -478,7 +478,7 @@ class Form941GuAggregator
   def prior_payroll_items
     PayrollItem.joins(:pay_period)
                .where(company_id: company.id)
-               .not_voided.reportable
+               .financially_reportable.reportable
                .where.not(employment_type: "contractor")
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
@@ -492,7 +492,7 @@ class Form941GuAggregator
 
     native_ids = PayrollItem.joins(:pay_period)
                .where(company_id: company.id)
-               .not_voided.reportable
+               .financially_reportable.reportable
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
                    .where(company_id: company.id)

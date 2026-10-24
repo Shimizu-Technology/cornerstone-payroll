@@ -30,9 +30,9 @@ RSpec.describe EarningsStatementEligibility do
     expect(printable(hours_worked: 0, loan_deduction: 50)).to be false
   end
 
-  it "retains a legitimate numbered statement but never a voided one" do
+  it "retains earned wage statements when their paper instrument is voided" do
     expect(printable(check_number: "8101")).to be true
-    expect(printable(voided: true, gross_pay: 1200, check_number: "8101")).to be false
+    expect(printable(voided: true, gross_pay: 1200, check_number: "8101")).to be true
   end
 
   it "includes persisted financial rows while ignoring inactive field entries" do
