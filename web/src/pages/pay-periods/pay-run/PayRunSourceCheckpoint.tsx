@@ -8,6 +8,7 @@ import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunSourceCheckpoint({
   onReviewSourceCoverage,
+  sourceCoverageProcessing,
   aireSourceRefreshToken,
   companyId,
   currentAireRecord,
@@ -37,7 +38,7 @@ export function PayRunSourceCheckpoint({
         <AirePayrollCockpit
           key={payPeriod.id}
           presentation="checkpoint"
-          sourceCoverageAction={onReviewSourceCoverage && <Button variant="outline" size="sm" onClick={onReviewSourceCoverage}>Review source coverage</Button>}
+          sourceCoverageAction={(payPeriod.status === 'draft' || payPeriod.status === 'calculated') && onReviewSourceCoverage && <Button variant="outline" size="sm" disabled={sourceCoverageProcessing} onClick={() => { if (!sourceCoverageProcessing) onReviewSourceCoverage(); }}>Review source coverage</Button>}
           sourceCoverageRequired={needsSourceCoverageAcknowledgement(payPeriod)}
           payPeriodId={payPeriod.id}
           payPeriodStatus={payPeriod.status}

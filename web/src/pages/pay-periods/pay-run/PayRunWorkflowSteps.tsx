@@ -42,16 +42,17 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
       <div id="payroll-blockers" tabIndex={-1} className="space-y-3"><PayRunBlockers {...sections.blockers} part="hours" /></div>
       <div id="time-tracking-hours"><PayRunSourceCheckpoint {...sections.source} /></div>
       {hasFeedback && state.current === 'hours' && <div id="payroll-feedback" tabIndex={-1}><PayRunFeedback {...sections.feedback} /></div>}
-      <PayRunLoanInputs {...sections.loans} /><PayRunRoster {...sections.roster} /><PayRunHoursWorksheet {...sections.hours} /><PayRunSavedRecords {...sections.results} /><PayRunTimecardOcr {...sections.ocr} /><PayRunEmptyState {...sections.empty} />
+      <div id="payroll-loan-inputs" tabIndex={-1} className="scroll-mt-16 space-y-4"><PayRunLoanInputs {...sections.loans} /><PayRunRoster {...sections.roster} /><PayRunHoursWorksheet {...sections.hours} /></div><PayRunSavedRecords {...sections.results} /><PayRunTimecardOcr {...sections.ocr} /><PayRunEmptyState {...sections.empty} />
     </Step>
-    <Step id="payroll-results" title="Results" number={2} current={state.current === 'results'} summary={payPeriod.status === 'draft' ? 'Calculate after hours and pay are added' : `${sections.results.payrollItems.length} employee records · Review saved pay`} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
-      {hasFeedback && state.current !== 'hours' && <div id="payroll-feedback" tabIndex={-1}><PayRunFeedback {...sections.feedback} /></div>}
+    <Step id="payroll-results" title="Results" number={2} current={state.current === 'results'} summary={payPeriod.status === 'draft' ? 'Calculate after hours and pay are added' : `${sections.results.payrollItems.length} employee record${sections.results.payrollItems.length === 1 ? '' : 's'} · Review saved pay`} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
+      {hasFeedback && state.current === 'results' && <div id="payroll-feedback" tabIndex={-1}><PayRunFeedback {...sections.feedback} /></div>}
       {sections.results.payrollItems.length === 0 && <PayRunStepAction {...sections.processing} step="results" />}
       <PayRunEmployeeResults {...sections.results} action={<PayRunStepAction {...sections.processing} step="results" />} />
       {payPeriod.status !== 'draft' && <><details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Prior-period comparison</summary><div className="pt-3"><PayRunComparison {...sections.comparison} /></div></details>
       <details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Employer taxes and DRT deposit</summary><div className="pt-3"><PayRunEmployerTaxes {...sections.employerTaxes} /></div></details></>}
     </Step>
     <Step id="payroll-commit" title="Approve & commit" number={3} current={state.current === 'commit'} summary={committedSummary} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
+      {hasFeedback && state.current === 'commit' && <div id="payroll-feedback" tabIndex={-1}><PayRunFeedback {...sections.feedback} /></div>}
       {!state.committed && <PayRunStepAction {...sections.processing} step="commit" />}
       <PayRunBlockers {...sections.blockers} part="approval" />
       {state.committed && <p className="text-sm text-neutral-700">{committedSummary}. Review payments on Checks &amp; payments and the final record on Reports.</p>}

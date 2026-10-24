@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod } from '@/types';
@@ -19,11 +19,11 @@ const period = {
   time_tracking: { linked_aire_records: [], aire_calendar: { enabled: true, cutoff_at: '2026-10-22T17:00:00+10:00' } },
 } as unknown as PayPeriod;
 
-function renderSource(payPeriod = period) {
+function renderSource(payPeriod = period, overrides: Partial<PayRunSectionProps<'source'>> = {}) {
   const props = {
     payPeriod, companyId: '1', hoursMap: {}, currentAireRecord: null, aireSourceRefreshToken: 0,
     invalidateAireSource: vi.fn(), loadPayPeriod: vi.fn(),
-    setTimeTrackingAutoPreview: vi.fn(), setTimeTrackingImportOpen: vi.fn(),
+    setTimeTrackingAutoPreview: vi.fn(), setTimeTrackingImportOpen: vi.fn(), ...overrides,
   } as unknown as PayRunSectionProps<'source'>;
   render(<MemoryRouter><PayRunSourceCheckpoint {...props} /></MemoryRouter>);
   return props;
@@ -61,4 +61,22 @@ describe('PayRunSourceCheckpoint', () => {
     expect(screen.getByText(/regular time tracking cutoff and full-period hours do not apply/)).toBeTruthy();
     expect(cockpit).not.toHaveBeenCalled();
   });
+});
+
+it.each(['draft', 'calculated'] as const)('allows %s coverage review only while idle', status => {
+  const review = vi.fn();
+  renderSource({ ...period, status }, { onReviewSourceCoverage: review, sourceCoverageProcessing: false });
+  const slot = cockpit.mock.lastCall![0].sourceCoverageAction;
+  render(<MemoryRouter>{slot}</MemoryRouter>);
+  const button = screen.getByRole('button', { name: 'Review source coverage' });
+  fireEvent.click(button); expect(review).toHaveBeenCalledOnce();
+  cleanup();
+  renderSource({ ...period, status }, { onReviewSourceCoverage: review, sourceCoverageProcessing: true });
+  render(<MemoryRouter>{cockpit.mock.lastCall![0].sourceCoverageAction}</MemoryRouter>);
+  const disabled = screen.getByRole('button', { name: 'Review source coverage' }) as HTMLButtonElement;
+  expect(disabled.disabled).toBe(true); fireEvent.click(disabled); expect(review).toHaveBeenCalledOnce();
+});
+it('does not expose calculation coverage review for an approved run', () => {
+  renderSource({ ...period, status: 'approved' }, { onReviewSourceCoverage: vi.fn() });
+  expect(cockpit.mock.lastCall![0].sourceCoverageAction).toBeFalsy();
 });
