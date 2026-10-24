@@ -31,6 +31,53 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     next_period.payroll_items.find_by!(employee: employee)
   end
 
+  context "fractional-cent source buckets" do
+    let(:next_import) do
+      make_import(next_period, 0.02, "current", "CENTS", daily_lines: [
+        { source_time_entry_id: "103", line_key: "carry-cent", source_kind: "carryover", source_time_entry_version: 2,
+          original_work_date: "2026-10-10", total_hours: 0.01, regular_hours: 0.01, overtime_hours: 0 },
+        { source_time_entry_id: "104", line_key: "current-cent", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 0.01, regular_hours: 0.01, overtime_hours: 0 }
+      ])
+    end
+
+    before { rate.update!(rate: "10.50") }
+
+    it "conserves each frozen tuple and gross through approval and commit" do
+      item = apply!(same_rate: true)
+      captured = item.reload.wage_rate_hours.deep_dup
+      item.calculate!
+      expect(item.reload.gross_pay).to eq("0.22".to_d)
+      expect(item.payroll_item_earnings.sum(:amount)).to eq(item.gross_pay)
+      expect(item.wage_rate_hours).to eq(captured)
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(next_period.reload.status).to eq("committed")
+      expect(item.reload.gross_pay).to eq("0.22".to_d)
+    end
+
+    %w[gross_pay net_pay].each do |field|
+      it "rejects a changed #{field} at approval and commit even when all frozen earning tuples still match" do
+        item = apply!(same_rate: true)
+        item.calculate!
+        next_period.update!(status: "calculated")
+        lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+        saved = item.reload.public_send(field)
+        item.update_columns(field => saved + 1)
+        expect { lifecycle.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /reconcile|Imported source/)
+        expect(next_period.reload.status).to eq("calculated")
+        item.update_columns(field => saved)
+        lifecycle.approve!
+        item.update_columns(field => saved + 1)
+        expect { lifecycle.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /reconcile|Imported source/)
+        expect(next_period.reload.status).to eq("approved")
+        expect(item.reload.check_number).to be_nil
+      end
+    end
+  end
+
   context "a zero-total REG/OT correction alongside current overtime" do
     let(:next_import) do
       make_import(next_period, 3, "current", "RECLASS", daily_lines: [
@@ -62,6 +109,34 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       lifecycle.commit!
       expect(item.reload.gross_pay).to eq(87.50)
       expect(next_period.reload.status).to eq("committed")
+    end
+  end
+
+  context "fractional current, carryover and reversal source dimensions" do
+    let(:next_import) do
+      make_import(next_period, 0.03, "current", "SIGNED-CENTS", daily_lines: [
+        { source_time_entry_id: "104", line_key: "current-cent", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 0.03, regular_hours: 0.03, overtime_hours: 0 },
+        { source_time_entry_id: "103", line_key: "carry-cent", source_kind: "carryover", source_time_entry_version: 2,
+          original_work_date: "2026-10-10", total_hours: 0.01, regular_hours: 0.01, overtime_hours: 0 },
+        { source_time_entry_id: "501", line_key: "reverse-cent", source_kind: "correction", source_time_entry_version: 1,
+          original_work_date: "2026-10-10", original_week_start: "2026-10-04", total_hours: -0.01, regular_hours: -0.01, overtime_hours: 0 }
+      ])
+    end
+
+    it "retains three frozen tuples while summing their signed cents through commit" do
+      rate.update!(rate: "10.50")
+      item = apply!(same_rate: true, source_kinds: %w[current carryover correction], signed_acknowledgement: true)
+      captured = item.reload.wage_rate_hours.deep_dup
+      item.calculate!
+      expect(item.reload.gross_pay).to eq("0.32".to_d)
+      expect(item.payroll_item_earnings.map(&:amount)).to contain_exactly("0.32".to_d, "0.11".to_d, "-0.11".to_d)
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.wage_rate_hours).to eq(captured)
+      expect(item.payroll_item_earnings.sum(:amount)).to eq(item.gross_pay)
     end
   end
 

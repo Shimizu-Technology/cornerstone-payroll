@@ -566,8 +566,8 @@
     "bonus": 30
   },
   {
-    "name": "cents round once after component sum",
-    "expected": 0.05,
+    "name": "cents round each saved wage line before summing",
+    "expected": 0.06,
     "employee": {
       "employment_type": "hourly",
       "pay_rate": 0.05,
@@ -673,6 +673,251 @@
         "mode": "default",
         "automatic": true,
         "currentActive": false
+      }
+    ]
+  },
+  {
+    "name": "two fractional-cent source buckets",
+    "expected": 0.22,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 10.5,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0.02,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "Rounding 0",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 1",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "many fractional-cent source buckets",
+    "expected": 0.55,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 10.5,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0.05,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "Rounding 0",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 1",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 2",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 3",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 4",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "signed fractional-cent source buckets",
+    "expected": 0.01,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 10.5,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0.0,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "Rounding 0",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 1",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 2",
+          "rate": 10.5,
+          "regular_hours": -0.02,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "hourly contractor fractional-cent buckets",
+    "expected": 0.22,
+    "employee": {
+      "employment_type": "contractor",
+      "pay_rate": 10.5,
+      "pay_frequency": "biweekly",
+      "contractor_pay_type": "hourly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0.02,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "Rounding 0",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 1",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": []
+  },
+  {
+    "name": "percentage addition uses the sum of rounded wage lines",
+    "expected": 0.24,
+    "employee": {
+      "employment_type": "hourly",
+      "pay_rate": 10.5,
+      "pay_frequency": "biweekly"
+    },
+    "item": {},
+    "hours": {
+      "regular": 0.02,
+      "overtime": 0,
+      "wage_rates": [
+        {
+          "label": "Rounding 0",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        },
+        {
+          "label": "Rounding 1",
+          "rate": 10.5,
+          "regular_hours": 0.01,
+          "overtime_hours": 0,
+          "holiday_hours": 0,
+          "pto_hours": 0,
+          "active": true
+        }
+      ]
+    },
+    "period": {
+      "includes_base_salary": true,
+      "includes_recurring_items": true,
+      "run_purpose": "regular"
+    },
+    "fields": [
+      {
+        "id": 91,
+        "amountType": "percentage",
+        "percentage": 10,
+        "editable": true,
+        "mode": "default"
       }
     ]
   }
