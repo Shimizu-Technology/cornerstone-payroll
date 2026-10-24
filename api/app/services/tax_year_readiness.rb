@@ -2,9 +2,9 @@
 
 # Read-only, shared by the operator warning and the production release gate.
 class TaxYearReadiness
-  def initialize(today: Date.current, pay_dates: [])
+  def initialize(today: Date.current, pay_dates: nil)
     @today = today
-    @pay_dates = pay_dates
+    @pay_dates = pay_dates || PayPeriod.where.not(status: "committed").distinct.pluck(:pay_date)
   end
 
   def as_json(*)

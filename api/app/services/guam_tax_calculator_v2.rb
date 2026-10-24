@@ -58,6 +58,13 @@ class GuamTaxCalculatorV2
   # @return [Hash] { withholding:, social_security:, medicare: }
   def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil, w4_dependent_credit: 0,
                 reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
+    unless @source_rule_snapshot.present?
+      current = AnnualTaxConfig.current(annual_config.tax_year)
+      raise ArgumentError, AnnualTaxConfig.unverified_message(annual_config.tax_year) unless current
+      if current.verified_at != annual_config.verified_at
+        raise ArgumentError, "#{annual_config.tax_year} tax verification changed. Calculate payroll again using the reviewed rules."
+      end
+    end
     withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
     bases = taxable_bases(
       gross_pay: gross_pay,

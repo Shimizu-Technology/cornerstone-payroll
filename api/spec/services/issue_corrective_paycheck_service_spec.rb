@@ -216,6 +216,7 @@ RSpec.describe IssueCorrectivePaycheckService do
     end
 
     it "uses the frozen historical tax basis while posting only the remaining delta in the correction pay year" do
+      ensure_verified_test_tax_years(2025)
       _, first = issue_target({ hours_worked: 80 }, pay_date: Date.new(2025, 1, 5))
       employee.update!(filing_status: "married", allowances: 5, pay_rate: 100)
       preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 65 })
