@@ -23,7 +23,7 @@ class CorrectiveRetirementContext
       historical: projection.source, opening: opening,
       ledger: rows.map do |item|
         { id: item.id, period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
-          totals: amounts(item), catch_up_classification: PayrollRetirementCatchUp.for_item(item), retirement_rule_snapshot: item.retirement_rule_snapshot }
+          totals: amounts(item), catch_up_classification: proved_catch_up(item), retirement_rule_snapshot: item.retirement_rule_snapshot }
       end
     }
   end
@@ -68,7 +68,7 @@ class CorrectiveRetirementContext
     additions_limit = [ annual_limit.annual_additions_limit.to_d, totals[:gross] ].min
     personal_local_catch_up = [ elective + external - base, 0.to_d ].max - [ external - base, 0.to_d ].max
     required = [ personal_local_catch_up, elective - regular, additions - additions_limit, 0.to_d ].max
-    proved = rows.sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) } + catch_up_delta(target)
+    proved = rows.sum(0.to_d) { |item| proved_catch_up(item) } + catch_up_delta(target)
     hold! if proved.negative? || proved > catch_up || proved > elective || required > proved
     if proved.positive? && (year_input.fetch(:external_traditional_deferrals, 0).to_d.positive? ||
         (year >= 2026 && year_input.fetch(:prior_year_fica_wages, 0).to_d > annual_limit.roth_catch_up_wage_threshold.to_d && totals[:roth_retirement] < proved))
@@ -82,10 +82,16 @@ class CorrectiveRetirementContext
   end
 
   def catch_up_delta(target)
-    PayrollRetirementCatchUp.for_item(target) - [ original, *active ].sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) }
+    proved_catch_up(target) - [ original, *active ].sum(0.to_d) { |item| proved_catch_up(item) }
   end
 
   private
+
+  def proved_catch_up(item)
+    PayrollRetirementCatchUp.for_item(item)
+  rescue PayrollRetirementCatchUp::UnprovedHistoryError => e
+    raise IssueCorrectivePaycheckService::MissingHistoricalContextError, "#{MESSAGE} #{e.message}"
+  end
 
   def canonical_year_input(value)
     value.stringify_keys.except("year_input_id").to_h do |key, entry|
