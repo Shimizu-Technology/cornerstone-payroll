@@ -153,7 +153,7 @@ function SignoffEditorModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} onAfterClose={onAfterClose} returnFocusRef={returnFocusRef}>
-      <DialogContent className="dialog-wide max-w-3xl p-0 sm:p-0">
+      <DialogContent className="dialog-wide mx-auto! max-w-3xl p-0! sm:mx-auto! sm:p-0!">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
           <DialogTitle className="text-lg font-semibold text-neutral-900">Edit Check Sign-Off Sheet</DialogTitle>
           <button onClick={onClose} aria-label="Close check sign-off editor" className="text-neutral-600 hover:text-neutral-900 p-1">
