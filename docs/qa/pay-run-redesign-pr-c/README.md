@@ -1,12 +1,14 @@
 # Pay-run redesign C
 
-Owner: `payroll-redesign`. Application source: `e4640d1d`; integrates staging-v2 `ce12d1da` (#385). Lead reviews and merges. PR A #383 and PR B #384 are already merged.
+Owner: `payroll-redesign`. Application source: `36b291d1` (UI logic/layout in `5a6e9754`, count labels in `04fd3b86`); integrates staging-v2 `ce12d1da` (#385). Lead reviews and merges. PR A #383 and PR B #384 are already merged.
 
 Payroll now follows Hours → Results → Approve & commit. Saved status chooses the current step; disclosure state only changes what the accountant inspects. Committed runs keep Results open for post-commit review. Hours and commitment collapse to a saved summary. Adjustment and late-hours runs state their selected-employee scope; parallel runs explain that commitment is unavailable.
 
 Hours contains one compact source checkpoint, coverage acknowledgement and the existing late-hours banner and entry. Source/calendar/batch/payment details remain in disclosures. The default results table shows employee, hours, gross, deductions, net, flags and Details. Show tax detail persists across reloads and restores the existing full table, including its custom pay, source and payment controls. Phone results are cards with name and net together; Filters uses the shared phone sheet.
 
 Amounts come from saved payroll items. Neither the compact table nor header re-derives earnings from hours/rates. Filtered footer totals are identified. Existing calculation, approval, commitment, client review, correction and permission guards remain. All four tabs, read-only summary, read-only Reports and overview/client routes retain their contracts.
+
+The lead’s four findings and CodeRabbit’s four findings are addressed in [review round 1](REVIEW-1.md). The header is the single filled primary; in-step actions stay available as secondary controls. Flags have a wider wrapping column and Details/menu retain separate space. Filters use compact selects and a growing search field. Feedback appears and receives focus in the current step, and loan conflicts link to their inputs.
 
 ## Evidence
 

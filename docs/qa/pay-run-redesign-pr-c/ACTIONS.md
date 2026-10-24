@@ -86,23 +86,23 @@
 | View record | connected-committed / 1280 | Reports workspace | retained |
 | Void | connected-committed / 1280 | Checks and payments workspace | retained |
 | Void This Pay Period | connected-committed / 1280 | payroll-corrections | retained |
-| + Tips & Deductions | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| + Tips & Deductions | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Activity | connected-draft / 1280 | Pay-run workspace sections; Payroll workspace | retained |
-| Ari Jet | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Ari Jet | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Back | connected-draft / 1280 | Header / shared dialog | retained |
 | Back to overview | connected-draft / 1280 | Checks and payments workspace | retained |
-| Ben Hangar | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Ben Hangar | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Calculate Payroll | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Casey Office | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Casey Office | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Check Settings › | connected-draft / 1280 | Checks and payments workspace | retained |
 | Checks & payments | connected-draft / 1280 | Pay-run workspace sections | retained |
 | Compare employee hours · 4 differences | connected-draft / 1280 | payroll-hours → Compare employee hours · 4 differences | moved or disclosure renamed |
 | Cutoff and connection details | connected-draft / 1280 | payroll-hours → Cutoff and connection details | moved or disclosure renamed |
-| Dana Salary | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Eli Manual | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Finn Review | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Lee Legacy | connected-draft / 1280 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Dana Salary | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Eli Manual | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Finn Review | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Lee Legacy | connected-draft / 1280 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Lock time tracking cutoff | connected-draft / 1280 | payroll-hours → Review timecards, held hours and team | moved or disclosure renamed |
 | More payroll actions | connected-draft / 1280 | Header / shared dialog | retained |
 | Payroll | connected-draft / 1280 | Pay-run workspace sections | retained |
@@ -126,12 +126,12 @@
 | Back | adjustment / 1280 | Header / shared dialog | retained |
 | Change payment method for Eli Manual | adjustment / 1280 | Checks and payments workspace; Checks and payments workspace → Review payment methods and amounts | retained |
 | Check Settings › | adjustment / 1280 | Checks and payments workspace | retained |
-| Checks & payments / Checks & payments 1 | adjustment / 1280 | Header / shared dialog; Pay-run workspace sections; Payroll workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Correct | adjustment / 1280 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Checks & payments / Checks & payments 1 | adjustment / 1280 | Header / shared dialog; Pay-run workspace sections; Payroll workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Correct | adjustment / 1280 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Correct Pay Date | adjustment / 1280 | Header / shared dialog | retained |
 | Download | adjustment / 1280 | Checks and payments workspace; Reports workspace | retained |
 | Download all earnings statements | adjustment / 1280 | Checks and payments workspace | retained |
-| Eli Manual | adjustment / 1280 | Checks and payments workspace → Review payment methods and amounts; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Eli Manual | adjustment / 1280 | Checks and payments workspace → Review payment methods and amounts; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Export | adjustment / 1280 | Reports workspace | retained |
 | Export PDF document (.pdf) | adjustment / 1280 | Reports workspace | retained |
 | Export final payroll record | adjustment / 1280 | Reports workspace | retained |
@@ -140,10 +140,10 @@
 | Link hours to payroll item | adjustment / 1280 | Checks and payments workspace | retained |
 | Link time tracking record | adjustment / 1280 | Header / shared dialog | retained |
 | Load older activity | adjustment / 1280 | Activity workspace | retained |
-| Manual | adjustment / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | adjustment / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | adjustment / 1280 | Header / shared dialog | retained |
 | Open | adjustment / 1280 | Checks and payments workspace → Review payment methods and amounts | retained |
-| Open payroll item | adjustment / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | adjustment / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | adjustment / 1280 | Checks and payments workspace → Review payment methods and amounts | retained |
 | Payroll | adjustment / 1280 | Pay-run workspace sections | retained |
 | Payroll corrections | adjustment / 1280 | Header / shared dialog | retained |
@@ -158,8 +158,8 @@
 | Refresh reconciliation | adjustment / 1280 | Checks and payments workspace | retained |
 | Reissue | adjustment / 1280 | Checks and payments workspace | retained |
 | Reopen unpaid payroll | adjustment / 1280 | payroll-corrections | retained |
-| Replace | adjustment / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Replace check | adjustment / 1280 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Replace | adjustment / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Replace check | adjustment / 1280 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Reports | adjustment / 1280 | Pay-run workspace sections; Payroll workspace | retained |
 | Retry sync for entry 17 | adjustment / 1280 | Checks and payments workspace | retained |
 | Review payment methods and amounts | adjustment / 1280 | Checks and payments workspace → Review payment methods and amounts | retained |
@@ -168,7 +168,7 @@
 | Technical evidence | adjustment / 1280 | Activity workspace → Technical evidence | retained |
 | View | adjustment / 1280 | Checks and payments workspace; Reports workspace | retained |
 | View Correction History | adjustment / 1280 | payroll-corrections | retained |
-| View details | adjustment / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | adjustment / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | View record | adjustment / 1280 | Reports workspace | retained |
 | Void | adjustment / 1280 | Checks and payments workspace | retained |
 | Void This Pay Period | adjustment / 1280 | payroll-corrections | retained |
@@ -228,44 +228,44 @@
 | View record | manual-committed / 1280 | Reports workspace | retained |
 | Void | manual-committed / 1280 | Checks and payments workspace | retained |
 | Void This Pay Period | manual-committed / 1280 | payroll-corrections | retained |
-| + Tips & Deductions | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| + Tips & Deductions | fresh-draft / 1280 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Activity | fresh-draft / 1280 | Pay-run workspace sections | retained |
 | Back | fresh-draft / 1280 | Header / shared dialog | retained |
 | Back to overview | fresh-draft / 1280 | Checks and payments workspace | retained |
 | Calculate Payroll | fresh-draft / 1280 | Header / shared dialog; payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Check Settings › | fresh-draft / 1280 | Checks and payments workspace | retained |
 | Checks & payments | fresh-draft / 1280 | Pay-run workspace sections | retained |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-draft / 1280 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Enter or review pay, then calculate | fresh-draft / 1280 | Header / shared dialog | retained |
-| Maya Manual | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Maya Manual | fresh-draft / 1280 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | More payroll actions | fresh-draft / 1280 | Header / shared dialog | retained |
 | Payroll | fresh-draft / 1280 | Pay-run workspace sections | retained |
 | Reports | fresh-draft / 1280 | Pay-run workspace sections | retained |
 | Run notes and processing history | fresh-draft / 1280 | Activity workspace → Run notes and processing history | retained |
-| Sam Salary | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Sam Salary | fresh-draft / 1280 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Search | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Select Files | fresh-draft / 1280 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
-| + Tips & Deductions | fresh-calculated / 1280 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| + Tips & Deductions | fresh-calculated / 1280 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
 | 2 access records / 3 access records | fresh-calculated / 1280 | Activity workspace → 2 access records | moved or disclosure renamed |
 | Activity | fresh-calculated / 1280 | Pay-run workspace sections | retained |
-| Adjust HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-calculated / 1280 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
-| Approve | fresh-calculated / 1280 | Header / shared dialog; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Adjust HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-calculated / 1280 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| Approve | fresh-calculated / 1280 | Header / shared dialog; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Back | fresh-calculated / 1280 | Header / shared dialog | retained |
 | Change payment method for Maya Manual | fresh-calculated / 1280 | Checks and payments workspace | retained |
 | Check Settings › | fresh-calculated / 1280 | Checks and payments workspace | retained |
 | Checks & payments 1 | fresh-calculated / 1280 | Pay-run workspace sections | retained |
 | Download | fresh-calculated / 1280 | Reports workspace | retained |
-| Edit | fresh-calculated / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Edit payroll | fresh-calculated / 1280 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Enter pay | fresh-calculated / 1280 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| Edit | fresh-calculated / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Edit payroll | fresh-calculated / 1280 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Enter pay | fresh-calculated / 1280 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
 | Export | fresh-calculated / 1280 | Reports workspace | retained |
 | Export PDF document (.pdf) | fresh-calculated / 1280 | Reports workspace | retained |
 | Load older activity | fresh-calculated / 1280 | Activity workspace | retained |
-| Manual | fresh-calculated / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Maya Manual | fresh-calculated / 1280 | Checks and payments workspace; payroll-hours → 1Hours42.00 h saved · View source and inputs; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | fresh-calculated / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Maya Manual | fresh-calculated / 1280 | Checks and payments workspace; payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | fresh-calculated / 1280 | Header / shared dialog | retained |
 | Open | fresh-calculated / 1280 | Checks and payments workspace | retained |
-| Open payroll item | fresh-calculated / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | fresh-calculated / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | fresh-calculated / 1280 | Checks and payments workspace | retained |
 | Payroll | fresh-calculated / 1280 | Pay-run workspace sections | retained |
 | Recalculate | fresh-calculated / 1280 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
@@ -275,7 +275,7 @@
 | Run notes and processing history | fresh-calculated / 1280 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | fresh-calculated / 1280 | Activity workspace → Technical evidence | retained |
 | View | fresh-calculated / 1280 | Reports workspace | retained |
-| View details | fresh-calculated / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | fresh-calculated / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | 2 access records / 3 access records | fresh-approved / 1280 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
 | Activity | fresh-approved / 1280 | Pay-run workspace sections | retained |
 | Back | fresh-approved / 1280 | Header / shared dialog | retained |
@@ -287,11 +287,11 @@
 | Export | fresh-approved / 1280 | Reports workspace | retained |
 | Export PDF document (.pdf) | fresh-approved / 1280 | Reports workspace | retained |
 | Load older activity | fresh-approved / 1280 | Activity workspace | retained |
-| Manual | fresh-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Maya Manual | fresh-approved / 1280 | Checks and payments workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | fresh-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Maya Manual | fresh-approved / 1280 | Checks and payments workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | fresh-approved / 1280 | Header / shared dialog | retained |
 | Open | fresh-approved / 1280 | Checks and payments workspace | retained |
-| Open payroll item | fresh-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | fresh-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | fresh-approved / 1280 | Checks and payments workspace | retained |
 | Payroll | fresh-approved / 1280 | Pay-run workspace sections | retained |
 | Refresh current setup | fresh-approved / 1280 | Header / shared dialog | retained |
@@ -301,7 +301,7 @@
 | Run notes and processing history | fresh-approved / 1280 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | fresh-approved / 1280 | Activity workspace → Technical evidence | retained |
 | View | fresh-approved / 1280 | Reports workspace | retained |
-| View details | fresh-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | fresh-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | About parallel comparison | parallel-approved / 1280 | Header / shared dialog | retained |
 | Activity | parallel-approved / 1280 | Pay-run workspace sections | retained |
 | Back | parallel-approved / 1280 | Header / shared dialog | retained |
@@ -312,32 +312,32 @@
 | Download | parallel-approved / 1280 | Reports workspace | retained |
 | Export | parallel-approved / 1280 | Reports workspace | retained |
 | Export PDF document (.pdf) | parallel-approved / 1280 | Reports workspace | retained |
-| Fixture | parallel-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Fixture | parallel-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | parallel-approved / 1280 | Header / shared dialog | retained |
 | Open | parallel-approved / 1280 | Checks and payments workspace | retained |
-| Open payroll item | parallel-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | parallel-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | parallel-approved / 1280 | Checks and payments workspace | retained |
 | Parallel comparison · cannot commit | parallel-approved / 1280 | Header / shared dialog | retained |
 | Payroll | parallel-approved / 1280 | Pay-run workspace sections | retained |
 | Refresh current setup | parallel-approved / 1280 | Header / shared dialog | retained |
-| Report Fixture | parallel-approved / 1280 | Checks and payments workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Report Fixture | parallel-approved / 1280 | Checks and payments workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Reports | parallel-approved / 1280 | Pay-run workspace sections; Payroll workspace | retained |
 | Review settings | parallel-approved / 1280 | payroll-blockers → 1Hours40.00 h saved · View source and inputs | moved or disclosure renamed |
 | Roll Back Approval | parallel-approved / 1280 | Header / shared dialog | retained |
 | Run notes and processing history | parallel-approved / 1280 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | parallel-approved / 1280 | Activity workspace → Technical evidence | retained |
 | View | parallel-approved / 1280 | Reports workspace | retained |
-| View details | parallel-approved / 1280 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| + Tips & Deductions | late-hours-navigation / 1280 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| View details | parallel-approved / 1280 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| + Tips & Deductions | late-hours-navigation / 1280 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Activity | late-hours-navigation / 1280 | Pay-run workspace sections | retained |
 | Back | late-hours-navigation / 1280 | Header / shared dialog | retained |
 | Back to overview | late-hours-navigation / 1280 | Checks and payments workspace | retained |
 | Calculate Payroll | late-hours-navigation / 1280 | Header / shared dialog; payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Check Settings › | late-hours-navigation / 1280 | Checks and payments workspace | retained |
 | Checks & payments | late-hours-navigation / 1280 | Pay-run workspace sections | retained |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | late-hours-navigation / 1280 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | late-hours-navigation / 1280 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Enter or review pay, then calculate | late-hours-navigation / 1280 | Header / shared dialog | retained |
-| Enter pay | late-hours-navigation / 1280 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| Enter pay | late-hours-navigation / 1280 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Import time tracking | late-hours-navigation / 1280 | Header / shared dialog | retained |
 | More payroll actions | late-hours-navigation / 1280 | Header / shared dialog | retained |
 | Payroll | late-hours-navigation / 1280 | Pay-run workspace sections | retained |
@@ -429,23 +429,23 @@
 | View record | connected-committed / 390 | Reports workspace | retained |
 | Void | connected-committed / 390 | Checks and payments workspace | retained |
 | Void This Pay Period | connected-committed / 390 | payroll-corrections | retained |
-| + Tips & Deductions | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| + Tips & Deductions | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Activity | connected-draft / 390 | Pay-run workspace sections; Payroll workspace | retained |
-| Ari Jet | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Ari Jet | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Back | connected-draft / 390 | Header / shared dialog | retained |
 | Back to overview | connected-draft / 390 | Checks and payments workspace | retained |
-| Ben Hangar | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Ben Hangar | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Calculate Payroll | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Casey Office | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Casey Office | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Check Settings › | connected-draft / 390 | Checks and payments workspace | retained |
 | Checks & payments | connected-draft / 390 | Pay-run workspace sections | retained |
 | Compare employee hours · 4 differences | connected-draft / 390 | payroll-hours → Compare employee hours · 4 differences | moved or disclosure renamed |
 | Cutoff and connection details | connected-draft / 390 | payroll-hours → Cutoff and connection details | moved or disclosure renamed |
-| Dana Salary | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Eli Manual | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Finn Review | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
-| Lee Legacy | connected-draft / 390 | payroll-hours → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Dana Salary | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Eli Manual | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Finn Review | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
+| Lee Legacy | connected-draft / 390 | payroll-loan-inputs → 1HoursReview source hours and any held entries before calculating. | moved or disclosure renamed |
 | Lock time tracking cutoff | connected-draft / 390 | payroll-hours → Review timecards, held hours and team | moved or disclosure renamed |
 | More payroll actions | connected-draft / 390 | Header / shared dialog | retained |
 | Payroll | connected-draft / 390 | Pay-run workspace sections | retained |
@@ -469,12 +469,12 @@
 | Back | adjustment / 390 | Header / shared dialog | retained |
 | Change payment method for Eli Manual | adjustment / 390 | Checks and payments workspace; Checks and payments workspace → Review payment methods and amounts | retained |
 | Check Settings › | adjustment / 390 | Checks and payments workspace | retained |
-| Checks & payments / Checks & payments 1 | adjustment / 390 | Header / shared dialog; Pay-run workspace sections; Payroll workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Correct | adjustment / 390 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Checks & payments / Checks & payments 1 | adjustment / 390 | Header / shared dialog; Pay-run workspace sections; Payroll workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Correct | adjustment / 390 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Correct Pay Date | adjustment / 390 | Header / shared dialog | retained |
 | Download | adjustment / 390 | Checks and payments workspace; Reports workspace | retained |
 | Download all earnings statements | adjustment / 390 | Checks and payments workspace | retained |
-| Eli Manual | adjustment / 390 | Checks and payments workspace → Review payment methods and amounts; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Eli Manual | adjustment / 390 | Checks and payments workspace → Review payment methods and amounts; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Export | adjustment / 390 | Reports workspace | retained |
 | Export PDF document (.pdf) | adjustment / 390 | Reports workspace | retained |
 | Export final payroll record | adjustment / 390 | Reports workspace | retained |
@@ -483,10 +483,10 @@
 | Link hours to payroll item | adjustment / 390 | Checks and payments workspace | retained |
 | Link time tracking record | adjustment / 390 | Header / shared dialog | retained |
 | Load older activity | adjustment / 390 | Activity workspace | retained |
-| Manual | adjustment / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | adjustment / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | adjustment / 390 | Header / shared dialog | retained |
 | Open | adjustment / 390 | Checks and payments workspace → Review payment methods and amounts | retained |
-| Open payroll item | adjustment / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | adjustment / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | adjustment / 390 | Checks and payments workspace → Review payment methods and amounts | retained |
 | Payroll | adjustment / 390 | Pay-run workspace sections | retained |
 | Payroll corrections | adjustment / 390 | Header / shared dialog | retained |
@@ -501,8 +501,8 @@
 | Refresh reconciliation | adjustment / 390 | Checks and payments workspace | retained |
 | Reissue | adjustment / 390 | Checks and payments workspace | retained |
 | Reopen unpaid payroll | adjustment / 390 | payroll-corrections | retained |
-| Replace | adjustment / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Replace check | adjustment / 390 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Replace | adjustment / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Replace check | adjustment / 390 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Reports | adjustment / 390 | Pay-run workspace sections; Payroll workspace | retained |
 | Retry sync for entry 17 | adjustment / 390 | Checks and payments workspace | retained |
 | Review payment methods and amounts | adjustment / 390 | Checks and payments workspace → Review payment methods and amounts | retained |
@@ -511,7 +511,7 @@
 | Technical evidence | adjustment / 390 | Activity workspace → Technical evidence | retained |
 | View | adjustment / 390 | Checks and payments workspace; Reports workspace | retained |
 | View Correction History | adjustment / 390 | payroll-corrections | retained |
-| View details | adjustment / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | adjustment / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | View record | adjustment / 390 | Reports workspace | retained |
 | Void | adjustment / 390 | Checks and payments workspace | retained |
 | Void This Pay Period | adjustment / 390 | payroll-corrections | retained |
@@ -571,44 +571,44 @@
 | View record | manual-committed / 390 | Reports workspace | retained |
 | Void | manual-committed / 390 | Checks and payments workspace | retained |
 | Void This Pay Period | manual-committed / 390 | payroll-corrections | retained |
-| + Tips & Deductions | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| + Tips & Deductions | fresh-draft / 390 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Activity | fresh-draft / 390 | Pay-run workspace sections | retained |
 | Back | fresh-draft / 390 | Header / shared dialog | retained |
 | Back to overview | fresh-draft / 390 | Checks and payments workspace | retained |
 | Calculate Payroll | fresh-draft / 390 | Header / shared dialog; payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Check Settings › | fresh-draft / 390 | Checks and payments workspace | retained |
 | Checks & payments | fresh-draft / 390 | Pay-run workspace sections | retained |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-draft / 390 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Enter or review pay, then calculate | fresh-draft / 390 | Header / shared dialog | retained |
-| Maya Manual | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Maya Manual | fresh-draft / 390 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | More payroll actions | fresh-draft / 390 | Header / shared dialog | retained |
 | Payroll | fresh-draft / 390 | Pay-run workspace sections | retained |
 | Reports | fresh-draft / 390 | Pay-run workspace sections | retained |
 | Run notes and processing history | fresh-draft / 390 | Activity workspace → Run notes and processing history | retained |
-| Sam Salary | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
+| Sam Salary | fresh-draft / 390 | payroll-loan-inputs → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Search | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
 | Select Files | fresh-draft / 390 | payroll-hours → 1HoursEnter hours and pay, then calculate payroll. | moved or disclosure renamed |
-| + Tips & Deductions | fresh-calculated / 390 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
-| 2 access records / 3 access records | fresh-calculated / 390 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
+| + Tips & Deductions | fresh-calculated / 390 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| 2 access records / 3 access records | fresh-calculated / 390 | Activity workspace → 2 access records | moved or disclosure renamed |
 | Activity | fresh-calculated / 390 | Pay-run workspace sections | retained |
-| Adjust HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-calculated / 390 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
-| Approve | fresh-calculated / 390 | Header / shared dialog; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Adjust HoursAll TypesSalaryHourly1099All DepartmentsManual Payroll QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | fresh-calculated / 390 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| Approve | fresh-calculated / 390 | Header / shared dialog; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Back | fresh-calculated / 390 | Header / shared dialog | retained |
 | Change payment method for Maya Manual | fresh-calculated / 390 | Checks and payments workspace | retained |
 | Check Settings › | fresh-calculated / 390 | Checks and payments workspace | retained |
 | Checks & payments 1 | fresh-calculated / 390 | Pay-run workspace sections | retained |
 | Download | fresh-calculated / 390 | Reports workspace | retained |
-| Edit | fresh-calculated / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Edit payroll | fresh-calculated / 390 | payroll-results; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Enter pay | fresh-calculated / 390 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
+| Edit | fresh-calculated / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Edit payroll | fresh-calculated / 390 | payroll-results; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Enter pay | fresh-calculated / 390 | payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
 | Export | fresh-calculated / 390 | Reports workspace | retained |
 | Export PDF document (.pdf) | fresh-calculated / 390 | Reports workspace | retained |
 | Load older activity | fresh-calculated / 390 | Activity workspace | retained |
-| Manual | fresh-calculated / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Maya Manual | fresh-calculated / 390 | Checks and payments workspace; payroll-hours → 1Hours42.00 h saved · View source and inputs; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | fresh-calculated / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Maya Manual | fresh-calculated / 390 | Checks and payments workspace; payroll-loan-inputs → 1Hours42.00 h saved · View source and inputs; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | fresh-calculated / 390 | Header / shared dialog | retained |
 | Open | fresh-calculated / 390 | Checks and payments workspace | retained |
-| Open payroll item | fresh-calculated / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | fresh-calculated / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | fresh-calculated / 390 | Checks and payments workspace | retained |
 | Payroll | fresh-calculated / 390 | Pay-run workspace sections | retained |
 | Recalculate | fresh-calculated / 390 | payroll-hours → 1Hours42.00 h saved · View source and inputs | moved or disclosure renamed |
@@ -618,7 +618,7 @@
 | Run notes and processing history | fresh-calculated / 390 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | fresh-calculated / 390 | Activity workspace → Technical evidence | retained |
 | View | fresh-calculated / 390 | Reports workspace | retained |
-| View details | fresh-calculated / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | fresh-calculated / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | 2 access records | fresh-approved / 390 | Activity workspace → 2 access records; Activity workspace → 3 access records | moved or disclosure renamed |
 | Activity | fresh-approved / 390 | Pay-run workspace sections | retained |
 | Back | fresh-approved / 390 | Header / shared dialog | retained |
@@ -630,11 +630,11 @@
 | Export | fresh-approved / 390 | Reports workspace | retained |
 | Export PDF document (.pdf) | fresh-approved / 390 | Reports workspace | retained |
 | Load older activity | fresh-approved / 390 | Activity workspace | retained |
-| Manual | fresh-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| Maya Manual | fresh-approved / 390 | Checks and payments workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Manual | fresh-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| Maya Manual | fresh-approved / 390 | Checks and payments workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | fresh-approved / 390 | Header / shared dialog | retained |
 | Open | fresh-approved / 390 | Checks and payments workspace | retained |
-| Open payroll item | fresh-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | fresh-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | fresh-approved / 390 | Checks and payments workspace | retained |
 | Payroll | fresh-approved / 390 | Pay-run workspace sections | retained |
 | Refresh current setup | fresh-approved / 390 | Header / shared dialog | retained |
@@ -644,7 +644,7 @@
 | Run notes and processing history | fresh-approved / 390 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | fresh-approved / 390 | Activity workspace → Technical evidence | retained |
 | View | fresh-approved / 390 | Reports workspace | retained |
-| View details | fresh-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| View details | fresh-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | About parallel comparison | parallel-approved / 390 | Header / shared dialog | retained |
 | 3 access records | parallel-approved / 390 | Activity workspace → 2 access records | moved or disclosure renamed |
 | Activity | parallel-approved / 390 | Pay-run workspace sections | retained |
@@ -656,32 +656,32 @@
 | Download | parallel-approved / 390 | Reports workspace | retained |
 | Export | parallel-approved / 390 | Reports workspace | retained |
 | Export PDF document (.pdf) | parallel-approved / 390 | Reports workspace | retained |
-| Fixture | parallel-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Fixture | parallel-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | More payroll actions | parallel-approved / 390 | Header / shared dialog | retained |
 | Open | parallel-approved / 390 | Checks and payments workspace | retained |
-| Open payroll item | parallel-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Open payroll item | parallel-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Open record | parallel-approved / 390 | Checks and payments workspace | retained |
 | Parallel comparison · cannot commit | parallel-approved / 390 | Header / shared dialog | retained |
 | Payroll | parallel-approved / 390 | Pay-run workspace sections | retained |
 | Refresh current setup | parallel-approved / 390 | Header / shared dialog | retained |
-| Report Fixture | parallel-approved / 390 | Checks and payments workspace; payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
+| Report Fixture | parallel-approved / 390 | Checks and payments workspace; payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
 | Reports | parallel-approved / 390 | Pay-run workspace sections; Payroll workspace | retained |
 | Review settings | parallel-approved / 390 | payroll-blockers → 1Hours40.00 h saved · View source and inputs | moved or disclosure renamed |
 | Roll Back Approval | parallel-approved / 390 | Header / shared dialog | retained |
 | Run notes and processing history | parallel-approved / 390 | Activity workspace → Run notes and processing history | retained |
 | Technical evidence | parallel-approved / 390 | Activity workspace → Technical evidence | retained |
 | View | parallel-approved / 390 | Reports workspace | retained |
-| View details | parallel-approved / 390 | payroll-results → 2Results1 employee records · Review saved pay | moved or disclosure renamed |
-| + Tips & Deductions | late-hours-navigation / 390 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| View details | parallel-approved / 390 | payroll-results → 2Results1 employee record · Review saved pay | moved or disclosure renamed |
+| + Tips & Deductions | late-hours-navigation / 390 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Activity | late-hours-navigation / 390 | Pay-run workspace sections | retained |
 | Back | late-hours-navigation / 390 | Header / shared dialog | retained |
 | Back to overview | late-hours-navigation / 390 | Checks and payments workspace | retained |
 | Calculate Payroll | late-hours-navigation / 390 | Header / shared dialog; payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Check Settings › | late-hours-navigation / 390 | Checks and payments workspace | retained |
 | Checks & payments | late-hours-navigation / 390 | Pay-run workspace sections | retained |
-| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | late-hours-navigation / 390 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| Enter HoursAll TypesSalaryHourly1099All DepartmentsFlight Operations QAName A-ZName Z-ARate High-LowRate Low-HighHours High-LowHours Low-HighEst. Gross High-LowEst. Gross Low-High+ Tips & Deductions | late-hours-navigation / 390 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Enter or review pay, then calculate | late-hours-navigation / 390 | Header / shared dialog | retained |
-| Enter pay | late-hours-navigation / 390 | payroll-hours → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
+| Enter pay | late-hours-navigation / 390 | payroll-loan-inputs → 1HoursSelected late hours only; the original payroll is unchanged. | moved or disclosure renamed |
 | Import time tracking | late-hours-navigation / 390 | Header / shared dialog | retained |
 | More payroll actions | late-hours-navigation / 390 | Header / shared dialog | retained |
 | Payroll | late-hours-navigation / 390 | Pay-run workspace sections | retained |
