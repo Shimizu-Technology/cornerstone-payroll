@@ -54,7 +54,7 @@ module TimeTracking
 
     def calendar_contract(pay_period)
       require!(:payroll_calendar_v2)
-      return AirePayrollCalendar::Contract.new(pay_period) if aire_policy?
+      return AirePayrollCalendar::Contract.new(pay_period, source: @source) if aire_policy?
 
       contract = PayrollCalendarContract.new(pay_period)
       payload = contract.payload

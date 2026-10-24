@@ -12,7 +12,8 @@ RSpec.describe AirePayrollCalendar::Publisher do
 
   let(:company) { create(:company, pay_frequency: "semimonthly") }
   let(:actor) { create(:user, company: company) }
-  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:activation_date) { Date.new(2026, 10, 1) }
+  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services", cutoff_enforcement_starts_on: activation_date) }
   let!(:schedule) do
     CompanyPaySchedule.create!(
       company: company,
@@ -218,6 +219,9 @@ RSpec.describe AirePayrollCalendar::Publisher do
     expect(revised.publication.schedule_version).to eq(2)
     expect(revised.publication.payload["cutoff_at"]).to eq("2026-11-22T17:00:00+10:00")
     expect(first.calendar_period.publications.order(:schedule_version).pluck(:schedule_version)).to eq([ 1, 2 ])
+    retry_result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    expect(retry_result.created).to be(false)
+    expect(retry_result.publication).to eq(revised.publication)
   end
 
   it "refuses to rewrite a delivered calendar after its cutoff" do
@@ -237,17 +241,80 @@ RSpec.describe AirePayrollCalendar::Publisher do
     end.to raise_error(described_class::ConflictError, /cutoff has passed/)
   end
 
-  it "does not create an undeliverable first publication after cutoff" do
-    expect do
-      described_class.new(
-        pay_period: pay_period,
-        source: source,
-        actor: actor,
-        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
-      ).call
-    end.to raise_error(described_class::ConflictError, /already passed/)
+  context "with the October 16 rollout boundary" do
+    let(:activation_date) { Date.new(2026, 10, 16) }
 
-    expect(AirePayrollCalendarPublication.count).to eq(0)
+    it "publishes October 1–15 after its nominal cutoff with an explicit manual lock mode" do
+      result = described_class.new(pay_period: pay_period, source: source, actor: actor,
+        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 24, 9)).call
+
+      expect(result.publication.payload).to include(
+        "lock_mode" => "manual", "cutoff_enforcement_starts_on" => "2026-10-16",
+        "cutoff_at" => "2026-10-22T17:00:00+10:00")
+      expect(source.reload.cutoff_enforcement_starts_on).to eq(Date.new(2026, 10, 16))
+    end
+
+    it "uses the October 31 regular payday for the first scheduled November 7 lock" do
+      pay_period
+      next_period = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+      result = described_class.new(pay_period: next_period, source: source, actor: actor, now: now).call
+      expect(result.publication.payload).to include("lock_mode" => "scheduled",
+        "previous_regular_pay_date" => "2026-10-31", "cutoff_at" => "2026-11-07T17:00:00+10:00")
+    end
+
+    it "fails clearly without the October 1–15 regular run and never creates a dummy run" do
+      next_period = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+      expect do
+        described_class.new(pay_period: next_period, source: source, actor: actor, now: now).call
+      end.to raise_error(AirePayrollCalendar::Contract::Error, /adjacent previous regular payroll/)
+      expect(company.pay_periods.count).to eq(2)
+      expect(AirePayrollCalendarPublication.count).to eq(0)
+    end
+  end
+
+  context "with an already delivered pre-rollout scheduled calendar" do
+    let(:activation_date) { Date.new(2026, 10, 16) }
+    let(:scheduled_period) do
+      pay_period
+      create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+    end
+    let!(:legacy_calendar) do
+      calendar = create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: scheduled_period)
+      payload = source.connector.calendar_contract(scheduled_period).payload.except("lock_mode", "cutoff_enforcement_starts_on")
+      create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar,
+        payload: payload, delivery_status: "delivered", delivered_at: now,
+        source_state: payload.merge("status" => "scheduled", "cutoff_state" => "upcoming"))
+      calendar
+    end
+
+    it "does not create a revision just to add rollout metadata to retained scheduled evidence" do
+      state = AirePayrollCalendar::Presenter.call(scheduled_period, now: now)
+      expect(state).to include(needs_revision: false, cutoff_state: "upcoming", lock_mode: "scheduled")
+      result = described_class.new(pay_period: scheduled_period, source: source, actor: actor, now: now).call
+      expect(result.created).to be(false)
+      expect(legacy_calendar.publications.count).to eq(1)
+    end
+
+    it "keeps a legitimate future policy revision compatible with AIRE's retained null activation" do
+      publication = legacy_calendar.latest_publication
+      # A legacy publication without weekly policy legitimately needs a revision.
+      allow_any_instance_of(AirePayrollCalendarPublication).to receive(:payload).and_wrap_original do |method|
+        value = method.call
+        method.receiver.id == publication.id ? value.except("overtime_policy") : value
+      end
+      result = described_class.new(pay_period: scheduled_period, source: source, actor: actor, now: now).call
+      expect(result.created).to be(true)
+      expect(result.publication.payload).not_to have_key("lock_mode")
+      expect(result.publication.payload).not_to have_key("cutoff_enforcement_starts_on")
+      response = result.publication.payload.merge("external_pay_period_id" => legacy_calendar.external_pay_period_id,
+        "lock_mode" => "scheduled", "cutoff_enforcement_starts_on" => nil)
+      client = instance_double(TimeTracking::Client, publish_payroll_calendar_period: { "payroll_calendar_period" => response })
+      delivery = AirePayrollCalendar::Delivery.new(publication_id: result.publication.id, now: now, client_factory: ->(*) { client }).call
+      expect(delivery[:status]).to eq("delivered")
+    end
   end
 
   it "rejects non-semimonthly periods and unrelated sources" do

@@ -42,13 +42,13 @@ module AirePayrollCalendar
           @source.connector.calendar_contract(@pay_period).validate!
 
           calendar_period = find_or_create_calendar_period!
-          latest = calendar_period.publications.lock.order(schedule_version: :desc).first
+          latest = calendar_period.publications.lock.reorder(schedule_version: :desc).first
           contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
           if latest && same_contract?(latest.payload, contract_fields)
             return Result.new(calendar_period: calendar_period, publication: latest, created: false)
           end
-          if Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now
+          if contract_fields["lock_mode"] != "manual" && Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now
             raise ConflictError, "This period's time tracking cutoff has already passed. Create a correction or supplemental run instead."
           end
           if latest && latest.delivered? && latest.cutoff_at <= @now
@@ -119,7 +119,9 @@ module AirePayrollCalendar
           external_pay_period_id: calendar_period.external_pay_period_id,
           schedule_version: publication.schedule_version,
           publication_id: publication.publication_id,
-          cutoff_at: publication.payload.fetch("cutoff_at")
+          cutoff_at: publication.payload.fetch("cutoff_at"),
+          lock_mode: publication.payload.fetch("lock_mode", "scheduled"),
+          cutoff_enforcement_starts_on: publication.payload["cutoff_enforcement_starts_on"]
         }
       )
     end

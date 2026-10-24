@@ -1,3 +1,4 @@
+import { lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import type { ReactNode } from 'react';
 import { PayLateHours } from './PayLateHours';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -565,6 +566,21 @@ function AirePayrollCockpitWorkspace({
     if (onSourceChanged?.() !== true) await load();
   };
 
+  const refreshCalendarAndSource = async () => {
+    const current = ++actionGeneration.current;
+    setLoading(true);
+    setRefreshError(null);
+    try {
+      await payPeriodsApi.refreshAireCalendar(payPeriodId);
+      if (current !== actionGeneration.current) return;
+      if (await onRefresh() !== true) await refreshSource();
+    } catch (caught) {
+      if (current !== actionGeneration.current) return;
+      setRefreshError(caught instanceof Error ? caught.message : 'Could not refresh the time tracking calendar');
+      setLoading(false);
+    }
+  };
+
   const startEmployeeMapping = (employee: import('@/types').AirePayrollCockpitEmployee) => {
     setEmployeeMapping({
       employee,
@@ -764,8 +780,25 @@ function AirePayrollCockpitWorkspace({
     }
   };
 
+  const openFinalize = () => {
+    const version = overview?.payroll_period.version;
+    if (version != null) {
+      setFinalizeCommand((current) => current?.version === version
+        ? current
+        : { commandId: commandId(), version });
+    }
+    setCommandError(null);
+    setShowFinalize(true);
+  };
+
   const renderedEntries = view === 'exceptions' ? exceptions?.time_exceptions : timeEntries?.time_entries;
-  const periodCanFinalize = overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
+  const manualLock = overview?.payroll_period.lock_mode === 'manual';
+  const periodCanFinalize = manualLock || overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
+  const periodLocked = overview?.payroll_period.status === 'finalized' || Boolean(calendar.finalized_batch);
+  const lockDisabledReason = busy ? 'A source action is processing. Wait for its saved result.'
+    : loading || !overview ? 'Wait for the source review to finish loading.'
+      : !canCommand ? 'Connect your time tracking account and obtain permission to lock this payroll.'
+        : !periodCanFinalize ? `The scheduled cutoff can be locked on ${formatGuamDateTime(overview.payroll_period.cutoff_at)}.` : undefined;
   const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
   const verifiedBatch = calendar.finalized_batch?.verification_status === 'verified'
     ? calendar.finalized_batch
@@ -811,6 +844,12 @@ function AirePayrollCockpitWorkspace({
         sourceCoverageAction={sourceCoverageAction}
         canReviewTimecards={Boolean(supportsCockpit && calendar.external_pay_period_id && cockpitPublished)}
         loading={loading}
+        lockAction={supportsCockpit && calendar.external_pay_period_id && cockpitPublished && !periodLocked ? (
+          <Button type="button" variant="outline" onClick={openFinalize} title={lockDisabledReason}
+            disabled={!canCommand || !periodCanFinalize || busy || loading} className="max-sm:w-full sm:shrink-0">
+            <LockKeyhole className="mr-2 h-4 w-4" aria-hidden="true" />Lock time tracking cutoff
+          </Button>
+        ) : undefined}
         onReview={onReviewFinalizedBatch}
         onReviewTimecards={() => {
           if (timecardDetailsRef.current) {
@@ -871,20 +910,11 @@ function AirePayrollCockpitWorkspace({
                   </p>
                 </div>}
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => void refreshSource()} disabled={loading || busy}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void refreshCalendarAndSource()} disabled={loading || busy}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
-                  {overview?.payroll_period.status !== 'finalized' && (
-                    <Button type="button" size="sm" onClick={() => {
-                      const version = overview?.payroll_period.version;
-                      if (version != null) {
-                        setFinalizeCommand((current) => current?.version === version
-                          ? current
-                          : { commandId: commandId(), version });
-                      }
-                      setCommandError(null);
-                      setShowFinalize(true);
-                    }} disabled={!canCommand || !periodCanFinalize || busy || loading}>
+                  {!checkpoint && overview?.payroll_period.status !== 'finalized' && (
+                    <Button type="button" size="sm" onClick={openFinalize} aria-describedby="payroll-lock-policy" disabled={!canCommand || !periodCanFinalize || busy || loading}>
                       <LockKeyhole className="mr-2 h-4 w-4" />
                       Lock time tracking cutoff
                     </Button>
@@ -946,6 +976,11 @@ function AirePayrollCockpitWorkspace({
                   </div>
                 )}
 
+                {overview.payroll_period.status !== 'finalized' && (
+                  <p id="payroll-lock-policy" className="border-b border-neutral-200 px-5 py-3 text-sm text-neutral-700 sm:px-6">
+                    {lockScheduleCopy(overview.payroll_period)}{manualLock ? '. Choose Lock when you have finished reviewing the hours.' : ''}
+                  </p>
+                )}
                 {overview.payroll_period.status !== 'finalized' && !periodCanFinalize && (
                   <div className="flex items-start gap-3 border-b border-primary-100 bg-primary-50/60 px-5 py-4 text-sm text-primary-900 sm:px-6">
                     <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
@@ -956,7 +991,7 @@ function AirePayrollCockpitWorkspace({
                 {overview.payroll_period.status === 'finalized' && (
                   <div className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p><span className="font-semibold">Time tracking cutoff locked.</span> The locked hours are ready to review. Held hours remain visible below for the next available payroll.</p>
+                    <p><span className="font-semibold">{manualLock ? 'Locked manually' : 'Time tracking cutoff locked.'}</span> The locked hours are ready to review. Held hours remain visible below for the next available payroll.</p>
                   </div>
                 )}
 
@@ -1304,8 +1339,8 @@ function AirePayrollCockpitWorkspace({
               </DialogDescription>
             </DialogHeader>
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
-            <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
-            <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value)} rows={4} placeholder="What did you verify?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
+            <button type="button" onClick={() => setReview(null)} disabled={busy} aria-label="Close review" className="absolute right-5 top-5 min-h-11 min-w-11 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-4 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button type="button" variant={review.decision === 'deny' ? 'danger' : 'primary'} onClick={() => void submitReview()} disabled={busy || !canCommand || reason.trim().length < 3}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{review.decision === 'approve' ? 'Approve' : 'Deny'} {review.kind === 'overtime' ? 'overtime' : 'time'}</Button></DialogFooter>
           </DialogContent>
         )}
@@ -1342,16 +1377,16 @@ function AirePayrollCockpitWorkspace({
                 <div className="mt-3 space-y-3">
                   {correction.breaks.map((breakRow, index) => (
                     <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-                      <label className="text-xs font-semibold text-neutral-600">Break starts<input aria-label={`Break ${index + 1} start`} type="time" value={breakRow.start_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, start_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
-                      <label className="text-xs font-semibold text-neutral-600">Break ends<input aria-label={`Break ${index + 1} end`} type="time" value={breakRow.end_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, end_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
+                      <label className="text-xs font-semibold text-neutral-600">Break starts<input aria-label={`Break ${index + 1} start`} type="time" value={breakRow.start_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, start_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
+                      <label className="text-xs font-semibold text-neutral-600">Break ends<input aria-label={`Break ${index + 1} end`} type="time" value={breakRow.end_time} onChange={(event) => setCorrection({ ...correction, breaks: correction.breaks.map((row, rowIndex) => rowIndex === index ? { ...row, end_time: event.target.value } : row) })} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
                       <Button type="button" size="sm" variant="ghost" aria-label={`Remove break ${index + 1}`} onClick={() => setCorrection({ ...correction, breaks: correction.breaks.filter((_, rowIndex) => rowIndex !== index) })}><X className="h-4 w-4" /></Button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <label className="mt-5 block text-sm font-semibold text-neutral-800">Correction reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Correction reason" value={correction.reason} onChange={(event) => setCorrection({ ...correction, reason: event.target.value })} rows={3} placeholder="What did you verify and why was this changed?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
-            <button type="button" onClick={() => setCorrection(null)} disabled={busy} aria-label="Close correction" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Correction reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Correction reason" value={correction.reason} onChange={(event) => setCorrection({ ...correction, reason: event.target.value })} rows={3} placeholder="What did you verify and why was this changed?" className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
+            <button type="button" onClick={() => setCorrection(null)} disabled={busy} aria-label="Close correction" className="absolute right-5 top-5 min-h-11 min-w-11 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setCorrection(null)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void submitCorrection()} disabled={busy || !canCommand || correction.reason.trim().length < 3 || !correction.workDate || !correction.startTime || !correction.endTime || !correction.timeCategoryId || correction.breaks.some((breakRow) => !breakRow.start_time || !breakRow.end_time) || Object.keys(correctionFields(correction)).length === 0}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save correction</Button></DialogFooter>
           </DialogContent>
         )}
@@ -1385,8 +1420,8 @@ function AirePayrollCockpitWorkspace({
             {settlementRoute.destinationKind === 'regular' && (
               <label className="mt-5 block text-sm font-semibold text-neutral-800">Regular payroll<select aria-label="Regular payroll" value={settlementRoute.targetExternalPayPeriodId} onChange={(event) => setSettlementRoute({ ...settlementRoute, targetExternalPayPeriodId: event.target.value })} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 font-normal"><option value="">Choose a published future payroll</option>{overview.routing_options.map((option) => <option key={option.external_pay_period_id} value={option.external_pay_period_id}>{formatDateRange(option.start_date, option.end_date)} · pay {formatDate(option.pay_date)}</option>)}</select>{overview.routing_options.length === 0 && <span className="mt-2 block text-xs font-normal leading-5 text-warning-800">{isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Publish a future regular pay period to time tracking before routing this correction.' : 'Publish the next regular pay period to time tracking before routing these hours.'}</span>}</label>
             )}
-            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Why should this correction not be applied?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
-            <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review reason<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea aria-label="Routing reason" value={settlementRoute.reason} onChange={(event) => setSettlementRoute({ ...settlementRoute, reason: event.target.value })} rows={3} placeholder={settlementRoute.destinationKind === 'regular' ? 'Why is this the correct payroll?' : isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Why should this correction not be applied?' : 'Why should these hours never be paid?'} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
+            <button type="button" onClick={() => setSettlementRoute(null)} disabled={busy} aria-label="Close destination" className="absolute right-5 top-5 min-h-11 min-w-11 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setSettlementRoute(null)} disabled={busy}>Cancel</Button><Button type="button" variant={settlementRoute.destinationKind === 'not_payable' ? 'danger' : 'primary'} onClick={() => void submitSettlementRoute()} disabled={busy || !canCommand || settlementRoute.reason.trim().length < 3 || (settlementRoute.destinationKind === 'regular' && !settlementRoute.targetExternalPayPeriodId)}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{settlementRoute.destinationKind === 'regular' ? 'Route to payroll' : isCorrectionSettlementCase(settlementRoute.settlementCase) ? 'Do not apply correction' : 'Mark not payable'}</Button></DialogFooter>
           </DialogContent>
         )}
@@ -1401,12 +1436,12 @@ function AirePayrollCockpitWorkspace({
           <DialogContent className="relative max-w-lg rounded-2xl p-5 sm:p-6">
             <DialogHeader className="pr-10 text-left">
               <DialogTitle className="font-display font-bold text-neutral-950">Lock the time tracking cutoff</DialogTitle>
-              <DialogDescription className="leading-6 text-neutral-600">Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours == null ? 'Other held hours are unavailable; review source details separately.' : `${heldHours.toFixed(2)} other held hours remain outside this payroll for review.`} {reportedPaymentHours == null ? 'Reported-payment hours are unavailable; review payment evidence separately.' : `${reportedPaymentHours.toFixed(2)} reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it.`}</DialogDescription>
+              <DialogDescription className="leading-6 text-neutral-600">{manualLock ? 'Your manual Lock freezes the approved hours as they are now.' : 'The lock uses approved hours as of the published cutoff.'} Time tracking will lock {Number(overview.readiness.eligible_hours).toFixed(2)} eligible hours. {heldHours == null ? 'Other held hours are unavailable; review source details separately.' : `${heldHours.toFixed(2)} other held hours remain outside this payroll for review.`} {reportedPaymentHours == null ? 'Reported-payment hours are unavailable; review payment evidence separately.' : `${reportedPaymentHours.toFixed(2)} reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it.`}</DialogDescription>
             </DialogHeader>
             {commandError && <ActionFeedback retryKey={commandErrorFeedbackAttempt} tone="error" message={commandError} />}
-            <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">It does not calculate Cornerstone payroll, issue checks, or mark wages paid.</p></div>
-            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review note<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={finalizeReason} onChange={(event) => setFinalizeReason(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-sm font-normal" /></label>
-            <button type="button" onClick={() => setShowFinalize(false)} disabled={busy} aria-label="Close cutoff confirmation" className="absolute right-5 top-5 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
+            <div className="mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This locks time in time tracking only.</p><p className="mt-1 leading-5">Later approvals and corrections need the late-hours review process. Next, import the frozen hours and calculate, approve, and commit payroll. Locking does not issue checks or mark wages paid.</p></div>
+            <label className="mt-5 block text-sm font-semibold text-neutral-800">Review note<span className="font-normal text-neutral-500"> (saved in both audit histories)</span><textarea autoFocus value={finalizeReason} onChange={(event) => setFinalizeReason(event.target.value)} rows={3} className="mt-2 w-full resize-none rounded-xl border border-neutral-300 px-3 py-2 text-base font-normal sm:text-sm" /></label>
+            <button type="button" onClick={() => setShowFinalize(false)} disabled={busy} aria-label="Close cutoff confirmation" className="absolute right-5 top-5 min-h-11 min-w-11 rounded-full p-2 text-neutral-500 hover:bg-neutral-100 disabled:opacity-50 sm:right-6 sm:top-6"><X className="h-5 w-5" /></button>
             <DialogFooter className="mt-5 !flex-row gap-2 pt-0"><Button type="button" variant="outline" onClick={() => setShowFinalize(false)} disabled={busy}>Cancel</Button><Button type="button" onClick={() => void finalize()} disabled={busy || !canCommand || !finalizeCommand || finalizeReason.trim().length < 3}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LockKeyhole className="mr-2 h-4 w-4" />}Lock eligible time</Button></DialogFooter>
           </DialogContent>
         )}

@@ -113,6 +113,7 @@ class StaffRolePolicy
     "api/v1/admin/pay_component_tax_rules#create" => :manage_organization,
     "api/v1/admin/pay_component_tax_rules#update" => :manage_organization,
     "api/v1/admin/pay_schedule_settings#update" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_calendars#refresh" => :payroll_operations,
     "api/v1/admin/aire_payroll_calendars#publish" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_calendars#retry_delivery" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#approve_time_entry" => :manage_client_configuration,

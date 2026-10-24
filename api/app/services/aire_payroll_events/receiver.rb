@@ -25,11 +25,23 @@ module AirePayrollEvents
       checksum = TimeTracking::CanonicalPayload.checksum(@payload)
 
       result = persist!(calendar_period, publication, checksum)
+      reconcile_source_state(calendar_period.time_tracking_source)
       queue_verification(result.event.id) if result.created
       result
     end
 
     private
+
+    def reconcile_source_state(source)
+      # Clear stale cutoff information before acknowledging the callback, even
+      # when the follow-up authenticated source read is unavailable.
+      AirePayrollCalendar::SourceState.new(source).invalidate
+      begin
+        AirePayrollCalendarSourceRefreshJob.perform_later(source.id)
+      rescue StandardError => e
+        Rails.logger.error("AIRE source refresh could not be queued: #{e.class}: #{e.message}")
+      end
+    end
 
     def queue_verification(event_id)
       AirePayrollEvent.dispatch_one!(event_id, now: @now)
@@ -78,7 +90,7 @@ module AirePayrollEvents
         publication_id: source_period["publication_id"]
       )
       raise ConflictError, "AIRE finalized an unknown calendar revision" unless publication
-      latest_delivered = calendar_period.publications.where(delivery_status: "delivered").order(schedule_version: :desc).first
+      latest_delivered = calendar_period.latest_delivered_publication
       raise ConflictError, "AIRE finalized a calendar revision that Cornerstone did not confirm as delivered" unless publication == latest_delivered
 
       publication
@@ -94,6 +106,9 @@ module AirePayrollEvents
              same_instant?(source_period["cutoff_at"], expected["cutoff_at"])
         raise ConflictError, "AIRE finalized calendar dates that do not match the published revision"
       end
+      unless %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_period[key] == expected[key] }
+        raise ConflictError, "AIRE finalized a different payroll lock rollout policy"
+      end
       unless source_period["external_pay_period_id"] == calendar_period.external_pay_period_id
         raise ConflictError, "AIRE finalized an unexpected calendar identity"
       end
@@ -101,9 +116,10 @@ module AirePayrollEvents
       raise Error, "AIRE event payroll batch ID is required" if source_batch["id"].blank?
       raise Error, "AIRE event payroll batch schema version must be 2.0" unless source_batch["schema_version"] == "2.0"
       raise Error, "AIRE event payroll batch checksum is invalid" unless source_batch["checksum"].to_s.match?(/\A[0-9a-f]{64}\z/)
+      snapshot_at = expected["lock_mode"] == "manual" ? source_period["locked_at"] : expected["cutoff_at"]
       unless source_batch.values_at("start_date", "end_date") ==
              expected.values_at("start_date", "end_date") &&
-             same_instant?(source_batch["cutoff_at"], expected["cutoff_at"])
+             same_instant?(source_batch["cutoff_at"], snapshot_at)
         raise ConflictError, "AIRE event payroll batch does not match the published period"
       end
       raise Error, "AIRE event payroll batch summary is required" unless source_batch["summary"].is_a?(Hash)
