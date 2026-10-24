@@ -35,6 +35,12 @@ const decimal = (value: unknown): Decimal => {
 };
 const money = (value: unknown): Decimal => decimal(value).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 const sum = (values: Decimal[]): Decimal => values.reduce((total, value) => total.plus(value), new Decimal(0));
+function wageLinesTotal(rate: Decimal, regular: unknown, overtime: unknown, holiday: unknown = 0, pto: unknown = 0): Decimal {
+  return sum([
+    rate.mul(decimal(regular)), rate.mul(decimal(overtime)).mul('1.5'),
+    rate.mul(decimal(holiday)), rate.mul(decimal(pto)),
+  ].map(amount => amount.toDecimalPlaces(2, Decimal.ROUND_HALF_UP)));
+}
 function normalized(entries: Earning[] = []): Earning[] {
   return entries.filter(entry => typeof entry.label === 'string' && entry.label.trim() && decimal(entry.amount).gt(0)).map(entry => ({
     label: entry.label.trim(), amount: money(entry.amount).toNumber(),
@@ -96,8 +102,8 @@ export function estimateDraftGross(input: DraftGrossInput): number | null {
     // A single ordinary bucket is sent as scalar hours; captured source buckets stay intact.
     const buckets = hours.wage_rates ?? [];
     base = buckets.length > 1 || (captured && buckets.length > 0) ? sum(buckets.map(row =>
-      decimal(row.rate).mul(decimal(row.regular_hours).plus(decimal(row.overtime_hours).mul('1.5')).plus(decimal(row.holiday_hours)).plus(decimal(row.pto_hours)))
-    )) : rate.mul(decimal(hours.regular).plus(decimal(hours.overtime).mul('1.5')).plus(isContractor ? 0 : decimal(item.holiday_hours).plus(decimal(item.pto_hours))));
+      wageLinesTotal(decimal(row.rate), row.regular_hours, row.overtime_hours, row.holiday_hours, row.pto_hours)
+    )) : wageLinesTotal(rate, hours.regular, hours.overtime, isContractor ? 0 : item.holiday_hours, isContractor ? 0 : item.pto_hours);
   } else {
     base = rate;
   }
