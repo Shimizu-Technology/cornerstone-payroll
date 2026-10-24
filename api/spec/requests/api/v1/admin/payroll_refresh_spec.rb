@@ -17,6 +17,80 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
   end
 
+  context "when a scheduled regular run has no imported time tracking hours" do
+    let!(:employee) { create(:employee, :contractor, company: company, pay_rate: 1000) }
+
+    before do
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+      period.update!(status: "draft", approved_at: nil, approved_by_id: nil)
+      item.update!(employment_type: "contractor", pay_rate: 1000, hours_worked: 0)
+    end
+
+    %w[run_payroll refresh_setup].each do |action|
+      [ {}, { source_coverage_reason: "Manual contractor fee only" },
+        { source_coverage_acknowledged: true },
+        { source_coverage_reason: "   ", source_coverage_acknowledged: true },
+        { source_coverage_reason: "Manual contractor fee only", source_coverage_acknowledged: false } ].each do |acknowledgement|
+        it "rejects #{action} without both reason and acknowledgement (#{acknowledgement.inspect}) before changing saved payroll" do
+          before_period = period.attributes
+          before_item = item.attributes
+          post "/api/v1/admin/pay_periods/#{period.id}/#{action}", params: {
+            includes_recurring_items: false, includes_base_salary: false, employee_ids: [ employee.id ]
+          }.merge(acknowledgement), as: :json
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.parsed_body.fetch("error")).to match(/reason and acknowledge/i)
+          expect(period.reload.attributes).to eq(before_period)
+          expect(item.reload.attributes).to eq(before_item)
+          expect(AuditLog.where(record_id: period.id, action: "pay_periods##{action}")).to be_empty
+        end
+      end
+    end
+
+    it "refreshes a fresh saved draft only after acknowledgement, records its reason, and requires a new acknowledgement to recalculate" do
+      acknowledgement = { source_coverage_reason: "  Manual contractor fee only; hourly payroll follows separately.  ", source_coverage_acknowledged: true }
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: {
+        includes_recurring_items: false, includes_base_salary: false
+      }.merge(acknowledgement), as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      expect(period.reload).to have_attributes(status: "calculated", includes_recurring_items: false, includes_base_salary: false)
+      expect(item.reload.gross_pay).to eq(1000.to_d)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
+      audit = AuditLog.where(record_id: period.id, action: "pay_periods#refresh_setup").last
+      expect(audit.metadata).to include("source_coverage_reason" => acknowledgement[:source_coverage_reason].strip,
+        "source_coverage_acknowledged" => true)
+      expect(audit.metadata.dig("business_summary", "employees_processed")).to eq(1)
+
+      %w[run_payroll refresh_setup].each do |action|
+        post "/api/v1/admin/pay_periods/#{period.id}/#{action}", as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(item.reload.gross_pay).to eq(1000.to_d)
+        post "/api/v1/admin/pay_periods/#{period.id}/#{action}", params: acknowledgement, as: :json
+        expect(response).to have_http_status(:ok)
+        expect(AuditLog.where(record_id: period.id, action: "pay_periods##{action}").last.metadata)
+          .to include("source_coverage_reason" => acknowledgement[:source_coverage_reason].strip)
+      end
+    end
+
+    it "allows empty-roster setup refresh without claiming a calculation" do
+      item.destroy!
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: { includes_recurring_items: false }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(period.reload.status).to eq("draft")
+      expect(period.includes_recurring_items).to be(false)
+      expect(response.parsed_body.dig("results", "success")).to eq([])
+    end
+
+    it "guards approved refresh before withdrawing approval" do
+      period.update!(status: "approved", approved_at: Time.current, approved_by_id: actor.id)
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(period.reload.status).to eq("approved")
+      expect(period.approved_by_id).to eq(actor.id)
+    end
+  end
+
   def commit_calculated_original!
     # Retained correction evidence must come from the original calculation,
     # before reopening or changing today's profile. Never backfill its schedule.

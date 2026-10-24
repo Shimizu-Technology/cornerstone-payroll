@@ -171,7 +171,7 @@ it.each([
   const employee = {
     id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
     pay_rate: 16, pay_frequency: 'semimonthly', status: 'active',
-    default_custom_earnings: [{ name: 'Allowance', amount: 120 }],
+    default_custom_earnings: [{ label: 'Allowance', amount: 120 }],
     default_payroll_adjustments: [
       { label: 'Additional allowance', amount: 30, treatment: 'taxable_addition', active: true },
       { label: 'Inactive allowance', amount: 90, treatment: 'taxable_addition', active: false },
@@ -240,7 +240,7 @@ it('submits an explicit amount equal to the excluded employee default as a one-t
   const { input } = await renderTaxableFieldPreview(false);
   fireEvent.change(input, { target: { value: '25' } });
   fireEvent.change(input, { target: { value: '75' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 75, replace_request: true });
 });
@@ -316,7 +316,7 @@ it('reserves the time tracking source preference for the guided verified-batch r
     </MemoryRouter>
   );
 
-  fireEvent.click(await screen.findByRole('button', { name: 'Import Time Tracking' }));
+  fireEvent.click(await screen.findByRole('button', { name: /Import time tracking|Review & add hours/ }));
 
   const modal = await screen.findByTestId('time-tracking-import-modal');
   expect(modal.getAttribute('data-auto-preview')).toBe('false');
@@ -359,7 +359,7 @@ it('keeps a capped request through an unrelated worksheet calculation and surfac
   expect((input as HTMLInputElement).value).toBe('1070.00');
   expect(screen.getByRole('region', { name: 'Retained manual retirement entries' })).toHaveProperty('textContent', expect.stringContaining('Previous manual retirement'));
   expect(screen.getAllByText(/Last applied \$0.00 after limits/).length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 1070 });
 });
@@ -368,7 +368,7 @@ it('marks an intentional zero request even when the prior applied amount was alr
   const input = await renderCappedFieldWorksheet();
   fireEvent.change(input, { target: { value: '0' } });
   fireEvent.blur(input);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 0, replace_request: true });
 });
@@ -529,7 +529,7 @@ it('calculates another employee while a variable-salary employee has no period p
 
   const card = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
   fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '8' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
 
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].salary_overrides).toBeUndefined();
@@ -695,7 +695,7 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
     pay_period: { ...initialPayPeriod, status: 'draft' },
     results: { success: [], skipped: [], errors: [{ employee_id: 30, name: 'Ana Cruz', error: 'Review the applied historical 401(k) classification.' }] },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
   expect(screen.getByRole('heading', { name: 'Resolve these employees before approval' })).toBeTruthy();
   const link = screen.getByRole('link', { name: 'Review 2026 retirement checks' });
@@ -754,7 +754,7 @@ it('preserves dirty hours, bonus edits and worksheet requests when the parent ch
   expect(bonus.value).toBe('77.00');
   expect(field.value).toBe('888.00');
   expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('1');
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual(expect.objectContaining({ regular: 19 }));
   expect(apiMocks.runPayroll.mock.calls[0][1].bonuses).toEqual({ '30': 77 });
@@ -769,11 +769,11 @@ it.each(['import', 'calculation', 'navigation'])('still applies canonical inputs
   apiMocks.get.mockResolvedValue({ pay_period: canonical });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { ...worksheet, assignments: worksheet.assignments.map((assignment: { requested_amount: number }) => ({ ...assignment, requested_amount: 250 })) } });
   if (action === 'import') {
-    fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+    fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
   } else if (action === 'calculation') {
     apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...canonical, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+    await calculateWithCoverage();
   } else {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
@@ -825,10 +825,10 @@ it.each(['import', 'calculation'])('explicitly refreshes every source panel afte
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('0');
   if (action === 'import') {
-    fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+    fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
   } else {
-    fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+    await calculateWithCoverage();
   }
   await waitFor(() => {
     for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
@@ -862,7 +862,7 @@ it('refreshes accounting correction metadata and every source panel while preser
   const { field, regular, bonus } = await editPayrollDrafts();
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', notes: 'Accounting correction metadata refreshed',
     time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Import Time Tracking' }));
+  fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Record accounting correction' }));
   await screen.findByText('Accounting correction metadata refreshed');
   expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('1');
@@ -872,7 +872,7 @@ it('refreshes accounting correction metadata and every source panel while preser
   expect(bonus.value).toBe('77.00');
   expect(field.value).toBe('888.00');
   expect(screen.getByLabelText('401(k) supplemental')).toBe(field);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual(expect.objectContaining({ regular: 19 }));
   expect(apiMocks.runPayroll.mock.calls[0][1].bonuses).toEqual({ '30': 77 });
@@ -1006,7 +1006,7 @@ it('preserves correction wage buckets after current rates change or source IDs a
   expect(within(card).getByText('Original department · $16.00/hr')).toBeTruthy();
   expect(within(card).getByText('Removed department · $20.00/hr')).toBeTruthy();
   expect(within(card).queryByText(/New department/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual(savedRates);
 });
@@ -1015,7 +1015,7 @@ it('keeps captured rates and other hour types when the operator deliberately edi
   const { card, savedRates } = await renderSavedRateCorrection();
   const bucket = within(card).getByText('Original department · $16.00/hr').parentElement!;
   fireEvent.change(within(bucket).getByLabelText('Regular hours'), { target: { value: '9' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 9 }, savedRates[1]]);
 });
@@ -1023,7 +1023,7 @@ it('keeps captured rates and other hour types when the operator deliberately edi
 it('submits a single captured wage bucket with updated hours instead of clearing its historical rate', async () => {
   const { card, savedRates } = await renderSavedRateCorrection(true);
   fireEvent.change(within(card).getByLabelText('Regular hours'), { target: { value: '10' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30'].wage_rates).toEqual([{ ...savedRates[0], regular_hours: 10 }]);
 });
@@ -1271,6 +1271,12 @@ async function renderRefreshNavigation() {
 function submitRefreshNavigation() {
   fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
+  const reason = screen.queryByLabelText('Reason for calculating without imported hours');
+  if (reason) {
+    fireEvent.change(reason, { target: { value: 'Manually verified hours for this synthetic payroll.' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Calculate without imported hours' }));
+  }
 }
 
 it.each(['run', 'company'])('does not reload the old run or clear a new busy refresh after a deferred POST and %s navigation', async scope => {
@@ -1292,7 +1298,7 @@ it.each(['run', 'company'])('does not reload the old run or clear a new busy ref
   expect(apiMocks.get.mock.calls.length).toBe(calls);
   expect(screen.queryByText('Old run failure must stay behind.')).toBeNull();
   expect(screen.getByText('New active refresh scope')).toBeTruthy();
-  expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(screen.getByRole('dialog', { name: 'Refresh current setup' })).getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => finishNew({ results: { success: [], skipped: [], errors: [] } }));
   await screen.findByText(/Current setup applied to the saved employees and inputs/);
 });
@@ -1400,7 +1406,7 @@ it.each(['mobile', 'desktop'])('retains both imported earning buckets and captur
   const hourInputs = within(entry).getAllByRole('textbox').filter(input => ['4', '2'].includes((input as HTMLInputElement).value));
   expect(hourInputs.length).toBe(2);
   expect(hourInputs.every(input => (input as HTMLInputElement).disabled)).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 6, overtime: 0, wage_rates: buckets });
 });
@@ -1459,7 +1465,7 @@ it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and
   expect(within(entry).getByRole('textbox', { name: 'Overtime hours for Ana Cruz · Regular · Correction · Oct 10, 2026' })).toHaveProperty('disabled', true);
   const signedInput = within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Correction · Oct 10, 2026' }) as HTMLInputElement;
   expect(signedInput.disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledTimes(1));
   expect(apiMocks.runPayroll.mock.calls[0][1].hours['30']).toEqual({ regular: 5, overtime: 0, wage_rates: buckets });
   expect(screen.queryByText('Hours must be between 0 and 200 per period')).toBeNull();
@@ -1711,7 +1717,7 @@ it('submits initial server roster defaults alongside connected hourly items with
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   await screen.findByRole('button', { name: 'Calculate Payroll' });
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids.sort()).toEqual([30, 31]);
 });
@@ -1743,4 +1749,120 @@ it('keeps whole-period AIRE readiness out of a selected-only adjustment', async 
   await screen.findByText('Manual adjustment · selected employees only');
   expect(screen.queryByTestId('source-cockpit-revision')).toBeNull();
   expect(screen.getByTestId('source-reconciliation-revision')).toBeTruthy();
+});
+
+async function calculateWithCoverage(): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  const reason = screen.queryByLabelText('Reason for calculating without imported hours');
+  if (!reason) return;
+  fireEvent.change(reason, { target: { value: 'Manually verified hours for this synthetic payroll.' } });
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate without imported hours' }));
+}
+
+it('requires a reason and acknowledgement for a scheduled connected run before import, then calculates the saved salary roster', async () => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'salary', salary_type: 'per_period', pay_rate: 1000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', cycle: 'regular', includes_base_salary: true, default_employee_ids: [30],
+    time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { ...sourceCalendar, cutoff_at: '2026-09-22T07:00:00Z', finalized_batch: null, cutoff_state: 'cutoff_due' } } } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  expect(await screen.findByRole('button', { name: 'Review & add hours' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  const dialog = await screen.findByRole('dialog');
+  const calculate = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
+  expect(calculate.disabled).toBe(true);
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  fireEvent.change(within(dialog).getByLabelText('Reason for calculating without imported hours'), { target: { value: 'Salary-only run; hourly time will be paid in the next run.' } });
+  expect(calculate.disabled).toBe(true);
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+  fireEvent.click(calculate);
+  await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
+  expect(apiMocks.runPayroll.mock.calls[0][1]).toMatchObject({ employee_ids: [30], source_coverage_reason: 'Salary-only run; hourly time will be paid in the next run.' });
+});
+
+
+it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage acknowledgement for %s setup refresh and resumes its selected scope', async status => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'contractor', pay_rate: 1000, pay_frequency: 'semimonthly', status: 'active' } as Employee;
+  const item = { id: 1, employee_id: 30, employment_type: 'contractor', pay_rate: 1000, gross_pay: 1000, net_pay: 1000 };
+  const period = { ...initialPayPeriod, status, cycle: 'regular', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true, payroll_items: [item],
+    time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: { ...sourceCalendar, cutoff_at: '2026-09-22T07:00:00Z', finalized_batch: null, cutoff_state: 'cutoff_due' } } } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.get.mockResolvedValue({ pay_period: { ...period, status: 'calculated' } });
+  apiMocks.refreshSetup.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(screen.getByLabelText('Include recurring employee setup'));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh and recalculate' }));
+  let dialog = screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' });
+  let confirm = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
+  expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
+  fireEvent.change(within(dialog).getByLabelText('Reason for calculating without imported hours'), { target: { value: 'Manual contractor fee only' } });
+  expect(confirm.disabled).toBe(true);
+  fireEvent.change(within(dialog).getByLabelText('Reason for calculating without imported hours'), { target: { value: '' } });
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+  expect(confirm.disabled).toBe(true);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh and recalculate' }));
+  dialog = screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' });
+  expect((within(dialog).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect((within(dialog).getByLabelText('Reason for calculating without imported hours') as HTMLTextAreaElement).value).toBe('');
+  confirm = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
+  fireEvent.change(within(dialog).getByLabelText('Reason for calculating without imported hours'), { target: { value: '  Manual contractor fee only  ' } });
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(apiMocks.refreshSetup).toHaveBeenCalledWith(12, {
+    includes_recurring_items: false, includes_base_salary: true, source_coverage_reason: 'Manual contractor fee only', source_coverage_acknowledged: true,
+  }));
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Current setup applied to the saved employees/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  expect(screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' })).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('previews holiday hours and a saved per-period salary override using the same gross values as calculation', async () => {
+  vi.clearAllMocks();
+  const hourly = { id: 30, company_id: 7, first_name: 'Holiday', last_name: 'Employee', employment_type: 'hourly', pay_rate: 15, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const salary = { ...hourly, id: 31, first_name: 'Salary', employment_type: 'salary', salary_type: 'per_period', pay_rate: 1000 } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_base_salary: true, includes_recurring_items: false,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 0, overtime_hours: 0, holiday_hours: 8, gross_pay: 0 },
+      { id: 2, employee_id: 31, employment_type: 'salary', pay_rate: 1000, salary_override: 725, hours_worked: 0, overtime_hours: 0, gross_pay: 0 }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [hourly, salary], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Enter Hours');
+  expect(screen.getAllByText('$120.00').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('$725.00').length).toBeGreaterThan(0);
+  const sort = screen.getByRole('option', { name: 'Est. Gross Low-High' }).closest('select')!;
+  fireEvent.change(sort, { target: { value: 'gross:desc' } });
+  const salaryRow = screen.getAllByRole('link', { name: 'Salary Employee' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(salaryRow.closest('table')!).getAllByRole('link')[0].textContent).toBe('Salary Employee');
+  expect(within(salaryRow).getByText('$725.00')).toBeTruthy();
+});
+
+it('includes automatic hidden taxable fields in the estimate without adding worksheet controls', async (): Promise<void> => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 15, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_recurring_items: true,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 8, overtime_hours: 0 }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [],
+    estimate_only_assignments: [{ employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', default_amount: 25, tax_treatment: 'taxable_addition', editable: false }] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const mobileCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(within(mobileCard).getByText('Estimated gross: $145.00')).toBeTruthy();
+  const row = screen.getAllByRole('link', { name: 'Ana Cruz' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(row).getByText('$145.00')).toBeTruthy();
+  expect(screen.queryByText('Hidden allowance')).toBeNull();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
