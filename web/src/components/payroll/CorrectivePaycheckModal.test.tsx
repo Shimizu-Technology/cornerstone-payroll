@@ -8,7 +8,7 @@ import type { CorrectivePaycheckPreview, CorrectivePaycheckSnapshot, PayPeriod, 
 
 const api = vi.hoisted(() => ({ preview: vi.fn(), issue: vi.fn() }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: { correctivePaycheckPreview: api.preview, issueCorrectivePaycheck: api.issue } }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 const snapshot = (hours: number, gross: number): CorrectivePaycheckSnapshot => ({
   gross_pay: gross, net_pay: gross * 0.8, hours_worked: hours, overtime_hours: 0, holiday_hours: 0, pto_hours: 0,
   bonus: 0, reported_tips: 0, tips_paid_out: 0, pay_rate: 15, withholding_tax: 0, social_security_tax: 0, medicare_tax: 0,
@@ -33,6 +33,7 @@ function setup(originalItem = item) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.setSystemTime(new Date("2024-02-09T12:00:00Z"));
   api.preview.mockImplementation((_period, request) => Promise.resolve(preview(request.corrected_inputs.hours_worked ?? 80)));
   api.issue.mockResolvedValue({ supplemental_pay_period: { id: 50 }, corrective_payroll_item: { id: 71 } });
 });
@@ -219,3 +220,29 @@ it.each([['Regular hours', '7.333', '7.33', 'hours_worked'], ['Bonus', '1.005', 
     expect(api.issue).toHaveBeenCalledWith(12, expect.objectContaining({ corrected_inputs: expect.objectContaining({ [field]: Number(valid) }) }));
     expect(api.preview.mock.calls.some(([, request]) => request.corrected_inputs[field] === Number(invalid))).toBe(false);
   });
+
+
+it('sends the selected tax year for preview and blocks issue when the server holds a prior-year correction', async () => {
+  const { user } = setup();
+  const input = screen.getByLabelText('Regular hours') as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe('80'));
+  api.preview.mockRejectedValue(new Error('Prior-year corrections require a separately reviewed prior-year process'));
+  await user.clear(input); await user.type(input, '85');
+  await screen.findByText(/Prior-year corrections require a separately reviewed/);
+  expect(api.preview).toHaveBeenLastCalledWith(12, expect.objectContaining({ pay_date: expect.any(String) }));
+  expect((screen.getByRole('button', { name: 'Issue corrective paycheck' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.issue).not.toHaveBeenCalled();
+});
+
+
+it('holds a cross-year pay date before a baseline or unchanged target can be issued', async () => {
+  api.preview.mockResolvedValue({ ...preview(80), meta: { ...preview(80).meta, is_zero_change: false } });
+  const { user } = setup();
+  await waitFor(() => expect((screen.getByLabelText('Regular hours') as HTMLInputElement).value).toBe('80'));
+  await user.type(screen.getByLabelText(/Reason/), 'Reviewed signed balance');
+  await user.clear(screen.getByLabelText(/Corrective check pay date/));
+  await user.type(screen.getByLabelText(/Corrective check pay date/), '2025-01-10');
+  await screen.findByText(/Prior-year corrections require a separately reviewed prior-year process/);
+  expect((screen.getByRole('button', { name: 'Issue corrective paycheck' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.issue).not.toHaveBeenCalled();
+});

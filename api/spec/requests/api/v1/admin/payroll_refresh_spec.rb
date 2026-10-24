@@ -63,6 +63,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   end
 
   it "holds an uncalculated legacy original instead of inferring its frequency from current matching setup" do
+    item.update!(tax_rule_snapshot: {})
     expect(item.calculation_context_snapshot).to eq({})
     expect(item.tax_rule_snapshot).to eq({})
     period.update!(status: "committed", committed_at: Time.current)

@@ -45,7 +45,8 @@ RSpec.describe "Variable salary finalization safety" do
   it "allows approval of an off-cycle bonus that intentionally excludes base salary" do
     period.update!(status: "draft")
     period.update!(run_purpose: "bonus", includes_base_salary: false)
-    item
+    item.update!(tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+      year: period.pay_date.year, excluding_pay_period_id: period.id).snapshot })
     period.update!(status: "calculated")
     expect { service.approve! }.not_to raise_error
   end

@@ -879,7 +879,8 @@ module Api
           preview = IssueCorrectivePaycheckService.preview(
             original_pay_period: @pay_period,
             employee:            employee,
-            corrected_inputs:    permit_corrective_paycheck_inputs
+            corrected_inputs:    permit_corrective_paycheck_inputs,
+            pay_date: params[:pay_date]
           )
 
           render json: preview
