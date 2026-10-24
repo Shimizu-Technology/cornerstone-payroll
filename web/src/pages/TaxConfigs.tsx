@@ -277,7 +277,7 @@ export default function TaxConfigs() {
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
       <AnnualRetirementLimitsPanel />
 
-      {/* Tax Years List */}
+      {/* Tax years List */}
       <div className="space-y-3 sm:hidden">
         {configs.map((config) => (
           <MobileRecordCard
@@ -287,7 +287,7 @@ export default function TaxConfigs() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-semibold text-neutral-950">{config.tax_year}</p>
-                <p className="text-sm text-neutral-500">Updated {new Date(config.updated_at).toLocaleDateString()}</p>
+                <p className="text-sm text-neutral-600">Updated {new Date(config.updated_at).toLocaleDateString()}</p>
               </div>
               {config.is_active ? (
                 <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Active</span>
@@ -296,7 +296,7 @@ export default function TaxConfigs() {
               )}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <MobileField label="SS Wage Base" value={formatCurrency(config.ss_wage_base)} />
+              <MobileField label="SS wage base" value={formatCurrency(config.ss_wage_base)} />
               <MobileField label="Verification" value={config.verification_status === 'verified' ? 'Verified' : 'Draft — payroll blocked'} />
             </div>
             <MobileCardActions>
@@ -322,38 +322,38 @@ export default function TaxConfigs() {
         ))}
       </div>
       <div className="hidden overflow-x-auto rounded-lg bg-white shadow sm:block">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+        <table className="min-w-full divide-y divide-neutral-200">
+          <thead className="bg-neutral-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Tax Year
+              <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600">
+                Tax year
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                SS Wage Base
+              <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600">
+                SS wage base
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Last Updated
+              <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600">
+                Last updated
               </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-neutral-200">
             {configs.map((config) => (
               <tr
                 key={config.id}
-                className={`hover:bg-gray-50 cursor-pointer ${
+                className={`hover:bg-neutral-50 cursor-pointer ${
                   selectedConfig?.id === config.id ? 'bg-indigo-50' : ''
                 }`}
                 onClick={() => fetchConfigDetails(config.id)}
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center">
-                    <span className="text-lg font-semibold text-gray-900">
+                    <span className="text-lg font-semibold text-neutral-900">
                       {config.tax_year}
                     </span>
                     {config.is_active && (
@@ -361,7 +361,7 @@ export default function TaxConfigs() {
                     )}
                   </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-900">
                   {formatCurrency(config.ss_wage_base)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -371,12 +371,12 @@ export default function TaxConfigs() {
                       Active
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-800">
                       Inactive
                     </span>
                   )}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-600">
                   {new Date(config.updated_at).toLocaleDateString()}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -384,7 +384,7 @@ export default function TaxConfigs() {
                     {!config.is_active && (
                       <button
                         onClick={() => activateConfig(config.id)}
-                        className="text-green-600 hover:text-green-900"
+                        className="text-success-800 hover:text-green-900"
                         title="Activate"
                         disabled={activatingId === config.id}
                       >
@@ -397,7 +397,7 @@ export default function TaxConfigs() {
                     )}
                     <button
                       onClick={() => fetchAuditLogs(config.id)}
-                      className="text-gray-600 hover:text-gray-900"
+                      className="text-neutral-600 hover:text-neutral-900"
                       title="View History"
                     >
                       <History className="h-5 w-5" />
@@ -429,20 +429,21 @@ export default function TaxConfigs() {
         <div className="bg-white shadow rounded-lg p-6 flex items-center justify-center py-12">
           <div className="text-center">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mx-auto" />
-            <p className="mt-2 text-sm text-gray-500">Loading configuration...</p>
+            <p className="mt-2 text-sm text-neutral-600">Loading configuration...</p>
           </div>
         </div>
       )}
       {selectedConfig && (
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex justify-between items-start mb-6">
-            <h2 className="text-xl font-bold text-gray-900">
+            <h2 className="text-xl font-bold text-neutral-900">
               {selectedConfig.tax_year} Configuration
               {loadingDetailId && <span className="ml-2 inline-block w-4 h-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600 align-middle" />}
             </h2>
             <button
+              aria-label="Close tax configuration"
               onClick={() => setSelectedConfig(null)}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-neutral-600 hover:text-neutral-900"
             >
               ✕
             </button>
@@ -450,9 +451,9 @@ export default function TaxConfigs() {
 
           <TaxYearVerification key={selectedConfig.id} config={selectedConfig} previous={previousConfig} onReload={() => fetchConfigDetails(selectedConfig.id, true)} onSaved={async () => { await fetchConfigDetails(selectedConfig.id); await fetchConfigs(); }} />
           {/* Global Settings */}
-          <div className="mb-8 p-4 bg-gray-50 rounded-lg">
+          <div className="mb-8 p-4 bg-neutral-50 rounded-lg">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-sm font-medium text-gray-700 uppercase">Tax Rates & Thresholds</h3>
+              <h3 className="text-sm font-medium text-neutral-700">Tax Rates & Thresholds</h3>
               {!isEditingGlobal ? (
                 <button
                   onClick={startEditingGlobal}
@@ -465,7 +466,7 @@ export default function TaxConfigs() {
                 <div className="flex space-x-2">
                   <button
                     onClick={() => { setIsEditingGlobal(false); setEditableConfig(null); }}
-                    className="inline-flex items-center text-sm text-gray-600 hover:text-gray-800"
+                    className="inline-flex items-center text-sm text-neutral-600 hover:text-neutral-800"
                     disabled={saving}
                   >
                     <X className="h-4 w-4 mr-1" />
@@ -473,7 +474,7 @@ export default function TaxConfigs() {
                   </button>
                   <button
                     onClick={saveGlobalConfig}
-                    className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                    className="inline-flex items-center text-sm text-success-800 hover:text-success-900"
                     disabled={saving}
                   >
                     <Save className="h-4 w-4 mr-1" />
@@ -485,86 +486,91 @@ export default function TaxConfigs() {
             
             <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-5">
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase">
-                  SS Wage Base
+                <label htmlFor="tax-ss_wage_base" className="block text-xs font-medium text-neutral-600">
+                  SS wage base
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-ss_wage_base"
                     value={editableConfig.ss_wage_base}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_wage_base: value ?? 0 })}
                     fixedDecimalsOnBlur={2}
                     className="mt-1"
                   />
                 ) : (
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                  <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatCurrency(selectedConfig.ss_wage_base)}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase">
-                  SS Rate
+                <label htmlFor="tax-ss_rate" className="block text-xs font-medium text-neutral-600">
+                  SS rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-ss_rate"
                     value={editableConfig.ss_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
                     className="mt-1"
                   />
                 ) : (
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                  <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatPercent(selectedConfig.ss_rate)}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase">
-                  Medicare Rate
+                <label htmlFor="tax-medicare_rate" className="block text-xs font-medium text-neutral-600">
+                  Medicare rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-medicare_rate"
                     value={editableConfig.medicare_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, medicare_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
                     className="mt-1"
                   />
                 ) : (
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                  <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatPercent(selectedConfig.medicare_rate)}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase">
-                  Add'l Medicare Rate
+                <label htmlFor="tax-additional_medicare_rate" className="block text-xs font-medium text-neutral-600">
+                  Add'l Medicare rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-additional_medicare_rate"
                     value={editableConfig.additional_medicare_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
                     className="mt-1"
                   />
                 ) : (
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                  <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatPercent(selectedConfig.additional_medicare_rate)}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase">
-                  Add'l Medicare Threshold
+                <label htmlFor="tax-additional_medicare_threshold" className="block text-xs font-medium text-neutral-600">
+                  Add'l Medicare threshold
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-additional_medicare_threshold"
                     value={editableConfig.additional_medicare_threshold}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_threshold: value ?? 0 })}
                     fixedDecimalsOnBlur={2}
                     className="mt-1"
                   />
                 ) : (
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                  <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatCurrency(selectedConfig.additional_medicare_threshold)}
                   </p>
                 )}
@@ -577,29 +583,32 @@ export default function TaxConfigs() {
             {selectedConfig.filing_statuses.map((fs) => (
               <div key={fs.id} className="border rounded-lg p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">
+                  <h3 className="text-lg font-medium text-neutral-900">
                     {formatFilingStatus(fs.filing_status)}
                   </h3>
                   <div className="flex items-center space-x-4">
                     {editingFilingStatus === fs.filing_status ? (
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-500">Standard Deduction: $</span>
+                        <label htmlFor={`standard-deduction-${fs.id}`} className="text-xs font-medium text-neutral-600">Standard deduction ($)</label>
                         <NumericInput
+                          id={`standard-deduction-${fs.id}`}
                           value={editableStandardDeduction}
                           onValueChange={(value) => setEditableStandardDeduction(value ?? 0)}
                           fixedDecimalsOnBlur={2}
                           className="w-32"
                         />
                         <button
+                          aria-label={`Cancel ${formatFilingStatus(fs.filing_status)} deduction edit`}
                           onClick={() => setEditingFilingStatus(null)}
-                          className="text-gray-600 hover:text-gray-800"
+                          className="text-neutral-600 hover:text-neutral-800"
                           disabled={saving}
                         >
                           <X className="h-4 w-4" />
                         </button>
                         <button
+                          aria-label={`Save ${formatFilingStatus(fs.filing_status)} deduction`}
                           onClick={saveFilingStatus}
-                          className="text-green-600 hover:text-green-800"
+                          className="text-success-800 hover:text-success-900"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4" />
@@ -607,8 +616,8 @@ export default function TaxConfigs() {
                       </div>
                     ) : (
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-500">
-                          Standard Deduction: <span className="font-semibold text-gray-900">{formatCurrency(fs.standard_deduction)}</span>
+                        <span className="text-sm text-neutral-600">
+                          Standard Deduction: <span className="font-semibold text-neutral-900">{formatCurrency(fs.standard_deduction)}</span>
                         </span>
                         <button
                           onClick={() => startEditingFilingStatus(fs)}
@@ -625,7 +634,7 @@ export default function TaxConfigs() {
                 {fs.brackets && editingBrackets !== fs.filing_status && (
                   <>
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-gray-500">Tax Brackets</span>
+                      <span className="text-sm text-neutral-600">Tax Brackets</span>
                       <button
                         onClick={() => startEditingBrackets(fs)}
                         className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800"
@@ -636,7 +645,7 @@ export default function TaxConfigs() {
                     </div>
                     <table className="min-w-full">
                       <thead>
-                        <tr className="text-xs font-medium text-gray-500 uppercase">
+                        <tr className="text-xs font-medium text-neutral-600">
                           <th className="text-left py-2">Rate</th>
                           <th className="text-right py-2">Min Income</th>
                           <th className="text-right py-2">Max Income</th>
@@ -644,22 +653,22 @@ export default function TaxConfigs() {
                           <th className="text-right py-2">Biweekly Max</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100">
+                      <tbody className="divide-y divide-neutral-100">
                         {fs.brackets.map((bracket) => (
                           <tr key={bracket.id} className="text-sm">
                             <td className="py-2 font-medium text-indigo-600">
                               {bracket.rate_percent}%
                             </td>
-                            <td className="py-2 text-right text-gray-900">
+                            <td className="py-2 text-right text-neutral-900">
                               {formatCurrency(bracket.min_income)}
                             </td>
-                            <td className="py-2 text-right text-gray-900">
+                            <td className="py-2 text-right text-neutral-900">
                               {bracket.max_income ? formatCurrency(bracket.max_income) : '∞'}
                             </td>
-                            <td className="py-2 text-right text-gray-500">
+                            <td className="py-2 text-right text-neutral-600">
                               {formatCurrency(bracket.min_income / 26)}
                             </td>
-                            <td className="py-2 text-right text-gray-500">
+                            <td className="py-2 text-right text-neutral-600">
                               {bracket.max_income ? formatCurrency(bracket.max_income / 26) : '∞'}
                             </td>
                           </tr>
@@ -673,11 +682,11 @@ export default function TaxConfigs() {
                 {editingBrackets === fs.filing_status && (
                   <>
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-gray-500">Tax Brackets (Editing)</span>
+                      <span className="text-sm text-neutral-600">Tax Brackets (Editing)</span>
                       <div className="flex space-x-2">
                         <button
                           onClick={() => { setEditingBrackets(null); setEditableBrackets([]); }}
-                          className="inline-flex items-center text-sm text-gray-600 hover:text-gray-800"
+                          className="inline-flex items-center text-sm text-neutral-600 hover:text-neutral-800"
                           disabled={saving}
                         >
                           <X className="h-4 w-4 mr-1" />
@@ -685,7 +694,7 @@ export default function TaxConfigs() {
                         </button>
                         <button
                           onClick={saveBrackets}
-                          className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                          className="inline-flex items-center text-sm text-success-800 hover:text-success-900"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4 mr-1" />
@@ -695,26 +704,28 @@ export default function TaxConfigs() {
                     </div>
                     <table className="min-w-full">
                       <thead>
-                        <tr className="text-xs font-medium text-gray-500 uppercase">
+                        <tr className="text-xs font-medium text-neutral-600">
                           <th className="text-left py-2">Rate</th>
                           <th className="text-right py-2">Min Income</th>
                           <th className="text-right py-2">Max Income</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100">
+                      <tbody className="divide-y divide-neutral-100">
                         {editableBrackets.map((bracket) => (
                           <tr key={bracket.bracket_order} className="text-sm">
                             <td className="py-2">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} rate (%)`}
                                 value={bracket.rate * 100}
                                 onValueChange={(value) => updateBracket(bracket.bracket_order, 'rate', (value ?? 0) / 100)}
                                 fixedDecimalsOnBlur={1}
                                 className="w-20"
                               />
-                              <span className="ml-1 text-gray-500">%</span>
+                              <span className="ml-1 text-neutral-600">%</span>
                             </td>
                             <td className="py-2 text-right">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} minimum income`}
                                 value={bracket.min_income}
                                 onValueChange={(value) => updateBracket(bracket.bracket_order, 'min_income', value ?? 0)}
                                 fixedDecimalsOnBlur={2}
@@ -723,6 +734,7 @@ export default function TaxConfigs() {
                             </td>
                             <td className="py-2 text-right">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} maximum income`}
                                 value={bracket.max_income}
                                 emptyValue={null}
                                 placeholder="∞"
@@ -735,7 +747,7 @@ export default function TaxConfigs() {
                         ))}
                       </tbody>
                     </table>
-                    <p className="mt-2 text-xs text-gray-500">
+                    <p className="mt-2 text-xs text-neutral-600">
                       Leave "Max Income" empty for the top bracket (no upper limit).
                     </p>
                   </>
@@ -752,16 +764,17 @@ export default function TaxConfigs() {
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-              Create New Tax Year
+            <h3 className="text-lg font-medium text-neutral-900 mb-4">
+              Create New Tax year
             </h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Tax Year
+                <label htmlFor="new-tax-year" className="block text-xs font-medium text-neutral-600">
+                  Tax year
                 </label>
                 <NumericInput
+                  id="new-tax-year"
                   value={newYear}
                   onValueChange={(value) => setNewYear(Math.round(value ?? new Date().getFullYear() + 1))}
                   fixedDecimalsOnBlur={0}
@@ -771,13 +784,14 @@ export default function TaxConfigs() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Copy From (optional)
+                <label htmlFor="copy-tax-year" className="block text-xs font-medium text-neutral-600">
+                  Copy from (optional)
                 </label>
                 <select
+                  id="copy-tax-year"
                   value={copyFromYear || ''}
                   onChange={(e) => setCopyFromYear(e.target.value ? parseInt(e.target.value) : null)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-neutral-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base sm:text-sm"
                 >
                   <option value="">Start from scratch</option>
                   {configs.map((c) => (
@@ -786,7 +800,7 @@ export default function TaxConfigs() {
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-neutral-600">
                   Copying will duplicate all brackets and settings, then you can update the values.
                 </p>
               </div>
@@ -795,7 +809,7 @@ export default function TaxConfigs() {
             <div className="mt-6 flex justify-end space-x-3">
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                className="px-4 py-2 text-sm font-medium text-neutral-700 bg-white border border-neutral-300 rounded-md hover:bg-neutral-50"
                 disabled={creating}
               >
                 Cancel
@@ -827,40 +841,41 @@ export default function TaxConfigs() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-900">
+              <h3 className="text-lg font-medium text-neutral-900">
                 Change History
               </h3>
               <button
+                aria-label="Close tax configuration history"
                 onClick={() => setShowAuditModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-neutral-600 hover:text-neutral-900"
               >
                 ✕
               </button>
             </div>
             
             {auditLogs.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No changes recorded yet.</p>
+              <p className="text-neutral-600 text-center py-8">No changes recorded yet.</p>
             ) : (
               <div className="space-y-3">
                 {auditLogs.map((log) => (
                   <div key={log.id} className="border-l-4 border-indigo-500 pl-4 py-2">
                     <div className="flex justify-between text-sm">
-                      <span className="font-medium text-gray-900 capitalize">
+                      <span className="font-medium text-neutral-900 capitalize">
                         {log.action}
                         {log.field_name && `: ${log.field_name}`}
                       </span>
-                      <span className="text-gray-500">
+                      <span className="text-neutral-600">
                         {new Date(log.created_at).toLocaleString()}
                       </span>
                     </div>
                     {log.old_value && (
-                      <p className="text-sm text-gray-500">
+                      <p className="text-sm text-neutral-600">
                         Changed from <span className="text-red-600">{log.old_value}</span> to{' '}
-                        <span className="text-green-600">{log.new_value}</span>
+                        <span className="text-success-800">{log.new_value}</span>
                       </p>
                     )}
                     {!log.old_value && log.new_value && (
-                      <p className="text-sm text-gray-600">{log.new_value}</p>
+                      <p className="text-sm text-neutral-600">{log.new_value}</p>
                     )}
                   </div>
                 ))}

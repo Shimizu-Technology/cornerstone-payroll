@@ -1,7 +1,8 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, useId, type RefObject } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
 import type { BlobDownload, PayrollRegisterReport, TransmittalOptions, TransmittalPreview, SavedTransmittal, TransmittalCustomEntry } from '@/services/api';
@@ -57,11 +58,15 @@ function SignoffEditorModal({
   onClose,
   onGenerate,
   payPeriodId,
+  onAfterClose,
+  returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
   onGenerate: (entries: { name: string; check_number: string }[], notes: string[]) => void;
   payPeriodId: number;
+  onAfterClose?: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const [entries, setEntries] = useState<{ name: string; check_number: string; included: boolean }[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
@@ -78,10 +83,7 @@ function SignoffEditorModal({
       return () => window.clearTimeout(resetTimer);
     }
 
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || initialized) return;
@@ -137,8 +139,6 @@ function SignoffEditorModal({
     };
   }, [open, payPeriodId, initialized]);
 
-  if (!open) return null;
-
   const includedCount = entries.filter(e => e.included).length;
 
   const handleGenerate = () => {
@@ -152,12 +152,11 @@ function SignoffEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-50 min-w-0 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} onAfterClose={onAfterClose} returnFocusRef={returnFocusRef}>
+      <DialogContent className="dialog-wide mx-auto! max-w-3xl p-0! sm:mx-auto! sm:p-0!">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
-          <h3 className="text-lg font-semibold text-gray-900">Edit Check Sign-Off Sheet</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+          <DialogTitle className="text-lg font-semibold text-neutral-900">Edit Check Sign-Off Sheet</DialogTitle>
+          <button onClick={onClose} aria-label="Close check sign-off editor" className="text-neutral-600 hover:text-neutral-900 p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -167,7 +166,7 @@ function SignoffEditorModal({
         {loadingPreview ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-            <span className="ml-2 text-sm text-gray-500">Loading sign-off data...</span>
+            <span className="ml-2 text-sm text-neutral-500">Loading sign-off data...</span>
           </div>
         ) : (<>
           {savedState?.generated_at && (
@@ -187,16 +186,16 @@ function SignoffEditorModal({
           <div className="px-6 py-4 space-y-6">
             {/* Company / period header */}
             {companyName && (
-              <div className="bg-gray-50 border rounded-lg p-3">
-                <p className="font-semibold text-sm text-gray-900">{companyName}</p>
-                {periodDesc && <p className="text-xs text-gray-500 mt-0.5">Pay Period: {periodDesc}</p>}
+              <div className="bg-neutral-50 border rounded-lg p-3">
+                <p className="font-semibold text-sm text-neutral-900">{companyName}</p>
+                {periodDesc && <p className="text-xs text-neutral-600 mt-0.5">Pay Period: {periodDesc}</p>}
               </div>
             )}
 
             {/* Employee Selection */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-700">
+                <label className="text-xs font-medium text-neutral-600">
                   Employees ({includedCount} of {entries.length} selected)
                 </label>
                 <div className="flex gap-2">
@@ -204,12 +203,12 @@ function SignoffEditorModal({
                     onClick={() => setEntries(entries.map(e => ({ ...e, included: true })))}
                     className="text-xs text-blue-600 hover:text-blue-800"
                   >Select All</button>
-                  <span className="text-gray-300">|</span>
+                  <span className="text-neutral-300">|</span>
                   <button
                     onClick={() => setEntries(entries.map(e => ({ ...e, included: false })))}
                     className="text-xs text-blue-600 hover:text-blue-800"
                   >Deselect All</button>
-                  <span className="text-gray-300">|</span>
+                  <span className="text-neutral-300">|</span>
                   <button
                     onClick={handleResetToPayroll}
                     className="text-xs text-blue-600 hover:text-blue-800"
@@ -220,60 +219,63 @@ function SignoffEditorModal({
               <div className="border rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0">
-                    <tr className="bg-gray-50 border-b">
-                      <th className="px-3 py-2 w-10"></th>
-                      <th className="text-left px-3 py-2 font-medium text-gray-600 w-8">#</th>
-                      <th className="text-left px-3 py-2 font-medium text-gray-600">Employee Name</th>
-                      <th className="text-left px-3 py-2 font-medium text-gray-600 w-36">Check No.</th>
-                      <th className="px-3 py-2 w-10"></th>
+                    <tr className="bg-neutral-50 border-b">
+                      <th className="px-3 py-2 w-10"><span className="sr-only">Selection or actions</span></th>
+                      <th className="text-left px-3 py-2 font-medium text-neutral-600 w-8">#</th>
+                      <th className="text-left px-3 py-2 font-medium text-neutral-600">Employee Name</th>
+                      <th className="text-left px-3 py-2 font-medium text-neutral-600 w-36">Check No.</th>
+                      <th className="px-3 py-2 w-10"><span className="sr-only">Selection or actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {entries.map((entry, i) => (
-                      <tr key={i} className={`border-b last:border-b-0 ${entry.included ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
+                      <tr key={i} className={`border-b last:border-b-0 ${entry.included ? 'bg-white' : 'bg-neutral-50'}`}>
                         <td className="px-3 py-1.5 text-center">
                           <input
                             type="checkbox"
+                            aria-label={`Include employee ${i + 1}: ${entry.name || 'Unnamed'}`}
                             checked={entry.included}
                             onChange={() => {
                               const updated = [...entries];
                               updated[i] = { ...updated[i], included: !updated[i].included };
                               setEntries(updated);
                             }}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            className="rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
                           />
                         </td>
-                        <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
+                        <td className="px-3 py-1.5 text-neutral-600 text-xs">{i + 1}</td>
                         <td className="px-3 py-1.5">
                           <input
                             type="text"
+                            aria-label={`Employee ${i + 1} name`}
                             value={entry.name}
                             onChange={e => {
                               const updated = [...entries];
                               updated[i] = { ...updated[i], name: e.target.value };
                               setEntries(updated);
                             }}
-                            className="w-full text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full text-base sm:text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="Last, First"
                           />
                         </td>
                         <td className="px-3 py-1.5">
                           <input
                             type="text"
+                            aria-label={`Employee ${i + 1} check number`}
                             value={entry.check_number}
                             onChange={e => {
                               const updated = [...entries];
                               updated[i] = { ...updated[i], check_number: e.target.value };
                               setEntries(updated);
                             }}
-                            className="w-full text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full text-base sm:text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
                             placeholder="—"
                           />
                         </td>
                         <td className="px-3 py-1.5 text-center">
                           <button
                             onClick={() => setEntries(entries.filter((_, idx) => idx !== i))}
-                            className="text-red-400 hover:text-red-600 p-0.5"
+                            className="text-danger-700 hover:text-danger-900 p-0.5"
                             title="Remove"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -300,12 +302,13 @@ function SignoffEditorModal({
 
             {/* Notes */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Notes <span className="font-normal text-gray-400">(printed at bottom of sheet)</span>
+              <label className="block text-xs font-medium text-neutral-600 mb-2">
+                Notes <span className="font-normal text-neutral-600">(printed at bottom of sheet)</span>
               </label>
               {notes.map((note, i) => (
                 <div key={i} className="flex items-start gap-2 mb-2">
                   <textarea
+                    aria-label={`Sign-off note ${i + 1}`}
                     value={note}
                     onChange={e => {
                       const updated = [...notes];
@@ -313,17 +316,18 @@ function SignoffEditorModal({
                       setNotes(updated);
                     }}
                     rows={2}
-                    className="flex-1 text-sm border rounded px-2 py-1 resize-none"
+                    className="flex-1 text-base sm:text-sm border rounded px-2 py-1 resize-none"
                   />
                   <button
                     onClick={() => setNotes(notes.filter((_, idx) => idx !== i))}
-                    className="text-red-500 hover:text-red-700 text-xs mt-1"
+                    className="text-danger-700 hover:text-danger-900 text-xs mt-1"
                   >Remove</button>
                 </div>
               ))}
               <div className="flex gap-2">
                 <input
                   type="text"
+                  aria-label="New sign-off note"
                   placeholder="Add a note..."
                   value={newNote}
                   onChange={e => setNewNote(e.target.value)}
@@ -333,7 +337,7 @@ function SignoffEditorModal({
                       setNewNote('');
                     }
                   }}
-                  className="flex-1 text-sm border rounded px-2 py-1"
+                  className="flex-1 text-base sm:text-sm border rounded px-2 py-1"
                 />
                 <Button
                   variant="outline"
@@ -353,8 +357,8 @@ function SignoffEditorModal({
             </Button>
           </div>
         </>)}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -364,17 +368,22 @@ export function TransmittalEditorModal({
   onGenerate,
   targetLabel,
   fixedReports = false,
+  returnFocusRef,
   payPeriodId,
   onOpenForm500,
+  onAfterClose,
 }: {
   open: boolean;
   onClose: () => void;
   onGenerate: (options: TransmittalOptions) => void;
   targetLabel: string;
   fixedReports?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   payPeriodId: number;
   onOpenForm500: () => void;
+  onAfterClose?: () => void;
 }) {
+  const fieldId = useId();
   const [preparerName, setPreparerName] = useState('Cornerstone Tax Services');
   const [notes, setNotes] = useState<string[]>([]);
   const [reportList, setReportList] = useState<string[]>(DEFAULT_REPORT_LIST);
@@ -404,12 +413,7 @@ export function TransmittalEditorModal({
       const resetTimer = window.setTimeout(() => setInitialized(false), 0);
       return () => window.clearTimeout(resetTimer);
     }
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || initialized) return;
@@ -485,7 +489,6 @@ export function TransmittalEditorModal({
     };
   }, [open, payPeriodId, initialized, fixedReports]);
 
-  if (!open) return null;
 
   const formatCheckRanges = (numbers: string[]) => {
     const clean = numbers.map(n => n.trim()).filter(Boolean);
@@ -568,12 +571,11 @@ export function TransmittalEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-50 min-w-0 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl">
+    <Dialog onAfterClose={onAfterClose} returnFocusRef={returnFocusRef} open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="dialog-wide dialog-center-mobile mx-auto! max-w-3xl max-h-[90dvh]! p-0!">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
-          <h3 className="text-lg font-semibold text-gray-900">Edit {targetLabel}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+          <DialogTitle className="text-lg font-semibold text-neutral-950">Edit {targetLabel}</DialogTitle>
+          <button type="button" onClick={onClose} aria-label={`Close ${targetLabel} editor`} className="text-neutral-600 hover:text-neutral-950 p-2">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -583,7 +585,7 @@ export function TransmittalEditorModal({
         {loadingPreview ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-            <span className="ml-2 text-sm text-gray-500">Loading transmittal data...</span>
+            <span className="ml-2 text-sm text-neutral-500">Loading transmittal data...</span>
           </div>
         ) : (<>
           {savedState?.generated_at && (
@@ -600,43 +602,45 @@ export function TransmittalEditorModal({
             </div>
           )}
           <div className="px-6 py-4 space-y-6">
-            {/* Preparer Name */}
+            {/* Preparer name */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Preparer Name</label>
+              <label htmlFor={`${fieldId}-preparer`} className="block text-xs font-medium text-neutral-600 mb-1">Preparer name</label>
               <input
+                id={`${fieldId}-preparer`}
                 type="text"
                 value={preparerName}
                 onChange={(e) => setPreparerName(e.target.value)}
                 placeholder="e.g. Cornerstone Tax Services"
-                className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full border rounded-md px-3 py-2 text-base sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Transmittal Date</label>
+              <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-neutral-600 mb-1">Transmittal date</label>
               <input
+                id={`${fieldId}-date`}
                 type="date"
                 value={transmittalDate}
                 onChange={(e) => setTransmittalDate(e.target.value)}
-                className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full border rounded-md px-3 py-2 text-base sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-500">Defaults to today; change it if the package will be delivered on a different date.</p>
+              <p className="mt-1 text-xs text-neutral-600">Defaults to today; change it if the package will be delivered on a different date.</p>
             </div>
 
             {/* Documents Provided Preview */}
             {preview && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Documents Provided to Client</label>
-                <div className="bg-gray-50 border rounded-lg p-4 space-y-4 text-sm">
+                <label className="block text-xs font-medium text-neutral-600 mb-2">Documents provided to client</label>
+                <div className="bg-neutral-50 border rounded-lg p-4 space-y-4 text-sm">
                   {/* Payroll Checks */}
                   {payrollCheckCount > 0 && (
                     <div>
-                      <p className="font-medium text-gray-900">1) Payroll Checks</p>
-                      <div className="ml-6 text-gray-600 space-y-1.5 mt-1">
-                        <p>Number of Checks: <span className="font-medium text-gray-900">{payrollCheckCount}</span></p>
+                      <p className="font-medium text-neutral-900">1) Payroll Checks</p>
+                      <div className="ml-6 text-neutral-600 space-y-1.5 mt-1">
+                        <p>Number of Checks: <span className="font-medium text-neutral-900">{payrollCheckCount}</span></p>
                         <div>
                           <span>Checks #: </span>
-                          <span className="font-medium text-gray-900">
+                          <span className="font-medium text-neutral-900">
                             {formatCheckRanges(payrollCheckNumbers) || '—'}
                           </span>
                         </div>
@@ -647,13 +651,13 @@ export function TransmittalEditorModal({
                                 type="text"
                                 value={number}
                                 onChange={(e) => updatePayrollCheckNumber(idx, e.target.value)}
-                                className="w-full border rounded px-2 py-1 text-sm font-medium text-gray-900 text-center"
+                                className="w-full border rounded px-2 py-1 text-base sm:text-sm font-medium text-neutral-900 text-center"
                                 aria-label={`Payroll check number ${idx + 1}`}
                               />
                               <button
                                 type="button"
                                 onClick={() => removePayrollCheckNumber(idx)}
-                                className="text-xs text-gray-400 hover:text-red-600 px-1"
+                                className="text-xs text-neutral-600 hover:text-red-600 px-1"
                                 aria-label={`Remove payroll check number ${idx + 1}`}
                               >
                                 ×
@@ -669,7 +673,7 @@ export function TransmittalEditorModal({
                   )}
 
                   {payrollCheckCount === 0 && (
-                    <div className="rounded-md border border-dashed border-gray-300 bg-white p-3 text-gray-600">
+                    <div className="rounded-md border border-dashed border-neutral-300 bg-white p-3 text-neutral-600">
                       <p className="text-sm">No payroll check numbers selected for this transmittal.</p>
                       <button type="button" onClick={addPayrollCheckNumber} className="mt-2 text-xs text-blue-600 hover:text-blue-800">
                         + Add payroll check #
@@ -680,22 +684,22 @@ export function TransmittalEditorModal({
                   {/* Non-Employee Checks */}
                   {preview.non_employee_checks.map((check, idx) => (
                     <div key={check.id}>
-                      <p className="font-medium text-gray-900">
+                      <p className="font-medium text-neutral-900">
                         {(payrollCheckCount > 0 ? 2 : 1) + idx}) {check.payable_to} — {displayCheckType(check.check_type)}
                       </p>
-                      <div className="ml-6 text-gray-600 space-y-1 mt-1">
+                      <div className="ml-6 text-neutral-600 space-y-1 mt-1">
                         <div className="flex items-center gap-2">
                           <span>Check #:</span>
                           <input
                             type="text"
                             value={neCheckNumbers[check.id] || ''}
                             onChange={(e) => setNeCheckNumbers(prev => ({ ...prev, [check.id]: e.target.value }))}
-                            className="w-24 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
+                            className="w-24 border rounded px-2 py-0.5 text-base sm:text-sm font-medium text-neutral-900 text-center"
                             placeholder="____"
                           />
                         </div>
-                        <p>Amount: <span className="font-medium text-gray-900">{fmt(check.amount)}</span></p>
-                        <p>Payable to: <span className="font-medium text-gray-900">{check.payable_to}</span></p>
+                        <p>Amount: <span className="font-medium text-neutral-900">{fmt(check.amount)}</span></p>
+                        <p>Payable to: <span className="font-medium text-neutral-900">{check.payable_to}</span></p>
                         {check.memo && <p>For: {displayCheckType(check.check_type)} — {check.memo}</p>}
                         {check.description && <p>Description/Memo: {check.description}</p>}
                       </div>
@@ -707,11 +711,11 @@ export function TransmittalEditorModal({
 
             {/* Custom / Manual Entries */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Documents / Manual Entries</label>
-              <p className="text-xs text-gray-500 mb-2">Add manually written checks, extra documents, or other items to the transmittal</p>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Additional Documents / Manual Entries</label>
+              <p className="text-xs text-neutral-600 mb-2">Add manually written checks, extra documents, or other items to the transmittal</p>
               <div className="space-y-3">
                 {customEntries.map((entry, idx) => (
-                  <div key={idx} className="border rounded-lg p-3 bg-gray-50 space-y-2 group relative">
+                  <div key={idx} className="border rounded-lg p-3 bg-neutral-50 space-y-2 group relative">
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -722,7 +726,7 @@ export function TransmittalEditorModal({
                           setCustomEntries(updated);
                         }}
                         placeholder="e.g. Manual Check for John Doe"
-                        className="flex-1 border rounded-md px-3 py-1.5 text-sm font-medium"
+                        className="flex-1 border rounded-md px-3 py-1.5 text-base sm:text-sm font-medium"
                       />
                       <button
                         onClick={() => setCustomEntries(customEntries.filter((_, i) => i !== idx))}
@@ -747,7 +751,7 @@ export function TransmittalEditorModal({
                             setCustomEntries(updated);
                           }}
                           placeholder="Detail line..."
-                          className="flex-1 border rounded-md px-3 py-1 text-sm"
+                          className="flex-1 border rounded-md px-3 py-1 text-base sm:text-sm"
                         />
                         <button
                           onClick={() => {
@@ -790,13 +794,13 @@ export function TransmittalEditorModal({
             {/* Employer Tax Obligations */}
             {preview && preview.tax_totals.total_drt_deposit > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Employer Tax Obligations</label>
+                <label className="block text-xs font-medium text-neutral-600 mb-2">Employer Tax Obligations</label>
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1">
                     <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Federal / Guam Income Tax</p>
+                      <p className="text-xs font-semibold text-neutral-600 mb-1">Federal / Guam Income Tax</p>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Employee FIT Withheld</span>
+                        <span className="text-neutral-600">Employee FIT Withheld</span>
                         <span className="font-medium">{fmt(preview.tax_totals.fit)}</span>
                       </div>
                       <div className="flex justify-between border-t mt-1 pt-1 font-semibold">
@@ -805,21 +809,21 @@ export function TransmittalEditorModal({
                       </div>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Social Security & Medicare (FICA)</p>
+                      <p className="text-xs font-semibold text-neutral-600 mb-1">Social Security & Medicare (FICA)</p>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Employee SS (6.2%)</span>
+                        <span className="text-neutral-600">Employee SS (6.2%)</span>
                         <span>{fmt(preview.tax_totals.employee_ss)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Employer SS (6.2%)</span>
+                        <span className="text-neutral-600">Employer SS (6.2%)</span>
                         <span>{fmt(preview.tax_totals.employer_ss)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Employee Medicare (1.45%)</span>
+                        <span className="text-neutral-600">Employee Medicare (1.45%)</span>
                         <span>{fmt(preview.tax_totals.employee_medicare)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Employer Medicare (1.45%)</span>
+                        <span className="text-neutral-600">Employer Medicare (1.45%)</span>
                         <span>{fmt(preview.tax_totals.employer_medicare)}</span>
                       </div>
                       <div className="flex justify-between border-t mt-1 pt-1 font-semibold">
@@ -839,7 +843,7 @@ export function TransmittalEditorModal({
             {/* Guam DRT Resources */}
             {preview && preview.tax_totals.fit > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Guam DRT Resources</label>
+                <label className="block text-xs font-medium text-neutral-600 mb-2">Guam DRT Resources</label>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-3">
                   <svg className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -866,8 +870,8 @@ export function TransmittalEditorModal({
 
             {/* Notes */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <p className="text-xs text-gray-500 mb-2">Instructions or reminders for the client — auto-populated with tax totals</p>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Notes</label>
+              <p className="text-xs text-neutral-600 mb-2">Instructions or reminders for the client — auto-populated with tax totals</p>
               <div className="space-y-2">
                 {notes.map((note, idx) => (
                   <div key={idx} className="flex items-center gap-2 group">
@@ -879,7 +883,7 @@ export function TransmittalEditorModal({
                         updated[idx] = e.target.value;
                         setNotes(updated);
                       }}
-                      className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                      className="flex-1 border rounded-md px-3 py-1.5 text-base sm:text-sm"
                     />
                     <button
                       onClick={() => handleRemoveNote(idx)}
@@ -899,12 +903,12 @@ export function TransmittalEditorModal({
                     onChange={(e) => setNewNote(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
                     placeholder="Add a note..."
-                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
+                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-base sm:text-sm text-neutral-500"
                   />
                   <button
                     onClick={handleAddNote}
                     disabled={!newNote.trim()}
-                    className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
+                    className="text-blue-600 hover:text-blue-800 disabled:text-neutral-300 text-sm font-medium px-2"
                   >
                     + Add
                   </button>
@@ -912,14 +916,14 @@ export function TransmittalEditorModal({
               </div>
             </div>
 
-            {/* Report List */}
+            {/* Report list */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Reports Included</label>
-              <p className="text-xs text-gray-500 mb-2">{fixedReports ? 'These five reports are attached automatically. The cover lists the actual package contents.' : 'Listed on the transmittal as documents provided to client'}</p>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Reports Included</label>
+              <p className="text-xs text-neutral-600 mb-2">{fixedReports ? 'These five reports are attached automatically. The cover lists the actual package contents.' : 'Listed on the transmittal as documents provided to client'}</p>
               <div className="space-y-2">
                 {reportList.map((report, idx) => (
                   <div key={idx} className="flex items-center gap-2 group">
-                    <span className="text-sm text-gray-500 w-6 text-right">{idx + 1}.</span>
+                    <span className="text-sm text-neutral-500 w-6 text-right">{idx + 1}.</span>
                     <input
                       type="text"
                       value={report}
@@ -930,7 +934,7 @@ export function TransmittalEditorModal({
                         updated[idx] = e.target.value;
                         setReportList(updated);
                       }}
-                      className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                      className="flex-1 border rounded-md px-3 py-1.5 text-base sm:text-sm"
                     />
                     {!fixedReports && <button
                       onClick={() => handleRemoveReport(idx)}
@@ -944,19 +948,19 @@ export function TransmittalEditorModal({
                   </div>
                 ))}
                 {!fixedReports && <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-400 w-6 text-right">{reportList.length + 1}.</span>
+                  <span className="text-sm text-neutral-600 w-6 text-right">{reportList.length + 1}.</span>
                   <input
                     type="text"
                     value={newReport}
                     onChange={(e) => setNewReport(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddReport(); }}
                     placeholder="Add a report..."
-                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
+                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-base sm:text-sm text-neutral-500"
                   />
                   <button
                     onClick={handleAddReport}
                     disabled={!newReport.trim()}
-                    className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
+                    className="text-blue-600 hover:text-blue-800 disabled:text-neutral-300 text-sm font-medium px-2"
                   >
                     + Add
                   </button>
@@ -969,14 +973,14 @@ export function TransmittalEditorModal({
         {previewError && <div role="alert" className="mx-6 mb-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">
           <p>{previewError}</p><Button variant="outline" className="mt-3" onClick={() => setInitialized(false)}>Retry cover details</Button>
         </div>}
-        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
+        <div className="sticky bottom-0 bg-neutral-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleGenerate} disabled={loadingPreview || !initialized || !!previewError}>
+          <Button onClick={handleGenerate} disabled={loadingPreview || !initialized || !!previewError} title={loadingPreview || !initialized ? 'Loading saved cover details' : previewError ? 'Retry cover details before generating' : undefined}>
             {savedState?.generated_at ? 'Regenerate' : 'Generate'} {targetLabel}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1043,6 +1047,7 @@ function PdfPreviewModal({
   title,
   onDownload,
   onPrint,
+  returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1050,25 +1055,13 @@ function PdfPreviewModal({
   title: string;
   onDownload: () => void;
   onPrint: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
-
-      <div className="relative z-50 flex flex-col h-full m-3 sm:m-6">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} returnFocusRef={returnFocusRef}>
+      <DialogContent aria-label={title} className="dialog-wide dialog-center-mobile flex h-[90dvh] flex-col p-0! overflow-hidden!">
         {/* Header */}
-        <div className="flex items-center justify-between bg-gray-900 text-white px-4 py-3 rounded-t-lg shrink-0">
+        <div className="flex items-center justify-between bg-neutral-900 text-white px-4 py-3 rounded-t-lg shrink-0">
           <h3 className="font-semibold text-sm sm:text-base truncate mr-4">{title}</h3>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -1094,7 +1087,7 @@ function PdfPreviewModal({
             <button
               onClick={onClose}
               className="ml-2 p-1.5 hover:bg-white/20 rounded transition-colors"
-              title="Close (Esc)"
+              title="Close (Esc)" aria-label={`Close ${title} preview`}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1104,7 +1097,7 @@ function PdfPreviewModal({
         </div>
 
         {/* PDF Content */}
-        <div className="flex-1 bg-gray-200 rounded-b-lg overflow-hidden min-h-0">
+        <div className="flex-1 bg-neutral-200 rounded-b-lg overflow-hidden min-h-0">
           {pdfUrl ? (
             <iframe
               src={pdfUrl}
@@ -1113,7 +1106,7 @@ function PdfPreviewModal({
             />
           ) : (
             <div className="flex items-center justify-center h-full">
-              <div className="flex flex-col items-center gap-3 text-gray-500">
+              <div className="flex flex-col items-center gap-3 text-neutral-700">
                 <svg className="animate-spin h-8 w-8" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1123,13 +1116,17 @@ function PdfPreviewModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
   const navigate = useNavigate();
+  const transmittalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingTransmittalPreview = useRef<(() => void) | null>(null);
+  const previewRequest = useRef(0);
+  useEffect(() => () => { previewRequest.current += 1; }, [payPeriodId]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [payrollPreviewState, setPayrollPreviewState] = useState<{
@@ -1164,6 +1161,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     blobData: BlobDownload | null;
   }>({ open: false, pdfUrl: null, blobData: null });
   const [signoffLoading, setSignoffLoading] = useState(false);
+  const signoffTriggerRef = useRef<HTMLButtonElement>(null);
+  const pendingSignoffGeneration = useRef<(() => void) | null>(null);
+  const signoffRequest = useRef(0);
+  useEffect(() => () => {
+    signoffRequest.current += 1;
+    pendingSignoffGeneration.current = null;
+  }, [payPeriodId]);
 
   const isReady = payPeriodStatus !== 'draft';
   const loadingKey = (reportKey: ReportKey, action: ReportAction) => `${reportKey}:${action}`;
@@ -1179,11 +1183,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
   const cleanupPreview = useCallback(() => {
+    previewRequest.current += 1;
+    if (previewState.key) setLoading(current => ({ ...current, [`${previewState.key}:preview`]: false }));
     if (previewState.pdfUrl) {
       URL.revokeObjectURL(previewState.pdfUrl);
     }
-    setPreviewState({ open: false, key: null, label: '', pdfUrl: null, blobData: null });
-  }, [previewState.pdfUrl]);
+    setPreviewState(current => ({ ...current, open: false }));
+  }, [previewState.pdfUrl, previewState.key]);
 
   const cleanupPayrollPreview = useCallback(() => {
     setPayrollPreviewState({ open: false, loading: false, report: null, error: null });
@@ -1222,19 +1228,22 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     }
 
     const key = loadingKey(reportKey, 'preview');
+    const request = ++previewRequest.current;
     setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
     try {
       const blobData = await fetchReport(reportKey, payPeriodId, payDate, transmittalOpts);
+      if (request !== previewRequest.current) return;
       const url = URL.createObjectURL(blobData.blob);
       setPreviewState(prev => ({ ...prev, pdfUrl: url, blobData }));
     } catch (err) {
+      if (request !== previewRequest.current) return;
       setPreviewState(prev => ({ ...prev, open: false }));
       setError(err instanceof Error ? err.message : 'Failed to generate report');
     } finally {
-      setLoading(prev => ({ ...prev, [key]: false }));
+      if (request === previewRequest.current) setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1323,11 +1332,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
   const handleTransmittalGenerate = async (options: TransmittalOptions) => {
     const { key, mode } = transmittalEditor;
-    setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' });
+    setTransmittalEditor(current => ({ ...current, open: false }));
     if (!key) return;
 
     if (mode === 'preview') {
-      await handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      pendingTransmittalPreview.current = () => {
+        void handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      };
     } else {
       await handleDownload(key, options);
     }
@@ -1362,7 +1373,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
   const handleSignoffGenerate = async (entries: { name: string; check_number: string }[], notes: string[]) => {
     const { mode } = signoffEditor;
-    setSignoffEditor({ open: false, mode: 'view' });
+    const request = ++signoffRequest.current;
 
     setSignoffLoading(true);
     setError(null);
@@ -1371,18 +1382,21 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       if (mode === 'view') {
         setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
         const blobData = await reportsApi.checkSignoffPdf(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        if (request !== signoffRequest.current) return;
         const url = URL.createObjectURL(blobData.blob);
         setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
       } else {
         const blobData = await reportsApi.checkSignoffSheet(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        if (request !== signoffRequest.current) return;
         downloadBlob(blobData, 'check_signoff_sheet.xlsx');
       }
       setSignoffSavedAt(new Date().toISOString());
     } catch (err) {
+      if (request !== signoffRequest.current) return;
       setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off sheet');
     } finally {
-      setSignoffLoading(false);
+      if (request === signoffRequest.current) setSignoffLoading(false);
     }
   };
 
@@ -1391,18 +1405,21 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       setSignoffEditor({ open: true, mode: 'view' });
       return;
     }
+    const request = ++signoffRequest.current;
     setSignoffLoading(true);
     setError(null);
     setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
     try {
       const blobData = await reportsApi.checkSignoffPdf(payPeriodId);
+      if (request !== signoffRequest.current) return;
       const url = URL.createObjectURL(blobData.blob);
       setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
     } catch (err) {
+      if (request !== signoffRequest.current) return;
       setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off PDF');
     } finally {
-      setSignoffLoading(false);
+      if (request === signoffRequest.current) setSignoffLoading(false);
     }
   };
 
@@ -1424,10 +1441,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const cleanupSignoffPreview = useCallback(() => {
+    signoffRequest.current += 1;
+    setSignoffLoading(false);
     if (signoffPdfPreview.pdfUrl) {
       URL.revokeObjectURL(signoffPdfPreview.pdfUrl);
     }
-    setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
+    setSignoffPdfPreview((previous) => ({ ...previous, open: false }));
   }, [signoffPdfPreview.pdfUrl]);
 
   if (!isReady) return null;
@@ -1435,9 +1454,9 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   return (
     <>
       <Card>
-        <div className="p-4 border-b bg-gray-50">
-          <h3 className="font-semibold text-gray-900">Reports & Documents</h3>
-          <p className="text-sm text-gray-500 mt-1">
+        <div className="p-4 border-b bg-neutral-50">
+          <h3 className="font-semibold text-neutral-900">Reports & Documents</h3>
+          <p className="text-sm text-neutral-500 mt-1">
             View, download, or print reports for this pay period
           </p>
         </div>
@@ -1475,10 +1494,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                 },
               ];
               return (
-                <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
+                <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-neutral-50 transition-colors">
                   <div className="mr-3 min-w-0">
-                    <p className="font-medium text-sm text-gray-900">{report.label}</p>
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="font-medium text-sm text-neutral-900">{report.label}</p>
+                    <p className="text-xs text-neutral-600 truncate">
                       {report.description}
                       {hasSaved && savedTransmittal?.generated_at && (
                         <span className="text-green-600 ml-1">
@@ -1492,7 +1511,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handlePreview(report.key, report.label)}
+                        key="edit"
+                        onClick={(event) => { transmittalTriggerRef.current = event.currentTarget; handlePreview(report.key, report.label); }}
                         disabled={previewLoading}
                         className="text-xs"
                         title="Edit transmittal settings before generating"
@@ -1506,7 +1526,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => hasSaved ? handleReprint(report.key, report.label) : handlePreview(report.key, report.label)}
+                      key="view"
+                      onClick={(event) => { transmittalTriggerRef.current = event.currentTarget; if (hasSaved) handleReprint(report.key, report.label); else handlePreview(report.key, report.label); }}
                       disabled={previewLoading}
                       className="text-xs"
                     >
@@ -1536,10 +1557,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       {/* Check Sign-Off Sheet */}
       <Card className="mt-4">
-        <div className="p-4 bg-gray-50 flex items-center justify-between">
+        <div className="p-4 bg-neutral-50 flex items-center justify-between">
           <div className="mr-3 min-w-0">
-            <h3 className="font-semibold text-gray-900">Check Sign-Off Sheet</h3>
-            <p className="text-sm text-gray-500 mt-0.5 truncate">
+            <h3 className="font-semibold text-neutral-900">Check Sign-Off Sheet</h3>
+            <p className="text-sm text-neutral-500 mt-0.5 truncate">
               Employee sign-off sheet for check pickup
               {signoffSavedAt && (
                 <span className="text-green-600 ml-1">
@@ -1553,7 +1574,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setSignoffEditor({ open: true, mode: 'view' })}
+                onClick={(event) => { signoffTriggerRef.current = event.currentTarget; setSignoffEditor({ open: true, mode: 'view' }); }}
                 className="text-xs"
               >
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1565,7 +1586,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleSignoffView}
+              onClick={(event) => { signoffTriggerRef.current = event.currentTarget; void handleSignoffView(); }}
               disabled={signoffLoading}
               className="text-xs"
             >
@@ -1582,7 +1603,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleSignoffDownload}
+              onClick={(event) => { signoffTriggerRef.current = event.currentTarget; void handleSignoffDownload(); }}
               disabled={signoffLoading}
               className="text-xs"
             >
@@ -1601,6 +1622,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       <PdfPreviewModal
         open={previewState.open}
+        returnFocusRef={transmittalTriggerRef}
         onClose={cleanupPreview}
         pdfUrl={previewState.pdfUrl}
         title={previewState.label}
@@ -1636,9 +1658,15 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       <TransmittalEditorModal
         open={transmittalEditor.open}
-        onClose={() => setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' })}
+        onClose={() => setTransmittalEditor(current => ({ ...current, open: false }))}
         onGenerate={handleTransmittalGenerate}
+        onAfterClose={() => {
+          const next = pendingTransmittalPreview.current;
+          pendingTransmittalPreview.current = null;
+          next?.();
+        }}
         fixedReports={transmittalEditor.key === 'fullPrintPackage'}
+        returnFocusRef={transmittalTriggerRef}
         targetLabel={transmittalEditor.label}
         payPeriodId={payPeriodId}
         onOpenForm500={() => setForm500Open(true)}
@@ -1647,7 +1675,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       <SignoffEditorModal
         open={signoffEditor.open}
         onClose={() => setSignoffEditor({ open: false, mode: 'view' })}
-        onGenerate={handleSignoffGenerate}
+        returnFocusRef={signoffTriggerRef}
+        onGenerate={(entries, notes) => {
+          pendingSignoffGeneration.current = () => { void handleSignoffGenerate(entries, notes); };
+          setSignoffEditor((previous) => ({ ...previous, open: false }));
+        }}
+        onAfterClose={() => {
+          const next = pendingSignoffGeneration.current;
+          pendingSignoffGeneration.current = null;
+          next?.();
+        }}
         payPeriodId={payPeriodId}
       />
 
@@ -1655,6 +1692,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       <PdfPreviewModal
         open={signoffPdfPreview.open}
+        returnFocusRef={signoffTriggerRef}
         onClose={cleanupSignoffPreview}
         pdfUrl={signoffPdfPreview.pdfUrl}
         title="Check Sign-Off Sheet"

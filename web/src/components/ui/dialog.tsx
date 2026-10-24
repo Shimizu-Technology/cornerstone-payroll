@@ -71,18 +71,19 @@ function acquireDialog(documentValue: Document, portal: HTMLElement, restoreTarg
   updatePortalInert(state);
 }
 
-function releaseDialog(documentValue: Document, portal: HTMLElement): void {
+function releaseDialog(documentValue: Document, portal: HTMLElement, explicitRestoreTarget?: HTMLElement | null): void {
   const state = documentDialogStates.get(documentValue);
   if (!state) return;
 
   const portalIndex = state.portals.findIndex(({ element }) => element === portal);
   if (portalIndex === -1) return;
+  if (portalIndex === 0 && explicitRestoreTarget?.isConnected) state.restoreTarget = explicitRestoreTarget;
   const wasTopPortal = portalIndex === state.portals.length - 1;
   const [closedPortal] = state.portals.splice(portalIndex, 1);
   if (state.portals.length > 0) {
     updatePortalInert(state);
     if (wasTopPortal) {
-      const restoreTarget = closedPortal.restoreTarget;
+      const restoreTarget = explicitRestoreTarget ?? closedPortal.restoreTarget;
       if (restoreTarget?.isConnected && !restoreTarget.closest('[inert]')) {
         restoreTarget.focus();
       } else {
@@ -106,9 +107,24 @@ interface DialogProps {
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
   dismissOnEscape?: boolean;
+  placement?: 'center' | 'left';
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
+  onAfterClose?: () => void;
 }
 
-export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }: DialogProps): React.ReactElement | null {
+export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, placement = 'center', returnFocusRef, onAfterClose }: DialogProps): React.ReactElement | null {
+  // Retain the portal and focus ownership until the opacity exit settles.
+  // Reopening cancels removal and CSS retargets the in-flight transition.
+  const [present, setPresent] = React.useState(open);
+  const active = open || present;
+  React.useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    const exit = window.setTimeout(() => setPresent(false), 120);
+    return () => window.clearTimeout(exit);
+  }, [open]);
   const generatedTitleId = React.useId();
   const [titleId, setTitleId] = React.useState(generatedTitleId);
   const portalRef = React.useRef<HTMLDivElement>(null);
@@ -121,16 +137,25 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
     setTitleId(resolvedId);
     return () => setTitleId((current) => current === resolvedId ? generatedTitleId : current);
   }, [generatedTitleId]);
+  // An async action can disable or replace its opener while this dialog is open.
+  // Resolve the caller's latest explicit target when ownership is released.
+  const getReturnFocusTarget = React.useCallback((): HTMLElement | null | undefined => returnFocusRef?.current, [returnFocusRef]);
+  const releaseOwnership = React.useRef<(() => void) | null>(null);
 
-  React.useEffect(() => {
-    if (!open || typeof document === 'undefined') return undefined;
+  React.useLayoutEffect(() => {
+    // Run after React restores selection for this commit, so it cannot overwrite
+    // the opener focus. Release still precedes passive onAfterClose handoffs.
+    const release = releaseOwnership.current;
+    releaseOwnership.current = null;
+    release?.();
+    if (!active || typeof document === 'undefined') return undefined;
 
     const portal = portalRef.current;
     if (!portal) return undefined;
 
-    const previouslyFocused = document.activeElement instanceof HTMLElement
+    const previouslyFocused = getReturnFocusTarget() ?? (document.activeElement instanceof HTMLElement
       ? document.activeElement
-      : null;
+      : null);
     acquireDialog(document, portal, previouslyFocused);
 
     const dialogElement = (): HTMLElement | null => portal.querySelector<HTMLElement>('[role="dialog"]');
@@ -140,14 +165,6 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
       const feedback = includeFeedback ? Array.from(document.querySelectorAll<HTMLElement>(`[data-feedback-portal] ${FOCUSABLE_SELECTOR.split(',').join(', [data-feedback-portal] ')}`)) : [];
       return [...withinDialog, ...feedback].filter((element) => element.offsetParent !== null && !element.closest('[inert]'));
     };
-    const focusFrame = window.requestAnimationFrame(() => {
-      const activeElement = document.activeElement;
-      const dialog = dialogElement();
-      // A fast click or keyboard entry may beat this frame. Keep the user's
-      // focus instead of interrupting input after asynchronously loaded fields.
-      if (activeElement instanceof HTMLElement && activeElement !== dialog && dialog?.contains(activeElement)) return;
-      (focusableElements()[0] || dialogElement())?.focus();
-    });
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (documentDialogStates.get(document)?.portals.at(-1)?.element !== portal) return;
       if (event.key === 'Escape') {
@@ -172,14 +189,59 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
     };
     document.addEventListener('keydown', handleKeyDown, true);
 
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
+    releaseOwnership.current = () => {
       document.removeEventListener('keydown', handleKeyDown, true);
-      releaseDialog(document, portal);
+      releaseDialog(document, portal, getReturnFocusTarget());
     };
+  }, [active, getReturnFocusTarget]);
+
+  React.useLayoutEffect(() => () => {
+    const release = releaseOwnership.current;
+    releaseOwnership.current = null;
+    if (!release) return;
+    const previousFocus = document.activeElement;
+    release();
+    const restoredFocus = document.activeElement;
+    // Actual unmount cleanup runs before React restores selection. Repair only
+    // that restoration; never replace focus chosen by a new dialog or caller.
+    queueMicrotask(() => {
+      if (previousFocus !== restoredFocus && document.activeElement === previousFocus
+        && restoredFocus instanceof HTMLElement && restoredFocus.isConnected
+        && !restoredFocus.closest('[inert]')) restoredFocus.focus();
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const portal = portalRef.current;
+    if (!portal) return;
+    if (!open) {
+      // Finish focused field drafts before a rapid reopen resets their values.
+      // The background stays inert until the exit completes.
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && portal.contains(focused)) focused.blur();
+      return;
+    }
+    const focusFrame = window.requestAnimationFrame(() => {
+      const dialog = portal.querySelector<HTMLElement>('[role="dialog"]');
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && focused !== dialog && dialog?.contains(focused)) return;
+      const first = dialog && Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+        .find((element) => element.offsetParent !== null && !element.closest('[inert]'));
+      (first || dialog)?.focus();
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
   }, [open]);
 
-  if (!open) return null;
+  const onAfterCloseRef = React.useRef(onAfterClose);
+  React.useLayoutEffect(() => { onAfterCloseRef.current = onAfterClose; }, [onAfterClose]);
+  const previouslyActive = React.useRef(active);
+  React.useEffect(() => {
+    // Focus ownership has already been released by the effect cleanup above.
+    if (!active && previouslyActive.current) onAfterCloseRef.current?.();
+    previouslyActive.current = active;
+  }, [active]);
+
+  if (!active) return null;
 
   if (typeof document === 'undefined') {
     return null;
@@ -187,24 +249,21 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
 
   return createPortal(
     <DialogContext.Provider value={{ generatedTitleId, titleId, registerTitleId }}>
-    <div ref={portalRef} data-dialog-portal className="fixed inset-0 z-[100]">
+    <div ref={portalRef} data-dialog-portal data-state={open ? 'open' : 'closed'} className="fixed inset-0 z-[100]">
       <div
-        className="absolute inset-0 bg-black/55 backdrop-blur-[1.5px]"
+        data-dialog-backdrop
+        className="dialog-backdrop absolute inset-0 bg-black/55"
         onClick={() => onOpenChange(false)}
       />
 
-      {/*
-        Default modal sits at max-w-lg (~512px) — fine for confirmation dialogs.
-        Any DialogContent that adds `.dialog-wide` opts into the wider tier:
-          - lg+ screens: capped at max-w-7xl (1280px)
-          - smaller screens: shrinks to fit (with the inner mx-4 gutter)
-        ImportModal additionally opts into `.dialog-top` so the workflow starts near the
-        top of the viewport instead of the vertical midpoint.
-      */}
-      <div className="relative z-10 h-full overflow-y-auto p-4 sm:p-6">
-        <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-center-mobile)]:items-center [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
-          <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
-        </div>
+      <div className={cn('relative z-10 h-full', placement === 'left' ? 'pointer-events-none flex items-stretch' : 'overflow-y-auto p-4 sm:p-6')}
+        onClick={(event) => { if (event.target === event.currentTarget) onOpenChange(false); }}>
+        {placement === 'left' ? <div className="pointer-events-auto h-full w-[86vw] max-w-[320px]">{children}</div> : (
+          <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-center-mobile)]:items-center [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12"
+            onClick={(event) => { if (event.target === event.currentTarget) onOpenChange(false); }}>
+            <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
+          </div>
+        )}
       </div>
     </div>
     </DialogContext.Provider>,
@@ -214,11 +273,13 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true }:
 
 interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
+  variant?: 'default' | 'drawer';
 }
 
 export function DialogContent({
   className,
   children,
+  variant = 'default',
   ...props
 }: DialogContentProps) {
   const context = React.useContext(DialogContext);
@@ -229,11 +290,13 @@ export function DialogContent({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby={props['aria-labelledby'] || context?.titleId}
+      aria-labelledby={props['aria-labelledby'] || (props['aria-label'] ? undefined : context?.titleId)}
       tabIndex={-1}
       className={cn(
-        'mx-0 max-h-[92vh] overflow-y-auto bg-white p-4 shadow-lg sm:mx-4 sm:rounded-lg sm:p-6',
-        isFullyRoundedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg',
+        'dialog-panel bg-white',
+        variant === 'drawer'
+          ? 'relative flex h-full w-full overflow-y-auto'
+          : cn('mx-0 max-h-[92dvh] overflow-y-auto p-4 shadow-lg sm:mx-4 sm:p-6', isFullyRoundedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg'),
         className
       )}
       {...props}
@@ -279,7 +342,7 @@ export function DialogDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
     <p
-      className={cn('text-sm text-gray-500', className)}
+      className={cn('text-sm text-neutral-600', className)}
       {...props}
     />
   );

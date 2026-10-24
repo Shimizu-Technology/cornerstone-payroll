@@ -47,8 +47,8 @@ export function InlineCheckNumberField({
               event.currentTarget.blur();
             }
           }}
-          className={`h-9 w-full rounded-lg border bg-white px-2.5 pr-7 font-mono text-sm font-semibold text-slate-900 shadow-sm transition-colors placeholder:font-sans placeholder:text-xs placeholder:font-normal placeholder:text-amber-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 ${
-            error ? 'border-red-400 bg-red-50/40' : dirty ? 'border-amber-400 bg-amber-50/70' : 'border-slate-300'
+          className={`h-9 w-full rounded-lg border bg-white px-2.5 pr-7 font-mono text-sm font-semibold text-neutral-900 shadow-sm transition-colors placeholder:font-sans placeholder:text-xs placeholder:font-normal placeholder:text-amber-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-neutral-100 ${
+            error ? 'border-red-400 bg-red-50/40' : dirty ? 'border-amber-400 bg-amber-50/70' : 'border-neutral-300'
           }`}
         />
         {dirty && !error && (
@@ -56,7 +56,7 @@ export function InlineCheckNumberField({
         )}
       </div>
       {error && <p className="mt-1 max-w-40 text-xs leading-tight text-red-600">{error}</p>}
-      {!error && dirty && <p className="mt-1 text-[11px] font-medium text-amber-700">Not saved</p>}
+      {!error && dirty && <p className="mt-1 text-xs font-medium text-amber-700">Not saved</p>}
       <span className="sr-only">
         {error
           ? error

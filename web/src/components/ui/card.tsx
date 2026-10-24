@@ -6,7 +6,7 @@ const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
     <div
       ref={ref}
       className={cn(
-        'rounded-[1.35rem] border border-neutral-200/80 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.52)] ring-1 ring-neutral-950/[0.04] backdrop-blur-sm transition-all duration-200',
+        'rounded-xl border border-neutral-200 bg-white',
         className
       )}
       {...props}
@@ -59,7 +59,7 @@ const CardFooter = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn('rounded-b-[1.35rem] border-t border-neutral-200/70 bg-neutral-50/80 px-4 py-4 sm:px-6', className)}
+      className={cn('rounded-b-xl border-t border-neutral-200/70 bg-neutral-50/80 px-4 py-4 sm:px-6', className)}
       {...props}
     />
   )

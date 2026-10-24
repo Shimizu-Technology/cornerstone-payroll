@@ -22,7 +22,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-neutral-700">
+          <label htmlFor={inputId} className="block text-xs font-medium text-neutral-600">
             {label}
           </label>
         )}
@@ -31,7 +31,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           type={type}
           className={cn(
-            'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm transition-all duration-200 placeholder:text-neutral-400',
+            'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-base sm:text-sm text-neutral-900 shadow-sm transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 focus-visible:border-primary-400',
             error
               ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
