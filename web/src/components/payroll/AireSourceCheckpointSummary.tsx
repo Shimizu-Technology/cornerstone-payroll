@@ -89,7 +89,7 @@ export function AireSourceCheckpointSummary({
             {batch ? `${hours(summary?.total_hours)} h ${aireRecord ? 'added' : 'in locked batch'}` : aireRecord ? 'Source hours linked to payroll' : 'No locked batch added'}
           </p>
           <p className="mt-1 text-sm tabular-nums text-neutral-700">
-            {batch ? `${hours(summary?.regular_hours)} regular + ${hours(summary?.overtime_hours)} OT · ${summary?.employee_count ?? '—'} people`
+            {batch ? `${hours(summary?.regular_hours)} regular + ${hours(summary?.overtime_hours)} OT · ${summary?.employee_count ?? '—'} ${Number(summary?.employee_count) === 1 ? 'person' : 'people'}`
               : loading ? 'Checking source hours…' : 'Regular / OT / people available after batch verification.'}
           </p>
           {!batch && readiness && <p className="mt-1 text-xs tabular-nums text-neutral-600">{hours(readiness.eligible_hours)} h ready for cutoff · live estimate</p>}
