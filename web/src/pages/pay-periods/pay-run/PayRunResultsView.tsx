@@ -24,8 +24,15 @@ export function PayRunResultsView(props: Props) {
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, []);
   const money = (value: unknown) => formatCurrency(Number(value) || 0);
-  const hours = (item: PayrollItem) => {
+  const hours = (item: PayrollItem): ReactNode => {
     const displayed = payrollItemDisplayedHours(item);
+    const hasSalaryTimekeeping = Boolean(item.timekeeping_source)
+      || Number(item.hours_worked || 0) > 0 || Number(item.overtime_hours || 0) > 0;
+    if (item.employment_type === 'salary' && !hasSalaryTimekeeping) {
+      return payPeriod.includes_base_salary === false
+        ? <span className="text-neutral-600" title="Salary hours do not apply to this run">—</span>
+        : <span className="whitespace-normal text-xs font-medium text-warning-700" title="No salary timekeeping record was available for this payroll item">Not recorded</span>;
+    }
     const regular = Number(item.hours_worked || 0).toFixed(2);
     const overtime = Number(item.overtime_hours || 0).toFixed(2);
     const splitMatches = (Number(regular) + Number(overtime)).toFixed(2) === displayed.toFixed(2);
@@ -33,7 +40,7 @@ export function PayRunResultsView(props: Props) {
       && !(item.employment_type === 'contractor' && displayed === 0);
     return <>{displayed.toFixed(2)}{showSplit && <p className="whitespace-normal text-xs text-neutral-600">{regular} reg + {overtime} OT</p>}</>;
   };
-  const rowMenu = (item: PayrollItem) => <details data-result-menu className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.removeAttribute('open'); event.currentTarget.querySelector('summary')?.focus(); } }}>
+  const rowMenu = (item: PayrollItem): ReactNode => <details data-result-menu className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.removeAttribute('open'); event.currentTarget.querySelector('summary')?.focus(); } }}>
     <summary aria-label={`More actions for ${item.employee_name}`} className="inline-flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-full border border-neutral-200 text-neutral-700 [&::-webkit-details-marker]:hidden"><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></summary>
     <div className="absolute right-0 z-30 flex w-48 flex-col gap-1 rounded-xl border border-neutral-200 bg-white p-2 shadow-lg" onClick={event => { if ((event.target as HTMLElement).closest('button,a')) { const menu = event.currentTarget.parentElement; menu?.removeAttribute('open'); menu?.querySelector('summary')?.focus(); } }}>
       <Link className="min-h-11 px-3 py-2 text-left text-sm text-primary-700" to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}>Employee profile</Link>

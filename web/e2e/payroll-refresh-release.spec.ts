@@ -71,6 +71,14 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     expect(Number(saved.payroll_items[0].hours_worked)).toBe(80.3);
     expect(Number(saved.payroll_items[0].overtime_hours)).toBe(14);
     expect(saved.payroll_items[0].employee_id).not.toBe(fixture.unselected_employee_id);
+    await expect(page.locator('#payroll-feedback').getByText(/Payroll calculated for/)).toBeVisible();
+    await expect(page.locator('#payroll-feedback')).toBeFocused();
+    for (const [label, path] of [['Reports', 'reports'], ['Checks & payments', 'checks'], ['Activity', 'activity']] as const) {
+      await showPayrollTab(page, label);
+      await expect(page).toHaveURL(new RegExp(`/pay-runs/${id}/${path}(?:\\?|$)`));
+      await expect(page.getByRole('heading', { level: 2, name: label === 'Checks & payments' ? 'Checks and payments' : label, exact: true })).toBeVisible();
+    }
+    await showPayrollTab(page, 'Payroll');
   }
   async function finalize(page: Page, id: number, loanId: number): Promise<void> {
     await page.locator('#payroll-results').getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();

@@ -18,8 +18,8 @@ const props = {
 } as unknown as ComponentProps<typeof PayRunResultsView>;
 beforeEach(() => { localStorage.clear(); review.mockClear(); });
 afterEach(cleanup);
-const setup = () => render(<MemoryRouter><PayRunResultsView {...props} /></MemoryRouter>);
-it('defaults to employee and net together, opens the existing review and retains guarded corrections', async () => {
+const setup = (): ReturnType<typeof render> => render(<MemoryRouter><PayRunResultsView {...props} /></MemoryRouter>);
+it('defaults to employee and net together, opens the existing review and retains guarded corrections', async (): Promise<void> => {
   const user = userEvent.setup(); setup();
   expect(screen.queryByRole('columnheader', { name: 'FIT' })).toBeNull();
   expect(screen.getByRole('columnheader', { name: 'Employee' })).toBeTruthy();
@@ -30,7 +30,26 @@ it('defaults to employee and net together, opens the existing review and retains
   expect(within(row).getByText('Correct')).toBeTruthy();
   expect(within(row).getByText('Replace check')).toBeTruthy();
 });
-it('reveals full tax columns using the keyboard and persists the preference', async () => {
+
+it.each([
+  { baseSalary: true, regular: 0, source: null, expected: 'Not recorded' },
+  { baseSalary: undefined, regular: 0, source: null, expected: 'Not recorded' },
+  { baseSalary: false, regular: 0, source: null, expected: '—' },
+  { baseSalary: true, regular: 0, source: 'schedule' as const, expected: '0.00' },
+  { baseSalary: false, regular: 0, source: 'schedule' as const, expected: '0.00' },
+  { baseSalary: true, regular: 8, source: null, expected: '8.00' },
+])('preserves salary hours meaning on desktop and phone ($baseSalary / $regular / $source)', ({ baseSalary, regular, source, expected }): void => {
+  const item: PayrollItem = { ...props.sortPayrollItems[0], employment_type: 'salary', hours_worked: regular, overtime_hours: 0, timekeeping_source: source };
+  render(<MemoryRouter><PayRunResultsView {...props} payPeriod={{ ...props.payPeriod, includes_base_salary: baseSalary }} sortPayrollItems={[item]} payrollItemDisplayedHours={() => regular} /></MemoryRouter>);
+  const row = screen.getByRole('row', { name: /Maya Manual/ });
+  const desktopHours = within(row).getAllByRole('cell')[1];
+  const phone = screen.getByRole('region', { name: 'Payroll result for Maya Manual' });
+  const phoneHours = within(phone).getByText('Hours').nextElementSibling!;
+  expect(desktopHours.textContent).toBe(expected);
+  expect(phoneHours.textContent).toBe(expected);
+  expect(screen.getByRole('row', { name: /Totals \(1\)/ }).textContent).toContain('42.00');
+});
+it('reveals full tax columns using the keyboard and persists the preference', async (): Promise<void> => {
   const user = userEvent.setup(); const view = setup();
   const toggle = screen.getByRole('checkbox', { name: 'Show tax detail' }); toggle.focus();
   await user.keyboard(' ');
@@ -39,7 +58,7 @@ it('reveals full tax columns using the keyboard and persists the preference', as
   expect((screen.getByRole('checkbox', { name: 'Show tax detail' }) as HTMLInputElement).checked).toBe(true);
   expect(screen.getByRole('columnheader', { name: 'FIT' })).toBeTruthy();
 });
-it('retains every combined flag and the contractor correction guards', () => {
+it('retains every combined flag and the contractor correction guards', (): void => {
   const item: PayrollItem = { ...props.sortPayrollItems[0], voided: true, correction_pay_basis_hold: { reason: 'Fixture source hold' }, withholding_tax_override: 0, employment_type: 'contractor', wage_rate_hours: [{ employee_wage_rate_id: 1, label: 'Base', rate: 25, regular_hours: 1, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }, { employee_wage_rate_id: 2, label: 'Other', rate: 30, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] };
   render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} /></MemoryRouter>);
   const row = screen.getByRole('row', { name: /Maya Manual/ });
@@ -55,7 +74,7 @@ it.each([
   { employmentType: 'salary', regular: 16, overtime: 0, displayed: 16, split: false },
   { employmentType: 'contractor', regular: 16, overtime: 0, displayed: 0, split: false },
   { employmentType: 'contractor', regular: 0, overtime: 0, displayed: 0, split: false },
-])('keeps desktop and phone hours consistent for $employmentType ($regular + $overtime → $displayed)', ({ employmentType, regular, overtime, displayed, split }) => {
+])('keeps desktop and phone hours consistent for $employmentType ($regular + $overtime → $displayed)', ({ employmentType, regular, overtime, displayed, split }): void => {
   const item = { ...props.sortPayrollItems[0], employment_type: employmentType as PayrollItem['employment_type'], hours_worked: regular, overtime_hours: overtime };
   render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} payrollItemDisplayedHours={() => displayed} /></MemoryRouter>);
   const row = screen.getByRole('row', { name: /Maya Manual/ });

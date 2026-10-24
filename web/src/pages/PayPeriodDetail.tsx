@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { payRunPath } from '@/lib/routes';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
@@ -33,29 +33,49 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const feedbackRoute = state.status === 'ready' ? payRunPath(state.sections.processing.companyId, state.sections.processing.payPeriod.id, 'work', { returnTo: state.sections.processing.returnTo }) : null;
   const feedback = state.status === 'ready' ? state.sections.feedback : null;
   const hasFeedback = Boolean(feedback && (feedback.error || feedback.calculationNotice || feedback.calendarRefreshError || feedback.worksheetRefreshWarning || feedback.savedImportReloadRequired || feedback.calculationFailures.length));
+  const failureOutcome = feedback?.calculationFailures.length ? JSON.stringify(feedback.calculationFailures) : null;
+  const feedbackOutcome = useMemo(() => [
+    feedback?.error ? `${feedback.errorFeedbackAttempt}:${feedback.error}` : null,
+    feedback?.calculationNotice || null,
+    feedback?.calendarRefreshError || null,
+    feedback?.worksheetRefreshWarning || null,
+    feedback?.savedImportReloadRequired ? 'saved-import-reload' : null,
+    failureOutcome,
+  ] as const, [feedback?.error, feedback?.errorFeedbackAttempt, feedback?.calculationNotice, feedback?.calendarRefreshError, feedback?.worksheetRefreshWarning, feedback?.savedImportReloadRequired, failureOutcome]);
+  const lastFeedback = useRef<{ route: string; outcome: typeof feedbackOutcome } | null>(null);
+  const feedbackFocusPending = useRef(false);
   useEffect(() => {
-    if (!hasFeedback || !feedbackRoute) return;
+    if (!feedbackRoute) { lastFeedback.current = null; feedbackFocusPending.current = false; return; }
+    const previous = lastFeedback.current;
+    // Only newly published feedback is an outcome. Retained notices, tab changes
+    // and clearing a different message must not redirect or steal focus.
+    const newOutcome = feedbackOutcome.some((value, index) => value !== null
+      && (previous?.route !== feedbackRoute || previous.outcome[index] !== value));
+    lastFeedback.current = { route: feedbackRoute, outcome: feedbackOutcome };
+    if (!hasFeedback) { feedbackFocusPending.current = false; return; }
+    if (newOutcome) feedbackFocusPending.current = true;
     if (activeTab !== 'work') {
-      void navigate(feedbackRoute);
+      if (newOutcome) void navigate(feedbackRoute);
       return;
     }
+    if (!feedbackFocusPending.current) return;
     // A fast API rejection can arrive before the confirmation dialog finishes
     // closing. Let its focus restoration finish before focusing the feedback.
     const observer = new MutationObserver(focusFeedback);
-    function focusFeedback() {
+    function focusFeedback(): void {
       if (document.querySelector('[role="dialog"]')) return;
       const target = document.getElementById('payroll-feedback');
       if (!target) return;
       for (let parent = target.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
       target.scrollIntoView?.({ block: 'nearest' });
       target.focus({ preventScroll: true });
+      feedbackFocusPending.current = false;
       observer.disconnect();
     }
     observer.observe(document.body, { childList: true, subtree: true });
     focusFeedback();
     return () => observer.disconnect();
-  // Feedback fields identify a new outcome; routine worksheet edits must not steal focus.
-  }, [activeTab, feedbackRoute, hasFeedback, feedback?.errorFeedbackAttempt, feedback?.error, feedback?.calculationNotice, feedback?.calendarRefreshError, feedback?.worksheetRefreshWarning, feedback?.savedImportReloadRequired, feedback?.calculationFailures.length, navigate]);
+  }, [activeTab, feedbackRoute, feedbackOutcome, hasFeedback, navigate]);
   useEffect(() => {
     if (!location.hash || state.status !== 'ready') return;
     let fragment: string;
