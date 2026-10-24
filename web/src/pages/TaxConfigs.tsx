@@ -384,7 +384,7 @@ export default function TaxConfigs() {
                     {!config.is_active && (
                       <button
                         onClick={() => activateConfig(config.id)}
-                        className="text-green-600 hover:text-green-900"
+                        className="text-success-800 hover:text-green-900"
                         title="Activate"
                         disabled={activatingId === config.id}
                       >
@@ -473,7 +473,7 @@ export default function TaxConfigs() {
                   </button>
                   <button
                     onClick={saveGlobalConfig}
-                    className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                    className="inline-flex items-center text-sm text-success-800 hover:text-green-800"
                     disabled={saving}
                   >
                     <Save className="h-4 w-4 mr-1" />
@@ -599,7 +599,7 @@ export default function TaxConfigs() {
                         </button>
                         <button
                           onClick={saveFilingStatus}
-                          className="text-green-600 hover:text-green-800"
+                          className="text-success-800 hover:text-green-800"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4" />
@@ -685,7 +685,7 @@ export default function TaxConfigs() {
                         </button>
                         <button
                           onClick={saveBrackets}
-                          className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                          className="inline-flex items-center text-sm text-success-800 hover:text-green-800"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4 mr-1" />
@@ -856,7 +856,7 @@ export default function TaxConfigs() {
                     {log.old_value && (
                       <p className="text-sm text-neutral-600">
                         Changed from <span className="text-red-600">{log.old_value}</span> to{' '}
-                        <span className="text-green-600">{log.new_value}</span>
+                        <span className="text-success-800">{log.new_value}</span>
                       </p>
                     )}
                     {!log.old_value && log.new_value && (

@@ -21,7 +21,7 @@ export function Badge({ children, variant = 'default', className, wrap = false }
     <span
       className={cn(
         'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold flex-none',
-        wrap ? 'max-w-full whitespace-normal break-words' : 'whitespace-nowrap',
+        wrap ? 'max-w-full whitespace-normal [overflow-wrap:anywhere]' : 'whitespace-nowrap',
         variants[variant],
         className
       )}
