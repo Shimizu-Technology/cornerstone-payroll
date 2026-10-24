@@ -18,7 +18,7 @@ export function PayRunReviewDialogs({
 }: PayRunSectionProps<'reviewDialogs'>) {
   return (<>
 <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => {
-        const result = await loadPayPeriod(payPeriod.id, true);
+        const result = await loadPayPeriod(payPeriod.id, true, true);
         if (result === 'failed') throw new Error('Saved payment method could not refresh.');
       }} />
 <PayrollItemReviewDialog companyId={companyId} payRunId={payRunId} item={reviewingItem} returnTo={currentPath} onClose={() => setReviewingItem(null)} />

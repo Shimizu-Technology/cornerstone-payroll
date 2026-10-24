@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -57,8 +57,8 @@ vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({ NonEmployeeChecks
 </div> }));
 
 vi.mock('@/components/payroll/ChecksPanel', () => ({
-  ChecksPanel: ({ onChecksChanged }: { onChecksChanged?: () => Promise<void> }) => (
-    <div>
+  ChecksPanel: ({ onChecksChanged, refreshToken }: { onChecksChanged?: () => Promise<void>; refreshToken?: number }) => (
+    <div data-testid="workspace-checks-refresh" data-refresh={refreshToken}>
       Check register
       <button onClick={() => void onChecksChanged?.()}>Simulate check status change</button>
     </div>
@@ -66,10 +66,13 @@ vi.mock('@/components/payroll/ChecksPanel', () => ({
 }));
 
 vi.mock('@/pages/PayPeriodDetail', () => ({
-  PayPeriodDetail: ({ refreshToken, activeTab, navigation, checksContent, activityContent }: { refreshToken?: number; activeTab?: string; navigation?: ReactNode; checksContent?: (options: { searchTerm: string; onChecksLoaded: () => void }) => ReactNode; activityContent?: ReactNode }) => <>
-    {navigation}<div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
-    {activeTab === 'checks' && checksContent?.({ searchTerm: '', onChecksLoaded: () => {} })}{activeTab === 'activity' && activityContent}
-  </>,
+  PayPeriodDetail: ({ refreshToken, activeTab, navigation, checksContent, activityContent }: { refreshToken?: number; activeTab?: string; navigation?: ReactNode; checksContent?: (options: { searchTerm: string; onChecksLoaded: () => void; refreshToken: number }) => ReactNode; activityContent?: ReactNode }) => {
+    const [checkRefresh, setCheckRefresh] = useState(0);
+    return <>{navigation}<div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
+      <button onClick={() => setCheckRefresh(value => value + 1)}>Correction saved</button>
+      {activeTab === 'checks' && checksContent?.({ searchTerm: '', onChecksLoaded: () => {}, refreshToken: checkRefresh })}{activeTab === 'activity' && activityContent}
+    </>;
+  },
 }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
@@ -139,6 +142,19 @@ describe('PayRunWorkspace rehearsal checks', () => {
       data: [],
       meta: { current_page: 1, per_page: 20, total_count: 0, total_pages: 0 },
     });
+  });
+
+  it('refreshes payment instruments after a correction in the persistent controller', async () => {
+    apiMocks.activeCompany = { id: 7, payroll_environment: 'live', workspace_can_write: true };
+    apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, status: 'committed' } });
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Correction saved' }));
+    fireEvent.click(screen.getByRole('link', { name: /Checks & payments/ }));
+    expect((await screen.findByTestId('workspace-checks-refresh')).getAttribute('data-refresh')).toBe('1');
+    fireEvent.click(screen.getByRole('link', { name: 'Activity' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Correction saved' }));
+    fireEvent.click(screen.getByRole('link', { name: /Checks & payments/ }));
+    expect((await screen.findByTestId('workspace-checks-refresh')).getAttribute('data-refresh')).toBe('2');
   });
 
   it('labels held correction totals as saved amounts without dropping their retained money', async () => {

@@ -15,6 +15,7 @@ async function mockWorkspace(page: Page, options: { sources?: string[]; status?:
     let body: unknown = { data: [], meta: { total_pages: 1 } };
     if (path.endsWith('/auth/me')) body = { user: { id: 1, email: 'review@example.test', name: 'Review Admin', role: 'admin', organization_id: 1, company_id: 1, assigned_company_ids: companies.map((item) => item.id) } };
     else if (path.endsWith('/companies')) body = { companies, can_manage_clients: true, can_switch_company: !!options.secondClient, current_company_id: 1 };
+    else if (path.includes('/record_activities/')) body = { data: [], meta: { current_page: 1, total_pages: 1 } };
     else if (path.endsWith('/pay_periods/71')) body = { pay_period: {
       id: 71, company_id: 1, status: options.status || 'committed', correction_status: options.voided ? 'voided' : null,
       start_date: '2026-09-01', end_date: '2026-09-15', pay_date: '2026-09-18', run_purpose: 'regular', includes_base_salary: true,
@@ -85,8 +86,7 @@ test('reviews saved AIRE records while disabled without fetching or mutating the
   expect(requests.some((request) => /time_tracking_sources|time_tracking_import/.test(request))).toBe(false);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await openPayrollActions(page);
-  await expect(page.getByRole('button', { name: 'View linked time record', exact: true })).toBeFocused();
+  await expect(page.getByLabel('More payroll actions', { exact: true })).toBeFocused();
   expect(errors).toEqual([]);
 });
 
