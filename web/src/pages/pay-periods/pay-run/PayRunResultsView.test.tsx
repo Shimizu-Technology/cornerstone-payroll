@@ -24,7 +24,7 @@ it('defaults to employee and net together, opens the existing review and retains
   expect(screen.getByRole('columnheader', { name: 'Employee' })).toBeTruthy();
   const row = screen.getByRole('row', { name: /Maya Manual/ });
   expect(within(row).getByText('$975.00')).toBeTruthy();
-  await user.click(within(row).getByRole('button', { name: 'Open payroll item' }));
+  await user.click(within(row).getByRole('button', { name: 'Details: open payroll item' }));
   expect(review).toHaveBeenCalledWith(props.sortPayrollItems[0]);
   expect(within(row).getByText('Correct')).toBeTruthy();
   expect(within(row).getByText('Replace check')).toBeTruthy();
