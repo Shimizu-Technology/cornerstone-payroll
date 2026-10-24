@@ -169,7 +169,7 @@ export function PayRunWorkspace(): ReactElement {
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mx-auto max-w-2xl border-danger-200 bg-danger-50">
           <CardContent className="p-6">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-danger-700">Pay run unavailable</p>
+            <p className="text-xs font-bold text-danger-700">Pay run unavailable</p>
             <h1 className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">This pay-run workspace could not be opened</h1>
             <p className="mt-2 text-sm leading-6 text-neutral-700">{error || 'The pay run may have been removed, or the link may belong to another client.'}</p>
             <div className="mt-4 flex flex-wrap gap-4"><Button onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700" to={returnTo}><ArrowLeft className="h-4 w-4" />Back to pay runs</Link></div>
@@ -221,7 +221,7 @@ export function PayRunWorkspace(): ReactElement {
           : undefined,
       }))} />
 
-      <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
         {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
         {activeTab === 'checks' && <PayRunChecks readOnly={readOnlyMode === 'workspace_access'} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
         {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
@@ -238,7 +238,7 @@ export function PayRunWorkspace(): ReactElement {
             </Suspense>
           </section>
         )}
-      </main>
+      </div>
     </div>
   );
 }
@@ -284,12 +284,12 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo,
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-4"><div><CardTitle>{recordsTitle}</CardTitle><p className="mt-2 text-sm text-neutral-500">{recordsDescription}</p></div>{!readOnly && <Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link>}</CardHeader>
           <CardContent className="p-0">
-            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div>{(!readOnly || readOnlyMode === 'workspace_access') && <button type="button" aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" onClick={() => setReviewingItem(item)}>Open <ArrowRight className="h-4 w-4" /></button>}</div></div>)}</div> : readOnly ? <div className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records were preserved for this period.</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
+            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-2 text-xs capitalize text-neutral-600">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-600">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div>{(!readOnly || readOnlyMode === 'workspace_access') && <button type="button" aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" onClick={() => setReviewingItem(item)}>Open <ArrowRight className="h-4 w-4" /></button>}</div></div>)}</div> : readOnly ? <div className="px-6 py-10 text-center text-sm text-neutral-500">No payroll records were preserved for this period.</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
           </CardContent>
         </Card>
         <div className="space-y-6">
           <Card><CardHeader><CardTitle>Run context</CardTitle></CardHeader><CardContent className="space-y-4"><ContextRow label="Pay date" value={formatDate(payRun.pay_date)} /><ContextRow label="Run purpose" value={runPurposeLabels[payRun.run_purpose] || payRun.run_purpose} /><ContextRow label="Base salary" value={payRun.includes_base_salary ? 'Included' : 'Excluded'} /><ContextRow label="Recurring employee setup" value={payRun.includes_recurring_items ? 'Included' : 'Excluded'} /><ContextRow label="Cycle" value={payRun.cycle || 'regular'} /></CardContent></Card>
-          {payRun.notes && <Card className="border-blue-100 bg-blue-50/60"><CardContent className="p-4"><p className="text-xs font-bold uppercase tracking-wide text-blue-700">Pay-run notes</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-blue-950">{payRun.notes}</p></CardContent></Card>}
+          {payRun.notes && <Card className="border-blue-100 bg-blue-50/60"><CardContent className="p-4"><p className="text-xs font-bold text-blue-700">Pay-run notes</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-blue-950">{payRun.notes}</p></CardContent></Card>}
         </div>
       </div>
     </>
@@ -457,13 +457,13 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link>
-                        <p className="mt-1 text-xs text-neutral-500">{display.description}</p>
+                        <p className="mt-1 text-xs text-neutral-600">{display.description}</p>
                       </div>
                       <Badge variant={display.tone}>{display.status}</Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
-                      <div><p className="text-xs text-neutral-500">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
+                      <div><p className="text-xs text-neutral-600">Gross</p><p className="font-medium tabular-nums text-neutral-900">{formatCurrency(Number(item.gross_pay || 0))}</p></div>
+                      <div><p className="text-xs text-neutral-600">Net</p><p className="font-semibold tabular-nums text-neutral-900">{formatCurrency(Number(item.net_pay || 0))}</p></div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       {!readOnly && display.canChange && <Button size="sm" variant="outline" aria-label={`Change payment method for ${item.employee_name}`} onClick={() => setSwitchItem(item)}>Change payment method</Button>}
@@ -516,7 +516,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
         <Card className="border-amber-200 bg-amber-50/70">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="max-w-3xl">
-              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Promoted payroll is recorded but unpaid</p>
+              <p className="text-xs font-bold text-amber-800">Promoted payroll is recorded but unpaid</p>
               <h2 className="mt-2 text-lg font-semibold text-neutral-950">Prepare the original checks before printing</h2>
               <p className="mt-2 text-sm leading-6 text-neutral-700">
                 This payroll was copied as a historical record, so check numbers were intentionally left blank. Preparing it assigns paper-check numbers once without recalculating pay or adding YTD, loan, or liability amounts again.
@@ -622,7 +622,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
             />
           </div>
           <p className="text-sm leading-6 text-neutral-600">Use the actual date Cornerstone will issue these checks. Do not assume or backdate it to the original pay date.</p>
-          <label className="flex items-start gap-2 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+          <label className="flex items-start gap-2 rounded-xl border border-neutral-200 p-4 text-xs text-neutral-600">
             <input type="checkbox" className="mt-1" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} />
             I confirm this payroll has not been paid by paper check or bank transfer, and these are the original employee payments—not replacements.
           </label>
@@ -696,7 +696,7 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold text-neutral-600">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
@@ -705,5 +705,5 @@ interface ContextRowProps {
 }
 
 function ContextRow({ label, value }: ContextRowProps): ReactElement {
-  return <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
+  return <div><p className="text-xs font-bold text-neutral-600">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
 }

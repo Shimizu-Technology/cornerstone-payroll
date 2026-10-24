@@ -592,7 +592,7 @@ it('requires explicit React confirmation and lets an operator cancel without an 
   expect(await screen.findByRole('dialog', { name: 'Commit and finalize payroll?' })).toBeTruthy();
   expect(apiMocks.commit).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
-  expect(screen.queryByRole('dialog')).toBeNull(); expect(apiMocks.commit).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 it('closes before the API completes, blocks duplicate writes and leaves a failed commit visible', async () => {
   vi.clearAllMocks();
@@ -603,7 +603,7 @@ it('closes before the API completes, blocks duplicate writes and leaves a failed
   const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
   fireEvent.click(confirm); fireEvent.click(confirm);
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
-  expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((screen.getByRole('button', { name: 'Committing...' }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
   expect(await screen.findByText('Commit rejected: stale approval')).toBeTruthy();
@@ -626,7 +626,7 @@ it('drops an open confirmation when navigating to another approved run', async (
   fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
   await screen.findByRole('button', { name: 'Commit & Finalize' });
-  expect(screen.queryByRole('dialog')).toBeNull(); expect(apiMocks.commit).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 
 it('settles a commit after a same-run sibling refresh and reloads the committed run', async () => {
@@ -1284,7 +1284,7 @@ it.each(['run', 'company'])('does not reload the old run or clear a new busy ref
   apiMocks.get.mockResolvedValue({ pay_period: next });
   fireEvent.click(screen.getByRole('button', { name: scope === 'run' ? 'Next refresh run' : 'Next refresh company' }));
   await screen.findByText('New active refresh scope');
-  expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
   submitRefreshNavigation();
   const calls = apiMocks.get.mock.calls.length;
@@ -1483,7 +1483,7 @@ it.each([false, true])('shows committed legacy imports with server correction ho
   await screen.findByRole('button', { name: 'View details' });
   const totals = screen.getByRole('region', { name: 'Saved payroll totals' });
   for (const label of held ? ['Saved gross pay', 'Saved deductions', 'Saved net pay', 'Saved DRT deposit']
-    : ['Gross Pay', 'Total Deductions', 'Net Pay', 'DRT Deposit']) {
+    : ['Gross pay', 'Total deductions', 'Net pay', 'DRT deposit']) {
     expect(within(totals).getByText(label)).toBeTruthy();
   }
   expect(within(totals).getByText('$75.00')).toBeTruthy();

@@ -102,7 +102,7 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
       <div className="bg-gradient-to-br from-primary-950 via-primary-900 to-primary-800 p-4 text-white sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 text-primary-200"><Landmark className="h-4 w-4" /><span className="text-xs font-bold uppercase tracking-[0.16em]">Payroll liability center</span></div>
+            <div className="flex items-center gap-2 text-primary-200"><Landmark className="h-4 w-4" /><span className="text-xs font-bold">Payroll liability center</span></div>
             <h2 className="mt-2 font-display text-2xl font-bold">Know exactly what is owed, prepared, and paid.</h2>
             <p className="mt-2 text-sm leading-6 text-primary-100">Amounts come from committed payroll. Preparing a payment reserves the exact journal entries; nothing counts as paid until a staff member explicitly confirms it.</p>
           </div>
@@ -138,8 +138,8 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
                     const dueValue = dueDrafts[obligation.key] ?? obligation.due_date ?? '';
                     return (
                       <div key={obligation.key} className="grid gap-4 border-t border-neutral-100 bg-white p-4 first:border-t-0 xl:grid-cols-[minmax(220px,1.2fr)_minmax(240px,1.3fr)_repeat(3,minmax(100px,.55fr))_minmax(150px,.7fr)] xl:items-center">
-                        <div><p className="font-semibold text-neutral-950">{formatDateRange(obligation.period_start, obligation.period_end)}</p><p className="mt-2 text-xs text-neutral-500">Paid {formatDate(obligation.pay_date)} · liability {formatDate(obligation.liability_date)}</p><Badge className={`mt-2 ${status.className}`}>{status.label}</Badge></div>
-                        <div><p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">What this includes</p><div className="mt-2 flex flex-wrap gap-2">{obligation.categories.map((category) => <span key={category.category} className="rounded-lg bg-neutral-100 px-2 py-1 text-xs text-neutral-700">{CATEGORY_LABELS[category.category] || category.category.replaceAll('_', ' ')} · {formatCurrency(category.amount)}</span>)}</div></div>
+                        <div><p className="font-semibold text-neutral-950">{formatDateRange(obligation.period_start, obligation.period_end)}</p><p className="mt-2 text-xs text-neutral-600">Paid {formatDate(obligation.pay_date)} · liability {formatDate(obligation.liability_date)}</p><Badge className={`mt-2 ${status.className}`}>{status.label}</Badge></div>
+                        <div><p className="text-xs font-semibold text-neutral-600">What this includes</p><div className="mt-2 flex flex-wrap gap-2">{obligation.categories.map((category) => <span key={category.category} className="rounded-lg bg-neutral-100 px-2 py-1 text-xs text-neutral-700">{CATEGORY_LABELS[category.category] || category.category.replaceAll('_', ' ')} · {formatCurrency(category.amount)}</span>)}</div></div>
                         <Amount label="Calculated" value={obligation.calculated_amount} />
                         <Amount label="Paid" value={obligation.paid_amount} tone="success" />
                         <Amount label="Still owed" value={obligation.outstanding_amount} tone={obligation.status === 'overdue' ? 'danger' : 'default'} />
@@ -165,10 +165,10 @@ export function PayrollLiabilityCenter({ center, loading, error, onPrepare, onUp
 
 function Summary({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'success' | 'warning' | 'danger' }) {
   const valueClass = { default: 'text-white', success: 'text-success-200', warning: 'text-warning-200', danger: 'text-danger-200' }[tone];
-  return <div className="rounded-xl border border-white/10 bg-white/10 p-4"><p className="text-[11px] font-bold uppercase tracking-wider text-primary-200">{label}</p><p className={`mt-2 font-display text-lg font-bold ${valueClass}`}>{formatCurrency(value)}</p></div>;
+  return <div className="rounded-xl border border-white/10 bg-white/10 p-4"><p className="text-xs font-bold text-primary-200">{label}</p><p className={`mt-2 font-display text-lg font-bold ${valueClass}`}>{formatCurrency(value)}</p></div>;
 }
 
 function Amount({ label, value, tone = 'default' }: { label: string; value: number; tone?: 'default' | 'success' | 'danger' }) {
   const valueClass = { default: 'text-neutral-950', success: 'text-success-700', danger: 'text-danger-700' }[tone];
-  return <div><p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 xl:text-right">{label}</p><p className={`mt-2 font-display text-lg font-bold xl:text-right ${valueClass}`}>{formatCurrency(value)}</p></div>;
+  return <div><p className="text-xs font-semibold text-neutral-600 xl:text-right">{label}</p><p className={`mt-2 font-display text-lg font-bold xl:text-right ${valueClass}`}>{formatCurrency(value)}</p></div>;
 }

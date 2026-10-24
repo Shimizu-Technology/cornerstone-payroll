@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { waitFor, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { PayrollItemReviewDialog } from '@/components/payroll/PayrollItemReviewDialog';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -174,7 +174,7 @@ it('reviews the exact scoped payroll item in context and closes without losing t
   expect(apiMocks.payrollItem).toHaveBeenCalledWith(2, 3, 1);
   expect(screen.getByRole('link', { name: 'Open full payroll record' }).getAttribute('href')).toContain('/companies/1/pay-runs/2/payroll-items/3');
   fireEvent.keyDown(document, { key: 'Escape' });
-  expect(screen.queryByRole('dialog')).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((screen.getByRole('textbox', { name: 'Employee filter' }) as HTMLInputElement).value).toBe('Casey');
   expect(document.activeElement).toBe(trigger);
   cleanup();

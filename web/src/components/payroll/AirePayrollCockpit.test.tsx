@@ -691,7 +691,7 @@ describe('AirePayrollCockpit', () => {
     expect((screen.getByLabelText('End time') as HTMLInputElement).value).toBe('17:09');
     expect((screen.getByRole('button', { name: 'Save correction' }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiMocks.correct).not.toHaveBeenCalled();
     expect(apiMocks.review).not.toHaveBeenCalled();
   });
@@ -784,7 +784,7 @@ describe('AirePayrollCockpit', () => {
       expect(button.disabled).toBe(true);
       await user.click(button);
     }
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiMocks.correct).not.toHaveBeenCalled();
     expect(apiMocks.review).not.toHaveBeenCalled();
     expect(apiMocks.reviewOvertime).not.toHaveBeenCalled();
@@ -1261,7 +1261,7 @@ describe('AirePayrollCockpit', () => {
     expect(apiMocks.review.mock.calls[1][2].command_id).not.toBe(apiMocks.review.mock.calls[0][2].command_id);
     await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(notifications.getAllByRole('alert')).toHaveLength(1);
     expect(apiMocks.review).toHaveBeenCalledTimes(2);
     view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
@@ -1280,7 +1280,7 @@ describe('AirePayrollCockpit', () => {
     view.rerender(<FeedbackProvider><AirePayrollCockpit payPeriodId={18} calendar={calendar} onRefresh={vi.fn()} /></FeedbackProvider>);
     await act(async () => { reject(new ApiError('Entry version changed', 409)); });
     expect(within(document.querySelector('[data-feedback-portal]') as HTMLElement).queryByRole('alert')).toBeNull();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiMocks.review).toHaveBeenCalledOnce();
     expect(apiMocks.review.mock.calls[0][0]).toBe(17);
   });
@@ -1365,11 +1365,11 @@ it.each([false, true])('settles a pending cockpit approval only for its current 
   if (navigate) {
     expect(onSourceChanged).not.toHaveBeenCalled();
     expect(screen.queryByText(/Time approved in time tracking/)).toBeNull();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   } else {
     expect(await screen.findByText(/Time approved in time tracking/)).toBeTruthy();
     expect(onSourceChanged).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   }
 });
 

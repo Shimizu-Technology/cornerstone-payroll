@@ -1098,9 +1098,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
     const payrollTable = page.getByRole('table').filter({
-      has: page.getByRole('columnheader', { name: 'Last Name' }),
+      has: page.getByRole('columnheader', { name: 'Last name' }),
     });
-    await expect(payrollTable.getByRole('columnheader', { name: 'First Name' })).toBeVisible();
+    await expect(payrollTable.getByRole('columnheader', { name: 'First name' })).toBeVisible();
     await expect(payrollTable.getByRole('columnheader', { name: /^Employee Medicare/ })).toBeVisible();
     await expect(payrollTable.getByRole('columnheader', { name: /^Employer Medicare/ })).toBeVisible();
 
@@ -1151,7 +1151,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       historicalContractorRow.getByRole('cell').nth(headerLabels.indexOf('Hours')),
     ).toHaveText('4');
 
-    const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
+    const registerSearch = page.getByRole('textbox', { name: 'Search employees' });
     await registerSearch.fill('Alpha');
     await expect(totalsRow).toContainText('Totals (1 employee)');
     expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80.00');
