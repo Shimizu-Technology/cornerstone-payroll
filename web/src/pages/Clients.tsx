@@ -106,7 +106,7 @@ function SettingToggle({ checked, label, description, onToggle, disabled }: Sett
   const descriptionId = description ? `${switchId}-description` : undefined;
 
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+    <div className="flex items-start gap-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
       <button
         id={switchId}
         type="button"
@@ -117,7 +117,7 @@ function SettingToggle({ checked, label, description, onToggle, disabled }: Sett
         onClick={onToggle}
         disabled={disabled}
         className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 ${
-          checked ? 'bg-blue-600' : 'bg-gray-300'
+          checked ? 'bg-blue-600' : 'bg-neutral-300'
         }`}
       >
         <span
@@ -127,8 +127,8 @@ function SettingToggle({ checked, label, description, onToggle, disabled }: Sett
         />
       </button>
       <div>
-        <label id={labelId} htmlFor={switchId} className="cursor-pointer text-sm font-medium text-gray-800">{label}</label>
-        {description && <p id={descriptionId} className="mt-1 text-xs leading-5 text-gray-600">{description}</p>}
+        <label id={labelId} htmlFor={switchId} className="cursor-pointer text-xs font-medium text-neutral-600">{label}</label>
+        {description && <p id={descriptionId} className="mt-1 text-xs leading-5 text-neutral-600">{description}</p>}
       </div>
     </div>
   );
@@ -728,7 +728,7 @@ export function Clients() {
                 <FlaskConical className="mr-2 h-4 w-4" />
                 Create test workspace
               </Button>
-              {productionCompanies.length === 0 && <p className="text-xs text-neutral-500">Add a production client before creating a test workspace.</p>}
+              {productionCompanies.length === 0 && <p className="text-xs text-neutral-600">Add a production client before creating a test workspace.</p>}
             </div>
             <Button onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-2" />
@@ -742,7 +742,7 @@ export function Clients() {
             <div className="border-b border-primary-100 bg-primary-50/70 p-4 sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Safe copy</p>
+                  <p className="text-xs font-bold text-primary-700">Safe copy</p>
                   <h2 className="mt-2 text-lg font-semibold tracking-tight text-neutral-950">Create a test workspace</h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">Copy a production client into an isolated workspace, give the right staff access, and test freely without changing live payroll.</p>
                 </div>
@@ -754,7 +754,7 @@ export function Clients() {
             <div className="space-y-6 p-4 sm:p-6">
               <div className="grid gap-5 lg:grid-cols-2">
                 <div>
-                  <label htmlFor="test-workspace-source" className="text-sm font-semibold text-neutral-900">Production client</label>
+                  <label htmlFor="test-workspace-source" className="text-xs font-semibold text-neutral-600">Production client</label>
                   <Select
                     id="test-workspace-source"
                     className="mt-2"
@@ -764,12 +764,12 @@ export function Clients() {
                     <option value="">Select a production client</option>
                     {productionCompanies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
                   </Select>
-                  <p className="mt-2 text-xs leading-5 text-neutral-500">The production client is only read while the isolated copy is built.</p>
+                  <p className="mt-2 text-xs leading-5 text-neutral-600">The production client is only read while the isolated copy is built.</p>
                 </div>
                 <div>
-                  <label htmlFor={workspaceNameId} className="text-sm font-semibold text-neutral-900">Workspace name</label>
+                  <label htmlFor={workspaceNameId} className="text-xs font-semibold text-neutral-600">Workspace name</label>
                   <Input id={workspaceNameId} className="mt-2" value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} disabled={!workspaceBuilderSource} />
-                  <p className="mt-2 text-xs leading-5 text-neutral-500">Use a name that makes the test and owner obvious.</p>
+                  <p className="mt-2 text-xs leading-5 text-neutral-600">Use a name that makes the test and owner obvious.</p>
                 </div>
               </div>
 
@@ -796,7 +796,7 @@ export function Clients() {
 
                   {workspaceCopyMode === 'exclude_recent' && (
                     <div className="max-w-sm">
-                      <label htmlFor="test-workspace-excluded-count" className="text-sm font-semibold text-neutral-900">Recent payrolls to leave out</label>
+                      <label htmlFor="test-workspace-excluded-count" className="text-xs font-semibold text-neutral-600">Recent payrolls to leave out</label>
                       <Select id="test-workspace-excluded-count" className="mt-2" value={workspaceExcludedPayrolls} onChange={event => setWorkspaceExcludedPayrolls(Number(event.target.value))}>
                         {Array.from({ length: 12 }, (_, index) => index + 1).map(count => <option key={count} value={count}>{count} payroll{count === 1 ? '' : 's'}</option>)}
                       </Select>
@@ -805,7 +805,7 @@ export function Clients() {
 
                   {workspaceCopyMode === 'through_pay_period' && (
                     <div className="max-w-xl">
-                      <label htmlFor="test-workspace-cutoff" className="text-sm font-semibold text-neutral-900">Last payroll to include</label>
+                      <label htmlFor="test-workspace-cutoff" className="text-xs font-semibold text-neutral-600">Last payroll to include</label>
                       <Select id="test-workspace-cutoff" className="mt-2" value={workspaceCutoffPayPeriodId ?? ''} onChange={event => setWorkspaceCutoffPayPeriodId(event.target.value ? Number(event.target.value) : null)}>
                         <option value="">Select a payroll</option>
                         {workspacePreview?.recent_payrolls.map(period => <option key={period.id} value={period.id}>{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)} · {period.status}</option>)}
@@ -818,10 +818,10 @@ export function Clients() {
                   ) : workspacePreview && (
                     <div className="space-y-4">
                       <div className="grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.active_employees} active · {workspacePreview.copy_summary.employees} total</p></div>
-                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Locked payroll history</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.payrolls_to_copy} payrolls</p></div>
+                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Employees</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.active_employees} active · {workspacePreview.copy_summary.employees} total</p></div>
+                        <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Locked payroll history</p><p className="mt-1 font-semibold">{workspacePreview.copy_summary.payrolls_to_copy} payrolls</p></div>
                         <div className="rounded-xl bg-neutral-50 p-4">
-                          <p className="text-xs text-neutral-500">Not copied</p>
+                          <p className="text-xs text-neutral-600">Not copied</p>
                           <p className="mt-1 font-semibold">
                             {workspacePreview.copy_mode === 'exclude_recent'
                               ? `${workspacePreview.copy_summary.recent_payrolls_excluded} latest · ${workspacePreview.copy_summary.other_open_payrolls_not_copied} other open`
@@ -862,7 +862,7 @@ export function Clients() {
                           {workspacePreview.assignable_staff.map(staff => {
                             const access = workspaceAssignments[staff.id];
                             return <div key={staff.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                              <label className="flex cursor-pointer items-start gap-2"><input type="checkbox" checked={Boolean(access)} onChange={event => setWorkspaceAssignments(current => { const next = { ...current }; if (event.target.checked) next[staff.id] = 'operator'; else delete next[staff.id]; return next; })} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span><span className="block text-sm font-medium text-neutral-900">{staff.name}</span><span className="mt-1 block text-xs text-neutral-500">{staff.email} · {staff.role}</span></span></label>
+                              <label className="flex cursor-pointer items-start gap-2"><input type="checkbox" checked={Boolean(access)} onChange={event => setWorkspaceAssignments(current => { const next = { ...current }; if (event.target.checked) next[staff.id] = 'operator'; else delete next[staff.id]; return next; })} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span><span className="block text-sm font-medium text-neutral-900">{staff.name}</span><span className="mt-1 block text-xs text-neutral-600">{staff.email} · {staff.role}</span></span></label>
                               {access && <Select aria-label={`Access level for ${staff.name}`} value={access} onChange={event => setWorkspaceAssignments(current => ({ ...current, [staff.id]: event.target.value as 'operator' | 'reviewer' | 'workspace_admin' }))} className="sm:w-48"><option value="operator">Operator — process</option><option value="reviewer">Reviewer — review</option><option value="workspace_admin">Workspace admin</option></Select>}
                             </div>;
                           })}
@@ -870,15 +870,15 @@ export function Clients() {
                       )}
                     </div>
                     <div>
-                      <label htmlFor="test-workspace-expiration" className="flex items-center gap-2 text-sm font-semibold text-neutral-900"><Clock3 className="h-4 w-4 text-neutral-500" />Automatic expiration</label>
+                      <label htmlFor="test-workspace-expiration" className="flex items-center gap-2 text-xs font-semibold text-neutral-600"><Clock3 className="h-4 w-4 text-neutral-500" />Automatic expiration</label>
                       <Select id="test-workspace-expiration" className="mt-2" value={workspaceExpirationDays} onChange={event => setWorkspaceExpirationDays(Number(event.target.value) as 30 | 60 | 90 | 180)}>
                         <option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option><option value={180}>180 days</option>
                       </Select>
-                      <p className="mt-2 text-xs leading-5 text-neutral-500">After this date the workspace becomes read-only until an admin restores it.</p>
+                      <p className="mt-2 text-xs leading-5 text-neutral-600">After this date the workspace becomes read-only until an admin restores it.</p>
                     </div>
                   </div>
 
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-xs text-neutral-600"><input type="checkbox" checked={workspaceConfirmed} onChange={event => setWorkspaceConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" /><span>I understand this copy contains protected employee and payroll data and live payroll actions stay blocked.</span></label>
                   {workspaceError && <ActionFeedback retryKey={workspaceErrorFeedbackAttempt} tone="error" message={workspaceError} />}
 
                   <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
@@ -915,10 +915,10 @@ export function Clients() {
             ) : rehearsalPreview && (
               <div className="mt-6 space-y-4">
                 <div className="grid gap-3 sm:grid-cols-4">
-                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.employees ?? 0}</p></div>
-                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Imported pay periods</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.imported_pay_periods ?? 0}</p></div>
-                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Imported paychecks</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.imported_paychecks ?? 0}</p></div>
-                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-500">Source evidence</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.retained_source_files ?? 0} files · {formatBytes(rehearsalPreview.copy_summary.source_file_bytes)}</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-600">Employees</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.employees ?? 0}</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-600">Imported pay periods</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.imported_pay_periods ?? 0}</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-600">Imported paychecks</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.imported_paychecks ?? 0}</p></div>
+                  <div className="rounded-xl bg-neutral-50 p-3"><p className="text-xs text-neutral-600">Source evidence</p><p className="mt-1 font-semibold">{rehearsalPreview.copy_summary.retained_source_files ?? 0} files · {formatBytes(rehearsalPreview.copy_summary.source_file_bytes)}</p></div>
                 </div>
 
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
@@ -940,10 +940,10 @@ export function Clients() {
                       <p className="mt-1 leading-6">The original remains untouched. Practice runs are always parallel-only and cannot be committed. Check, payment, and official filing actions are blocked.</p>
                     </div>
                     <div className="max-w-xl">
-                      <label htmlFor={rehearsalNameId} className="mb-1 block text-sm font-medium text-neutral-700">Rehearsal name</label>
+                      <label htmlFor={rehearsalNameId} className="mb-1 block text-xs font-medium text-neutral-600">Rehearsal name</label>
                       <Input id={rehearsalNameId} value={rehearsalName} onChange={event => setRehearsalName(event.target.value)} />
                     </div>
-                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-sm text-neutral-700">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-4 text-xs text-neutral-600">
                       <input type="checkbox" checked={rehearsalConfirmed} onChange={event => setRehearsalConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
                       <span>I understand this copy contains protected payroll and employee data and must only be used inside Cornerstone for migration testing.</span>
                     </label>
@@ -971,7 +971,7 @@ export function Clients() {
                     <ShieldCheck className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Verified migration handoff</p>
+                    <p className="text-xs font-bold text-primary-700">Verified migration handoff</p>
                     <h3 className="mt-1 text-lg font-semibold tracking-tight text-neutral-950">Move rehearsal results to the clean client</h3>
                     <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
                       Cornerstone verifies the employee match and both payrolls, takes a sealed backup, then applies everything in one transaction. Nothing is sent, printed, filed, or synced externally.
@@ -993,7 +993,7 @@ export function Clients() {
                 <div className="space-y-6">
                   <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                      <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Rehearsal source</p>
+                      <p className="text-xs font-bold text-amber-800">Rehearsal source</p>
                       <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.rehearsal.name}</p>
                       <p className="mt-1 text-sm text-neutral-600">
                         {promotionPreview.rehearsal.employee_count} employees · {promotionPreview.source_periods.length} reviewed {promotionPreview.source_periods.length === 1 ? 'payroll' : 'payrolls'}
@@ -1001,16 +1001,16 @@ export function Clients() {
                     </div>
                     <ArrowRight className="mx-auto hidden h-5 w-5 text-neutral-400 lg:block" />
                     <div className="rounded-xl border border-primary-200 bg-primary-50 p-4">
-                      <p className="text-xs font-bold uppercase tracking-wide text-primary-800">Clean client destination</p>
+                      <p className="text-xs font-bold text-primary-800">Clean client destination</p>
                       <p className="mt-2 font-semibold text-neutral-950">{promotionPreview.target_company?.name || 'Missing clean client'}</p>
                       <p className="mt-1 text-sm text-neutral-600">{promotionPreview.target_company?.employee_count ?? 0} employee records</p>
                     </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
-                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
-                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-500">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
+                    <div className="border-l-2 border-success-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-600">Employees matched <HelpTip label="employees matched">Existing clean-client employees that Cornerstone matched to the rehearsal by protected identity fields.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.matched}</p></div>
+                    <div className="border-l-2 border-primary-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-600">New employees to add <HelpTip label="new employees to add">Employees found in the rehearsal but not in the clean client. They will be added during the verified handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.employee_mapping.new}</p></div>
+                    <div className="border-l-2 border-amber-500 px-4 py-2"><p className="flex items-center gap-2 text-xs text-neutral-600">Empty drafts replaced <HelpTip label="empty drafts replaced">Matching clean-client drafts can be replaced only when they contain no payroll results. Drafts with work in them block the handoff.</HelpTip></p><p className="mt-1 text-xl font-semibold text-neutral-950">{promotionPreview.replaceable_drafts.length}</p></div>
                   </div>
 
                   <div>
@@ -1026,7 +1026,7 @@ export function Clients() {
                             <Badge variant="default"><span className="capitalize">{period.status}</span></Badge>
                           </div>
                           <p className="mt-2 text-sm text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
-                          <p className="mt-1 text-xs text-neutral-500">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
+                          <p className="mt-1 text-xs text-neutral-600">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
                           <div className="mt-3 flex gap-6 border-t border-neutral-200 pt-3 text-sm"><span><span className="text-neutral-500">Gross </span><strong>{formatMoney(period.gross_pay)}</strong></span><span><span className="text-neutral-500">Net </span><strong>{formatMoney(period.net_pay)}</strong></span></div>
                           <fieldset className="mt-4 space-y-2">
                             <legend className="sr-only">Payment status for payroll {index + 1}</legend>
@@ -1114,7 +1114,7 @@ export function Clients() {
                   )}
 
                   {(promotionPreview.ready_to_back_up || (promotionPreview.ready_to_apply && allPromotionDispositionsSelected)) && (
-                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-300 p-4 text-sm text-neutral-700">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-300 p-4 text-xs text-neutral-600">
                       <input type="checkbox" checked={promotionConfirmed} onChange={event => setPromotionConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-neutral-300" />
                       <span>{promotionPreview.ready_to_apply
                         ? `I reviewed the employee match, both payroll totals, and the verified backup. Apply this rehearsal to ${promotionPreview.target_company?.name}.`
@@ -1160,10 +1160,10 @@ export function Clients() {
 
             {/* Basic Info */}
             <div className="space-y-4">
-              <h4 className="text-sm font-medium text-gray-700 border-b pb-1">Basic Information</h4>
+              <h4 className="text-sm font-medium text-neutral-700 border-b pb-1">Basic Information</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label htmlFor={`${clientFormId}-name`} className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor={`${clientFormId}-name`} className="block text-xs font-medium text-neutral-600 mb-1">
                     Client Name <span className="text-red-500">*</span>
                   </label>
                   <Input
@@ -1173,10 +1173,10 @@ export function Clients() {
                     placeholder="e.g. MoSa's Hotbox, Inc."
                     disabled={!canEditField('name')}
                   />
-                  <p className="mt-1 text-xs text-neutral-500">Shown on reports and earnings statements.</p>
+                  <p className="mt-1 text-xs text-neutral-600">Shown on reports and earnings statements.</p>
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-ein`} className="block text-sm font-medium text-gray-700 mb-1">EIN</label>
+                  <label htmlFor={`${clientFormId}-ein`} className="block text-xs font-medium text-neutral-600 mb-1">EIN</label>
                   <Input
                     id={`${clientFormId}-ein`}
                     value={form.ein || ''}
@@ -1186,7 +1186,7 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-pay_frequency`} className="block text-sm font-medium text-gray-700 mb-1">Pay Frequency</label>
+                  <label htmlFor={`${clientFormId}-pay_frequency`} className="block text-xs font-medium text-neutral-600 mb-1">Pay Frequency</label>
                   <Select
                     id={`${clientFormId}-pay_frequency`}
                     value={form.pay_frequency}
@@ -1201,10 +1201,10 @@ export function Clients() {
               </div>
 
               {/* Contact */}
-              <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Contact</h4>
+              <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Contact</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor={`${clientFormId}-phone`} className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <label htmlFor={`${clientFormId}-phone`} className="block text-xs font-medium text-neutral-600 mb-1">Phone</label>
                   <Input
                     id={`${clientFormId}-phone`}
                     disabled={!canEditField('phone')}
@@ -1214,7 +1214,7 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-email`} className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <label htmlFor={`${clientFormId}-email`} className="block text-xs font-medium text-neutral-600 mb-1">Email</label>
                   <Input
                     id={`${clientFormId}-email`}
                     disabled={!canEditField('email')}
@@ -1227,10 +1227,10 @@ export function Clients() {
               </div>
 
               {/* Address */}
-              <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Address</h4>
+              <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Address</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor={`${clientFormId}-address_line1`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 1</label>
+                  <label htmlFor={`${clientFormId}-address_line1`} className="block text-xs font-medium text-neutral-600 mb-1">Address Line 1</label>
                   <Input
                     id={`${clientFormId}-address_line1`}
                     disabled={!canEditField('address_line1')}
@@ -1240,7 +1240,7 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-address_line2`} className="block text-sm font-medium text-gray-700 mb-1">Address Line 2</label>
+                  <label htmlFor={`${clientFormId}-address_line2`} className="block text-xs font-medium text-neutral-600 mb-1">Address Line 2</label>
                   <Input
                     id={`${clientFormId}-address_line2`}
                     disabled={!canEditField('address_line2')}
@@ -1252,7 +1252,7 @@ export function Clients() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label htmlFor={`${clientFormId}-city`} className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  <label htmlFor={`${clientFormId}-city`} className="block text-xs font-medium text-neutral-600 mb-1">City</label>
                   <Input
                     id={`${clientFormId}-city`}
                     disabled={!canEditField('city')}
@@ -1262,7 +1262,7 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-state`} className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                  <label htmlFor={`${clientFormId}-state`} className="block text-xs font-medium text-neutral-600 mb-1">State</label>
                   <Input
                     id={`${clientFormId}-state`}
                     disabled={!canEditField('state')}
@@ -1272,7 +1272,7 @@ export function Clients() {
                   />
                 </div>
                 <div>
-                  <label htmlFor={`${clientFormId}-zip`} className="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
+                  <label htmlFor={`${clientFormId}-zip`} className="block text-xs font-medium text-neutral-600 mb-1">ZIP</label>
                   <Input
                     id={`${clientFormId}-zip`}
                     disabled={!canEditField('zip')}
@@ -1286,10 +1286,10 @@ export function Clients() {
               {canEditCore && (
                 <>
                   {/* Bank Info */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
+                  <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Bank Information</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label htmlFor={`${clientFormId}-bank_name`} className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
+                      <label htmlFor={`${clientFormId}-bank_name`} className="block text-xs font-medium text-neutral-600 mb-1">Bank Name</label>
                       <Input
                         id={`${clientFormId}-bank_name`}
                         disabled={!canEditField('bank_name')}
@@ -1299,7 +1299,7 @@ export function Clients() {
                       />
                     </div>
                     <div>
-                      <label htmlFor={`${clientFormId}-bank_address`} className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
+                      <label htmlFor={`${clientFormId}-bank_address`} className="block text-xs font-medium text-neutral-600 mb-1">Bank Address</label>
                       <Input
                         id={`${clientFormId}-bank_address`}
                         disabled={!canEditField('bank_address')}
@@ -1311,7 +1311,7 @@ export function Clients() {
                   </div>
 
                   {/* Payroll Reporting */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
+                  <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Payroll Reporting</h4>
                   <SettingToggle
                     disabled={!canEditField('simple_payroll_register_enabled')}
                     checked={form.simple_payroll_register_enabled === true}
@@ -1337,10 +1337,10 @@ export function Clients() {
                   />
 
                   {/* Check Settings */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
+                  <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Check Settings</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label htmlFor={`${clientFormId}-check_stock_type`} className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
+                      <label htmlFor={`${clientFormId}-check_stock_type`} className="block text-xs font-medium text-neutral-600 mb-1">Check Stock Type</label>
                       <Select
                         id={`${clientFormId}-check_stock_type`}
                         disabled={!canEditField('check_stock_type')}
@@ -1353,7 +1353,7 @@ export function Clients() {
                       </Select>
                     </div>
                     <div>
-                      <label htmlFor={`${clientFormId}-next_check_number`} className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
+                      <label htmlFor={`${clientFormId}-next_check_number`} className="block text-xs font-medium text-neutral-600 mb-1">Next Check Number</label>
                       <NumericInput
                         id={`${clientFormId}-next_check_number`}
                         disabled={!canEditField('next_check_number')}
@@ -1403,7 +1403,7 @@ export function Clients() {
 
         {/* Clients list */}
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-gray-500">Loading clients…</div>
+          <div className="flex items-center justify-center py-12 text-neutral-500">Loading clients…</div>
         ) : (
           <>
             <div className="space-y-3 sm:hidden">
@@ -1414,7 +1414,7 @@ export function Clients() {
               ) : orderedCompanies.map((c) => (
                 <Fragment key={c.id}>
                   {groupStartLabels.has(c.id) && (
-                    <h2 className="px-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                    <h2 className="px-1 pt-2 text-xs font-bold text-neutral-600">
                       {groupStartLabels.get(c.id)}
                     </h2>
                   )}
@@ -1522,7 +1522,7 @@ export function Clients() {
               <TableBody>
                 {orderedCompanies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="text-center py-8 text-neutral-500">
                       {canManageClients ? 'No clients found. Click "Add New Client" to get started.' : 'No assigned clients found.'}
                     </TableCell>
                   </TableRow>
@@ -1531,7 +1531,7 @@ export function Clients() {
                     <Fragment key={c.id}>
                     {groupStartLabels.has(c.id) && (
                       <TableRow className="bg-neutral-50/80 hover:bg-neutral-50/80">
-                        <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-neutral-500">
+                        <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="py-2 text-xs font-bold text-neutral-600">
                           {groupStartLabels.get(c.id)}
                         </TableCell>
                       </TableRow>
@@ -1539,9 +1539,9 @@ export function Clients() {
                     <TableRow>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-gray-400" />}
+                          {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-neutral-400" />}
                           <div>
-                            <span className="font-medium text-gray-900">{c.name}</span>
+                            <span className="font-medium text-neutral-900">{c.name}</span>
                             {isTestWorkspace(c) && (
                               <p className="text-xs font-medium text-amber-700">{testWorkspaceLabel(c)} · source: {c.migration_source_company_name || 'linked client'}</p>
                             )}
@@ -1551,11 +1551,11 @@ export function Clients() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-600 font-mono text-sm">—</TableCell>
-                      <TableCell className="text-gray-600 capitalize">{c.pay_frequency}</TableCell>
+                      <TableCell className="text-neutral-600 font-mono text-sm">—</TableCell>
+                      <TableCell className="text-neutral-600 capitalize">{c.pay_frequency}</TableCell>
                       <TableCell className="text-center">
-                        <span className="text-gray-900 font-medium">{c.active_employees}</span>
-                        <span className="text-gray-400 text-xs ml-1">/ {c.total_employees}</span>
+                        <span className="text-neutral-900 font-medium">{c.active_employees}</span>
+                        <span className="text-neutral-600 text-xs ml-1">/ {c.total_employees}</span>
                       </TableCell>
                       <TableCell className="text-center">
                         {c.test_workspace_archived_at ? (
@@ -1610,7 +1610,7 @@ export function Clients() {
                               >
                                 {loadingEditId === c.id ? (
                                   <>
-                                    <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                    <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
                                     Loading...
                                   </>
                                 ) : (
@@ -1650,9 +1650,9 @@ export function Clients() {
           </DialogHeader>
           <form onSubmit={event => { event.preventDefault(); void handleRename(); }}>
             <div className="space-y-2 py-4">
-              <label htmlFor={renameNameId} className="text-sm font-medium">Client name</label>
+              <label htmlFor={renameNameId} className="text-xs font-medium">Client name</label>
               <Input id={renameNameId} value={renameName} onChange={event => setRenameName(event.target.value)} disabled={renaming} aria-describedby={`${renameNameId}-help`} aria-invalid={Boolean(renameError)} />
-              <p id={`${renameNameId}-help`} className="text-xs text-neutral-500">Shown on reports and earnings statements.</p>
+              <p id={`${renameNameId}-help`} className="text-xs text-neutral-600">Shown on reports and earnings statements.</p>
               {renameError && <ActionFeedback retryKey={renameErrorAttempt} tone="error" message={renameError} />}
             </div>
             <DialogFooter>

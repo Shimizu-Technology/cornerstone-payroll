@@ -316,7 +316,7 @@ export function Users() {
     const assignedCompanies = assignedCompaniesForUser(user);
     if (assignedCompanies.length === 0) {
       return needsClientAssignment(user.role) ? (
-        <p className="mt-1 text-xs text-gray-400">No assigned payroll clients</p>
+        <p className="mt-1 text-xs text-neutral-600">No assigned payroll clients</p>
       ) : null;
     }
 
@@ -325,7 +325,7 @@ export function Users() {
         {assignedCompanies.map((company) => (
           <span
             key={company.id}
-            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600"
+            className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
           >
             {company.name}{company.test_workspace ? ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
           </span>
@@ -357,11 +357,11 @@ export function Users() {
     }
 
     if (isLoadingCompanies && availableCompanies.length === 0) {
-      return <p className="text-sm text-gray-500">Loading payroll clients...</p>;
+      return <p className="text-sm text-neutral-500">Loading payroll clients...</p>;
     }
 
     if (assignableCompanies.length === 0) {
-      return <p className="text-sm text-gray-500">No payroll clients available.</p>;
+      return <p className="text-sm text-neutral-500">No payroll clients available.</p>;
     }
 
     return (
@@ -372,21 +372,21 @@ export function Users() {
             return (
               <label
                 key={company.id}
-                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
+                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-xs ${
                   selectedIds.includes(company.id)
                     ? 'border-primary-300 bg-primary-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50'
+                    : 'border-neutral-200 bg-white hover:bg-neutral-50'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={selectedIds.includes(company.id)}
                   onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
-                  className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                  className="h-4 w-4 text-primary-600 rounded border-neutral-300 focus:ring-primary-500"
                 />
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-gray-500'}`}>
+                  <p className="font-medium text-neutral-900 truncate">{company.name}</p>
+                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-500'}`}>
                     {testWorkspace ? `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
                   </p>
                 </div>
@@ -395,7 +395,7 @@ export function Users() {
           })}
         </div>
         {summaryLabel && (
-          <p className="text-xs text-gray-500 mt-2">{summaryLabel}</p>
+          <p className="text-xs text-neutral-600 mt-2">{summaryLabel}</p>
         )}
       </>
     );
@@ -418,42 +418,42 @@ export function Users() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Role guide */}
-        <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+        <section className="mb-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+          <div className="border-b border-neutral-200 bg-neutral-950 px-4 py-4 text-white">
             <h2 className="font-semibold">Choose the narrowest role that fits</h2>
-            <p className="mt-1 text-sm leading-5 text-slate-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
+            <p className="mt-1 text-sm leading-5 text-neutral-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
           </div>
-          <div className="divide-y divide-slate-200 sm:hidden">
+          <div className="divide-y divide-neutral-200 sm:hidden">
             {roleGuideOptions.map((role) => (
               <details key={role.value} className="group bg-white px-4 py-4">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
                   <span>
-                    <span className="block font-semibold text-slate-950">{role.label}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">{role.scope}</span>
+                    <span className="block font-semibold text-neutral-950">{role.label}</span>
+                    <span className="mt-0.5 block text-xs text-neutral-600">{role.scope}</span>
                   </span>
                   <span className="text-xs font-semibold text-primary-700 group-open:hidden">View</span>
                   <span className="hidden text-xs font-semibold text-primary-700 group-open:inline">Close</span>
                 </summary>
                 <dl className="space-y-4 pb-2 pt-4 text-xs leading-5">
-                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
                 </dl>
               </details>
             ))}
           </div>
-          <div className="hidden gap-px bg-slate-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
+          <div className="hidden gap-px bg-neutral-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
             {roleGuideOptions.map((role) => (
               <article key={role.value} className="bg-white p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <h3 className="font-semibold text-slate-950">{role.label}</h3>
-                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">Exceptional</span>}
+                  <h3 className="font-semibold text-neutral-950">{role.label}</h3>
+                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">Exceptional</span>}
                 </div>
                 <dl className="mt-4 space-y-4 text-xs leading-5">
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Scope</dt><dd className="text-slate-700">{role.scope}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Scope</dt><dd className="text-neutral-700">{role.scope}</dd></div>
+                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
                 </dl>
               </article>
             ))}
@@ -473,8 +473,8 @@ export function Users() {
         {/* Invite New User Form */}
         {isAddingNew && (
           <Card className="mb-6 p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">Invite New User</h3>
-            <p className="text-xs text-gray-500 mb-4">
+            <h3 className="text-sm font-semibold text-neutral-900 mb-1">Invite New User</h3>
+            <p className="text-xs text-neutral-600 mb-4">
               An invitation will be sent via Clerk. Their name will update from their profile when they accept.
             </p>
             {newError && (
@@ -491,10 +491,10 @@ export function Users() {
             </div>
 
             {needsClientAssignment(newRole) && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <p className="text-sm font-medium text-gray-700 mb-2">
+              <div className="mt-4 pt-4 border-t border-neutral-200">
+                <p className="text-sm font-medium text-neutral-700 mb-2">
                   Assign Payroll Clients
-                  <span className="text-xs font-normal text-gray-400 ml-2">(can also be changed later)</span>
+                  <span className="text-xs font-normal text-neutral-600 ml-2">(can also be changed later)</span>
                 </p>
                 {renderClientAssignmentPicker(
                   newClientIds,
@@ -520,7 +520,7 @@ export function Users() {
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto" />
-              <p className="mt-2 text-sm text-gray-500">Loading users...</p>
+              <p className="mt-2 text-sm text-neutral-500">Loading users...</p>
             </div>
           </div>
         ) : (
@@ -657,7 +657,7 @@ export function Users() {
                       </TableCell>
                       <TableCell>
                         {user.active === false ? (
-                          <span className="text-sm text-gray-500">Inactive</span>
+                          <span className="text-sm text-neutral-500">Inactive</span>
                         ) : (
                           <span className="text-sm text-green-600">Active</span>
                         )}
@@ -696,7 +696,7 @@ export function Users() {
                               <>
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {togglingId === user.id ? (
-                                    <span className="flex items-center"><div className="w-4 h-4 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />{user.active === false ? 'Activating...' : 'Deactivating...'}</span>
+                                    <span className="flex items-center"><div className="w-4 h-4 mr-1 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />{user.active === false ? 'Activating...' : 'Deactivating...'}</span>
                                   ) : user.active === false ? (
                                     <span className="flex items-center"><UserCheck className="w-4 h-4 mr-1" />Activate</span>
                                   ) : (
@@ -723,15 +723,15 @@ export function Users() {
                     {/* Inline edit details row */}
                     {editingId === user.id && (
                       <TableRow>
-                        <TableCell colSpan={6} className="bg-gray-50 p-0">
+                        <TableCell colSpan={6} className="bg-neutral-50 p-0">
                           <div className="px-6 py-4">
                             {needsClientAssignment(editRole) ? (
                               <>
                                 <div className="mb-3 flex items-center justify-between">
-                                  <p className="text-sm font-medium text-gray-700">
+                                  <p className="text-sm font-medium text-neutral-700">
                                     Payroll clients for <strong>{editName || user.name}</strong>
                                   </p>
-                                  <span className="text-xs text-gray-500">
+                                  <span className="text-xs text-neutral-600">
                                     {editClientIds.length} selected
                                   </span>
                                 </div>
@@ -739,7 +739,7 @@ export function Users() {
                                 {renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole)}
                               </>
                             ) : (
-                              <p className="text-sm text-gray-500">
+                              <p className="text-sm text-neutral-500">
                                 This role does not use payroll client assignments. Saving will clear any existing client assignments.
                               </p>
                             )}
@@ -763,7 +763,7 @@ export function Users() {
 
 function OwnerBadge() {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700" title="Permanent primary platform owner">
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700" title="Permanent primary platform owner">
       <ShieldCheck className="h-3 w-3" /> Primary owner
     </span>
   );

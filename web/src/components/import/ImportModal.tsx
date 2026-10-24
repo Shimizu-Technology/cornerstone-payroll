@@ -310,7 +310,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                         Continue revision {currentPackage.package_revision}
                       </Button>
                     )}
-                    <label className="mt-3 flex items-start gap-2 text-sm font-medium">
+                    <label className="mt-3 flex items-start gap-2 text-xs font-medium">
                       <input type="checkbox" checked={replacementConfirmed} onChange={(event) => setReplacementConfirmed(event.target.checked)} className="mt-0.5 rounded border-amber-300" />
                       <span>This corrected Revel package replaces revision {currentPackage.package_revision}.</span>
                     </label>
@@ -340,7 +340,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-xs font-medium text-neutral-600 mb-1">
                 Revel POS Payroll PDF <span className="text-red-500">*</span>
               </label>
               <input
@@ -348,16 +348,16 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                 type="file"
                 accept=".pdf"
                 onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="block w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
-              {pdfFile && <p className="text-xs text-gray-500 mt-1">{pdfFile.name}</p>}
-              <p className="mt-2 text-xs text-gray-500">
+              {pdfFile && <p className="text-xs text-neutral-600 mt-1">{pdfFile.name}</p>}
+              <p className="mt-2 text-xs text-neutral-600">
                 Keep using the original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. The dates in the report must match this payroll.
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-xs font-medium text-neutral-600 mb-1">
                 Cornerstone payroll changes workbook (optional)
               </label>
               <input
@@ -368,12 +368,12 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                   setExcelFile(e.target.files?.[0] || null);
                   setTipsPaidOutFromTips(false);
                 }}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="block w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
-              {excelFile && <p className="text-xs text-gray-500 mt-1">{excelFile.name}</p>}
+              {excelFile && <p className="text-xs text-neutral-600 mt-1">{excelFile.name}</p>}
             </div>
 
-            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <input
                 type="checkbox"
                 checked={tipsPaidOutFromTips}
@@ -391,7 +391,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
 
         {/* Preview Step */}
         {step === 'upload' && (
-          <p className="text-sm text-gray-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The current workbook uses dedicated OWNER PERIOD PAY and ONE-TIME COMPONENTS sheets.</p>
+          <p className="text-sm text-neutral-500">Older workbook only: an optional BONUSES sheet uses row 4 headers, column C last name, D first name, and F bonus amount. The current workbook uses dedicated OWNER PERIOD PAY and ONE-TIME COMPONENTS sheets.</p>
         )}
 
         {step === 'preview' && previewData && (
@@ -416,7 +416,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
               </div>
             )}
             {overwriteRows.length > 0 && (
-              <label className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
+              <label className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-xs text-warning-900">
                 <input type="checkbox" checked={reviewedOverwrite} onChange={(event) => setReviewedOverwrite(event.target.checked)} className="shrink-0 self-start" />
                 <span>Replace existing hours, tips and direct loan deductions with the reviewed source values for {overwriteRows.map((row) => row.employee_name).join(', ')}. Saved period pay and manually entered bonuses are retained.</span>
               </label>
@@ -438,7 +438,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                   <div key={row.id} className="grid gap-3 rounded-2xl border border-neutral-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_300px]">
                     <div>
                       <p className="font-medium text-neutral-950">{row.source_employee_name}</p>
-                      <p className="mt-1 text-xs uppercase tracking-wide text-neutral-500">{row.row_kind === 'unmatched_revel' ? 'Revel hours' : 'Change workbook'}</p>
+                      <p className="mt-1 text-xs text-neutral-600">{row.row_kind === 'unmatched_revel' ? 'Revel hours' : 'Change workbook'}</p>
                       {row.errors.map((entry) => <p key={entry.code} className="mt-2 text-sm text-danger-700">{entry.message}</p>)}
                     </div>
                     {dispositionControls(row)}
@@ -478,15 +478,15 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                 return (
                   <section key={row.source_row_id} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Source row for ${row.employee_name}`}>
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0"><p className="font-semibold text-neutral-950">{row.employee_name}</p>{row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && <p className="text-xs text-neutral-500">PDF: {row.pdf_employee_name}</p>}</div>
+                      <div className="min-w-0"><p className="font-semibold text-neutral-950">{row.employee_name}</p>{row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>}</div>
                       <Badge variant={row.confidence >= 1 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}% match</Badge>
                     </div>
                     <div>{dispositionControls(sourceRow)}</div>
                     <dl className="grid grid-cols-2 gap-3 text-sm">
-                      <div><dt className="text-xs text-neutral-500">Hours</dt><dd className="font-medium">{row.regular_hours}{row.overtime_hours > 0 ? ` + ${row.overtime_hours} OT` : ''}</dd></div>
-                      <div><dt className="text-xs text-neutral-500">{row.period_pay_required ? 'Pay this person' : 'Profile rate'}</dt><dd className="font-medium">{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</dd></div>
-                      <div><dt className="text-xs text-neutral-500">Tips</dt><dd>{row.total_tips > 0 ? formatCurrency(row.total_tips) : '—'}{row.tip_pool ? ` · ${row.tip_pool.toUpperCase()}` : ''}</dd></div>
-                      <div><dt className="text-xs text-neutral-500">Loan deduction</dt><dd>{sourceLoanAmount > 0 ? formatCurrency(sourceLoanAmount) : '—'}</dd></div>
+                      <div><dt className="text-xs text-neutral-600">Hours</dt><dd className="font-medium">{row.regular_hours}{row.overtime_hours > 0 ? ` + ${row.overtime_hours} OT` : ''}</dd></div>
+                      <div><dt className="text-xs text-neutral-600">{row.period_pay_required ? 'Pay this person' : 'Profile rate'}</dt><dd className="font-medium">{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</dd></div>
+                      <div><dt className="text-xs text-neutral-600">Tips</dt><dd>{row.total_tips > 0 ? formatCurrency(row.total_tips) : '—'}{row.tip_pool ? ` · ${row.tip_pool.toUpperCase()}` : ''}</dd></div>
+                      <div><dt className="text-xs text-neutral-600">Loan deduction</dt><dd>{sourceLoanAmount > 0 ? formatCurrency(sourceLoanAmount) : '—'}</dd></div>
                     </dl>
                     {sourceLoanAmount > 0 && (row.loan_reconciliation_matches || []).length > 0 && <p className="text-xs font-medium text-green-700">Matched loan: {(row.loan_reconciliation_matches || []).map((match) => match.name).join(', ')}</p>}
                     {(row.payroll_components || []).length > 0 && <div className="border-t border-neutral-100 pt-3 text-xs"><p className="mb-2 font-semibold text-neutral-700">One-time items</p>{(row.payroll_components || []).map((component, index) => <div key={`${component.label}-${index}`} className="py-1"><p className="flex justify-between gap-2"><span>{component.label}</span><span className="font-semibold tabular-nums">{formatCurrency(component.amount)}</span></p><p className="text-neutral-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p></div>)}</div>}
@@ -523,9 +523,9 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                         </TableCell>
                         <TableCell>
                           <div>
-                            <p className="font-medium text-gray-900">{row.employee_name}</p>
+                            <p className="font-medium text-neutral-900">{row.employee_name}</p>
                             {row.pdf_employee_name && row.pdf_employee_name !== row.employee_name && (
-                              <p className="text-xs text-gray-500">PDF: {row.pdf_employee_name}</p>
+                              <p className="text-xs text-neutral-600">PDF: {row.pdf_employee_name}</p>
                             )}
                           </div>
                         </TableCell>
@@ -537,7 +537,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                         </TableCell>
                         <TableCell className="text-right">
                           <p>{row.period_pay_required ? (row.period_pay_missing || row.current_period_pay == null ? 'Missing period pay' : formatCurrency(row.current_period_pay)) : formatCurrency(row.pay_rate)}</p>
-                          <p className="text-[11px] text-gray-500">
+                          <p className="text-xs text-neutral-600">
                             {row.period_pay_required
                               ? (row.period_pay_source === 'change_workbook' ? 'Pay this person · change workbook' : 'Pay this person · payroll worksheet')
                               : 'from employee profile'}
@@ -554,7 +554,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                               )}
                             </span>
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            <span className="text-neutral-400">—</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
@@ -562,44 +562,44 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                             <div>
                               <p>{formatCurrency(sourceLoanAmount)}</p>
                               {((row.recurring_loan_deduction || 0) > 0 || (row.installment_payment || 0) > 0) && (
-                                <p className="mt-0.5 text-[11px] text-gray-500">
+                                <p className="mt-0.5 text-xs text-neutral-600">
                                   {(row.recurring_loan_deduction || 0) > 0 && `This payroll ${formatCurrency(row.recurring_loan_deduction || 0)}`}
                                   {(row.recurring_loan_deduction || 0) > 0 && (row.installment_payment || 0) > 0 && ' · '}
                                   {(row.installment_payment || 0) > 0 && `Installment ${formatCurrency(row.installment_payment || 0)}`}
                                 </p>
                               )}
                               {(row.loan_reconciliation_matches || []).length > 0 && (
-                                <p className="mt-0.5 text-[11px] font-medium text-green-700">
+                                <p className="mt-0.5 text-xs font-medium text-green-700">
                                   Matched to {(row.loan_reconciliation_matches || []).map((match) => match.name).join(', ')}
                                 </p>
                               )}
                             </div>
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            <span className="text-neutral-400">—</span>
                           )}
                         </TableCell>
                         <TableCell>
                           {(row.payroll_components || []).length > 0 || (row.effective_bonus || 0) > 0 ? (
                             <div className="space-y-2">
                               {(row.payroll_components || []).map((component, index) => (
-                                <div key={`${row.source_row_id}-${component.label}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs">
+                                <div key={`${row.source_row_id}-${component.label}-${index}`} className="rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-2 text-xs">
                                   <div className="flex items-center justify-between gap-2">
-                                    <span className="font-medium text-slate-900">{component.label}</span>
+                                    <span className="font-medium text-neutral-900">{component.label}</span>
                                     <span className={component.kind === 'deduction' ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}>
                                       {formatCurrency(component.amount)}
                                     </span>
                                   </div>
-                                  <p className="mt-2 text-[11px] text-slate-500">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p>
+                                  <p className="mt-2 text-xs text-neutral-600">{component.tax_treatment.replaceAll('_', ' ')} · {component.category.replaceAll('_', ' ')}</p>
                                 </div>
                               ))}
                               {(row.effective_bonus || 0) > 0 && (
-                                <div className="text-xs text-slate-700">
+                                <div className="text-xs text-neutral-700">
                                   Legacy bonus {formatCurrency(row.effective_bonus || 0)}{row.bonus_keeps_manual ? ' · retained manual value' : ''}
                                 </div>
                               )}
                             </div>
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            <span className="text-neutral-400">—</span>
                           )}
                         </TableCell>
                         <TableCell className="text-center">
@@ -614,8 +614,8 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
               </Table>
             </div>
 
-            <div className="space-y-3 text-sm text-gray-500">
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-gray-700">
+            <div className="space-y-3 text-sm text-neutral-500">
+              <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-neutral-700">
                 <span className="font-medium">Tip treatment reviewed with these files:</span>{' '}
                 {previewData.preview.tips_paid_out_from_tips
                   ? 'Tips were already paid daily and will offset employee checks.'
@@ -655,7 +655,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
 
         {/* Applying Step */}
         {step === 'applying' && (
-          <div className="py-8 text-center text-gray-500">
+          <div className="py-8 text-center text-neutral-500">
             Importing payroll data and calculating taxes...
           </div>
         )}

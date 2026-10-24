@@ -134,7 +134,7 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps): Re
               <Tab active={view === 'account'} onClick={() => setView('account')} icon={<UserRoundCog className="h-4 w-4" />} label="Account history" />
             </div>
           </div>
-          <p className="py-3 text-xs leading-5 text-neutral-500">
+          <p className="py-3 text-xs leading-5 text-neutral-600">
             {view === 'performed'
               ? `Recorded actions ${user.name} performed across the system.`
               : view === 'sign_ins'
@@ -267,7 +267,7 @@ function ActivityEntry({ group }: { group: AuditEntryGroup }): ReactElement {
 function SessionDetail({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div className="min-w-0 bg-neutral-50 px-3 py-3 sm:px-4">
-      <dt className="text-[11px] font-bold uppercase tracking-wide text-neutral-400">{label}</dt>
+      <dt className="text-xs font-bold text-neutral-600">{label}</dt>
       <dd className="mt-1 break-words text-sm font-medium text-neutral-800">{value}</dd>
     </div>
   );
@@ -276,7 +276,7 @@ function SessionDetail({ label, value }: { label: string; value: string }): Reac
 function TechnicalDetail({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div>
-      <dt className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</dt>
+      <dt className="text-xs font-bold text-neutral-600">{label}</dt>
       <dd className="mt-1 break-all text-neutral-700">{value}</dd>
     </div>
   );
@@ -341,7 +341,7 @@ function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () =>
 function Summary({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div className="min-w-0 rounded-xl border border-neutral-200 bg-white p-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p>
+      <p className="text-xs font-semibold text-neutral-600">{label}</p>
       <p className="mt-1 break-words text-sm font-medium text-neutral-900">{value}</p>
     </div>
   );

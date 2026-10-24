@@ -94,7 +94,7 @@ async function fetchRegisterEligiblePayRuns(companyId: number): Promise<PayrollH
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase text-gray-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-neutral-600">{label}</span>
       {children}
     </label>
   );
@@ -115,7 +115,7 @@ function SortableTh({
     <th className={`pb-2 pr-4 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
       <button
         type="button"
-        className={`whitespace-nowrap text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
+        className={`whitespace-nowrap text-xs font-medium text-neutral-600 hover:text-neutral-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
         onClick={onClick}
       >
         {label}{activeLabel}
@@ -319,11 +319,11 @@ export function PayrollRegisterPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="pr-period" className="text-sm font-medium text-gray-700">
+              <label htmlFor="pr-period" className="text-xs font-medium text-neutral-600">
                 Pay Period
               </label>
               {loadingPeriods ? (
-                <span className="text-sm text-gray-400">Loading…</span>
+                <span className="text-sm text-neutral-400">Loading…</span>
               ) : (
                 <select
                   id="pr-period"
@@ -393,7 +393,7 @@ function ChecksPaymentsRegisterPanel() {
         >
           Open Checks & Payments
         </Link>
-        <p className="mt-3 text-sm text-gray-500">
+        <p className="mt-3 text-sm text-neutral-500">
           Use the register filters, then choose Export Register to download the visible checks as CSV.
         </p>
       </CardContent>
@@ -522,7 +522,7 @@ function TaxSummaryPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="ts-period-mode" className="text-sm font-medium text-gray-700">Period</label>
+              <label htmlFor="ts-period-mode" className="text-xs font-medium text-neutral-600">Period</label>
               <select id="ts-period-mode" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'calendar' | 'custom'); setReport(null); setError(null); }} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
                 <option value="calendar">Year / quarter</option>
                 <option value="custom">Custom pay dates</option>
@@ -531,12 +531,12 @@ function TaxSummaryPanel() {
             {periodMode === 'custom' ? (
               <>
                 <input aria-label="Tax summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
-                <span className="text-sm text-gray-500">to</span>
+                <span className="text-sm text-neutral-500">to</span>
                 <input aria-label="Tax summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
               </>
             ) : <>
             <div className="flex items-center gap-2">
-              <label htmlFor="ts-year" className="text-sm font-medium text-gray-700">Year</label>
+              <label htmlFor="ts-year" className="text-xs font-medium text-neutral-600">Year</label>
               <select
                 id="ts-year"
                 value={year}
@@ -556,7 +556,7 @@ function TaxSummaryPanel() {
             </>}
             {periodMode === 'calendar' && (
               <div className="flex items-center gap-2">
-                <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+                <label htmlFor="ts-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
                 <select
                   id="ts-quarter"
                   value={quarter ?? ''}
@@ -834,7 +834,7 @@ export function W2GuPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="w2gu-year" className="text-sm font-medium text-gray-700">
+              <label htmlFor="w2gu-year" className="text-xs font-medium text-neutral-600">
                 Tax Year
               </label>
               <select
@@ -899,7 +899,7 @@ export function W2GuPanel() {
             </div>
           </div>
           <div className="mt-3">
-            <label htmlFor="w2gu-filing-notes" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="w2gu-filing-notes" className="block text-xs font-medium text-neutral-600 mb-1">
               Filing Notes (optional)
             </label>
             <textarea
@@ -936,7 +936,7 @@ export function W2GuPanel() {
         <ActionFeedback retryKey={markReadyErrorFeedbackAttempt} tone="error" message={markReadyError}><CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
             <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
-            <p className="text-xs text-gray-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
+            <p className="text-xs text-neutral-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
           </CardContent></ActionFeedback>
       )}
 
@@ -951,23 +951,23 @@ export function W2GuPanel() {
               <p role="status" className="mt-2 text-sm text-amber-900">Payroll, employee details, filing rules or responsibility changed after the previous review. Run Preflight, review the current report, then mark it ready again. Previous approval remains in the review history.</p>
             )}
             {filing.preflight_run_at && (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-neutral-600">
                 Last explicit preflight: {new Date(filing.preflight_run_at).toLocaleString()}
               </p>
             )}
             {filing.marked_ready_at && (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-neutral-600">
                 {filing.status === 'filing_ready' ? 'Marked ready' : 'Previous review'}: {new Date(filing.marked_ready_at).toLocaleString()}
                 {typeof filing.marked_ready_by_id === 'number' ? ` (user #${filing.marked_ready_by_id})` : ''}
               </p>
             )}
-            {filing.notes && <p className="text-sm text-gray-600">Notes: {filing.notes}</p>}
+            {filing.notes && <p className="text-sm text-neutral-600">Notes: {filing.notes}</p>}
             {!!filing.attestation_history?.length && (
               <details className="mt-3 text-sm">
                 <summary className="cursor-pointer font-medium">Previous filing reviews ({filing.attestation_history.length})</summary>
                 <ul className="mt-2 space-y-2">
                   {filing.attestation_history.map((review, index) => (
-                    <li key={`${review.marked_ready_at}-${index}`} className="rounded-lg border border-gray-200 p-3">
+                    <li key={`${review.marked_ready_at}-${index}`} className="rounded-lg border border-neutral-200 p-3">
                       <p>{new Date(review.marked_ready_at).toLocaleString()} — user #{review.marked_ready_by_id ?? 'unknown'}{review.legacy ? ' (before source verification)' : ''}</p>
                       {review.notes && <p className="break-words">{review.notes}</p>}
                     </li>
@@ -1006,7 +1006,7 @@ export function W2GuPanel() {
               </p>
             ))}
             {preflight.findings.length > 25 && (
-              <p className="text-xs text-gray-500">Showing first 25 of {preflight.findings.length} findings.</p>
+              <p className="text-xs text-neutral-600">Showing first 25 of {preflight.findings.length} findings.</p>
             )}
           </CardContent>
         </Card>
@@ -1085,7 +1085,7 @@ export function W2GuPanel() {
               {report.employees.map((emp: W2GuEmployeeRow) => (
                 <div key={emp.employee_id} className="rounded-xl border border-neutral-200 p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{emp.employee_name}</p><p className="mt-1 font-mono text-xs text-neutral-500">{emp.employee_ssn_last4 ? `***-**-${emp.employee_ssn_last4}` : 'SSN missing'}</p></div>
+                    <div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{emp.employee_name}</p><p className="mt-1 font-mono text-xs text-neutral-600">{emp.employee_ssn_last4 ? `***-**-${emp.employee_ssn_last4}` : 'SSN missing'}</p></div>
                     {emp.has_missing_ssn && <Badge variant="danger">No SSN</Badge>}
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-sm"><p className="text-neutral-500">Box 1 wages<span className="block font-semibold text-neutral-950">{fmt(emp.box1_wages_tips_other_comp)}</span></p><p className="text-neutral-500">Box 2 withholding<span className="block font-semibold text-neutral-950">{fmt(emp.box2_federal_income_tax_withheld)}</span></p></div>
@@ -1097,7 +1097,7 @@ export function W2GuPanel() {
             <CardContent className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-gray-500">
+                  <tr className="border-b text-left text-neutral-500">
                     <th className="pb-2 pr-4 font-medium">Employee</th>
                     <th className="pb-2 pr-4 font-medium">SSN</th>
                     <th className="pb-2 pr-4 font-medium text-right">Box 1<br /><span className="font-normal text-xs">Wages</span></th>
@@ -1111,7 +1111,7 @@ export function W2GuPanel() {
                 </thead>
                 <tbody>
                   {report.employees.map((emp: W2GuEmployeeRow) => (
-                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-gray-50">
+                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-neutral-50">
                       <td className="py-2 pr-4">
                         <div className="flex items-center gap-2">
                           <span>{emp.employee_name}</span>
@@ -1120,7 +1120,7 @@ export function W2GuPanel() {
                           )}
                         </div>
                       </td>
-                      <td className="py-2 pr-4 font-mono text-gray-500">
+                      <td className="py-2 pr-4 font-mono text-neutral-500">
                         {emp.employee_ssn_last4 ? `***-**-${emp.employee_ssn_last4}` : '—'}
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box1_wages_tips_other_comp)}</td>
@@ -1144,7 +1144,7 @@ export function W2GuPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-gray-400">
+                      <td colSpan={9} className="py-6 text-center text-neutral-400">
                         No committed payroll data found for {report.meta.year}.
                       </td>
                     </tr>
@@ -1277,11 +1277,11 @@ export function EmployeePayHistoryPanel(): ReactNode {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="eph-employee" className="text-sm font-medium text-gray-700">
+              <label htmlFor="eph-employee" className="text-xs font-medium text-neutral-600">
                 Employee
               </label>
               {loadingEmployees ? (
-                <span className="text-sm text-gray-400">Loading…</span>
+                <span className="text-sm text-neutral-400">Loading…</span>
               ) : (
                 <select
                   id="eph-employee"
@@ -1304,7 +1304,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
               )}
             </div>
             <input aria-label="Employee history start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
-            <span className="text-sm text-gray-500">to</span>
+            <span className="text-sm text-neutral-500">to</span>
             <input aria-label="Employee history end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
             <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
               {loading ? 'Loading…' : 'View Report'}
@@ -1352,8 +1352,8 @@ export function EmployeePayHistoryPanel(): ReactNode {
             <CardContent className="space-y-3 sm:hidden">
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-500">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
-                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-500">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-600">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div><div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div><div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div><div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div></dl></details>
                 </div>
               ))}
@@ -1362,7 +1362,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
             <CardContent className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-gray-500">
+                  <tr className="border-b text-left text-neutral-500">
                     <th className="pb-2 pr-4 font-medium">Pay Date</th>
                     <th className="pb-2 pr-4 font-medium">Period</th>
                     <th className="pb-2 pr-4 font-medium">Source</th>
@@ -1378,9 +1378,9 @@ export function EmployeePayHistoryPanel(): ReactNode {
                 </thead>
                 <tbody>
                   {report.history.map((h) => (
-                    <tr key={h.key} className="border-b last:border-0 hover:bg-gray-50">
+                    <tr key={h.key} className="border-b last:border-0 hover:bg-neutral-50">
                       <td className="py-2 pr-4">{h.pay_date}</td>
-                      <td className="py-2 pr-4 text-gray-500">{h.period_description}</td>
+                      <td className="py-2 pr-4 text-neutral-500">{h.period_description}</td>
                       <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge></td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
@@ -1389,12 +1389,12 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
-                      <td className="py-2 text-gray-500">{payrollPaymentLabel(h)}{h.check_number && <span className="block font-mono text-xs">Check #{h.check_number}</span>}</td>
+                      <td className="py-2 text-neutral-500">{payrollPaymentLabel(h)}{h.check_number && <span className="block font-mono text-xs">Check #{h.check_number}</span>}</td>
                     </tr>
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="py-6 text-center text-gray-400">
+                      <td colSpan={11} className="py-6 text-center text-neutral-400">
                         No pay history found.
                       </td>
                     </tr>
@@ -1627,8 +1627,8 @@ export function YtdSummaryPanel() {
             </select>
             {periodMode === 'pay_run' ? (
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <label htmlFor="ytd-pay-run" className="text-sm font-medium text-gray-700">Payroll run</label>
-                {loadingPayRuns ? <span className="text-sm text-gray-500">Loading payroll runs…</span> : (
+                <label htmlFor="ytd-pay-run" className="text-xs font-medium text-neutral-600">Payroll run</label>
+                {loadingPayRuns ? <span className="text-sm text-neutral-500">Loading payroll runs…</span> : (
                   <select
                     id="ytd-pay-run"
                     value={selectedPayRunKey}
@@ -1646,11 +1646,11 @@ export function YtdSummaryPanel() {
               </div>
             ) : periodMode === 'custom' ? <>
               <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
-              <span className="text-sm text-gray-500">to</span>
+              <span className="text-sm text-neutral-500">to</span>
               <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
             </> : periodMode === 'year' || periodMode === 'quarter' || periodMode === 'month' ? <>
             <div className="flex items-center gap-2">
-              <label htmlFor="ytd-year" className="text-sm font-medium text-gray-700">Year</label>
+              <label htmlFor="ytd-year" className="text-xs font-medium text-neutral-600">Year</label>
               <select
                 id="ytd-year"
                 value={year}
@@ -1665,7 +1665,7 @@ export function YtdSummaryPanel() {
             </div>
             {periodMode === 'quarter' && (
               <div className="flex items-center gap-2">
-                <label htmlFor="ytd-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+                <label htmlFor="ytd-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
                 <select id="ytd-quarter" value={quarter} onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
                   {[1, 2, 3, 4].map((value) => <option key={value} value={value}>Q{value}</option>)}
                 </select>
@@ -1673,7 +1673,7 @@ export function YtdSummaryPanel() {
             )}
             {periodMode === 'month' && (
               <div className="flex items-center gap-2">
-                <label htmlFor="ytd-month" className="text-sm font-medium text-gray-700">Month</label>
+                <label htmlFor="ytd-month" className="text-xs font-medium text-neutral-600">Month</label>
                 <select id="ytd-month" value={month} onChange={(e) => { setMonth(Number(e.target.value)); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
                   {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
                     <option key={value} value={value}>{new Date(2000, value - 1, 1).toLocaleString('en-US', { month: 'long' })}</option>
@@ -1683,7 +1683,7 @@ export function YtdSummaryPanel() {
             )}
             </> : null}
             <div className="flex items-center gap-2">
-              <label htmlFor="ytd-search" className="text-sm font-medium text-gray-700">Search</label>
+              <label htmlFor="ytd-search" className="text-xs font-medium text-neutral-600">Search</label>
               <input
                 id="ytd-search"
                 value={search}
@@ -1693,7 +1693,7 @@ export function YtdSummaryPanel() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="ytd-type" className="text-sm font-medium text-gray-700">Type</label>
+              <label htmlFor="ytd-type" className="text-xs font-medium text-neutral-600">Type</label>
               <select
                 id="ytd-type"
                 value={employmentType}
@@ -1707,7 +1707,7 @@ export function YtdSummaryPanel() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="ytd-status" className="text-sm font-medium text-gray-700">Status</label>
+              <label htmlFor="ytd-status" className="text-xs font-medium text-neutral-600">Status</label>
               <select
                 id="ytd-status"
                 value={status}
@@ -1720,7 +1720,7 @@ export function YtdSummaryPanel() {
                 <option value="terminated">Terminated</option>
               </select>
             </div>
-            <label className="flex min-h-12 items-center gap-2 text-sm text-gray-700">
+            <label className="flex min-h-12 items-center gap-2 text-xs text-neutral-600">
               <input
                 type="checkbox"
                 checked={includeZeroPay}
@@ -1775,9 +1775,9 @@ export function YtdSummaryPanel() {
               ) : <>
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               {(report.included_payroll_runs?.length ?? 0) > 0 && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" aria-label="Included payroll runs">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Included payroll runs</p>
-                  <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3" aria-label="Included payroll runs">
+                  <p className="text-xs font-bold text-neutral-600">Included payroll runs</p>
+                  <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                     {report.included_payroll_runs?.map((payRun) => (
                       <li key={payRun.key}>
                         {payRun.work_period_start} – {payRun.work_period_end} · paid {payRun.pay_date} · {payRun.source}
@@ -1794,7 +1794,7 @@ export function YtdSummaryPanel() {
                   Employee filters change the rows below, not the company-wide totals above. The totals always include all reportable payroll activity in this period.
                 </p>
               )}
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700" role="note">
+              <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-700" role="note">
                 Bonus is part of gross pay. Retirement and loan payments are part of deductions. Payroll field and source amounts below show where those same totals came from; do not add the breakdowns to the totals again.
               </p>
               {report.company_totals && (
@@ -1806,7 +1806,7 @@ export function YtdSummaryPanel() {
                     <TotalBox label="Employer Payroll Cost" value={report.company_totals.employer_payroll_cost ?? 0} />
                   </div>
                   <div>
-                    <h3 className="mb-3 text-sm font-semibold text-slate-800">Included in those totals</h3>
+                    <h3 className="mb-3 text-sm font-semibold text-neutral-800">Included in those totals</h3>
                     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                       <TotalBox label="Bonus (in gross)" value={report.company_totals.bonus ?? 0} />
                       <TotalBox label="Pre-tax 401(k) (in deductions)" value={report.company_totals.retirement} />
@@ -1814,8 +1814,8 @@ export function YtdSummaryPanel() {
                       <TotalBox label="All loan deductions (in deductions)" value={Number(report.company_totals.straight_loan_deductions ?? 0) + Number(report.company_totals.installment_loan_payments ?? 0) + Number(report.company_totals.historical_loan_deductions_unclassified ?? 0)} />
                     </div>
                   </div>
-                  <details className="rounded-xl border border-slate-200 px-4 py-3">
-                    <summary className="cursor-pointer font-medium text-slate-800">More payroll categories and field reconciliation</summary>
+                  <details className="rounded-xl border border-neutral-200 px-4 py-3">
+                    <summary className="cursor-pointer font-medium text-neutral-800">More payroll categories and field reconciliation</summary>
                     <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                       <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
                       <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
@@ -1855,22 +1855,22 @@ export function YtdSummaryPanel() {
               <CardDescription>Category and source columns are views of the same saved paychecks, not extra amounts to add.</CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
-              <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+              <label className="mb-4 flex min-h-11 items-center gap-2 text-xs text-neutral-600">
                 <input type="checkbox" checked={showCategoryColumns} onChange={(event) => setShowCategoryColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
                 Show deduction and earnings categories
               </label>
               {(report.component_columns?.length ?? 0) > 0 && (
-                <label className="mb-4 flex min-h-11 items-center gap-2 text-sm text-slate-700">
+                <label className="mb-4 flex min-h-11 items-center gap-2 text-xs text-neutral-600">
                   <input type="checkbox" checked={showSourceColumns} onChange={(event) => setShowSourceColumns(event.target.checked)} className="h-4 w-4 accent-primary" />
                   Show source breakdown columns (already included in totals)
                 </label>
               )}
-              {showSourceColumns && <p className="mb-4 text-sm leading-6 text-slate-600" role="note">
+              {showSourceColumns && <p className="mb-4 text-sm leading-6 text-neutral-600" role="note">
                 Each source column is a separate saved field or QuickBooks label. A value may also appear in a category column; add neither breakdown to gross, deductions, or net again.
               </p>}
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-gray-500">
+                  <tr className="border-b text-left text-neutral-500">
                     <SortableTh label="Employee" activeLabel={sortLabel('name')} onClick={() => updateSort('name')} />
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
@@ -1904,18 +1904,18 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                     {showSourceColumns && (report.component_columns || []).map((column) => (
                       <th key={column.key} title={column.label} className="min-w-44 px-4 py-4 text-right">
-                        <span className="block text-[10px] font-bold uppercase text-primary-700">{sourceGroupLabel(column.source_group)}</span>
-                        <span className="mt-2 block break-words font-semibold normal-case text-slate-800">{column.short_label}</span>
-                        <span className="mt-2 block text-[10px] font-normal normal-case text-slate-500">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
+                        <span className="block text-xs font-bold text-primary-700">{sourceGroupLabel(column.source_group)}</span>
+                        <span className="mt-2 block break-words font-semibold normal-case text-neutral-800">{column.short_label}</span>
+                        <span className="mt-2 block text-xs font-normal normal-case text-neutral-600">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {report.employees.map((emp) => (
-                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-gray-50">
+                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-neutral-50">
                       <td className="py-2 pr-4 font-medium">{emp.name}</td>
-                      <td className="py-2 pr-4 capitalize text-gray-500">{emp.employment_type}</td>
+                      <td className="py-2 pr-4 capitalize text-neutral-500">{emp.employment_type}</td>
                       <td className="py-2 pr-4">
                         <Badge variant={emp.status === 'active' ? 'success' : 'default'}>
                           {emp.status}
@@ -1956,7 +1956,7 @@ export function YtdSummaryPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-gray-400">
+                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-neutral-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -2106,7 +2106,7 @@ function AnnualPayrollSummaryPanel() {
                 {report.years.map((row) => (
                   <div key={row.year} className="rounded-xl border border-neutral-200 p-4">
                     <p className="font-display text-lg font-extrabold text-neutral-950">{row.year}</p>
-                    <p className="mt-1 text-xs leading-5 text-neutral-500">{sourceLabel(row)}</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-600">{sourceLabel(row)}</p>
                     <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                       <div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(row.gross_pay)}</dd></div>
                       <div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(row.net_pay)}</dd></div>
@@ -2143,7 +2143,7 @@ function AnnualPayrollSummaryPanel() {
                     <TableRow key={row.year}>
                       <TableCell stickyLeft className="min-w-64 bg-white align-top">
                         <p className="font-display text-lg font-extrabold text-neutral-950">{row.year}</p>
-                        <p className="mt-2 text-xs leading-5 text-neutral-500">{sourceLabel(row)}</p>
+                        <p className="mt-2 text-xs leading-5 text-neutral-600">{sourceLabel(row)}</p>
                         {row.excluded_unlinked_paycheck_count > 0 && (
                           <p className="mt-2 text-xs font-semibold text-amber-700">
                             {row.excluded_unlinked_paycheck_count} unlinked imported paycheck{row.excluded_unlinked_paycheck_count === 1 ? '' : 's'} excluded ({fmt(row.excluded_unlinked_gross_pay)} gross / {fmt(row.excluded_unlinked_net_pay)} net)
@@ -2266,7 +2266,7 @@ function EmployerLiabilityPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="el-year" className="text-sm font-medium text-gray-700">Year</label>
+              <label htmlFor="el-year" className="text-xs font-medium text-neutral-600">Year</label>
               <select
                 id="el-year"
                 value={year}
@@ -2280,7 +2280,7 @@ function EmployerLiabilityPanel() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="el-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <label htmlFor="el-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
               <select
                 id="el-quarter"
                 value={quarter ?? ''}
@@ -2337,31 +2337,31 @@ function EmployerLiabilityPanel() {
               </p>
             </div>
 
-            <div className="mt-6 rounded-md bg-gray-50 border p-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">Full Tax Breakdown</h4>
+            <div className="mt-6 rounded-md bg-neutral-50 border p-4">
+              <h4 className="text-sm font-medium text-neutral-700 mb-3">Full Tax Breakdown</h4>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Employee Withholding (FIT)</span>
+                  <span className="text-neutral-600">Employee Withholding (FIT)</span>
                   <span className="tabular-nums">{fmt(report.totals.withholding_tax)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Employee SS</span>
+                  <span className="text-neutral-600">Employee SS</span>
                   <span className="tabular-nums">{fmt(report.totals.social_security_employee)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Employer SS</span>
+                  <span className="text-neutral-600">Employer SS</span>
                   <span className="tabular-nums font-medium">{fmt(report.totals.social_security_employer)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Employee Medicare</span>
+                  <span className="text-neutral-600">Employee Medicare</span>
                   <span className="tabular-nums">{fmt(report.totals.medicare_employee)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Employer Medicare</span>
+                  <span className="text-neutral-600">Employer Medicare</span>
                   <span className="tabular-nums font-medium">{fmt(report.totals.medicare_employer)}</span>
                 </div>
                 <div className="flex justify-between border-t pt-2 col-span-2">
-                  <span className="text-gray-700 font-medium">Total Employment Taxes</span>
+                  <span className="text-neutral-700 font-medium">Total Employment Taxes</span>
                   <span className="tabular-nums font-semibold">{fmt(report.totals.total_employment_taxes)}</span>
                 </div>
               </div>
@@ -2556,7 +2556,7 @@ export function QuarterlyCompliancePacketPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="qcp-year" className="text-sm font-medium text-gray-700">Year</label>
+              <label htmlFor="qcp-year" className="text-xs font-medium text-neutral-600">Year</label>
               <select
                 id="qcp-year"
                 value={year}
@@ -2568,7 +2568,7 @@ export function QuarterlyCompliancePacketPanel() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="qcp-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <label htmlFor="qcp-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
               <select
                 id="qcp-quarter"
                 value={quarter}
@@ -2587,7 +2587,7 @@ export function QuarterlyCompliancePacketPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
-          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
+          {templateMessage && <p role="status" className="mt-3 text-sm text-neutral-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><p>{error}</p>
             {bridgeRecoveryPath && <div className="mt-2">
               <p>Review the affected historical adjustments, prepare the next YTD bridge revision, and activate it after reconciliation.</p>
@@ -2619,19 +2619,19 @@ export function QuarterlyCompliancePacketPanel() {
             <CardContent>
               <div className="grid gap-4 md:grid-cols-4">
                 <div className="rounded-md border p-4">
-                  <p className="text-sm text-gray-500">Form 500 / W-1</p>
+                  <p className="text-sm text-neutral-500">Form 500 / W-1</p>
                   <p className="mt-1 text-xl font-semibold">{fmt(report.w1.total_guam_withholding)}</p>
                 </div>
                 <div className="rounded-md border p-4">
-                  <p className="text-sm text-gray-500">SWICA Wages</p>
+                  <p className="text-sm text-neutral-500">SWICA Wages</p>
                   <p className="mt-1 text-xl font-semibold">{fmt(report.swica.totals.total_wages)}</p>
                 </div>
                 <div className="rounded-md border p-4">
-                  <p className="text-sm text-gray-500">SWICA Employees</p>
+                  <p className="text-sm text-neutral-500">SWICA Employees</p>
                   <p className="mt-1 text-xl font-semibold">{report.swica.totals.employee_count}</p>
                 </div>
                 <div className="rounded-md border p-4">
-                  <p className="text-sm text-gray-500">Review Checks</p>
+                  <p className="text-sm text-neutral-500">Review Checks</p>
                   <p className="mt-1 text-xl font-semibold">{reviewNeedsAttention === 0 ? 'Ready' : `${reviewNeedsAttention} review`}</p>
                 </div>
               </div>
@@ -2663,7 +2663,7 @@ export function QuarterlyCompliancePacketPanel() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-neutral-950">{task.title}</p>
-                          <p className="mt-1 text-xs text-neutral-500">
+                          <p className="mt-1 text-xs text-neutral-600">
                             Due {task.due_date || report.due_dates.official_due_date} · Target {task.internal_target_date || report.due_dates.internal_target_date}
                           </p>
                         </div>
@@ -2672,7 +2672,7 @@ export function QuarterlyCompliancePacketPanel() {
                         </Badge>
                       </div>
                       <div className="mt-4 grid gap-3">
-                        <label className="text-xs font-semibold text-neutral-500">
+                        <label className="text-xs font-semibold text-neutral-600">
                           Status
                           <select
                             value={task.status}
@@ -2824,19 +2824,19 @@ export function QuarterlyCompliancePacketPanel() {
               <CardContent>
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Suggested deposit schedule</span>
+                    <span className="text-neutral-600">Suggested deposit schedule</span>
                     <span className="font-medium capitalize">{report.federal_941.deposit_schedule.suggested_schedule}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Schedule B required</span>
+                    <span className="text-neutral-600">Schedule B required</span>
                     <span className="font-medium">{report.federal_941.deposit_schedule.schedule_b_required ? 'Yes' : 'No'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Line 5e SS/Medicare</span>
+                    <span className="text-neutral-600">Line 5e SS/Medicare</span>
                     <span className="font-medium tabular-nums">{fmt(report.federal_941.report.lines.line5e_total_ss_medicare)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Lines 2 and 3</span>
+                    <span className="text-neutral-600">Lines 2 and 3</span>
                     <span className="font-medium">Skipped for Guam</span>
                   </div>
                 </div>
@@ -2854,11 +2854,11 @@ export function QuarterlyCompliancePacketPanel() {
                   <div key={check.key} className="rounded-md border px-3 py-2">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="text-sm text-gray-700">{check.message}</p>
+                        <p className="text-sm text-neutral-700">{check.message}</p>
                         {check.details ? (
-                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
                             {Object.entries(check.details).map(([key, value]) => (
-                              <span key={key}>{key.replaceAll('_', ' ')}: <span className="font-medium text-gray-700">{String(value ?? 'blank')}</span></span>
+                              <span key={key}>{key.replaceAll('_', ' ')}: <span className="font-medium text-neutral-700">{String(value ?? 'blank')}</span></span>
                             ))}
                           </div>
                         ) : null}
@@ -3057,8 +3057,8 @@ function QuarterlyOfficialFormModal({
         <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
             <div>
-              <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Government Form'} — Draft</h2>
-              <p className="mt-1 text-sm text-gray-500">Review and adjust the preparation values, then preview the PDF marked not filed before downloading or printing.</p>
+              <h2 className="text-2xl font-semibold text-neutral-900">{fields?.title || 'Government Form'} — Draft</h2>
+              <p className="mt-1 text-sm text-neutral-500">Review and adjust the preparation values, then preview the PDF marked not filed before downloading or printing.</p>
             </div>
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
@@ -3069,9 +3069,9 @@ function QuarterlyOfficialFormModal({
           </div>
           {error ? <div role="alert" className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 lg:mx-5">{error}</div> : null}
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
-            <div className={`${mobileView === 'fields' ? 'block' : 'hidden'} min-h-0 overflow-y-auto bg-gray-50 p-4 lg:block lg:p-5`}>
+            <div className={`${mobileView === 'fields' ? 'block' : 'hidden'} min-h-0 overflow-y-auto bg-neutral-50 p-4 lg:block lg:p-5`}>
               {loading || !fields ? (
-                <div className="rounded-md border bg-white p-4 text-sm text-gray-500 sm:p-6">Loading form values...</div>
+                <div className="rounded-md border bg-white p-4 text-sm text-neutral-500 sm:p-6">Loading form values...</div>
               ) : (
                 <div className="space-y-5">
                   <section className="rounded-md border bg-white p-4">
@@ -3102,7 +3102,7 @@ function QuarterlyOfficialFormModal({
 
                   {fields.lines ? (
                     <section className="rounded-md border bg-white p-4">
-                      <h3 className="text-sm font-semibold text-gray-900">941 Lines</h3>
+                      <h3 className="text-sm font-semibold text-neutral-900">941 Lines</h3>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {Object.entries(fields.lines).filter(([, value]) => value !== null).map(([key, value]) => (
                           <Field key={key} label={key.replaceAll('_', ' ')}>
@@ -3115,7 +3115,7 @@ function QuarterlyOfficialFormModal({
 
                   {fields.daily_liabilities ? (
                     <section className="rounded-md border bg-white p-4">
-                      <h3 className="text-sm font-semibold text-gray-900">Pay-Date Liabilities</h3>
+                      <h3 className="text-sm font-semibold text-neutral-900">Pay-Date Liabilities</h3>
                       <div className="mt-3 space-y-2">
                         {fields.daily_liabilities.map((row, index) => (
                           <div key={`${row.pay_date}-${index}`} className="grid grid-cols-[1fr_140px] gap-3">
@@ -3129,7 +3129,7 @@ function QuarterlyOfficialFormModal({
 
                   {fields.employees ? (
                     <section className="rounded-md border bg-white p-4">
-                      <h3 className="text-sm font-semibold text-gray-900">SWICA Employees</h3>
+                      <h3 className="text-sm font-semibold text-neutral-900">SWICA Employees</h3>
                       <div className="mt-3 space-y-3">
                         {fields.employees.map((employee, index) => (
                           <div key={`${employee.employee_id}-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
@@ -3153,11 +3153,11 @@ function QuarterlyOfficialFormModal({
                 <Button variant="outline" onClick={printPreview} disabled={!previewUrl}>Print</Button>
                 <Button variant="outline" onClick={downloadPreview} disabled={!previewBlob}>Download Preview</Button>
               </div>
-              <div className="min-h-0 flex-1 bg-gray-200">
+              <div className="min-h-0 flex-1 bg-neutral-200">
                 {previewUrl ? (
                   <iframe src={previewUrl} title={fields?.title || 'Official form preview'} className="h-full w-full border-0 bg-white" />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-gray-500">Preview the PDF after reviewing the values.</div>
+                  <div className="flex h-full items-center justify-center text-sm text-neutral-500">Preview the PDF after reviewing the values.</div>
                 )}
               </div>
             </div>
@@ -3247,7 +3247,7 @@ export function Form941GuPanel() {
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="f941-year" className="text-sm font-medium text-gray-700">Year</label>
+              <label htmlFor="f941-year" className="text-xs font-medium text-neutral-600">Year</label>
               <select
                 id="f941-year"
                 value={year}
@@ -3261,7 +3261,7 @@ export function Form941GuPanel() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="f941-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <label htmlFor="f941-quarter" className="text-xs font-medium text-neutral-600">Quarter</label>
               <select
                 id="f941-quarter"
                 value={quarter}
@@ -3280,7 +3280,7 @@ export function Form941GuPanel() {
             </Button>
             <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
-          {templateMessage && <p role="status" className="mt-3 text-sm text-gray-600">{templateMessage}</p>}
+          {templateMessage && <p role="status" className="mt-3 text-sm text-neutral-600">{templateMessage}</p>}
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         </CardContent>
       </Card>
@@ -3310,7 +3310,7 @@ export function Form941GuPanel() {
                     ['Recorded employee + employer liability', report.withholding_reconciliation.recorded_total_liability],
                     ['Remaining liability difference', report.withholding_reconciliation.recorded_liability_residual],
                   ].map(([label, amount]) => (
-                    <div key={String(label)}><dt className="text-sm text-gray-600">{label}</dt><dd className="font-medium tabular-nums">{fmtOrPlaceholder(amount as number | null)}</dd></div>
+                    <div key={String(label)}><dt className="text-sm text-neutral-600">{label}</dt><dd className="font-medium tabular-nums">{fmtOrPlaceholder(amount as number | null)}</dd></div>
                   ))}
                 </dl>
                 <p className="mt-4 text-sm">{report.withholding_reconciliation.explanation}</p>
@@ -3332,115 +3332,115 @@ export function Form941GuPanel() {
                 <div className="rounded-md border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="text-left px-4 py-2 font-medium text-gray-600">Line</th>
-                        <th className="text-left px-4 py-2 font-medium text-gray-600">Description</th>
-                        <th className="text-right px-4 py-2 font-medium text-gray-600">Taxable Amount</th>
-                        <th className="text-right px-4 py-2 font-medium text-gray-600">Tax</th>
+                      <tr className="bg-neutral-50 border-b">
+                        <th className="text-left px-4 py-2 font-medium text-neutral-600">Line</th>
+                        <th className="text-left px-4 py-2 font-medium text-neutral-600">Description</th>
+                        <th className="text-right px-4 py-2 font-medium text-neutral-600">Taxable Amount</th>
+                        <th className="text-right px-4 py-2 font-medium text-neutral-600">Tax</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">1</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">1</td>
                         <td className="px-4 py-2">Number of employees</td>
                         <td className="px-4 py-2 text-right tabular-nums">{report.lines.line1_employee_count}</td>
                         <td className="px-4 py-2 text-right"></td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">2</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">2</td>
                         <td className="px-4 py-2">Wages, tips, and other compensation (skipped for Guam)</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line2_wages_tips_other)}</td>
                         <td className="px-4 py-2 text-right"></td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">3</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">3</td>
                         <td className="px-4 py-2">Federal income tax withheld (skipped for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line3_fit_withheld)}</td>
                       </tr>
-                      <tr className="border-b bg-gray-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">5a</td>
+                      <tr className="border-b bg-neutral-50">
+                        <td className="px-4 py-2 font-mono text-neutral-500">5a</td>
                         <td className="px-4 py-2">Taxable Social Security wages</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5a_ss_wages)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5a_ss_combined_tax)}</td>
                       </tr>
-                      <tr className="border-b bg-gray-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">5b</td>
+                      <tr className="border-b bg-neutral-50">
+                        <td className="px-4 py-2 font-mono text-neutral-500">5b</td>
                         <td className="px-4 py-2">Taxable Social Security tips</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5b_ss_tips)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5b_ss_tips_combined_tax)}</td>
                       </tr>
-                      <tr className="border-b bg-gray-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">5c</td>
+                      <tr className="border-b bg-neutral-50">
+                        <td className="px-4 py-2 font-mono text-neutral-500">5c</td>
                         <td className="px-4 py-2">Taxable Medicare wages & tips</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5c_medicare_wages)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5c_medicare_combined_tax)}</td>
                       </tr>
-                      <tr className="border-b bg-gray-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">5d</td>
+                      <tr className="border-b bg-neutral-50">
+                        <td className="px-4 py-2 font-mono text-neutral-500">5d</td>
                         <td className="px-4 py-2">Taxable wages & tips subject to Additional Medicare Tax</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5d_add_medicare_wages)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5d_add_medicare_tax)}</td>
                       </tr>
                       <tr className="border-b font-medium">
-                        <td className="px-4 py-2 font-mono text-gray-500">5e</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">5e</td>
                         <td className="px-4 py-2">Total Social Security and Medicare taxes</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5e_total_ss_medicare)}</td>
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">6</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">6</td>
                         <td className="px-4 py-2">Total taxes before adjustments (line 5e for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line6_total_taxes_before_adj)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">7</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">7</td>
                         <td className="px-4 py-2">Adjustment: fractions of cents</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line7_adj_fractions_cents)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">8</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">8</td>
                         <td className="px-4 py-2">Adjustment: sick pay</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line8_adj_sick_pay)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line8_adj_sick_pay)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">9</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">9</td>
                         <td className="px-4 py-2">Adjustment: tips and group-term life</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line9_adj_tips_group_life)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line9_adj_tips_group_life)}</td>
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">10</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">10</td>
                         <td className="px-4 py-2">Total taxes after adjustments</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line10_total_taxes_after_adj)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">11</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">11</td>
                         <td className="px-4 py-2">Nonrefundable portion of credit</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line11_nonrefundable_credits)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line11_nonrefundable_credits)}</td>
                       </tr>
                       <tr className="border-b font-medium">
-                        <td className="px-4 py-2 font-mono text-gray-500">12</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">12</td>
                         <td className="px-4 py-2">Total taxes after adjustments and credits</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line12_total_after_credits)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-gray-500">13</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">13</td>
                         <td className="px-4 py-2">Total deposits for this quarter</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line13_total_deposits)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line13_total_deposits)}</td>
                       </tr>
                       <tr className="bg-amber-50">
-                        <td className="px-4 py-2 font-mono text-gray-500">14</td>
+                        <td className="px-4 py-2 font-mono text-neutral-500">14</td>
                         <td className="px-4 py-2 font-medium">Balance due / overpayment</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line14_balance_due_or_overpayment)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line14_balance_due_or_overpayment)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -3449,17 +3449,17 @@ export function Form941GuPanel() {
                 {/* Monthly Wage-base Reference */}
                 {report.monthly_liability && report.monthly_liability.length > 0 && (
                   <div className="mt-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Monthly Wage-base Reference</h4>
+                    <h4 className="text-sm font-medium text-neutral-700 mb-2">Monthly Wage-base Reference</h4>
                     <div className="rounded-md border overflow-hidden">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="bg-gray-50 border-b">
-                            <th className="text-left px-4 py-2 font-medium text-gray-600">Month</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">Guam W-1 Withholding</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">SS Combined</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">Medicare Combined</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">Addtl Medicare</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">Total Liability</th>
+                          <tr className="bg-neutral-50 border-b">
+                            <th className="text-left px-4 py-2 font-medium text-neutral-600">Month</th>
+                            <th className="text-right px-4 py-2 font-medium text-neutral-600">Guam W-1 Withholding</th>
+                            <th className="text-right px-4 py-2 font-medium text-neutral-600">SS Combined</th>
+                            <th className="text-right px-4 py-2 font-medium text-neutral-600">Medicare Combined</th>
+                            <th className="text-right px-4 py-2 font-medium text-neutral-600">Addtl Medicare</th>
+                            <th className="text-right px-4 py-2 font-medium text-neutral-600">Total Liability</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3480,39 +3480,39 @@ export function Form941GuPanel() {
                 )}
 
                 {/* Tax Detail Breakdown */}
-                <div className="mt-4 rounded-md bg-gray-50 border p-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-3">Employee/Employer Tax Split</h4>
+                <div className="mt-4 rounded-md bg-neutral-50 border p-4">
+                  <h4 className="text-sm font-medium text-neutral-700 mb-3">Employee/Employer Tax Split</h4>
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employee SS Tax</span>
+                      <span className="text-neutral-600">Employee SS Tax</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.ss_employee)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employer SS Tax</span>
+                      <span className="text-neutral-600">Employer SS Tax</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.ss_employer)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employee Medicare</span>
+                      <span className="text-neutral-600">Employee Medicare</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.medicare_employee)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employer Medicare</span>
+                      <span className="text-neutral-600">Employer Medicare</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.medicare_employer)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Additional Medicare (Employee)</span>
+                      <span className="text-neutral-600">Additional Medicare (Employee)</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.additional_medicare_employee)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Reported Tips</span>
+                      <span className="text-neutral-600">Reported Tips</span>
                       <span className="tabular-nums">{fmt(report.tax_detail.reported_tips)}</span>
                     </div>
                     <div className="flex justify-between border-t pt-2">
-                      <span className="text-gray-700 font-medium">Total Employee Taxes</span>
+                      <span className="text-neutral-700 font-medium">Total Employee Taxes</span>
                       <span className="tabular-nums font-semibold">{fmt(report.tax_detail.total_employee_taxes)}</span>
                     </div>
                     <div className="flex justify-between border-t pt-2">
-                      <span className="text-gray-700 font-medium">Total Employer Taxes</span>
+                      <span className="text-neutral-700 font-medium">Total Employer Taxes</span>
                       <span className="tabular-nums font-semibold">{fmt(report.tax_detail.total_employer_taxes)}</span>
                     </div>
                   </div>
@@ -3537,7 +3537,7 @@ export function Form941GuPanel() {
 function TotalBox({ label, value, format = 'currency' }: { label: string; value: number; format?: 'currency' | 'number' }) {
   return (
     <div className="rounded-md border p-3">
-      <p className="text-xs text-gray-500 leading-tight">{label}</p>
+      <p className="text-xs text-neutral-600 leading-tight">{label}</p>
       <p className="mt-1 text-lg font-semibold tabular-nums">{format === 'number' ? value.toFixed(2) : fmt(value)}</p>
     </div>
   );
@@ -3548,15 +3548,15 @@ function PayrollFieldTotalsTable({ disclosure }: { disclosure?: PayrollFieldsDis
   if (rows.length === 0) return null;
 
   return (
-    <div className="mt-6 overflow-hidden rounded-xl border border-gray-200">
-      <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
-        <h3 className="font-semibold text-gray-900">Payroll field reconciliation</h3>
-        <p className="text-sm text-gray-500">Historical field values saved on the payrolls in this period.</p>
+    <div className="mt-6 overflow-hidden rounded-xl border border-neutral-200">
+      <div className="border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+        <h3 className="font-semibold text-neutral-900">Payroll field reconciliation</h3>
+        <p className="text-sm text-neutral-500">Historical field values saved on the payrolls in this period.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-4 py-2">Field</th><th className="px-4 py-2">Treatment</th><th className="px-4 py-2">Paid by</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
-          <tbody>{rows.map((row, index) => <tr key={JSON.stringify([row.payroll_field_definition_id == null ? 'entry' : 'definition', row.payroll_field_definition_id ?? row.payroll_item_field_entry_id ?? index, row.label, row.kind, row.tax_treatment, row.category, row.reporting_group, row.employee_paid, row.employer_paid])} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}<span className="ml-2 text-xs font-normal text-gray-500">{row.payroll_field_definition_id ? `#${row.payroll_field_definition_id}` : row.payroll_item_field_entry_id ? `entry #${row.payroll_item_field_entry_id}` : ''}</span></td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
+          <thead><tr className="border-b text-left text-xs text-neutral-600"><th className="px-4 py-2">Field</th><th className="px-4 py-2">Treatment</th><th className="px-4 py-2">Paid by</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={JSON.stringify([row.payroll_field_definition_id == null ? 'entry' : 'definition', row.payroll_field_definition_id ?? row.payroll_item_field_entry_id ?? index, row.label, row.kind, row.tax_treatment, row.category, row.reporting_group, row.employee_paid, row.employer_paid])} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}<span className="ml-2 text-xs font-normal text-neutral-600">{row.payroll_field_definition_id ? `#${row.payroll_field_definition_id}` : row.payroll_item_field_entry_id ? `entry #${row.payroll_item_field_entry_id}` : ''}</span></td><td className="px-4 py-2 text-neutral-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-neutral-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
         </table>
       </div>
     </div>
@@ -3679,7 +3679,7 @@ function Form1099NecPanel() {
         <CardContent>
           <div className="flex flex-wrap items-end gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tax Year</label>
+              <label className="block text-xs font-medium text-neutral-600 mb-1">Tax Year</label>
               <select
                 className="border rounded-md px-3 py-2 text-sm"
                 value={year}
@@ -3740,7 +3740,7 @@ function Form1099NecPanel() {
                 <p className="mt-1 text-lg font-semibold">{fmt(report.totals.reportable_compensation)}</p>
               </div>
               <div className="rounded-md border p-3">
-                <p className="text-xs text-gray-500">Federal Tax Withheld</p>
+                <p className="text-xs text-neutral-600">Federal Tax Withheld</p>
                 <p className="mt-1 text-lg font-semibold">{fmt(report.totals.total_federal_withheld)}</p>
               </div>
             </div>
@@ -3756,13 +3756,13 @@ function Form1099NecPanel() {
             </div>
 
             {report.all_contractors.length === 0 ? (
-              <p className="text-sm text-gray-500">No contractor payments found for {report.meta.year}.</p>
+              <p className="text-sm text-neutral-500">No contractor payments found for {report.meta.year}.</p>
             ) : (
               <>
               <div className="space-y-3 sm:hidden">
                 {report.all_contractors.map((contractor) => (
                   <div key={contractor.employee_id} className={`rounded-xl border p-4 ${contractor.compliance_issues.length > 0 ? 'border-red-200 bg-red-50/50' : 'border-neutral-200 bg-white'}`}>
-                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{contractor.name}</p>{contractor.business_name && <p className="mt-1 text-xs text-neutral-500">{contractor.business_name}</p>}</div><Badge variant={contractor.requires_filing ? 'success' : 'default'}>{contractor.requires_filing ? 'Reportable' : 'Below threshold'}</Badge></div>
+                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-semibold text-neutral-950">{contractor.name}</p>{contractor.business_name && <p className="mt-1 text-xs text-neutral-600">{contractor.business_name}</p>}</div><Badge variant={contractor.requires_filing ? 'success' : 'default'}>{contractor.requires_filing ? 'Reportable' : 'Below threshold'}</Badge></div>
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Box 1 compensation</dt><dd className="font-semibold">{fmt(contractor.total_compensation)}</dd></div><div><dt className="text-neutral-500">Box 4 withheld</dt><dd className="font-semibold">{fmt(contractor.federal_withheld)}</dd></div><div><dt className="text-neutral-500">TIN</dt><dd>{contractor.tin_type}: ***{contractor.tin_last_four || '????'}</dd></div><div><dt className="text-neutral-500">Payments</dt><dd>{contractor.payment_count}</dd></div><div><dt className="text-neutral-500">W-9</dt><dd>{contractor.w9_on_file ? 'On file' : 'Missing'}</dd></div></dl>
                     {contractor.compliance_issues.length > 0 && <ul className="mt-3 space-y-1 text-xs font-medium text-red-700">{contractor.compliance_issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
                   </div>
@@ -3786,10 +3786,10 @@ function Form1099NecPanel() {
                       <TableRow key={c.employee_id} className={c.compliance_issues.length > 0 ? 'bg-red-50/50' : undefined}>
                         <TableCell>
                           <p className="font-medium">{c.name}</p>
-                          {c.business_name && <p className="text-xs text-gray-500">{c.business_name}</p>}
+                          {c.business_name && <p className="text-xs text-neutral-600">{c.business_name}</p>}
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm text-gray-600">{c.tin_type}: ***{c.tin_last_four || '????'}</span>
+                          <span className="text-sm text-neutral-600">{c.tin_type}: ***{c.tin_last_four || '????'}</span>
                         </TableCell>
                         <TableCell className="text-center">{c.payment_count}</TableCell>
                         <TableCell className="text-right font-medium">{fmt(c.total_compensation)}</TableCell>
@@ -3807,14 +3807,14 @@ function Form1099NecPanel() {
                               Reportable
                             </span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                            <span className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">
                               Below threshold
                             </span>
                           )}
                           {c.compliance_issues.length > 0 && (
                             <div className="mt-1">
                               {c.compliance_issues.map((issue, i) => (
-                                <span key={i} className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 mr-1 mb-0.5">
+                                <span key={i} className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 mr-1 mb-0.5">
                                   {issue}
                                 </span>
                               ))}
@@ -4091,7 +4091,7 @@ function ReportLibraryRow({
             </div>
             <ReportMetaChips report={report} />
             <div className="mt-4 flex flex-col items-stretch gap-3 border-t border-neutral-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{reportCategories.find((category) => category.id === report.category)?.label}</span>
+              <span className="text-xs font-bold text-neutral-600">{reportCategories.find((category) => category.id === report.category)?.label}</span>
               <Button size="sm" variant={active ? 'primary' : 'outline'} onClick={(event) => { event.stopPropagation(); onOpen(); }}>
                 {active ? 'Selected' : report.cta}
               </Button>
@@ -4233,7 +4233,7 @@ function ReportsContent() {
           <CardContent className="p-4 sm:p-6 lg:p-7">
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
               <div>
-                <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Reports center</p>
+                <p className="text-xs font-extrabold text-primary-700">Reports center</p>
                 <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance">Everything payroll teams need to file, reconcile, and review.</h2>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
                   Search the report library, open a focused setup panel, and export packet-ready payroll records. Report basis and output formats are shown up front so operators know exactly what they are running.
@@ -4243,7 +4243,7 @@ function ReportsContent() {
                 </p>
               </div>
               <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm shadow-primary-100/70">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Recommended workflow</p>
+                <p className="text-xs font-bold text-neutral-600">Recommended workflow</p>
                 <div className="mt-3 space-y-2 text-sm text-neutral-600">
                   <p><span className="font-bold text-neutral-950">1.</span> Pick a report or packet.</p>
                   <p><span className="font-bold text-neutral-950">2.</span> Confirm period, quarter, or employee.</p>
@@ -4328,7 +4328,7 @@ function ReportsContent() {
                 <div className="flex items-start gap-4">
                   <div className="rounded-2xl bg-primary-100 p-3 text-primary-700 ring-1 ring-primary-200">{activeReportDefinition.icon}</div>
                   <div>
-                    <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-primary-700">Selected report</p>
+                    <p className="text-xs font-extrabold text-primary-700">Selected report</p>
                     <h2 id="active-report-heading" className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">{activeReportDefinition.title}</h2>
                     <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500">{activeReportDefinition.description}</p>
                     <ReportMetaChips report={activeReportDefinition} />

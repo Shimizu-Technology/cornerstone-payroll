@@ -541,20 +541,20 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
     <>
       <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()} dismissOnEscape={!savingNumbers}>
         <DialogContent className="dialog-wide flex h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden p-0 sm:h-[94vh] sm:max-h-[94vh]">
-          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-4 py-4 text-white sm:px-6 sm:py-5">
+          <DialogHeader className="border-b border-neutral-800 bg-neutral-950 px-4 py-4 text-white sm:px-6 sm:py-5">
             <div className="flex items-start justify-between gap-5 pr-8">
               <div>
                 <DialogTitle className="text-xl text-white">Print checks</DialogTitle>
-                <DialogDescription className="mt-1 max-w-3xl text-slate-300">Generate and save an exact package. That prepares the selected checks; print the saved PDF when ready.</DialogDescription>
+                <DialogDescription className="mt-1 max-w-3xl text-neutral-300">Generate and save an exact package. That prepares the selected checks; print the saved PDF when ready.</DialogDescription>
               </div>
-              {queue && <div className="hidden shrink-0 font-mono text-xs text-slate-400 sm:block">{queue.meta.check_stock_type.replaceAll('_', ' ').toUpperCase()}</div>}
+              {queue && <div className="hidden shrink-0 font-mono text-xs text-neutral-400 sm:block">{queue.meta.check_stock_type.replaceAll('_', ' ').toUpperCase()}</div>}
             </div>
           </DialogHeader>
 
           {initialLoading ? <CheckPrintWorkspaceSkeleton /> : (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_390px]">
-                <section className="min-w-0 border-r border-slate-200 p-4 sm:p-5 lg:p-6">
+                <section className="min-w-0 border-r border-neutral-200 p-4 sm:p-5 lg:p-6">
                   <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
                     <div className="flex items-start gap-3">
                       <FileLock2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" />
@@ -567,18 +567,18 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                       {(['all', 'employee', 'non_employee'] as SourceFilter[]).map((value) => (
                         <Button key={value} size="sm" variant={sourceFilter === value ? 'default' : 'outline'} onClick={() => setSourceFilter(value)}>{value === 'all' ? 'All checks' : value === 'employee' ? 'Employees' : 'Non-employees'}</Button>
                       ))}
-                      <select aria-label="Check status" className="min-h-9 rounded-full border border-slate-300 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="unprepared">Not prepared</option><option value="prepared">Prepared or later</option><option value="all">All statuses</option></select>
+                      <select aria-label="Check status" className="min-h-9 rounded-full border border-neutral-300 bg-white px-3 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="unprepared">Not prepared</option><option value="prepared">Prepared or later</option><option value="all">All statuses</option></select>
                     </div>
                     <div className="flex gap-2 text-xs">
-                      <button type="button" className="font-semibold text-blue-700 disabled:text-slate-400" disabled={editingLocked || bulkSelectableItems.length === 0} onClick={() => setSelected((current) => { const next = new Set(current); bulkSelectableItems.forEach((item) => next.add(item.key)); return next; })}>{statusFilter === 'all' ? 'Select not prepared' : 'Select visible'}</button>
-                      <span className="text-slate-300">/</span>
-                      <button type="button" className="font-semibold text-slate-600 disabled:text-slate-400" disabled={editingLocked} onClick={() => setSelected(new Set())}>Clear</button>
+                      <button type="button" className="font-semibold text-blue-700 disabled:text-neutral-400" disabled={editingLocked || bulkSelectableItems.length === 0} onClick={() => setSelected((current) => { const next = new Set(current); bulkSelectableItems.forEach((item) => next.add(item.key)); return next; })}>{statusFilter === 'all' ? 'Select not prepared' : 'Select visible'}</button>
+                      <span className="text-neutral-300">/</span>
+                      <button type="button" className="font-semibold text-neutral-600 disabled:text-neutral-400" disabled={editingLocked} onClick={() => setSelected(new Set())}>Clear</button>
                     </div>
                   </div>
 
-                  <p className="mb-3 text-xs text-slate-500">Edit check numbers first. The saved package will use exactly the reviewed values shown here.</p>
+                  <p className="mb-3 text-xs text-neutral-500">Edit check numbers first. The saved package will use exactly the reviewed values shown here.</p>
                   {!run && previouslyPreparedCount > 0 && (
-                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm leading-5 ${selectedPreviouslyPreparedCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                    <div className={`mb-4 rounded-xl border px-4 py-3 text-sm leading-5 ${selectedPreviouslyPreparedCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-neutral-200 bg-neutral-50 text-neutral-700'}`}>
                       {selectedPreviouslyPreparedCount > 0
                         ? `${selectedPreviouslyPreparedCount} selected check${selectedPreviouslyPreparedCount === 1 ? ' was' : 's were'} prepared before. Review the selection before generating another package.`
                         : `${previouslyPreparedCount} check${previouslyPreparedCount === 1 ? ' was' : 's were'} prepared before. They remain available for another package but are not selected automatically. Select them individually, or use the Prepared filter to select a group.`}
@@ -591,22 +591,22 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                     </div>
                   )}
 
-                  <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200">
-                    {mobileCheckList && <div className="divide-y divide-slate-100" aria-label="Checks available for this package">
+                  <div className="min-w-0 overflow-hidden rounded-2xl border border-neutral-200">
+                    {mobileCheckList && <div className="divide-y divide-neutral-100" aria-label="Checks available for this package">
                       {visibleItems.map((item) => (
                         <div key={item.key} className={`min-w-0 space-y-3 p-4 ${selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}`}>
                           <div className="flex min-w-0 items-start gap-3">
                             <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={selected.has(item.key)} disabled={!item.eligible || editingLocked} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} />
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
-                                <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{item.payee}</p>
-                                <p className="shrink-0 font-mono text-sm font-semibold text-slate-950">{formatCurrency(item.amount)}</p>
+                                <p className="min-w-0 break-words text-sm font-semibold text-neutral-900">{item.payee}</p>
+                                <p className="shrink-0 font-mono text-sm font-semibold text-neutral-950">{formatCurrency(item.amount)}</p>
                               </div>
-                              <p className="mt-1 text-xs text-slate-500">{item.kind_label}</p>
+                              <p className="mt-1 text-xs text-neutral-500">{item.kind_label}</p>
                             </div>
                           </div>
                           <div className="flex min-w-0 flex-wrap items-end justify-between gap-3 pl-8">
-                            <div><p className="mb-1 text-xs font-medium text-slate-600">Check number</p><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></div>
+                            <div><p className="mb-1 text-xs font-medium text-neutral-600">Check number</p><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></div>
                             {statusBadge(item)}
                           </div>
                           {item.disabled_reason && <p className="pl-8 text-xs text-red-600">{item.disabled_reason}</p>}
@@ -615,70 +615,70 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                     </div>}
                     {!mobileCheckList && <div className="min-w-0 overflow-x-auto">
                     <table className="w-full min-w-[680px] text-left text-sm">
-                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="w-10 p-3"/><th className="p-3">Check</th><th className="p-3">Payee</th><th className="p-3">Type</th><th className="p-3">Status</th><th className="p-3 text-right">Amount</th></tr></thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <thead className="bg-neutral-50 text-xs text-neutral-500"><tr><th className="w-10 p-3"/><th className="p-3">Check</th><th className="p-3">Payee</th><th className="p-3">Type</th><th className="p-3">Status</th><th className="p-3 text-right">Amount</th></tr></thead>
+                      <tbody className="divide-y divide-neutral-100">
                         {visibleItems.map((item) => (
                           <tr key={item.key} className={selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}>
                             <td className="p-3"><input type="checkbox" checked={selected.has(item.key)} disabled={!item.eligible || editingLocked} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} /></td>
-                            <td className="p-3 text-slate-900"><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></td>
-                            <td className="p-3"><div className="font-medium text-slate-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
-                            <td className="p-3 text-slate-600">{item.kind_label}</td><td className="p-3">{statusBadge(item)}</td><td className="p-3 text-right font-mono font-semibold">{formatCurrency(item.amount)}</td>
+                            <td className="p-3 text-neutral-900"><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></td>
+                            <td className="p-3"><div className="font-medium text-neutral-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
+                            <td className="p-3 text-neutral-600">{item.kind_label}</td><td className="p-3">{statusBadge(item)}</td><td className="p-3 text-right font-mono font-semibold">{formatCurrency(item.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                     </div>}
-                    {visibleItems.length === 0 && <div className="p-10 text-center text-sm text-slate-500">{queue?.items.length ? 'No checks match these filters.' : 'No checks are available for this pay period.'}{queue?.items.length && (statusFilter !== 'all' || sourceFilter !== 'all') ? <button type="button" className="mt-2 block w-full font-semibold text-blue-700" onClick={() => { setStatusFilter('all'); setSourceFilter('all'); }}>Show all checks</button> : null}</div>}
+                    {visibleItems.length === 0 && <div className="p-10 text-center text-sm text-neutral-500">{queue?.items.length ? 'No checks match these filters.' : 'No checks are available for this pay period.'}{queue?.items.length && (statusFilter !== 'all' || sourceFilter !== 'all') ? <button type="button" className="mt-2 block w-full font-semibold text-blue-700" onClick={() => { setStatusFilter('all'); setSourceFilter('all'); }}>Show all checks</button> : null}</div>}
                   </div>
                 </section>
 
-                <aside className="min-w-0 space-y-4 bg-slate-50 p-4 sm:p-5 lg:sticky lg:top-0 lg:self-start">
+                <aside className="min-w-0 space-y-4 bg-neutral-50 p-4 sm:p-5 lg:sticky lg:top-0 lg:self-start">
                   {generation && <OperationStatusPanel generation={generation} showLongRunningHint={showLongRunningHint} onRetry={() => void generate()} retryDisabled={hasUnsavedNumbers || hasNumberErrors || savingNumbers} />}
 
-                  <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex items-center justify-between gap-3"><div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Printer profile</div>{!run && <Button size="sm" variant="ghost" className="gap-1.5 px-2" onClick={() => setProfileManagerOpen(true)} disabled={!queue || generationInProgress}><Settings2 className="h-3.5 w-3.5" /> Manage</Button>}</div>
+                  <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3"><div className="text-xs font-semibold tracking-[0.16em] text-neutral-500">Printer profile</div>{!run && <Button size="sm" variant="ghost" className="gap-1.5 px-2" onClick={() => setProfileManagerOpen(true)} disabled={!queue || generationInProgress}><Settings2 className="h-3.5 w-3.5" /> Manage</Button>}</div>
                     {run ? (
-                      <div className="mt-2"><p className="font-semibold text-slate-950">{run.printer_profile_name || 'Legacy company calibration'}</p><p className="mt-1 text-xs leading-5 text-slate-500">Package snapshot{run.printer_profile_lock_version !== null ? ` · profile version ${run.printer_profile_lock_version}` : ''}. Later profile edits do not change this PDF.</p></div>
+                      <div className="mt-2"><p className="font-semibold text-neutral-950">{run.printer_profile_name || 'Legacy company calibration'}</p><p className="mt-1 text-xs leading-5 text-neutral-500">Package snapshot{run.printer_profile_lock_version !== null ? ` · profile version ${run.printer_profile_lock_version}` : ''}. Later profile edits do not change this PDF.</p></div>
                     ) : (
                       <>
-                        <select aria-label="Printer profile" className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-900" value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationInProgress || busyAction === 'profiles'}>
+                        <select aria-label="Printer profile" className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm font-medium text-neutral-900" value={queue?.meta.printer_profile?.id ?? ''} onChange={(event) => { const profile = compatibleProfiles.find((candidate) => candidate.id === Number(event.target.value)); if (profile) void selectPrinterProfile(profile); }} disabled={!queue || generationInProgress || busyAction === 'profiles'}>
                           <option value="" disabled>Select a calibrated printer…</option>{compatibleProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
                         </select>
-                        <p className="mt-2 text-xs leading-5 text-slate-500">Profiles are shared by the organization. This selection applies only to you.</p>
+                        <p className="mt-2 text-xs leading-5 text-neutral-500">Profiles are shared by the organization. This selection applies only to you.</p>
                         {profileLoadError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"><p>{profileLoadError}</p><Button className="mt-2" size="sm" variant="outline" loading={busyAction === 'profiles'} loadingLabel="Retrying…" onClick={() => { setBusyAction('profiles'); void loadPrinterProfiles().catch(() => undefined).finally(() => setBusyAction(null)); }}>Retry printer profiles</Button></div>}
                         {!queue?.meta.printer_profile && <button type="button" onClick={() => setProfileManagerOpen(true)} className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs font-medium text-amber-900">Choose or create a printer profile before generating.</button>}
                       </>
                     )}
                   </section>
 
-                  <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Package summary</div>
-                    <div className="mt-4 grid grid-cols-2 gap-3"><div><div className="text-xs text-slate-500">{run ? 'Checks in package' : 'Selected'}</div><div className="text-2xl font-bold text-slate-950">{run?.selected_count ?? selectedItems.length}</div></div><div><div className="text-xs text-slate-500">Total value</div><div className="text-xl font-bold text-slate-950">{formatCurrency(packageTotal)}</div></div></div>
+                  <section className="rounded-2xl border border-neutral-200 bg-white p-4">
+                    <div className="text-xs font-semibold tracking-[0.16em] text-neutral-500">Package summary</div>
+                    <div className="mt-4 grid grid-cols-2 gap-3"><div><div className="text-xs text-neutral-500">{run ? 'Checks in package' : 'Selected'}</div><div className="text-2xl font-bold text-neutral-950">{run?.selected_count ?? selectedItems.length}</div></div><div><div className="text-xs text-neutral-500">Total value</div><div className="text-xl font-bold text-neutral-950">{formatCurrency(packageTotal)}</div></div></div>
                     {replacementMode && !run && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">Review the current checks and printer profile. Generating will save a new replacement; the outdated package stays in history.</p>}
-                    {queue?.meta.check_stock_type === 'first_hawaiian_4up' && !run && <div className="mt-5 border-t border-slate-100 pt-4"><div className="mb-2 text-sm font-semibold text-slate-800">First sheet starts at slot</div><div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map((slot) => <button type="button" key={slot} disabled={generationInProgress} onClick={() => setStartingSlot(slot)} className={`rounded-lg border py-3 font-mono font-bold ${startingSlot === slot ? 'border-blue-700 bg-blue-700 text-white' : 'border-slate-200 bg-white text-slate-700'}`}>{slot}</button>)}</div><p className="mt-2 text-xs text-slate-500">Estimated stock: {sheetCount} sheet{sheetCount === 1 ? '' : 's'}.</p></div>}
+                    {queue?.meta.check_stock_type === 'first_hawaiian_4up' && !run && <div className="mt-5 border-t border-neutral-100 pt-4"><div className="mb-2 text-sm font-semibold text-neutral-800">First sheet starts at slot</div><div className="grid grid-cols-4 gap-2">{[1, 2, 3, 4].map((slot) => <button type="button" key={slot} disabled={generationInProgress} onClick={() => setStartingSlot(slot)} className={`rounded-lg border py-3 font-mono font-bold ${startingSlot === slot ? 'border-blue-700 bg-blue-700 text-white' : 'border-neutral-200 bg-white text-neutral-700'}`}>{slot}</button>)}</div><p className="mt-2 text-xs text-neutral-500">Estimated stock: {sheetCount} sheet{sheetCount === 1 ? '' : 's'}.</p></div>}
                   </section>
 
                   {run && (
-                    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                      <div className="border-b border-slate-100 p-4">
-                        <div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-slate-950">Package #{run.id}</div><div className="mt-1 text-xs text-slate-500">Generated {new Date(run.generated_at).toLocaleString()} {run.created_by_name ? `by ${run.created_by_name}` : ''}</div></div>{packageBadge(run)}</div>
-                        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs"><div><dt className="text-slate-500">Checks</dt><dd className="mt-0.5 font-semibold text-slate-900">{run.selected_count} · {packageRange}</dd></div><div><dt className="text-slate-500">Total</dt><dd className="mt-0.5 font-semibold text-slate-900">{formatCurrency(packageTotal)}</dd></div><div className="col-span-2"><dt className="text-slate-500">Printer snapshot</dt><dd className="mt-0.5 font-semibold text-slate-900">{run.printer_profile_name || 'Legacy calibration'}{run.printer_profile_lock_version !== null ? ` · version ${run.printer_profile_lock_version}` : ''}</dd></div></dl>
+                    <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+                      <div className="border-b border-neutral-100 p-4">
+                        <div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-neutral-950">Package #{run.id}</div><div className="mt-1 text-xs text-neutral-500">Generated {new Date(run.generated_at).toLocaleString()} {run.created_by_name ? `by ${run.created_by_name}` : ''}</div></div>{packageBadge(run)}</div>
+                        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs"><div><dt className="text-neutral-500">Checks</dt><dd className="mt-0.5 font-semibold text-neutral-900">{run.selected_count} · {packageRange}</dd></div><div><dt className="text-neutral-500">Total</dt><dd className="mt-0.5 font-semibold text-neutral-900">{formatCurrency(packageTotal)}</dd></div><div className="col-span-2"><dt className="text-neutral-500">Printer snapshot</dt><dd className="mt-0.5 font-semibold text-neutral-900">{run.printer_profile_name || 'Legacy calibration'}{run.printer_profile_lock_version !== null ? ` · version ${run.printer_profile_lock_version}` : ''}</dd></div></dl>
                       </div>
-                      {previewBlob ? <div><div className="flex justify-end border-b border-slate-100 p-2"><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="gap-1.5 max-sm:min-h-[44px]"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div><PdfDocumentView blob={previewBlob} className="h-96 flex-none" /></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-slate-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
+                      {open && previewBlob ? <div><div className="flex justify-end border-b border-neutral-100 p-2"><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="gap-1.5 max-sm:min-h-[44px]"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div><PdfDocumentView blob={previewBlob} className="h-96 flex-none" /></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-neutral-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
                       <div className="border-t border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-950"><span className="font-semibold">Printer setup:</span> Open the original saved PDF to print. Letter paper, Actual Size / 100% scale, headers and footers off. Never use Fit or Shrink. Download it if your browser cannot open the PDF.</div>
                       <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !['prepared', 'confirmed'].includes(run.confirmation_state)}>Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()}>Download</Button></div>
                       {run.confirmation_state === 'outdated' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><div className="flex items-start gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>This package is outdated.</strong> {run.confirmation_issue} Generate a replacement from current data.</span></div></div>}
                       {run.confirmation_state === 'legacy' && <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">This older package did not prepare its checks. Generate a new package before recording issuance or payment.</div>}
-                      <details className="border-t border-slate-100 px-4 py-3 text-xs text-slate-600"><summary className="cursor-pointer font-semibold text-slate-700">Audit details</summary><div className="mt-2 space-y-1 break-all font-mono"><p>File: {run.filename}</p><p>SHA-256: {run.sha256}</p><p>Bytes: {run.byte_size.toLocaleString()}</p></div></details>
+                      <details className="border-t border-neutral-100 px-4 py-3 text-xs text-neutral-600"><summary className="cursor-pointer font-semibold text-neutral-700">Audit details</summary><div className="mt-2 space-y-1 break-all font-mono"><p>File: {run.filename}</p><p>SHA-256: {run.sha256}</p><p>Bytes: {run.byte_size.toLocaleString()}</p></div></details>
                     </section>
                   )}
 
                   {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
                   {runs.length > 0 && (
-                    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                      <div className="border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="h-4 w-4" />Saved package history</div><p className="mt-1 text-xs text-slate-500">Every package is retained as an immutable payroll record.</p></div>
-                      <div className="divide-y divide-slate-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-slate-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-slate-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-slate-500">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
+                    <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+                      <div className="border-b border-neutral-100 px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold text-neutral-900"><Clock3 className="h-4 w-4" />Saved package history</div><p className="mt-1 text-xs text-neutral-500">Every package is retained as an immutable payroll record.</p></div>
+                      <div className="divide-y divide-neutral-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-neutral-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-neutral-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-neutral-500">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
                     </section>
                   )}
                 </aside>
@@ -686,8 +686,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
             </div>
           )}
 
-          <DialogFooter className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
-            {generationActive && <p className="mr-auto self-center text-xs text-slate-500">Safe to close — generation will continue in the background.</p>}
+          <DialogFooter className="shrink-0 border-t border-neutral-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+            {generationActive && <p className="mr-auto self-center text-xs text-neutral-500">Safe to close — generation will continue in the background.</p>}
             <Button variant="outline" onClick={requestClose}>Close</Button>
             {!run && !generationActive && <Button loading={startingGeneration} loadingLabel="Starting generation…" onClick={() => void generate()} disabled={selectedItems.length === 0 || !queue?.meta.printer_profile || savingNumbers || hasUnsavedNumbers}>{replacementMode ? 'Generate replacement package' : 'Generate and save package'}</Button>}
             {generationActive && <Button loading loadingLabel="Generating package…">Generating package…</Button>}
@@ -701,9 +701,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
 
       <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded} dismissOnEscape={busyAction !== 'download'}>
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
-          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-slate-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
-          {previewBlob && <PdfDocumentView blob={previewBlob} />}
-          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
+          <DialogHeader className="border-b border-neutral-800 bg-neutral-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-neutral-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-neutral-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
+          {open && previewBlob && <PdfDocumentView blob={previewBlob} />}
+          <DialogFooter className="border-t border-neutral-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

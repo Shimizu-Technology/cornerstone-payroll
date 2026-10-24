@@ -33,7 +33,7 @@ Table.displayName = 'Table';
 
 const TableHeader = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
-    <thead ref={ref} className={cn('bg-gray-50', className)} {...props} />
+    <thead ref={ref} className={cn('bg-neutral-50', className)} {...props} />
   )
 );
 TableHeader.displayName = 'TableHeader';
@@ -43,8 +43,8 @@ const TableBody = forwardRef<HTMLTableSectionElement, TableBodyProps>(
     <tbody
       ref={ref}
       className={cn(
-        'divide-y divide-gray-200',
-        striped && '[&_tr:nth-child(odd)]:bg-white [&_tr:nth-child(even)]:bg-slate-100',
+        'divide-y divide-neutral-200',
+        striped && '[&_tr:nth-child(odd)]:bg-white [&_tr:nth-child(even)]:bg-neutral-100',
         className
       )}
       {...props}
@@ -57,7 +57,7 @@ const TableFooter = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTable
   ({ className, ...props }, ref) => (
     <tfoot
       ref={ref}
-      className={cn('bg-gray-50 font-medium', className)}
+      className={cn('bg-neutral-50 font-medium', className)}
       {...props}
     />
   )
@@ -68,7 +68,7 @@ const TableRow = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTableRowElem
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn('transition-colors hover:bg-gray-50', className)}
+      className={cn('transition-colors hover:bg-neutral-50', className)}
       {...props}
     />
   )
@@ -80,8 +80,8 @@ const TableHead = forwardRef<HTMLTableCellElement, ThHTMLAttributes<HTMLTableCel
     <th
       ref={ref}
       className={cn(
-        'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
-        stickyLeft && 'sticky left-0 z-50 border-r border-slate-200 bg-gray-50 shadow-[12px_0_18px_-14px_rgba(15,23,42,0.55)]',
+        'px-6 py-3 text-left text-xs font-medium text-neutral-600',
+        stickyLeft && 'sticky left-0 z-50 border-r border-neutral-200 bg-neutral-50 shadow-[12px_0_18px_-14px_rgba(15,23,42,0.55)]',
         className
       )}
       {...props}
@@ -96,7 +96,7 @@ const TableCell = forwardRef<HTMLTableCellElement, TdHTMLAttributes<HTMLTableCel
       ref={ref}
       className={cn(
         'px-6 py-4 whitespace-nowrap',
-        stickyLeft && 'sticky left-0 z-10 border-r border-slate-200 bg-inherit shadow-[12px_0_18px_-14px_rgba(15,23,42,0.45)]',
+        stickyLeft && 'sticky left-0 z-10 border-r border-neutral-200 bg-inherit shadow-[12px_0_18px_-14px_rgba(15,23,42,0.45)]',
         className
       )}
       {...props}

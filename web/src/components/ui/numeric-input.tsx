@@ -94,7 +94,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
         inputMode={inputMode}
         value={displayValue}
         className={cn(
-          'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm transition-all duration-200 placeholder:text-neutral-400',
+          'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-base sm:text-sm text-neutral-900 shadow-sm transition-[border-color,background-color,color,box-shadow] duration-150 ease-out placeholder:text-neutral-400',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 focus-visible:border-primary-400',
           'border-neutral-300 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
           className

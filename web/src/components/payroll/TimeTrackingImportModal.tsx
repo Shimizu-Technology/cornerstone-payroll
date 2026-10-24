@@ -685,7 +685,7 @@ export function TimeTrackingImportModal({
                         </p>
                       </div>
                       <div className="rounded-xl border border-neutral-200 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Pay period</div>
+                        <div className="text-xs font-semibold text-neutral-600">Pay period</div>
                         <div className="mt-2 text-sm font-medium text-neutral-900">{payPeriod.start_date}</div>
                         <div className="text-sm text-neutral-500">through {payPeriod.end_date}</div>
                       </div>
@@ -693,11 +693,11 @@ export function TimeTrackingImportModal({
                   ) : (
                     <>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="block text-sm font-medium text-neutral-700">
+                        <label className="block text-xs font-medium text-neutral-600">
                           Start date
                           <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm" />
                         </label>
-                        <label className="block text-sm font-medium text-neutral-700">
+                        <label className="block text-xs font-medium text-neutral-600">
                           End date
                           <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm" />
                         </label>
@@ -742,8 +742,8 @@ export function TimeTrackingImportModal({
                     <dt>Net</dt><dd>{formatCurrency(correction.original.net_pay)} → {formatCurrency(correction.corrected.net_pay)} ({formatCurrency(correction.deltas.net_pay)})</dd>
                   </dl>
                   <p className="text-sm font-medium">Accounting correction only. The paid check remains. No new payment or recovery is recorded.</p>
-                  <label className="block text-sm">Reason<textarea className="mt-2 w-full rounded-lg border p-2" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
-                  <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={correctionAcknowledged} onChange={(event) => setCorrectionAcknowledged(event.target.checked)} />I reviewed the signed adjustment and understand no new payment or recovery is recorded.</label>
+                  <label className="block text-xs">Reason<textarea className="mt-2 w-full rounded-lg border p-2" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
+                  <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={correctionAcknowledged} onChange={(event) => setCorrectionAcknowledged(event.target.checked)} />I reviewed the signed adjustment and understand no new payment or recovery is recorded.</label>
                   <Button disabled={correctionBusy || !correctionAcknowledged || correctionReason.trim().length < 10} onClick={() => void confirmCorrection()}>Confirm accounting correction</Button>
                 </section>
               )}
@@ -796,7 +796,7 @@ export function TimeTrackingImportModal({
                   {unmappedIncludedCount > 0 && ` · ${unmappedIncludedCount} unmapped`}
                   {warningCount > 0 && ` · ${warningCount} warning${warningCount === 1 ? '' : 's'}`}
                 </p>
-                {!isFinalizedBatch && <p className="mt-1 text-xs text-neutral-500">OT window: {formatDateRange(preview.fetch_start_date, preview.fetch_end_date)}</p>}
+                {!isFinalizedBatch && <p className="mt-1 text-xs text-neutral-600">OT window: {formatDateRange(preview.fetch_start_date, preview.fetch_end_date)}</p>}
               </section>
 
               {isFinalizedBatch && exclusions.length > 0 && (
@@ -846,7 +846,7 @@ export function TimeTrackingImportModal({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             {!isFinalizedBatch && (
-                              <label className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-700">
+                              <label className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-600">
                                 <input
                                   type="checkbox"
                                   checked={included}
@@ -862,22 +862,22 @@ export function TimeTrackingImportModal({
                             )}
                             <h3 className="font-semibold text-neutral-950">{row.source_display_name}</h3>
                             {Object.entries(row.source_kind_counts || {}).map(([kind, count]) => Number(count) > 0 && (
-                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-[11px] font-semibold capitalize text-neutral-700">{kind} {count}</span>
+                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold capitalize text-neutral-700">{kind} {count}</span>
                             ))}
                           </div>
-                          {row.source_email && <div className="mt-2 text-xs text-neutral-500">{row.source_email}</div>}
+                          {row.source_email && <div className="mt-2 text-xs text-neutral-600">{row.source_email}</div>}
 
                           <div className="mt-4 grid grid-cols-3 gap-2 sm:max-w-md">
                             <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Regular</div>
+                              <div className="text-xs font-semibold text-neutral-600">Regular</div>
                               <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.regular_hours)}</div>
                             </div>
                             <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Overtime</div>
+                              <div className="text-xs font-semibold text-neutral-600">Overtime</div>
                               <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.overtime_hours)}</div>
                             </div>
                             <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Total</div>
+                              <div className="text-xs font-semibold text-neutral-600">Total</div>
                               <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(row.total_hours)}</div>
                             </div>
                           </div>
@@ -888,7 +888,7 @@ export function TimeTrackingImportModal({
                           )}
                         </div>
 
-                        <label className="block min-w-0 text-sm font-medium text-neutral-700 lg:w-72">
+                        <label className="block min-w-0 text-xs font-medium text-neutral-600 lg:w-72">
                           Payroll employee
                           <select
                             value={mappedEmployeeId ?? ''}
@@ -909,7 +909,7 @@ export function TimeTrackingImportModal({
                               <option key={employee.id} value={employee.id}>{[employee.first_name, employee.last_name].filter(Boolean).join(' ')}</option>
                             ))}
                           </select>
-                          <span className="mt-2 block text-xs font-normal text-neutral-500">
+                          <span className="mt-2 block text-xs font-normal text-neutral-600">
                             {row.match_method === 'saved_mapping'
                               ? 'Confirmed saved link'
                               : row.suggested_employee_name
@@ -921,7 +921,7 @@ export function TimeTrackingImportModal({
 
                       {categories.length > 0 && (
                         <div className="mt-4 border-t border-neutral-200 pt-4">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                          <div className="text-xs font-semibold text-neutral-600">
                             {isHistoricalReconciliation ? 'time tracking earning breakdown' : 'Payable earning dimensions'}
                           </div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
@@ -937,13 +937,13 @@ export function TimeTrackingImportModal({
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div>
                                     <div className="text-sm font-semibold text-neutral-900">{category.name}</div>
-                                    <div className="mt-2 text-xs text-neutral-500">
+                                    <div className="mt-2 text-xs text-neutral-600">
                                       {!isHistoricalReconciliation && <>{formatRate(selectedRateCents)} · </>}
                                       {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT
                                     </div>
                                   </div>
                                   {(category.source_kinds || []).map((kind) => (
-                                    <span key={kind} className="rounded-full bg-white px-2 text-[10px] font-semibold capitalize text-neutral-600">{kind}</span>
+                                    <span key={kind} className="rounded-full bg-white px-2 text-xs font-semibold capitalize text-neutral-600">{kind}</span>
                                   ))}
                                 </div>
                                 {needsRateMapping && lacksActiveWageRates && (
@@ -952,7 +952,7 @@ export function TimeTrackingImportModal({
                                   </p>
                                 )}
                                 {needsRateMapping && !lacksActiveWageRates && (
-                                  <label className="mt-4 block text-xs font-medium text-neutral-700">
+                                  <label className="mt-4 block text-xs font-medium text-neutral-600">
                                     Payroll earning type
                                     <select
                                       value={rowRateMappings[categoryMappingKey(category)] ?? ''}
@@ -1019,9 +1019,9 @@ export function TimeTrackingImportModal({
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <div className="text-sm font-semibold text-neutral-900">{exclusion.display_name || exclusion.source_user_id}</div>
-                            <div className="mt-2 text-xs text-neutral-500">{exclusion.original_work_date} · {exclusion.category?.name || 'Uncategorized'}</div>
+                            <div className="mt-2 text-xs text-neutral-600">{exclusion.original_work_date} · {exclusion.category?.name || 'Uncategorized'}</div>
                           </div>
-                          <span className="rounded-full bg-neutral-100 px-2 text-[11px] font-semibold text-neutral-700">{exclusionLabel(exclusion.reason)}</span>
+                          <span className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{exclusionLabel(exclusion.reason)}</span>
                         </div>
                         <div className="mt-2 text-xs text-neutral-600">{formatHours(exclusion.held_total_hours)} held hours at cutoff</div>
                       </div>
@@ -1037,23 +1037,23 @@ export function TimeTrackingImportModal({
                   </summary>
                   <dl className="grid min-w-0 gap-4 border-t border-neutral-200 p-4 sm:grid-cols-2">
                     <div className="min-w-0">
-                      <dt className="text-xs font-semibold text-neutral-500">Batch ID</dt>
+                      <dt className="text-xs font-semibold text-neutral-600">Batch ID</dt>
                       <dd className="mt-1 break-all font-mono text-xs text-neutral-950">{preview.external_batch_id || 'Unavailable'}</dd>
                     </div>
                     <div>
-                      <dt className="text-xs font-semibold text-neutral-500">Contract version</dt>
+                      <dt className="text-xs font-semibold text-neutral-600">Contract version</dt>
                       <dd className="mt-1 break-all text-neutral-950">{preview.contract_version || 'Unavailable'}</dd>
                     </div>
                     <div>
-                      <dt className="text-xs font-semibold text-neutral-500">Cutoff</dt>
+                      <dt className="text-xs font-semibold text-neutral-600">Cutoff</dt>
                       <dd className="mt-1 text-neutral-950">{formatTimestamp(preview.source_cutoff_at)}</dd>
                     </div>
                     <div>
-                      <dt className="text-xs font-semibold text-neutral-500">Finalized</dt>
+                      <dt className="text-xs font-semibold text-neutral-600">Finalized</dt>
                       <dd className="mt-1 text-neutral-950">{formatTimestamp(preview.processed_payload.finalized_at)}</dd>
                     </div>
                     <div className="min-w-0 sm:col-span-2">
-                      <dt className="text-xs font-semibold text-neutral-500">SHA-256</dt>
+                      <dt className="text-xs font-semibold text-neutral-600">SHA-256</dt>
                       <dd className="mt-1 break-all font-mono text-xs leading-5 text-neutral-950">{preview.external_batch_checksum || 'Unavailable'}</dd>
                     </div>
                   </dl>
@@ -1069,11 +1069,11 @@ export function TimeTrackingImportModal({
                   <p className="mt-2 text-sm leading-6 text-warning-900">
                     This batch contains {negativeAdjustmentCount} negative adjustment{negativeAdjustmentCount === 1 ? '' : 's'}. Confirm that the reversals and replacement lines are expected before applying them.
                   </p>
-                  <label className="mt-4 flex items-start gap-4 text-sm font-medium text-warning-950">
+                  <label className="mt-4 flex items-start gap-4 text-xs font-medium text-warning-950">
                     <input type="checkbox" checked={negativeAdjustmentsReviewed} onChange={(event) => setNegativeAdjustmentsReviewed(event.target.checked)} className="mt-2 rounded border-warning-400" />
                     I reviewed the negative corrections and their replacement lines.
                   </label>
-                  <label className="mt-4 block text-sm font-medium text-warning-950">
+                  <label className="mt-4 block text-xs font-medium text-warning-950">
                     Review note
                     <textarea
                       value={negativeAdjustmentNote}
@@ -1092,7 +1092,7 @@ export function TimeTrackingImportModal({
                     <History className="h-4 w-4" aria-hidden="true" /> Historical reconciliation note
                   </div>
                   <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from time tracking.</p>
-                  <label htmlFor="reconciliation-note" className="mt-4 block text-sm font-medium text-primary-950">
+                  <label htmlFor="reconciliation-note" className="mt-4 block text-xs font-medium text-primary-950">
                     Audit note
                   </label>
                   <textarea

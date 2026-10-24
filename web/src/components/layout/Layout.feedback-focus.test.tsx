@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FeedbackProvider, useFeedback } from '@/components/ui/action-feedback';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Layout } from './Layout';
@@ -14,7 +14,8 @@ vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
 vi.mock('./Sidebar', () => ({ Sidebar: () => <nav><a href="/employees">Employees</a></nav> }));
 vi.mock('./CommandPalette', () => ({ CommandPalette: () => null }));
 
-afterEach(cleanup);
+beforeEach(() => { vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function FailedAction() {
   const { notify } = useFeedback();

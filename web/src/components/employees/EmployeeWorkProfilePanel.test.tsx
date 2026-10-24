@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { waitFor, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Employee } from '@/types';
@@ -44,7 +44,7 @@ describe('work profile workspace permissions', () => {
     expect((confirmation as HTMLTextAreaElement).value).toContain('Retained draft');
     expect(screen.getByRole('button', { name: 'Confirm new profile' }).hasAttribute('disabled')).toBe(true);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(mocks.create).not.toHaveBeenCalled();
   });
 });
