@@ -41,7 +41,10 @@ module TimeTracking
           TimeTrackingLateHoursRun.where(adjustment_pay_period_id: item.pay_period_id).where.not(applied_at: nil).exists?
         raise ArgumentError, "This late-hours adjustment contains only its selected source hours. Create a separate run for other pay."
       end
-      return true if rows.empty?
+      if rows.empty?
+        PayrollEarningsRounding.validate!(item) if calculated
+        return true
+      end
 
       valid = rows.all? { |row| frozen_line_matches?(row, item) } &&
         rows.sum(&:regular_hours) == item.hours_worked.to_d &&
@@ -51,7 +54,10 @@ module TimeTracking
       captured = rows.select { |row| row.earning_snapshot.present? }
       # Older allocations never recorded the selected wage mapping. Retain their
       # history and enforce exact frozen hours; do not manufacture rate evidence.
-      return true if captured.empty?
+      if captured.empty?
+        PayrollEarningsRounding.validate!(item) if calculated
+        return true
+      end
       raise ArgumentError, MESSAGE unless captured.size == rows.size
       raise ArgumentError, PAY_BASIS_MESSAGE if pay_basis_changed?(item, captured)
       captured.map(&:time_tracking_import).uniq(&:id).each do |import|
@@ -92,9 +98,9 @@ module TimeTracking
             next if amount.zero?
             label = kind == "overtime" ? "#{entry['label']} OT" : entry["label"]
             if amount.positive?
-              [ kind, label, hours, rate, amount.round(2) ]
+              [ kind, label, hours, rate, PayrollEarningsRounding.line_amount(amount) ]
             else
-              [ "other", "#{label} correction reversal", nil, nil, amount.round(2) ]
+              [ "other", "#{label} correction reversal", nil, nil, PayrollEarningsRounding.line_amount(amount) ]
             end
           end
         end
@@ -104,6 +110,7 @@ module TimeTracking
         end.map { |earning| [ earning.category, earning.label, earning.hours, earning.rate, earning.amount ] }
         raise ArgumentError, MESSAGE unless canonical_earnings(actual_earnings) == canonical_earnings(expected_earnings)
       end
+      PayrollEarningsRounding.validate!(item) if calculated
       true
     rescue KeyError, TypeError, PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error
       raise ArgumentError, MESSAGE
