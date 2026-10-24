@@ -305,6 +305,55 @@ RSpec.describe "Corrective component ledger" do
   end
 
 
+
+  it "does not repay or change an unchanged scheduled loan while correcting wages" do
+    type = DeductionType.create!(company: company, name: "Fixed tracked loan", category: "post_tax", sub_category: "loan")
+    employee.employee_deductions.create!(deduction_type: type, amount: 50, active: true)
+    loan = EmployeeLoan.create!(employee: employee, company: company, deduction_type: type, name: "Fixed tracked loan",
+      original_amount: 1000, current_balance: 1000, opening_balance: 1000, balance_as_of: Date.new(2024, 1, 1),
+      balance_source: "other_verified", payment_amount: 50, first_deduction_date: Date.new(2024, 1, 1),
+      start_date: Date.new(2024, 1, 1), status: "active")
+    original = original!
+    loan.loan_transactions.create!(payroll_item: original, transaction_type: "payment", amount: 50,
+      balance_before: 1000, balance_after: 950, transaction_date: period.pay_date)
+    loan.update!(current_balance: 950)
+    before = loan.reload.attributes
+    transactions = loan.loan_transactions.map(&:attributes)
+    correction = issue(hours_worked: 65)
+    expect(correction.loan_payment).to eq(0)
+    expect(correction.payroll_item_deductions).to be_empty
+    expect(loan.reload.attributes).to eq(before)
+    expect(loan.loan_transactions.reload.map(&:attributes)).to eq(transactions)
+    assert_cash(correction)
+  end
+
+  it "holds changed flexible employer insurance until its benefit ledger is reviewed" do
+    add_deduction(category: "employer_contribution", sub_category: "insurance")
+    original!
+    expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /employer insurance.*review/i)
+    expect { issue(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError)
+    expect(period.supplemental_pay_periods).to be_empty
+  end
+
+  [ :first, :second ].each do |voided|
+    it "reconciles net-only non-taxable corrections through void #{voided}" do
+      original = original!
+      first = issue(non_taxable_pay: 100)
+      second = issue(non_taxable_pay: 50)
+      expect(first.gross_pay).to eq(0)
+      expect(first.net_pay).to eq(100)
+      expect(second.net_pay).to eq(-50)
+      removed, retained = voided == :first ? [ first, second ] : [ second, first ]
+      stale = preview(non_taxable_pay: 75).dig(:meta, :review_digest)
+      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse non-taxable cash adjustment")
+      expect { issue({ non_taxable_pay: 75 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
+      repair = issue(non_taxable_pay: 75)
+      expect([ original, retained, repair ].sum(&:non_taxable_pay)).to eq(75)
+      [ first, second, repair ].each { |item| assert_cash(item) }
+      expect { issue(non_taxable_pay: 75) }.to raise_error(IssueCorrectivePaycheckService::InvalidStateError)
+    end
+  end
+
   describe "signed register exports", type: :request do
     it "keeps negative custom deductions in the JSON register and signed hours in the employee workbook" do
       original!(custom_deductions: [ { "label" => "Uniform", "amount" => 10 } ])

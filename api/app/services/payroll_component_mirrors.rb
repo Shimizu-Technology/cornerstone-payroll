@@ -8,9 +8,12 @@ class PayrollComponentMirrors
       "employer_contribution" => "employer_contribution" }[deduction.category]
     return unless deduction.employer_contribution? || deduction.deduction_type&.name.to_s.match?(/\APayroll Field(?:\s|:)/)
 
+    # Employee field mirrors can retain the uncapped requested amount while
+    # the authoritative field stores the capped amount. Their generated type
+    # carries the mirror identity; employer mirrors still require equal money.
     matches = item.payroll_item_field_entries.select do |entry|
       entry.active? && entry.tax_treatment == treatment && entry.label == deduction.label &&
-        entry.amount.to_d.round(2) == deduction.amount.to_d.round(2) &&
+        (!deduction.employer_contribution? || entry.amount.to_d.round(2) == deduction.amount.to_d.round(2)) &&
         PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
     end
     matches.sole if matches.one?

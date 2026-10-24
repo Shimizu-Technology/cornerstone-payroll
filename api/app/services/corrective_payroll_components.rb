@@ -67,6 +67,13 @@ class CorrectivePayrollComponents
         raise Error, "Ambiguous #{association} identity; review the component history before correcting this paycheck" unless seen.add?(key)
 
         attrs = row.attributes.slice(*attributes).deep_dup
+        if association == :payroll_item_deductions && item.equal?(@corrected) && row.deduction_type&.loan?
+          # Historical recomputation deliberately does not resolve a live loan.
+          # Retain only the original identity so an unchanged fixed payment
+          # produces no delta. Any changed amount is held below, never applied.
+          original_row = @original.payroll_item_deductions.find { |entry| entry.deduction_type_id == row.deduction_type_id }
+          attrs["employee_loan_id"] = original_row&.employee_loan_id
+        end
         group = grouped[key] ||= { attributes: attrs, amount: 0.to_d, hours: 0.to_d, rates: Set.new }
         unless earnings || same_identity?(group[:attributes], attrs)
           raise Error, "A #{association} identity changed; review its reporting and mirror history before correcting this paycheck"
@@ -114,6 +121,9 @@ class CorrectivePayrollComponents
   end
 
   def validate_loans!(item)
+    if item.payroll_item_deductions.any? { |row| row.employer_contribution? && row.deduction_type&.sub_category == "insurance" }
+      raise Error, "Flexible employer insurance changes require a reviewed benefit-ledger correction; the legacy insurance aggregate cannot classify them safely"
+    end
     changed = item.loan_payment.to_d.nonzero? || item.payroll_item_deductions.any? { |row| row.deduction_type&.loan? } ||
       item.payroll_item_field_entries.any? { |row| row.category == "loan" }
     return unless changed
