@@ -74,6 +74,22 @@ RSpec.describe AirePayrollCalendar::SourceState do
     expect(present[:next_scheduled_cutoff_at]).to eq(cutoff)
   end
 
+  it "clears a stale source observation when the staging outbound policy rejects refresh" do
+    source.update_columns(payroll_calendar_source_state: { "status" => "available", "next_scheduled_cutoff_at" => cutoff })
+    original = publication.attributes.slice("payload", "payload_checksum", "source_state")
+    previous = ENV.to_h
+    ENV["DEPLOYMENT_ENV"] = "staging"
+    ENV["STAGING_INTEGRATION_HOSTS"] = "other-staging.example.test"
+    expect(Net::HTTP).not_to receive(:new)
+
+    result = described_class.new(source).refresh
+    expect(result).to include("status" => "unavailable", "next_scheduled_cutoff_at" => nil)
+    expect(present).to include(next_scheduled_cutoff_at: nil, next_scheduled_cutoff_status: "unavailable")
+    expect(publication.reload.attributes.slice(*original.keys)).to eq(original)
+  ensure
+    ENV.replace(previous) if previous
+  end
+
   it "rejects malformed cutoff values" do
     remote["next_scheduled_cutoff_at"] = false
     expect(service.refresh).to include("status" => "unavailable")

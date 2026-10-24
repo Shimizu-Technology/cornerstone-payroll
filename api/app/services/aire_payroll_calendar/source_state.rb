@@ -31,7 +31,7 @@ module AirePayrollCalendar
           raise TimeTracking::Client::Error, "AIRE returned an unexpected calendar revision"
         end
         record(state)
-      rescue TimeTracking::Client::Error, KeyError, ArgumentError
+      rescue TimeTracking::Client::Error, StagingOutboundPolicy::Blocked, KeyError, ArgumentError
         unavailable
       end
     end
