@@ -1608,3 +1608,100 @@ it('keeps source failures visible outside a collapsed verified timecard disclosu
   expect(alert.closest('details')).toBeNull();
   expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
 });
+
+const checkpointBatch: NonNullable<AirePayrollCalendarState['finalized_batch']> = {
+  event_id: 'checkpoint-event', verification_status: 'verified', verification_attempts: 1,
+  occurred_at: '2026-10-22T17:00:00+10:00', payroll_batch_id: 'checkpoint-batch',
+  payroll_batch_checksum: 'checkpoint-checksum',
+  summary: { total_hours: 81, regular_hours: 76, overtime_hours: 5, employee_count: 4, exclusion_count: 2 },
+  issues: { pending_approval_count: 1, pending_overtime_count: 1 },
+};
+
+describe('AirePayrollCockpit compact source checkpoint', () => {
+  it('combines locked hours and held reasons above closed disclosures, preserving import', async () => {
+    const user = userEvent.setup();
+    const onReview = vi.fn();
+    render(<AirePayrollCockpit presentation="checkpoint" sourceCoverageRequired payPeriodId={17}
+      calendar={{ ...calendar, cutoff_state: 'batch_verified', finalized_batch: checkpointBatch }}
+      onRefresh={vi.fn()} onReviewFinalizedBatch={onReview} />);
+    const summary = screen.getByRole('region', { name: 'Source checkpoint' });
+    expect(within(summary).getByText(/Locked · Oct 18, 2026/)).toBeTruthy();
+    expect(within(summary).getByText('76.00 regular + 5.00 OT · 4 people')).toBeTruthy();
+    expect(within(summary).getByText('2 held entries excluded')).toBeTruthy();
+    expect(within(summary).getByText('1 awaiting approval or submitted/approved after cutoff · 1 overtime pending or approved after cutoff')).toBeTruthy();
+    expect(within(summary).getByText(/Calculating without linked source hours requires an acknowledgement/)).toBeTruthy();
+    await user.click(within(summary).getByRole('button', { name: 'Review and add time tracking hours' }));
+    expect(onReview).toHaveBeenCalledOnce();
+    for (const label of ['Cutoff and connection details', 'Batch and payment details', 'Review timecards, held hours and team']) {
+      const disclosure = screen.getAllByText(label).find(node => node.tagName === 'SUMMARY')!.closest('details');
+      expect(disclosure?.open).toBe(false);
+    }
+    expect(within(summary).queryByText(/checkpoint-batch|checkpoint-checksum|Schedule v/)).toBeNull();
+    expect(screen.getByText('checkpoint-checksum')).toBeTruthy();
+  });
+
+  it('keeps a due source unimported and opens timecard review without running a command', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit presentation="checkpoint" sourceCoverageRequired payPeriodId={17}
+      calendar={{ ...calendar, cutoff_state: 'cutoff_due' }} onRefresh={vi.fn()} />);
+    const summary = screen.getByRole('region', { name: 'Source checkpoint' });
+    await within(summary).findByText('1 held entry excluded');
+    expect(within(summary).getByText(/Due — waiting for time tracking/)).toBeTruthy();
+    expect(within(summary).getByText('No locked batch added')).toBeTruthy();
+    expect(within(summary).queryByRole('button', { name: /Review and add/ })).toBeNull();
+    await user.click(within(summary).getByRole('button', { name: 'Review timecards' }));
+    expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(true);
+    expect(document.activeElement?.textContent).toContain('Review timecards, held hours and team');
+    expect(screen.getByRole('button', { name: /Needs attention/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(apiMocks.finalize).not.toHaveBeenCalled();
+    expect(apiMocks.review).not.toHaveBeenCalled();
+    expect(apiMocks.manualReview).toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'failed', 'rejected'] as const)('never offers to import a %s batch', async status => {
+    render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17}
+      calendar={{ ...calendar, finalized_batch: { ...checkpointBatch, verification_status: status } }} onRefresh={vi.fn()} />);
+    const summary = screen.getByRole('region', { name: 'Source checkpoint' });
+    expect(within(summary).queryByRole('button', { name: /Review and add/ })).toBeNull();
+    expect(within(summary).queryByText('76.00 regular + 5.00 OT · 4 people')).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+  });
+
+  it('preserves correction review and committed record-link labels', async () => {
+    const view = render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17}
+      calendar={{ ...calendar, finalized_batch: { ...checkpointBatch, summary: { ...checkpointBatch.summary, correction_count: 1 } } }}
+      onRefresh={vi.fn()} />);
+    expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByRole('button', { name: 'Review time tracking corrections' })).toBeTruthy();
+    view.rerender(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} payPeriodStatus="committed"
+      calendar={{ ...calendar, finalized_batch: checkpointBatch }} onRefresh={vi.fn()} />);
+    expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByRole('button', { name: 'Review and link time tracking record' })).toBeTruthy();
+    await act(async () => { await Promise.resolve(); });
+  });
+
+  it('shows failures outside disclosures and retains late-hours payment access', async () => {
+    const user = userEvent.setup();
+    render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    await within(screen.getByRole('region', { name: 'Source checkpoint' })).findByText('1 held entry excluded');
+    await user.click(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByRole('button', { name: 'Review timecards' }));
+    await user.click(screen.getByRole('button', { name: /Held time/ }));
+    expect(screen.getByRole('button', { name: /Pay late hours/ })).toBeTruthy();
+    apiMocks.overview.mockRejectedValueOnce(new Error('Compact source unavailable'));
+    await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+    expect((await screen.findByText('Compact source unavailable')).closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Lock time tracking cutoff' }).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+it('keeps compact batch-only setup reachable without calling optional live APIs', async () => {
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={{
+    ...calendar, source_capabilities: ['finalized_batch_v2'], publication: null,
+  }} onRefresh={vi.fn()} />);
+  await user.click(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByRole('button', { name: 'Review source details' }));
+  const sourceDetails = screen.getAllByText('Cutoff and connection details').find(node => node.tagName === 'SUMMARY')!;
+  expect(sourceDetails.closest('details')?.open).toBe(true);
+  expect(document.activeElement).toBe(sourceDetails);
+  for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
+    expect(api).not.toHaveBeenCalled();
+  }
+});

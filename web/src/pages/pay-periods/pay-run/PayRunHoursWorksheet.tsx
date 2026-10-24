@@ -122,7 +122,7 @@ export function PayRunHoursWorksheet({
                   </div>
                 </div>
                 {hoursTableOpen && (
-                  <div className="grid w-full shrink-0 grid-cols-1 gap-3 sm:w-auto sm:grid-cols-none sm:flex sm:items-center" onClick={(e) => e.stopPropagation()}>
+                  <div className="grid min-w-0 w-full grid-cols-1 gap-3 sm:w-auto sm:flex-1 sm:grid-cols-none sm:flex sm:flex-wrap sm:items-center" onClick={(e) => e.stopPropagation()}>
                     <Select
                       aria-label="Employee type"
                       value={employeeTypeFilter}
