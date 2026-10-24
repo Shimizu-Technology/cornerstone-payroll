@@ -54,10 +54,12 @@ module AirePayrollCalendar
         "pay_date" => pay_period.pay_date.iso8601,
         "cutoff_at" => cutoff_at.iso8601,
         "time_zone" => TIME_ZONE,
-        "overtime_policy" => OVERTIME_POLICY.dup,
-        "lock_mode" => lock_mode,
-        "cutoff_enforcement_starts_on" => rollout_source.cutoff_enforcement_starts_on.iso8601
+        "overtime_policy" => OVERTIME_POLICY.dup
       }
+      unless retained_legacy_scheduled_calendar?
+        fields["lock_mode"] = lock_mode
+        fields["cutoff_enforcement_starts_on"] = rollout_source.cutoff_enforcement_starts_on.iso8601
+      end
       if legacy_policy
         fields["cutoff_days_before"] = CUTOFF_DAYS_BEFORE
       else
@@ -116,6 +118,16 @@ module AirePayrollCalendar
 
     def lock_mode
       pay_period.start_date < rollout_source.cutoff_enforcement_starts_on ? "manual" : "scheduled"
+    end
+
+    # Retained scheduled calendars keep their original wire contract. AIRE
+    # preserves their null per-period activation even on legitimate revisions.
+    def retained_legacy_scheduled_calendar?
+      return false unless lock_mode == "scheduled"
+
+      calendar = AirePayrollCalendarPeriod.find_by(pay_period_id: pay_period.id, time_tracking_source_id: rollout_source.id)
+      publication = calendar&.latest_publication
+      publication && !publication.payload.key?("lock_mode") && !publication.payload.key?("cutoff_enforcement_starts_on")
     end
 
     def previous_regular_pay_date

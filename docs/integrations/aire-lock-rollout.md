@@ -25,6 +25,8 @@ No source hours, legacy mappings, historical payments, frozen payloads or prior 
 - `next_scheduled_cutoff_at`: AIRE's next unfinalized scheduled published cutoff, ISO 8601 or `null`. Manual periods do not contribute a cutoff; a delayed due scheduled period remains relevant. Payroll's presenter forwards source state and can fall back to its retained scheduled publications.
 - `locked_at`: AIRE's actual frozen snapshot instant for a finalized manual period, with microsecond precision. Its batch cutoff must match this field. The calendar's `cutoff_at` remains the original nominal contract cutoff.
 
+Pre-rollout scheduled publications retain their original wire field set. Rollout metadata alone does not request a revision. A legitimate future policy revision remains compatible with AIRE’s retained null per-period activation; new publications still require both explicit rollout fields.
+
 Scheduled batches still require their batch cutoff to equal the published cutoff. A manual publication's delivery can retry after its nominal cutoff; the nominal instant does not expire an explicitly manual workflow. Importing remains frozen-batch-only. Lock, import, payroll commit and payment issuance remain separate saved actions.
 
 Payroll UI changes are confined to the cockpit and calendar components, shared calendar copy and their types/tests. The pay-run Hours-step redesign remains a separate slice and should be rechecked after integration.
