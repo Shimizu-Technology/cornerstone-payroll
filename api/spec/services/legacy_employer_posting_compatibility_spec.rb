@@ -25,6 +25,70 @@ RSpec.describe "Reviewed pre-deploy employer postings" do
     posting
   end
 
+  def uncaptured_legacy_item!(kind)
+    if kind == :insurance
+      add_deduction(category: "employer_contribution", sub_category: "insurance")
+      item = original!(post_liabilities: false) { |built| built.insurance_payment = 45 }
+    else
+      field = create(:payroll_field_definition, company: company, name: "Uncaptured employer benefit", kind: "employer_contribution",
+        tax_treatment: "employer_contribution", category: "benefit", amount_type: "percentage", default_percentage: 5)
+      employee.employee_payroll_fields.create!(payroll_field_definition: field)
+      item = original!(post_liabilities: false)
+      item.payroll_item_deductions.sole.deduction_type.update!(name: field.name)
+      item.payroll_item_field_entries.each { |row| row.update_columns(metadata: row.metadata.except("deduction_mirror")) }
+    end
+    item.update_columns(calculation_context_snapshot: item.calculation_context_snapshot.except("built_in_employer_match_mirrors"))
+    item.reload
+  end
+
+  [ :insurance, :employer ].product([ :preview, :issue ]).each do |kind, action|
+    it "holds #{action} after an ambiguous #{kind} legacy restatement capture" do
+      item = uncaptured_legacy_item!(kind)
+      frozen = freeze_history(item)
+      PayPeriodPayDateCorrectionService.call(pay_period: period, actor: actor,
+        new_pay_date: ledger_correction_date, reason: "Restate retained legacy payroll")
+      flag = kind == :insurance ? "ambiguous_insurance_history" : "ambiguous_employer_contribution_history"
+      expect(period.payroll_liability_postings.find_by!(posting_type: "historical_backfill").metadata).to include(flag => true)
+      before = [ PayPeriod.count, PayrollItem.count, PayrollLiabilityPosting.count, AuditLog.count, employee.ytd_totals_for(2024).reload.attributes ]
+      expect { public_send(action, hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError)
+      expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(false)
+      expect([ PayPeriod.count, PayrollItem.count, PayrollLiabilityPosting.count, AuditLog.count, employee.ytd_totals_for(2024).reload.attributes ]).to eq(before)
+      expect(freeze_history(item.reload)[1..]).to eq(frozen[1..])
+    end
+  end
+
+  [ :insurance, :employer ].each do |kind|
+    it "keeps ambiguous #{kind} legacy voids available without certifying their capture" do
+      item = uncaptured_legacy_item!(kind)
+      PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Void retained legacy payroll")
+      expect(period.reload).to be_voided
+      expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(false)
+      expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
+      expect { issue(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError)
+    end
+  end
+
+  %w[legacy_capture lifecycle_legacy_capture].each do |marker|
+    it "does not certify a retained posting with the #{marker} lifecycle marker" do
+      item = uncaptured_legacy_item!(:insurance)
+      old_posting!(item)
+      period.payroll_liability_postings.update_all(metadata: { marker => true })
+      expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError)
+      expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(false)
+    end
+  end
+
+  it "checks a new ambiguity marker even when the item's posting association was already loaded" do
+    item = uncaptured_legacy_item!(:insurance)
+    old_posting!(item)
+    item.pay_period.payroll_liability_postings.load
+    expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(true)
+    period.payroll_liability_postings.create!(company: company, posting_type: "historical_backfill", liability_date: period.pay_date,
+      posted_at: Time.current, idempotency_key: "new-capture:#{period.id}", component_rule_snapshot: {},
+      metadata: { "ambiguous_insurance_history" => true })
+    expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(false)
+  end
+
   %w[insurance other].each do |category|
     it "corrects an old #{category} employer field without rewriting history" do
       field = create(:payroll_field_definition, company: company, name: "Historical employer source", kind: "employer_contribution",

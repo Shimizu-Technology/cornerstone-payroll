@@ -4,14 +4,21 @@
 # This records old omissions; it never creates a payable or repairs old money.
 class PayrollLegacyEmployerComponents
   POSTING_VERSION_KEY = "employer_contribution_ledger_version".freeze
+  LIFECYCLE_CAPTURE_KEY = "lifecycle_legacy_capture".freeze
+  INELIGIBLE_POSTING_KEYS = [ POSTING_VERSION_KEY, LIFECYCLE_CAPTURE_KEY, "legacy_capture",
+    "ambiguous_employer_contribution_history", "ambiguous_insurance_history" ].freeze
 
   def self.eligible?(item)
     context = item.calculation_context_snapshot.to_h
     return false unless item.persisted? && item.pay_period.committed? && PayrollCalculationContext.valid_for_correction?(context)
     return false if context.key?("built_in_employer_match_mirrors") || context.key?("corrective_paycheck")
 
-    postings = item.pay_period.payroll_liability_postings.to_a
-    postings.any? && postings.none? { |posting| posting.metadata.to_h.key?(POSTING_VERSION_KEY) }
+    # A lifecycle capture preserves bookkeeping, not proof of source identity.
+    # Read current postings even when a caller previously loaded the association.
+    postings = item.pay_period.payroll_liability_postings.order(:id).to_a
+    postings.any? && postings.none? do |posting|
+      INELIGIBLE_POSTING_KEYS.any? { |key| posting.metadata.to_h.key?(key) }
+    end
   end
 
   def self.field_mirror?(item, field, row)
