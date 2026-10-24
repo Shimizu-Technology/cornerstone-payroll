@@ -81,3 +81,8 @@ describe('AireSourceCheckpointSummary', () => {
     expect(within(region).getByText('No locked batch added')).toBeTruthy();
   });
 });
+
+it('uses person for a one-person locked batch', () => {
+  render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, finalized_batch: { ...batch, summary: { ...batch.summary!, employee_count: 1 } } }} />);
+  expect(screen.getByText(/1 person$/)).toBeTruthy();
+});
