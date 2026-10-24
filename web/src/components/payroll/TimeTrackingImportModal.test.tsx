@@ -206,13 +206,13 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(screen.getByText('$350.00')).toBeTruthy();
     expect(screen.getByText('1 held entry · 4.00 held hours at cutoff.')).toBeTruthy();
     expect(screen.getByText('Pending Approval')).toBeTruthy();
-    const disclosure = screen.getByText('Batch audit details').closest('details')!;
+    const disclosure = screen.getByText('Technical details').closest('details')!;
     expect(disclosure.open).toBe(false);
     expect(screen.getByText('a'.repeat(64)).className).toContain('break-all');
     expect(within(disclosure).getByText('time tracking-PAY-17')).toBeTruthy();
     expect(within(disclosure).getByText('payroll_batch_v2')).toBeTruthy();
     expect(summary.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await userEvent.click(screen.getByText('Batch audit details'));
+    await userEvent.click(screen.getByText('Technical details'));
     expect(disclosure.open).toBe(true);
   });
 
@@ -255,7 +255,7 @@ describe('TimeTrackingImportModal payroll-first review', () => {
 
   it('keeps audit disclosure and mapping controls in the dialog keyboard loop', async () => {
     await review();
-    const disclosure = screen.getByText('Batch audit details');
+    const disclosure = screen.getByText('Technical details');
     const employeeSelect = screen.getByRole('combobox', { name: /^Payroll employee/ });
     const close = screen.getByRole('button', { name: 'Close' });
     expect(document.activeElement).toBe(close);
@@ -444,6 +444,8 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     const link = screen.getByRole('button', { name: 'Verify & Link time tracking Record' }) as HTMLButtonElement;
     expect(link.disabled).toBe(true);
     expect(screen.getByText('Link the committed payroll to this cutoff. Pay will stay unchanged.')).toBeTruthy();
+    expect(screen.getByText('Hours by pay type')).toBeTruthy();
+    expect(screen.queryByText('Hours and pay rates')).toBeNull();
     expect(screen.queryByText('$350.00')).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Payroll earning type' })).toBeNull();
     await userEvent.type(screen.getByRole('textbox', { name: 'Audit note' }), 'Compared committed hours');
@@ -456,7 +458,7 @@ describe('TimeTrackingImportModal payroll-first review', () => {
 
   it('preserves legacy row skipping and updates the included hours summary', async () => {
     await review({ validation_version: 'time_summary_v1' });
-    expect(screen.queryByText('Batch audit details')).toBeNull();
+    expect(screen.queryByText('Technical details')).toBeNull();
     const summary = screen.getByRole('region', { name: 'Hours included in this review' });
     expect(within(summary).getByText('14.00')).toBeTruthy();
     await userEvent.click(screen.getByRole('checkbox', { name: 'Include' }));

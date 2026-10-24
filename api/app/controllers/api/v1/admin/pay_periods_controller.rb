@@ -120,9 +120,11 @@ module Api
             raise ArgumentError, "Only draft, calculated, or approved payroll can refresh setup"
           end
           scope_attributes = refresh_scope_attributes
+          ids = @pay_period.payroll_items.pluck(:employee_id)
+          return unless ids.empty? || source_coverage_acknowledged?
+
           @pay_period.invalidate_calculation!(reason: "Employee/client setup refreshed; previous approval is no longer valid")
           @pay_period.update!(scope_attributes)
-          ids = @pay_period.payroll_items.pluck(:employee_id)
           if ids.empty?
             render json: { pay_period: pay_period_json(@pay_period, include_items: true), results: { success: [], skipped: [], errors: [] } }
           else
@@ -329,6 +331,8 @@ module Api
           unless @pay_period.draft? || @pay_period.calculated?
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end
+          return unless source_coverage_acknowledged?
+
           if params.key?(:named_loan_payments) && !params[:named_loan_payments].respond_to?(:to_unsafe_h)
             return render json: { error: "Named loan inputs must be an object keyed by employee" }, status: :unprocessable_entity
           end
@@ -1018,6 +1022,17 @@ module Api
 
         private
 
+        # Both full-run calculation paths use this decision under the financial
+        # lock. Refresh must check before invalidating approval or changing scope.
+        def source_coverage_acknowledged?
+          return true unless PayrollSourceCoverage.acknowledgement_required?(@pay_period)
+          return true if params[:source_coverage_acknowledged] == true && params[:source_coverage_reason].to_s.strip.present?
+
+          render json: { error: "Enter a reason and acknowledge that hourly employees from time tracking will be missing unless entered manually.",
+                         code: "source_coverage_acknowledgement_required" }, status: :unprocessable_entity
+          false
+        end
+
         def audit_record
           @pay_period
         end
@@ -1030,17 +1045,21 @@ module Api
 
         def audit_record_metadata(record)
           return {} unless record.is_a?(PayPeriod)
-          return {} unless %w[run_payroll approve unapprove commit void].include?(action_name)
+          return {} unless %w[run_payroll refresh_setup approve unapprove commit void].include?(action_name)
 
           summary = pay_period_business_summary(record)
-          if action_name == "run_payroll" && defined?(@payroll_audit_results) && @payroll_audit_results
+          if %w[run_payroll refresh_setup].include?(action_name) && defined?(@payroll_audit_results) && @payroll_audit_results
             summary[:employees_processed] = @payroll_audit_results.fetch(:success, []).size
             summary[:employees_failed] = @payroll_audit_results.fetch(:errors, []).size
             summary[:outcome] = summary[:employees_failed].positive? ? "partial" : "completed"
           end
 
           metadata = { business_summary: summary }
-          if action_name == "run_payroll" && defined?(@payroll_review_package) && @payroll_review_package
+          if %w[run_payroll refresh_setup].include?(action_name) && params[:source_coverage_reason].present?
+            metadata[:source_coverage_reason] = params[:source_coverage_reason].to_s.strip.truncate(1000)
+            metadata[:source_coverage_acknowledged] = params[:source_coverage_acknowledged] == true
+          end
+          if %w[run_payroll refresh_setup].include?(action_name) && defined?(@payroll_review_package) && @payroll_review_package
             metadata[:review_revision] = {
               id: @payroll_review_package.id,
               revision: @payroll_review_package.revision,

@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 
 import { PayPeriods } from './PayPeriods';
 import type { PayrollHistoryRecord } from '@/services/api';
@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   payPeriodUpdate: vi.fn(),
   payPeriodDelete: vi.fn(),
   runPayroll: vi.fn(),
+  payPeriodGet: vi.fn(),
   approve: vi.fn(),
   commit: vi.fn(),
 }));
@@ -38,6 +39,7 @@ vi.mock('@/services/api', () => ({
     update: apiMocks.payPeriodUpdate,
     delete: apiMocks.payPeriodDelete,
     runPayroll: apiMocks.runPayroll,
+    get: apiMocks.payPeriodGet,
     approve: apiMocks.approve,
     commit: apiMocks.commit,
   },
@@ -227,4 +229,19 @@ describe('fixed semimonthly paydays', () => {
     expect((screen.getByLabelText('End Date') as HTMLInputElement).value).toBe(end);
     expect(screen.getByText(/including weekends and holidays/)).toBeTruthy();
   });
+});
+
+it.each(['desktop', 'phone'])('opens the source acknowledgement worksheet instead of quick-calculating missing coverage on %s', async layout => {
+  vi.clearAllMocks();
+  apiMocks.activeCompany = { id: 11 };
+  apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([{ ...editablePeriod, test_workspace_role: undefined, parallel_run: false }]));
+  apiMocks.payPeriodGet.mockResolvedValue({ pay_period: { ...editablePeriod, time_tracking: { aire_calendar: { enabled: true, cutoff_at: '2026-10-22T07:00:00Z' }, linked_aire_records: [] } } });
+  render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><Routes>
+    <Route path="/companies/11/pay-runs" element={<PayPeriods />} />
+    <Route path="/companies/11/pay-runs/12/work" element={<p>Review hours and acknowledge source coverage</p>} />
+  </Routes></MemoryRouter>);
+  const container = await screen.findByRole(layout === 'desktop' ? 'row' : 'group', { name: layout === 'desktop' ? /Aug 24 - Sep 6, 2026/ : 'Pay period Aug 24 - Sep 6, 2026' });
+  fireEvent.click(within(container).getByRole('button', { name: /Recalculate/ }));
+  expect(await screen.findByText('Review hours and acknowledge source coverage')).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
