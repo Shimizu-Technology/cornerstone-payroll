@@ -1,0 +1,529 @@
+[
+  {
+    "tag": "Button",
+    "label": "{adoptingConfirmedWorkweek ? (<><Loader2 className=\"mr-2 h-4 w-4 animate-spin\"/>Applying…</>) : 'Use confirmed workweek'}",
+    "attributes": [
+      "type=\"button\"",
+      "size=\"sm\"",
+      "onClick={() => void handleAdoptConfirmedWorkweek()}",
+      "disabled={adoptingConfirmedWorkweek}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => void openClientApproval()}",
+      "disabled={clientApprovalLoading}",
+      "className=\"shrink-0 bg-white\""
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{clientApprovalLoading ? 'Recording…' : 'Bind Approval to This Revision'}",
+    "attributes": [
+      "type=\"submit\"",
+      "disabled={clientApprovalLoading || clientApprovers.length === 0 || !clientApproverId || !clientApprovalEvidence.trim() || !clientApprovalConfirmed}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added",
+    "attributes": [
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "variant=\"outline\"",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{needsSourceCoverageAcknowledgement(payPeriod) ? 'Review & add hours' : 'Import time tracking'}",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{payDateCorrectionSubmitting ? 'Saving...' : 'Save Pay Date Correction'}",
+    "attributes": [
+      "type=\"submit\"",
+      "disabled={payDateCorrectionSubmitting}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Clear this payroll amount' : 'Use employee default'}",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"mt-1 text-xs font-medium text-primary-700 underline\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Enter an amount or clear this payroll amount' : 'Enter an amount or use the employee default'}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}",
+      "className=\"text-center text-xs font-semibold leading-tight text-danger-600 transition-colors hover:text-danger-700 hover:underline\""
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Override · clear this payroll amount' : `Override · use ${defaultLabel}`}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}",
+      "className=\"text-xs font-medium text-blue-700 hover:text-blue-900 hover:underline\""
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{processing ? 'Calculating...' : 'Calculate Payroll'}",
+    "attributes": [
+      "variant={needsSourceCoverageAcknowledgement(payPeriod) ? 'outline' : 'primary'}",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{processing ? 'Committing...' : 'Commit & Finalize'}",
+    "attributes": [
+      "onClick={() => setCommitPeriodId(payPeriod.id)}",
+      "disabled={processing || financialActionsHeld}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{processing ? 'Refreshing…' : 'Refresh and recalculate'}",
+    "attributes": [
+      "disabled={processing}",
+      "onClick={() => void handleRefreshSetup()}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "{retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "onClick={handleRetryTaxSync}",
+      "disabled={retryingSyncTax}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "{showPayrollFields ? `Payroll Fields (${worksheetPayrollFields.length}) ✓` : `+ Payroll Fields (${worksheetPayrollFields.length})`}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={(event) => { event.preventDefault(); event.stopPropagation(); setShowPayrollFields((previous) => !previous); }}",
+      "className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${showPayrollFields ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "{showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={(event) => { event.preventDefault(); event.stopPropagation(); tipsLoansVisibilityModeRef.current = 'manual'; setShowTipsLoans(prev => !prev); }}",
+      "className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${showTipsLoans ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'}`}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Approve",
+    "attributes": [
+      "onClick={handleApprove}",
+      "disabled={processing || financialActionsHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}",
+      "title={savedImportReloadRequired ? 'Reload the saved source import before approval' : correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval' : calculationFailures.length > 0 ? 'Resolve the employee calculation errors and calculate again before approval' : payrollItems.length === 0 ? 'Enter pay for at least one employee before approval' : hasPendingCalculationChanges ? 'Recalculate the staged payroll changes before approval' : payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved' ? 'Client approval is required for this revision' : undefined}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Calculate without imported hours",
+    "attributes": [
+      "disabled={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() || processing}",
+      "title={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() ? 'Enter a reason and acknowledge the missing hours.' : undefined}",
+      "onClick={() => { const pending = pendingCoverageActionRef.current; pendingCoverageActionRef.current = null; setSourceCoverageOpen(false); if (!pending || pending.companyId !== companyId || pending.payRunId !== payRunId || pending.generation !== commitRouteGenerationRef.current) return; const coverage: CoverageAcknowledgement = { source_coverage_reason: sourceCoverageReason.trim(), source_coverage_acknowledged: true }; if (pending.action === 'refresh') void handleRefreshSetup(pending.refreshScope, coverage); else void handleRunPayroll(coverage); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => setClientApprovalOpen(false)}",
+      "disabled={clientApprovalLoading}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => setPayDateCorrectionOpen(false)}",
+      "disabled={payDateCorrectionSubmitting}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "variant=\"outline\"",
+      "disabled={processing}",
+      "onClick={() => setRefreshSetupOpen(false)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { pendingCoverageActionRef.current = null; setSourceCoverageOpen(false); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Change payment method",
+    "attributes": [
+      "size=\"sm\"",
+      "variant=\"outline\"",
+      "className=\"min-h-11 w-full sm:w-auto\"",
+      "aria-label={`Change payment method for ${item.employee_name}`}",
+      "onClick={() => setPaymentMethodItem(item)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Correct Pay Date",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={openPayDateCorrection}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Correct",
+    "attributes": [
+      "onClick={() => setCorrectingItem(item)}",
+      "className=\"text-xs text-warning-700 hover:text-warning-900 hover:underline font-medium\"",
+      "title=\"Issue a separate supplemental check for the difference (use when the original was cashed)\""
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Correct",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setCorrectingItem(item)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Edit payroll",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setEditingItem(item)}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Edit",
+    "attributes": [
+      "onClick={() => setEditingItem(item)}",
+      "className=\"text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium\""
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Enter pay",
+    "attributes": [
+      "onClick={() => { setAdditionalEmployeeIds(prev => { const next = new Set(prev); next.add(emp.id); return next; }); setHoursMap(prev => ({ ...prev, [String(emp.id)]: { regular: 0, overtime: 0, wage_rates: prev[String(emp.id)]?.wage_rates }, })); }}",
+      "className=\"min-h-11 rounded-lg px-3 py-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500\""
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Import (MoSa)",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setImportModalOpen(true)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Import Spike Email",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setPayrollIntakeImportOpen(true)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Link time tracking record",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Open payroll item <ArrowRight className=\"h-3.5 w-3.5\"/>",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900\"",
+      "onClick={() => setReviewingItem(item)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Print checks",
+    "attributes": [
+      "size=\"sm\"",
+      "onClick={() => setCheckPrintOpen(true)}",
+      "disabled={paperCheckCount === 0 && !nonEmployeeChecks.some((check) => !check.voided)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Recalculate",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Refresh current setup",
+    "attributes": [
+      "variant=\"outline\"",
+      "disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges}",
+      "title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}",
+      "onClick={() => { setRefreshRecurring(payPeriod.includes_recurring_items); setRefreshBaseSalary(payPeriod.includes_base_salary); setRefreshSetupOpen(true); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Reload saved payroll",
+    "attributes": [
+      "className=\"mt-3 min-h-11\"",
+      "variant=\"outline\"",
+      "disabled={processing || timeTrackingImportOpen}",
+      "onClick={() => void reloadSavedSourceImport()}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Remove from this run",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"min-h-11 text-xs font-medium text-primary-700 underline\"",
+      "aria-label={`Remove ${emp.first_name} ${emp.last_name} from this run`}",
+      "onClick={() => { setAdditionalEmployeeIds(previous => { const next = new Set(previous); next.delete(emp.id); return next; }); const withoutEmployee = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([key]) => key !== String(emp.id))); setHoursMap(withoutEmployee); setSalaryOverrideMap(withoutEmployee); setBonusMap(withoutEmployee); setBonusEdits(withoutEmployee); setTipsMap(withoutEmployee); setTipsPaidOutMap(withoutEmployee); setLoansMap(withoutEmployee); setNamedLoanDrafts(withoutEmployee); setPayrollFieldDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${emp.id}:`)))); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Replace check",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setReplacingItem(item)}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "Replace",
+    "attributes": [
+      "onClick={() => setReplacingItem(item)}",
+      "className=\"text-xs text-orange-700 hover:text-orange-900 hover:underline font-medium\"",
+      "title=\"Void & reissue this check (use when the original is uncashed or never distributed)\""
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Retry comparison",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "onClick={() => loadComparison(payPeriod.id)}",
+      "disabled={comparisonLoading}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Review affected employees",
+    "attributes": [
+      "variant=\"outline\"",
+      "className=\"mt-3\"",
+      "onClick={() => { const section = document.getElementById('payroll-calculation-issues'); section?.scrollIntoView({ block: 'start' }); section?.focus({ preventScroll: true }); }}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Review current source",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "className=\"shrink-0 border-danger-300 bg-white text-danger-900 hover:bg-danger-100\"",
+      "onClick={() => canImportMosa ? setImportModalOpen(true) : setPayrollIntakeImportOpen(true)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Roll Back Approval",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={handleUnapprove}",
+      "disabled={processing}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "Try again",
+    "attributes": [
+      "className=\"mt-4\"",
+      "variant=\"outline\"",
+      "onClick={() => void loadPayPeriod(payRunId)}"
+    ]
+  },
+  {
+    "tag": "button",
+    "label": "View details",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700\"",
+      "onClick={() => setReviewingItem(item)}"
+    ]
+  },
+  {
+    "tag": "Button",
+    "label": "View linked time record",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setAireRecordsOpen(true)}"
+    ]
+  },
+  {
+    "tag": "div",
+    "label": "<div className=\"flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between\"> <div className=\"flex items-center gap-2\"> <svg className={`w-4 h-4 text-neutral-600 transition-transform ${hoursTableOpen ? 'rotate-90' : ''}`} fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" strokeWidth={2}> <path strokeLinecap=\"round\" strokeLinejoin=\"round\" d=\"M9 5l7 7-7 7\"/> </svg> <div> <h3 className=\"font-semibold text-neutral-900\"> {isCalculated ? 'Adjust Hours' : 'Enter Hours'} </h3> {!hoursTableOpen && (<p className=\"text-xs text-neutral-600 mt-0.5\">Click to expand</p>)} </div> </div> {hoursTableOpen && (<div className=\"grid w-full shrink-0 grid-cols-1 gap-3 sm:w-auto sm:grid-cols-none sm:flex sm:items-center\" onClick={(e) => e.stopPropagation()}> <Select aria-label=\"Employee type\" value={employeeTypeFilter} onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)} className=\"w-full sm:w-36\"> <option value=\"all\">All Types</option> <option value=\"salary\">Salary</option> <option value=\"hourly\">Hourly</option> <option value=\"contractor\">1099</option> </Select> <Select aria-label=\"Department\" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className=\"w-full sm:w-44\"> <option value=\"all\">All Departments</option> {departmentOptions.map(([deptId, deptName]) => (<option key={deptId} value={deptId}>{deptName}</option>))} </Select> <Select aria-label=\"Sort\" value={`${hoursSortBy}:${hoursSortDirection}`} onChange={(event) => { const [sortBy, direction] = event.target.value.split(':') as [ typeof hoursSortBy, typeof hoursSortDirection ]; setHoursSortBy(sortBy); setHoursSortDirection(direction); }} className=\"w-full sm:w-44\"> <option value=\"name:asc\">Name A-Z</option> <option value=\"name:desc\">Name Z-A</option> <option value=\"rate:desc\">Rate High-Low</option> <option value=\"rate:asc\">Rate Low-High</option> <option value=\"hours:desc\">Hours High-Low</option> <option value=\"hours:asc\">Hours Low-High</option> <option value=\"gross:desc\">Est. Gross High-Low</option> <option value=\"gross:asc\">Est. Gross Low-High</option> </Select> <button type=\"button\" onClick={(event) => { event.preventDefault(); event.stopPropagation(); tipsLoansVisibilityModeRef.current = 'manual'; setShowTipsLoans(prev => !prev); }} className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${showTipsLoans ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'}`}> {showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'} </button> {worksheetPayrollFields.length > 0 && (<button type=\"button\" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setShowPayrollFields((previous) => !previous); }} className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${showPayrollFields ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}> {showPayrollFields ? `Payroll Fields (${worksheetPayrollFields.length}) ✓` : `+ Payroll Fields (${worksheetPayrollFields.length})`} </button>)} <div className=\"relative\"> <input type=\"text\" aria-label=\"Search employees\" placeholder=\"Search employees...\" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className=\"w-full rounded-lg border border-neutral-300 py-2 pl-8 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 sm:w-48\"/> <svg className=\"absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" strokeWidth={2}> <path strokeLinecap=\"round\" strokeLinejoin=\"round\" d=\"M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z\"/> </svg> </div> </div>)} </div>",
+    "attributes": [
+      "role=\"button\"",
+      "tabIndex={0}",
+      "className=\"w-full border-b p-4 text-left transition-colors hover:bg-neutral-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset\"",
+      "onClick={() => setHoursTableOpen(prev => !prev)}",
+      "onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setHoursTableOpen(prev => !prev); } }}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "{emp.first_name} {emp.last_name}",
+    "attributes": [
+      "className=\"font-medium text-neutral-900 hover:text-primary-700 hover:underline\"",
+      "to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "{item.employee_name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-800\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "{lastName || '—'}",
+    "attributes": [
+      "className=\"font-medium text-neutral-900 hover:text-primary-700 hover:underline\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "{name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-800\"",
+      "to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "<UserPlus className=\"mr-2 h-4 w-4\" aria-hidden=\"true\"/> Add employee",
+    "attributes": [
+      "className=\"mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2\"",
+      "to={newEmployeePath(companyId, { returnTo: currentPath })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "Check Settings ›",
+    "attributes": [
+      "to=\"/check-settings\"",
+      "className=\"text-xs text-blue-600 hover:underline\""
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "Review checks and payments",
+    "attributes": [
+      "className=\"inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800\"",
+      "to={payRunPath(companyId, payRunId, 'checks', { returnTo })}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "Review paycheck",
+    "attributes": [
+      "className=\"font-semibold underline underline-offset-2\"",
+      "to={`/companies/${payPeriod.company_id}/pay-runs/${payPeriod.id}/payroll-items/${item.id}`}"
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "Review settings",
+    "attributes": [
+      "to=\"/pay-schedule-settings\"",
+      "target=\"_blank\"",
+      "rel=\"noreferrer\"",
+      "className=\"inline-flex min-h-9 items-center justify-center rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2\""
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "Supplemental period · pay date {sp.pay_date}",
+    "attributes": [
+      "to={payRunPath(companyId, sp.id, 'work', { returnTo: currentPath })}",
+      "className=\"text-sm font-semibold text-blue-700 hover:underline\""
+    ]
+  },
+  {
+    "tag": "Link",
+    "label": "the original committed period",
+    "attributes": [
+      "to={payRunPath(companyId, payPeriod.corrects_pay_period_id, 'work', { returnTo: currentPath })}",
+      "className=\"font-semibold underline\""
+    ]
+  },
+  {
+    "tag": "summary",
+    "label": "Run notes and processing history",
+    "attributes": [
+      "className=\"cursor-pointer py-1 font-semibold text-primary-800\""
+    ]
+  }
+]
