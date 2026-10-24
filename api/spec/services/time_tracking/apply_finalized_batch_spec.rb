@@ -418,6 +418,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "links an exact committed historical payroll without recalculating its amounts" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "historical@example.com")
     adjustments = [
@@ -467,6 +468,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "records a small legacy rounding exception without changing committed payroll amounts" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "rounding@example.com")
     adjustment = {
@@ -522,6 +524,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "accepts a legacy rounding exception exactly at the 0.05-hour boundary" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "boundary@example.com")
     adjustment = {
@@ -581,6 +584,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     "voided" => [ "payment_voided", "voided" ]
   }.each do |check_status, (payment_status, event_type)|
     it "reconciles #{check_status} payment state using the matching check event timestamp" do
+      ensure_verified_test_tax_years(2026)
       company, pay_period, source = setup_records
       employee = create(:employee, company: company, department: create(:department, company: company), email: "#{check_status}@example.com")
       adjustment = {
@@ -649,6 +653,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "refuses to reconcile a voided historical pay period" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     pay_period.update!(status: "committed", correction_status: "voided", committed_at: Time.current)
     import = create(
@@ -669,6 +674,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "refuses to link a historical payroll when employee hours exceed the legacy rounding tolerance" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "mismatch@example.com")
     adjustment = {
@@ -988,6 +994,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "requires history approval for draft preview and apply while keeping committed historical review available" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records(source_type: "custom")
     payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [])
     payload["source"] = "neutral_time"

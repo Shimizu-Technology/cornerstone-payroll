@@ -134,9 +134,22 @@ class PayPeriod < ApplicationRecord
 
   def verified_tax_year_for_finalization
     return unless persisted? && will_save_change_to_status? && %w[approved committed].include?(status)
-    return if pay_date.blank? || AnnualTaxConfig.verified_for_year?(pay_date.year)
+    return if pay_date.blank?
+    unless AnnualTaxConfig.verified_for_year?(pay_date.year, lock: true)
+      errors.add(:base, AnnualTaxConfig.unverified_message(pay_date.year))
+      return
+    end
+    return if pay_date.year <= 2026
 
-    errors.add(:base, AnnualTaxConfig.unverified_message(pay_date.year))
+    verification = AnnualTaxConfig.current(pay_date.year)&.verified_at&.utc&.iso8601(6)
+    # Historical corrective entries retain the original committed rule snapshot.
+    # New ordinary runs must prove which verified version produced their money.
+    stale = payroll_items.not_voided.any? do |item|
+      !item.correction_entry? && (verification.nil? || item.tax_rule_snapshot["tax_year_verification_at"] != verification)
+    end
+    if stale
+      errors.add(:base, "#{pay_date.year} tax tables were verified or changed after this payroll was calculated. Recalculate payroll before approval or commitment.")
+    end
   end
 
   validate :end_date_after_start_date
