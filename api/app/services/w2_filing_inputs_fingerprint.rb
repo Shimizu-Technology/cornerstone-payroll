@@ -43,7 +43,7 @@ class W2FilingInputsFingerprint
           .merge("ssn" => employee.ssn_digits)
       end,
       items: PayrollItem.joins(:pay_period).includes(:pay_period).where(company_id: company.id)
-        .not_voided.reportable.where.not(employment_type: "contractor")
+        .financially_reportable.reportable.where.not(employment_type: "contractor")
         .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: company.id, pay_date: year_range).select(:id) })
         .order(:id).map { |item| item.attributes.slice(*ITEM_FIELDS).merge("pay_date" => item.pay_period.pay_date.iso8601) },
       responsibility: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")

@@ -12,7 +12,7 @@ module TrainingReplay
 
     def self.capture!(company:, pay_period:, source_pay_period:, actor:)
       source_items = source_pay_period.payroll_items
-        .not_voided
+        .financially_reportable
         .includes(employee: :department)
         .lock
         .order(:id)

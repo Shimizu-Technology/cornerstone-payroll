@@ -118,7 +118,7 @@ class PayPeriodLifecycleService
   attr_reader :pay_period, :actor, :ip_address
 
   def validate_source_earnings!
-    pay_period.payroll_items.not_voided.each do |item|
+    pay_period.payroll_items.financially_reportable.each do |item|
       TimeTracking::SourceEarningsConservation.validate!(item, calculated: true)
     end
   rescue ArgumentError => e
@@ -126,7 +126,7 @@ class PayPeriodLifecycleService
   end
 
   def validate_payroll_participation!
-    items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    items = pay_period.payroll_items.financially_reportable.includes(:employee).to_a
     raise EmptyPayPeriodError, "Cannot finalize a pay period with no payroll items" if items.empty?
 
     invalid = items.reject { |item| PayrollItemActivity.classify(item) == :active }
@@ -159,7 +159,7 @@ class PayPeriodLifecycleService
   end
 
   def validate_variable_period_pay!
-    missing = pay_period.payroll_items.not_voided.includes(:employee).select do |item|
+    missing = pay_period.payroll_items.financially_reportable.includes(:employee).select do |item|
       item.variable_salary_missing?(use_calculation_snapshot: true)
     end
     return if missing.empty?
@@ -294,7 +294,7 @@ class PayPeriodLifecycleService
       voided: false
     )
 
-    w2_items = items.reject { |item| item.employment_type == "contractor" || item.voided? }
+    w2_items = items.reject { |item| item.employment_type == "contractor" || !item.payroll_included? }
     total_fit = w2_items.sum(&:total_income_tax_withheld)
     return unless total_fit.positive?
 

@@ -306,6 +306,20 @@ RSpec.describe "Financial correction ownership recovery" do
     expect { salary.ensure_financial_source_payment_ready! }.not_to raise_error
     expect { item.ensure_financial_source_payment_ready! }.to raise_error(ArgumentError)
   end
+  it "records one financial-link reversal after retained check retirement and reissue" do
+    period, item = build_correction
+    link = accept_link(item)
+    item.mark_package_prepared!(user: actor)
+    item.void!(user: actor, reason: "Retire the damaged corrected check")
+    old_number = item.check_number
+    item.update!(voided: false, voided_at: nil, void_reason: nil, check_number: company.next_check_number!,
+      reprint_of_check_number: old_number, check_prepared_at: nil, check_prepared_source_updated_at: nil)
+    item.mark_package_prepared!(user: actor)
+    event = PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Explicit whole corrected payroll reversal")
+    expect(link.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+    TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: period.reload, void_event: event)
+    expect(link.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+  end
 end
 
 RSpec.describe "Concurrent correction Source catch-up", :postgres_concurrency do

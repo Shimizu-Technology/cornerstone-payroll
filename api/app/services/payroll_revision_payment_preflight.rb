@@ -5,10 +5,11 @@
 class PayrollRevisionPaymentPreflight
   attr_reader :pay_period, :employee_items, :other_payments
 
-  def initialize(pay_period:, lock: false)
+  def initialize(pay_period:, lock: false, payroll_item: nil)
     @pay_period = pay_period
     @locked = lock
     items = pay_period.payroll_items.reportable.order(:id)
+    items = items.where(id: payroll_item.id) if payroll_item
     @employee_items = (lock ? items.lock : items).to_a
     allocated_ids = PayrollLiabilityCheckAllocation.joins(payroll_liability_entry: :payroll_liability_posting)
       .where(payroll_liability_postings: { pay_period_id: pay_period.id }).select(:non_employee_check_id)
@@ -93,7 +94,7 @@ class PayrollRevisionPaymentPreflight
   def retire!(actor:, reason:)
     employee_items.each do |item|
       next if item.voided? || item.check_number.blank?
-      item.void!(user: actor, reason: reason)
+      item.void!(user: actor, reason: reason, payroll_obligation_retained: false)
     end
     other_payments.each do |payment|
       next if payment.voided?
