@@ -254,6 +254,7 @@ class IssueCorrectivePaycheckService
   # ---------------------------------------------------------------------
   def validate_for_preview!
     raise OriginalNotFoundError, "Original payroll item not found for employee in this pay period" if original_item.nil?
+    assert_original_payroll_included!
     pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
     raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
@@ -320,7 +321,14 @@ class IssueCorrectivePaycheckService
     Date.parse(@pay_date.to_s) rescue nil
   end
 
+  def assert_original_payroll_included!
+    unless original_item.payroll_included?
+      raise InvalidStateError, "Cannot issue a corrective paycheck for a financially reversed original"
+    end
+  end
+
   def assert_correctable!(period)
+    assert_original_payroll_included!
     pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
     raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
