@@ -23,7 +23,7 @@ class CorrectiveRetirementContext
       historical: projection.source, opening: opening,
       ledger: rows.map do |item|
         { id: item.id, period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
-          totals: amounts(item), retirement_rule_snapshot: item.retirement_rule_snapshot }
+          totals: amounts(item), catch_up_classification: PayrollRetirementCatchUp.for_item(item), retirement_rule_snapshot: item.retirement_rule_snapshot }
       end
     }
   end
@@ -48,7 +48,7 @@ class CorrectiveRetirementContext
     # classifications require administrator review rather than inferred room.
     catch_up = 0.to_d
     if evidence["catch_up_permission_status"] == "permitted" &&
-        evidence["year_input"].to_h.except("year_input_id") == year_input.stringify_keys.except("year_input_id") &&
+        canonical_year_input(evidence["year_input"].to_h) == canonical_year_input(year_input) &&
         employee.date_of_birth && year - employee.date_of_birth.year == evidence["employee_age_at_year_end"].to_i
       statutory = (year - employee.date_of_birth.year).between?(60, 63) ? annual_limit.enhanced_catch_up_limit : annual_limit.catch_up_limit
       catch_up = [ evidence["catch_up_limit"].to_d, statutory.to_d ].min
@@ -64,19 +64,45 @@ class CorrectiveRetirementContext
       match_cap = election["employer_match_annual_cap"].presence
       hold! if match_cap && totals[:match] > match_cap.to_d
     end
-    inferred_catch_up = [ elective + external - base, elective - regular, 0.to_d ].max
-    if inferred_catch_up.positive? && (year_input.fetch(:external_traditional_deferrals, 0).to_d.positive? ||
-        (year >= 2026 && year_input.fetch(:prior_year_fica_wages, 0).to_d > annual_limit.roth_catch_up_wage_threshold.to_d && totals[:roth_retirement] < inferred_catch_up))
+    additions = elective + totals[:employer] + totals[:non_roth_after_tax]
+    additions_limit = [ annual_limit.annual_additions_limit.to_d, totals[:gross] ].min
+    personal_local_catch_up = [ elective + external - base, 0.to_d ].max - [ external - base, 0.to_d ].max
+    required = [ personal_local_catch_up, elective - regular, additions - additions_limit, 0.to_d ].max
+    proved = rows.sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) } + catch_up_delta(target)
+    hold! if proved.negative? || proved > catch_up || proved > elective || required > proved
+    if proved.positive? && (year_input.fetch(:external_traditional_deferrals, 0).to_d.positive? ||
+        (year >= 2026 && year_input.fetch(:prior_year_fica_wages, 0).to_d > annual_limit.roth_catch_up_wage_threshold.to_d && totals[:roth_retirement] < proved))
       hold!
     end
     hold! if totals[:gross] > annual_limit.compensation_limit.to_d && delta[:employer].positive?
-    additions = elective + totals[:employer] + totals[:non_roth_after_tax] - inferred_catch_up
-    hold! if additions > [ annual_limit.annual_additions_limit.to_d, totals[:gross] ].min
+    hold! if additions - proved > additions_limit
+
   rescue ArgumentError => e
     raise IssueCorrectivePaycheckService::MissingHistoricalContextError, "#{MESSAGE} #{e.message}"
   end
 
+  def catch_up_delta(target)
+    PayrollRetirementCatchUp.for_item(target) - [ original, *active ].sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) }
+  end
+
   private
+
+  def canonical_year_input(value)
+    value.stringify_keys.except("year_input_id").to_h do |key, entry|
+      type = EmployeeRetirementYearInput.attribute_types[key]
+      [ key, canonical_evidence(type ? type.cast(entry) : entry) ]
+    end
+  end
+
+  def canonical_evidence(value)
+    case value
+    when BigDecimal then value.to_s("F")
+    when Date, Time then value.iso8601
+    when Hash then value.stringify_keys.transform_values { |entry| canonical_evidence(entry) }
+    when Array then value.map { |entry| canonical_evidence(entry) }
+    else value
+    end
+  end
 
   attr_reader :employee, :original, :active, :year
 
