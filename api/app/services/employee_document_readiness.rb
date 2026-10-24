@@ -31,8 +31,8 @@ class EmployeeDocumentReadiness
   end
 
   def self.require_payroll_ready!(pay_period)
-    employee_ids = pay_period.payroll_items.not_voided.select(:employee_id)
-    items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    employee_ids = pay_period.payroll_items.financially_reportable.select(:employee_id)
+    items = pay_period.payroll_items.financially_reportable.includes(:employee).to_a
     stale_setup = items.select do |item|
       employee = item.employee
       next false if employee.intake_exception.blank? || employee.intake_payroll_confirmed_at.blank?

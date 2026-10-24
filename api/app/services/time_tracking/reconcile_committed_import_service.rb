@@ -184,6 +184,13 @@ module TimeTracking
         .includes(:check_events)
         .to_a
       payment_acknowledgements = items.flat_map do |item|
+        if item.voided? && item.payroll_included?
+          cancellation = item.check_events.select { |event| event.check_number == item.check_number && event.payment_cancellation? }.max_by(&:id)
+          if cancellation && allocations_by_item.fetch(item.id, []).any? { |row| !PaymentCancellationBridge.valid_original_receipt?(item, row) }
+            raise ArgumentError, "The original exact check receipt is missing for these source lines; review cancellation before reconciling history"
+          end
+          next cancellation ? AirePayrollEntryAcknowledgement.record_for_check_event!(check_event: cancellation, status: "payment_cancelled") : []
+        end
         status = { "prepared" => "payment_prepared", "printed" => "payment_prepared", "delivered" => "payment_issued", "voided" => "payment_voided" }[item.check_status]
         item_allocations = allocations_by_item.fetch(item.id, [])
         next [] unless status && item_allocations.any?

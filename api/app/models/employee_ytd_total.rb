@@ -80,7 +80,7 @@ class EmployeeYtdTotal < ApplicationRecord
       company_id: employee.company_id,
       pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)
     )
-    scope = employee.payroll_items.not_voided.where(pay_period_id: committed_periods.select(:id))
+    scope = employee.payroll_items.financially_reportable.where(pay_period_id: committed_periods.select(:id))
                     .where.not(id: payroll_item.id)
     employee.merge_historical_ytd(PayrollRetirementTotals.for_scope(scope), year)
   end

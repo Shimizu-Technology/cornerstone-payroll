@@ -150,7 +150,7 @@ module MigrationPromotion
         intake_stale_session_id: nil
       ))
 
-      source.payroll_items.not_voided.order(:id).each do |source_item|
+      source.payroll_items.financially_reportable.order(:id).each do |source_item|
         target_item = copy_record!(
           source_item,
           PAYROLL_ITEM_CLEAR_COLUMNS.merge(
@@ -212,10 +212,10 @@ module MigrationPromotion
       raise "Rehearsal promotion period-count verification failed" unless sources.length == targets.length
 
       sources.zip(targets).each do |source, target|
-        source_totals = source.payroll_items.not_voided.pick(
+        source_totals = source.payroll_items.financially_reportable.pick(
           Arel.sql("COUNT(*)"), Arel.sql("COALESCE(SUM(gross_pay), 0)"), Arel.sql("COALESCE(SUM(net_pay), 0)")
         )
-        target_totals = target.payroll_items.not_voided.pick(
+        target_totals = target.payroll_items.financially_reportable.pick(
           Arel.sql("COUNT(*)"), Arel.sql("COALESCE(SUM(gross_pay), 0)"), Arel.sql("COALESCE(SUM(net_pay), 0)")
         )
         raise "Rehearsal promotion payroll-total verification failed" unless source_totals == target_totals

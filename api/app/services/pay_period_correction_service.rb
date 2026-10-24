@@ -96,7 +96,7 @@ class PayPeriodCorrectionService
       # Commit and void both lock employee YTD rows. Keep a deterministic
       # employee order across pay periods so concurrent financial operations
       # cannot acquire the same YTD rows in opposite orders.
-      all_items = locked.payroll_items.order(:employee_id, :id).to_a
+      all_items = locked.payroll_items.financially_reportable.order(:employee_id, :id).to_a
       employee_ids = all_items.map(&:employee_id).uniq
 
       emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
@@ -134,6 +134,12 @@ class PayPeriodCorrectionService
           PayrollTaxSyncService.configured? ? { tax_sync_idempotency_key: "cpr-#{locked.id}-void-#{SecureRandom.uuid}" } : {}
         )
       )
+
+      PayrollYtdSnapshotRefresh.call(pay_period: locked, employee_ids: employee_ids)
+      manual_ids = locked.time_tracking_manual_allocations.where.not(status: "voided").pluck(:id)
+      if manual_ids.any?
+        ActiveRecord.after_all_transactions_commit { manual_ids.each { |id| AireManualAllocationSyncJob.perform_later(id) } }
+      end
 
       source_void_ids = TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: locked, void_event: event).map(&:id)
       if source_void_ids.any?
@@ -293,7 +299,7 @@ class PayPeriodCorrectionService
       .includes(:resulting_pay_period).order(id: :desc).filter_map(&:resulting_pay_period)
       .find { |period| period.voided? && period.company_id == source.company_id }
     copy_source = previous || source
-    copy_source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
+    copy_source.payroll_items.where(payroll_reversed_at: nil).reportable.find_each(batch_size: 500) do |source_item|
       copied = target.payroll_items.create!(
         company_id:               target.company_id,
         employee_id:              source_item.employee_id,

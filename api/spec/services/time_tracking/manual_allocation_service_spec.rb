@@ -166,9 +166,9 @@ RSpec.describe TimeTracking::ManualAllocationService do
     expect(client).not_to have_received(:issue_payroll_manual_allocation)
   end
 
-  it "releases committed AIRE hours when the paycheck is voided before delivery" do
+  it "releases committed AIRE hours only when payroll is financially reversed before delivery" do
     allocation = create_link
-    item.update_columns(voided: true, voided_at: Time.current)
+    item.update_columns(voided: true, voided_at: Time.current, **payroll_reversal_fixture)
     allow(client).to receive(:issue_payroll_manual_allocation)
     allow(client).to receive(:void_payroll_manual_allocation).and_return(
       "manual_allocation" => { "id" => "501", "version" => 1 }

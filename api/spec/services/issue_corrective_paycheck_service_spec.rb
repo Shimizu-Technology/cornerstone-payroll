@@ -42,6 +42,35 @@ RSpec.describe IssueCorrectivePaycheckService do
                  name: "Corrective Actor", role: "admin", active: true)
   end
 
+  %w[preview locked_issuance].each do |operation|
+    it "rejects #{operation} against a financially reversed checkless original" do
+      employee_ytd = employee.ytd_totals_for(2024)
+      company_ytd = CompanyYtdTotal.find_by!(company: company, year: 2024)
+      employee_ytd.subtract_payroll_item!(original_item)
+      company_ytd.subtract_payroll_item!(original_item)
+      original_item.assign_attributes(check_number: nil,
+        withholding_tax_override: original_item.gross_pay - original_item.social_security_tax - original_item.medicare_tax)
+      PayrollCalculator.for(employee, original_item).calculate
+      original_item.save!
+      employee_ytd.add_payroll_item!(original_item)
+      company_ytd.add_payroll_item!(original_item)
+      expect(original_item.net_pay).to eq(0)
+      cached = described_class.new(original_pay_period: original_period, employee: employee,
+        corrected_inputs: { hours_worked: 80 }, pay_date: Date.new(2024, 1, 26), reason: "Stale correction review", actor: actor)
+      cached.preview
+      ReversePaycheckService.call(payroll_item: original_item, actor: actor, reason: "Reverse incorrect checkless earned wages")
+      expect(original_item.reload).not_to be_voided
+
+      expect {
+        operation == "preview" ? described_class.preview(original_pay_period: original_period, employee: employee,
+          corrected_inputs: { hours_worked: 80 }) : cached.issue!
+      }.to raise_error(described_class::InvalidStateError, /financially reversed/)
+      expect(employee_ytd.reload.gross_pay).to eq(0)
+      expect(company_ytd.reload.gross_pay).to eq(0)
+      expect(original_period.supplemental_pay_periods).to be_empty
+    end
+  end
+
   describe "cumulative corrections" do
     def issue_target(inputs, pay_date: Date.new(2024, 1, 26))
       described_class.issue!(original_pay_period: original_period, employee: employee,
@@ -103,7 +132,10 @@ RSpec.describe IssueCorrectivePaycheckService do
         expect(employee.ytd_totals_for(2024).reload.gross_pay).to eq(original_item.pay_rate)
         expect(original_item.reload.attributes).to eq(frozen_original)
         expect(original_item.payroll_item_earnings.reload.map(&:attributes)).to eq(frozen_earnings)
-        expect(second.reload.attributes).to eq(frozen_second)
+        statement_fields = %w[ytd_gross ytd_net ytd_withholding_tax ytd_social_security_tax ytd_medicare_tax ytd_retirement ytd_roth_retirement updated_at]
+        expect(second.reload.attributes.except(*statement_fields)).to eq(frozen_second.except(*statement_fields))
+        expect(second.ytd_gross).to eq(original_item.gross_pay + second.gross_pay)
+        expect(second.ytd_net).to eq(original_item.net_pay + second.net_pay)
         ytd_after = employee.ytd_totals_for(2024).reload.attributes
         expect {
           described_class.issue!(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 1 },

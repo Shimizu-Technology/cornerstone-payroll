@@ -10,7 +10,7 @@ class EarningsStatementEligibility
   ]).uniq.freeze
 
   def self.printable?(item)
-    return false if item.voided?
+    return false unless item.payroll_included?
     return true if item.check_number.present?
     return true if FINANCIAL_FIELDS.any? { |field| item.public_send(field).to_d.nonzero? }
 

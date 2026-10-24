@@ -58,7 +58,7 @@ class PayrollTaxSyncService
 
   def validate_pay_period!
     raise SyncError, "Pay period is not committed" unless @pay_period.committed?
-    raise SyncError, "Pay period has no reportable payroll items" unless PayrollTaxSyncPayloadBuilder.reportable_items(@pay_period).exists?
+    raise SyncError, "Pay period has no reportable payroll items" unless PayrollTaxSyncPayloadBuilder.reportable_items(@pay_period).exists? || @pay_period.payroll_items.reportable.where.not(payroll_reversed_at: nil).exists?
   end
 
   def post_to_cst(payload)

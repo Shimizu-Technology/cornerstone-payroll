@@ -81,7 +81,7 @@ class PayrollLiabilityReconciliationService
   end
 
   def unclassified_components
-    pay_period.payroll_items.flat_map do |item|
+    pay_period.payroll_items.financially_reportable.flat_map do |item|
       unclassified_custom_deductions(item) + unclassified_adjustments(item)
     end
   end

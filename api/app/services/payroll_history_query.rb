@@ -92,7 +92,7 @@ class PayrollHistoryQuery
         'Cornerstone'::text AS source_label,
         (pp.status = 'committed') AS source_locked
       FROM pay_periods pp
-      LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND COALESCE(pi.voided, FALSE) = FALSE
+      LEFT JOIN payroll_items pi ON pi.pay_period_id = pp.id AND pi.payroll_reversed_at IS NULL AND COALESCE(pp.correction_status, '') <> 'voided'
         AND NOT EXISTS (
           SELECT 1 FROM payroll_item_legacy_dispositions disposition
           WHERE disposition.payroll_item_id = pi.id
