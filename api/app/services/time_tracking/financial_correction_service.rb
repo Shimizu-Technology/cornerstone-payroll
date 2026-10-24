@@ -70,10 +70,10 @@ module TimeTracking
       end
       pay_period.payroll_items.flat_map do |item|
         next [] if item.source_accounting_correction_linked?
-        # An earlier instrument cancellation retained the obligation. Its
-        # subsequent whole-payroll reversal needs its own exact source void.
-        retained_retirement = item.voided? && item.check_events.voids.where("details ->> 'payroll_obligation_retained' = 'true'").exists?
-        next [] unless instrumentless?(item) || retained_retirement
+        # The actual financial reversal above authorizes source release, even
+        # when an earlier legacy instrument void has no retained-obligation metadata.
+        # Exact linked-line ownership and receipt deduplication remain below.
+        next [] unless instrumentless?(item) || item.voided?
         original = item.time_tracking_entry_allocations.includes(:time_tracking_import).filter_map do |row|
           next unless row.time_tracking_import.finalized_batch? && row.time_tracking_import.contract_version == "2.0" && row.verified_source_user_uuid.present?
           next if item.aire_payroll_entry_acknowledgements.where(time_tracking_import_id: row.time_tracking_import_id,
