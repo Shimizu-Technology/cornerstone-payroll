@@ -51,7 +51,7 @@ RSpec.describe "Tax Configs Admin API", type: :request do
         create(:tax_bracket, filing_status_config: filing, bracket_order: 1, max_income: nil)
       end
       config.update_columns(verification_status: "draft")
-      post "/api/v1/admin/tax_configs/#{config.id}/verify", params: { source_note: "Synthetic January rehearsal: https://www.ssa.gov/oact/COLA/cbb.html" }
+      post "/api/v1/admin/tax_configs/#{config.id}/verify", params: { source_note: "Synthetic January rehearsal: https://www.ssa.gov/oact/COLA/cbb.html", reviewed_digest: config.reload.review_digest }
       expect(response).to have_http_status(:ok)
       expect(config.reload.verified_by).to eq(admin_user.id.to_s)
       expect(config.audit_logs.last.new_value).to include("Synthetic January rehearsal")
@@ -68,6 +68,49 @@ RSpec.describe "Tax Configs Admin API", type: :request do
       get "/api/v1/admin/tax_configs/#{config.id}"
       expect(response.parsed_body.dig("previous_year", "id")).to eq(previous.id)
       expect(response.parsed_body.dig("tax_config", "verification_status")).to eq("draft")
+    end
+  end
+
+  describe "verification from two administrator sessions" do
+    %w[fica withholding].each do |change|
+      it "rejects a stale review after another admin changes #{change}, then permits a fresh review" do
+        config = create(:annual_tax_config, tax_year: 2027, verification_status: "draft", ss_wage_base: 192_300)
+        FilingStatusConfig::FILING_STATUSES.each do |status|
+          filing = create(:filing_status_config, annual_tax_config: config, filing_status: status)
+          create(:tax_bracket, filing_status_config: filing, bracket_order: 1, max_income: nil)
+        end
+        config.update_columns(verification_status: "draft", verified_by: nil, verified_at: nil)
+        get "/api/v1/admin/tax_configs/#{config.id}"
+        reviewed_digest = response.parsed_body.dig("tax_config", "review_digest")
+
+        other_admin = create(:user, company: company, role: "admin")
+        allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(other_admin)
+        allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(other_admin.id)
+        if change == "fica"
+          patch "/api/v1/admin/tax_configs/#{config.id}", params: { ss_rate: 0.07 }
+        else
+          patch "/api/v1/admin/tax_configs/#{config.id}/brackets/single",
+            params: { brackets: [ { bracket_order: 1, min_income: 0, max_income: nil, rate: 0.22 } ] }, as: :json
+        end
+        expect(response).to have_http_status(:ok)
+
+        allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(admin_user)
+        allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(admin_user.id)
+        post "/api/v1/admin/tax_configs/#{config.id}/verify",
+          params: { source_note: "Synthetic review from the first session", reviewed_digest: reviewed_digest }
+        expect(response).to have_http_status(:conflict)
+        expect(response.parsed_body["error"]).to include("changed after")
+        expect(config.reload).not_to be_verified
+        expect(AnnualTaxConfig.current(2027)).to be_nil
+
+        get "/api/v1/admin/tax_configs/#{config.id}"
+        fresh_digest = response.parsed_body.dig("tax_config", "review_digest")
+        expect(fresh_digest).not_to eq(reviewed_digest)
+        post "/api/v1/admin/tax_configs/#{config.id}/verify",
+          params: { source_note: "Synthetic review of current values", reviewed_digest: fresh_digest }
+        expect(response).to have_http_status(:ok)
+        expect(config.reload.verified_by).to eq(admin_user.id.to_s)
+      end
     end
   end
 

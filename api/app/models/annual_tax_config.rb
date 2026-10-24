@@ -117,13 +117,22 @@ class AnnualTaxConfig < ApplicationRecord
     update_columns(verification_status: "draft", verified_by: nil, verified_at: nil) if persisted? && verified?
   end
 
-  def verify!(actor:, source_note:)
+  class StaleReviewError < ArgumentError; end
+
+  def review_digest
+    Digest::SHA256.hexdigest([ id, rules_digest, *FilingStatusConfig::FILING_STATUSES.map { |status| rules_digest(status) } ].to_json)
+  end
+
+  def verify!(actor:, source_note:, reviewed_digest: nil)
     raise ArgumentError, "Admin access required" unless actor&.organization_admin?
     raise ArgumentError, "A source note is required to verify tax tables" if source_note.to_s.strip.blank?
 
     with_lock do
       unless FilingStatusConfig::FILING_STATUSES.all? { |status| complete_withholding?(config_for(status)) }
         raise ArgumentError, "Complete withholding tables for every filing status before verification"
+      end
+      unless reviewed_digest.present? && reviewed_digest == review_digest
+        raise StaleReviewError, "These tax tables changed after you opened the review. Reload them and review the current values before verifying."
       end
       update!(verification_status: "verified", verified_by: actor.id.to_s,
               verified_at: Time.current, source_references: source_note.strip)

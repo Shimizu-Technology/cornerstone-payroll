@@ -61,8 +61,8 @@ export default function TaxConfigs() {
 
   useEffect(() => { void fetchConfigs(); }, [fetchConfigs]);
 
-  const fetchConfigDetails = async (id: number) => {
-    setSelectedConfig(null);
+  const fetchConfigDetails = async (id: number, preserveSelection = false) => {
+    if (!preserveSelection) setSelectedConfig(null);
     setLoadingDetailId(id);
     try {
       const data = await taxConfigsApi.get(id);
@@ -72,6 +72,7 @@ export default function TaxConfigs() {
       });
     } catch (error) {
       notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to fetch config details. Check the entered values and try again.' });
+      if (preserveSelection) throw error;
     } finally {
       setLoadingDetailId((prev) => (prev === id ? null : prev));
     }
@@ -447,7 +448,7 @@ export default function TaxConfigs() {
             </button>
           </div>
 
-          <TaxYearVerification key={`${selectedConfig.id}-${selectedConfig.updated_at}`} config={selectedConfig} previous={previousConfig} onSaved={async () => { await fetchConfigDetails(selectedConfig.id); await fetchConfigs(); }} />
+          <TaxYearVerification key={selectedConfig.id} config={selectedConfig} previous={previousConfig} onReload={() => fetchConfigDetails(selectedConfig.id, true)} onSaved={async () => { await fetchConfigDetails(selectedConfig.id); await fetchConfigs(); }} />
           {/* Global Settings */}
           <div className="mb-8 p-4 bg-gray-50 rounded-lg">
             <div className="flex justify-between items-center mb-4">
