@@ -329,6 +329,12 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
+    if line_rounded_earnings?
+      total = Array(payroll_item.custom_earnings).sum(0.to_d) { |ce| PayrollEarningsRounding.line_amount(ce["amount"]) } +
+        payroll_item.taxable_payroll_adjustments_total.to_d
+      total += payroll_item.taxable_payroll_field_entries_total.to_d unless @exclude_payroll_field_entry_totals
+      return total
+    end
     total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
       payroll_item.taxable_payroll_adjustments_total
     total += payroll_item.taxable_payroll_field_entries_total unless @exclude_payroll_field_entry_totals
@@ -938,6 +944,19 @@ class PayrollCalculator
     @calculation_context.present?
   end
 
+  def line_rounded_earnings?
+    payroll_item.employment_type.in?(%w[hourly contractor]) &&
+      (!historical_calculation? || @calculation_context["earnings_rounding"] == PayrollEarningsRounding::POLICY)
+  end
+
+  def wage_earning_amount(amount)
+    line_rounded_earnings? ? PayrollEarningsRounding.line_amount(amount) : amount
+  end
+
+  def saved_earning_amount(amount)
+    line_rounded_earnings? ? PayrollEarningsRounding.line_amount(amount) : amount.to_f.round(2)
+  end
+
   def snapshotted_tax_calculator
     snapshot = payroll_item.tax_rule_snapshot.deep_stringify_keys
     args = {
@@ -987,6 +1006,9 @@ class PayrollCalculator
       w4_election: w4_election_for_calculation,
       retirement_election: retirement_election_for_calculation
     ).merge(built_in_employer_match_identity)
+    if line_rounded_earnings?
+      payroll_item.calculation_context_snapshot = payroll_item.calculation_context_snapshot.merge("earnings_rounding" => PayrollEarningsRounding::POLICY)
+    end
   end
 
   def built_in_employer_match_identity
