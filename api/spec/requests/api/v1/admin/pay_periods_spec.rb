@@ -1158,6 +1158,15 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       end
     end
 
+    it "retains the operator's reason for calculating without imported source hours in the audit trail" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } }, source_coverage_reason: "  Manual hours verified against approved timecards.  "
+      }
+      expect(response).to have_http_status(:ok)
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("source_coverage_reason")).to eq("Manual hours verified against approved timecards.")
+    end
+
     it "calculates payroll for employees with pay activity" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
         hours: { employee.id.to_s => { regular: 80, overtime: 0 } }

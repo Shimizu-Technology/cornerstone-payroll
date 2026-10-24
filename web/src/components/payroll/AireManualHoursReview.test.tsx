@@ -88,7 +88,7 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('Live time tracking readiness')).toBeTruthy();
+    expect(await screen.findByText('Hours ready for payroll')).toBeTruthy();
     expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
     expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
@@ -236,7 +236,7 @@ it('retains the read-only snapshot and payroll values during same-period source 
   let resolveRefresh!: (value: typeof review) => void;
   apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
   view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
-  expect(screen.getByRole('status').textContent).toContain('Refreshing live time tracking readiness');
+  expect(screen.getByRole('status').textContent).toContain('Refreshing hours ready for payroll');
   expect(screen.queryByText(/Comparing time tracking with the hours entered/)).toBeNull();
   expect(screen.getAllByText('Includes 6.10 carryover')[0]).toBe(retained);
   expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
