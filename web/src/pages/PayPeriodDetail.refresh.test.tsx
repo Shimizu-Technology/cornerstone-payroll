@@ -1923,3 +1923,12 @@ it('counts prepared paper checks separately from direct-deposit stubs in the hea
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('link', { name: '1 check prepared, not issued' })).toBeTruthy();
 });
+
+
+it('reveals actual withholding and FICA fields in phone tax detail', async () => {
+  await renderLoanWorksheet('calculated');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show tax detail' }));
+  const result = screen.getByRole('region', { name: /^Payroll result for / });
+  for (const label of ['FIT', 'Additional withholding', 'Social Security', 'Employee Medicare', 'Employer Medicare']) expect(within(result).getByText(label, { exact: true })).toBeTruthy();
+  expect(within(result).getByText('Net pay', { exact: true })).toBeTruthy();
+});
