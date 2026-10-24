@@ -1,13 +1,14 @@
 # Gates
 
-Final hours-only application source: `72e5cc30`, including staging-v2 `ce12d1da`. Evidence-only changes leave web tree `502d2b4b593d9231ff497e4cc44f9d37f5b71e3c` unchanged.
+Current application/test source: `973f61f2` (UI logic b374803a), including staging-v2 `ce12d1da`. Later evidence-only changes leave web tree `20174b224bdf18800ac73f814eefa607e6ff5754` unchanged.
 
 | Fresh gate | Result |
 | --- | --- |
-| npm run gate | TypeScript, zero-warning lint, 131 files / 1,248 tests, production build passed |
+| npm run gate | TypeScript, zero-warning lint, 131 files / 1,259 tests, production build passed |
 | test:e2e:release | 45 passed; 0 failed, skipped or flaky |
-| Hours presentation | 6 headless checks at 1280×800 / 390×844; no horizontal overflow |
+| test:e2e:refresh | 10 passed; 0 failed, skipped or flaky; includes tab navigation after calculation at both widths |
+| Hours presentation | 12 headless checks at 1280×800 / 390×844; no horizontal overflow |
 
-The final lead request narrowed this follow-up to the full web gate and release lane. The accepted previous round passed npm ci, npm audit (0 vulnerabilities), public 131, release 45, refresh 10 and pay-items 24, all with zero failures, skips or flaky results. Those prior-round public/refresh/pay-items receipts are historical evidence, not claimed as rerun on the final hours change. Its 32 axe scans, 18 viewport checks, 12 read-only Reports checks, 12 saved-outcome/dialog receipts and Impeccable 4.6.0 scan remain in the review-round-1 report.
+The lead requested these three gates for the five latest comments. Public 131 and pay-items 24 passed in the accepted earlier round and are historical receipts, not represented as rerun on this change. The prior npm ci/audit (0 vulnerabilities), 32 axe scans, 18 viewport checks, 12 read-only Reports checks, 12 saved-outcome/dialog receipts and Impeccable 4.6.0 evidence remain in review round 1.
 
-[Last hours fix and fresh stress captures](REVIEW-2.md) · [Accepted eight review fixes](REVIEW-1.md). Raw final-round evidence is in `pr-c/review-2/` under the local evidence root in METHODS.md. Gates were run on 72e5cc30; later commits contain evidence only. API tree equals ce12d1da, with no backend changes, migrations or dependency changes. Backend specs were not rerun under the lead’s web-only C gate. CI on the pushed head remains the lead’s merge gate.
+[Current fixes and evidence](REVIEW-3.md) · [Hours consistency follow-up](REVIEW-2.md) · [Eight accepted initial fixes](REVIEW-1.md). The first web attempt hit an unchanged ChecksPanel timer assertion under host load; its isolated 30 tests and the complete web gate passed on retry without timeout changes. Only the green receipts in pr-c/review-3/final-gate count toward current acceptance. API source equals ce12d1da; no API, migrations or dependencies changed, and backend specs were not rerun. CI on the pushed head remains the lead’s merge gate.
