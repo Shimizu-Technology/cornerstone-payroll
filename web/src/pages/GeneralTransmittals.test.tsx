@@ -121,7 +121,7 @@ describe('GeneralTransmittals PDF preview dialog', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' })));
     await user.keyboard('{Escape}');
     await waitFor(() => expect(document.activeElement).toBe(opener));
-    expect(screen.queryByTitle('Transmittal PDF preview')).toBeNull();
+    await waitFor(() => expect(screen.queryByTitle('Transmittal PDF preview')).toBeNull());
     expect((screen.getByRole('textbox', { name: 'Title' }) as HTMLInputElement).value).toBe(packet.title);
 
     await user.keyboard('{Enter}');

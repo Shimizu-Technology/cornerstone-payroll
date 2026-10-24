@@ -44,7 +44,7 @@ export function WorkspaceTabs({ label, tabs }: WorkspaceTabsProps): ReactElement
             <Icon className="h-4 w-4" />
             {tabLabel}
             {typeof count === 'number' && count > 0 && (
-              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary-50 px-2 text-[11px] font-extrabold tabular-nums text-primary-800">
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary-50 px-2 text-xs font-extrabold tabular-nums text-primary-800">
                 {count}
               </span>
             )}

@@ -808,7 +808,7 @@ export function PayPeriods() {
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
@@ -866,9 +866,9 @@ export function PayPeriods() {
         {/* Pay Period Table */}
         <Card>
           {loading ? (
-            <div className="p-8 text-center text-gray-500">Loading...</div>
+            <div className="p-8 text-center text-neutral-600">Loading...</div>
           ) : visiblePayPeriods.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-neutral-600">
               {searchTerm
                 ? 'No pay periods match the current filters.'
                 : readOnlyWorkspace
@@ -899,7 +899,7 @@ export function PayPeriods() {
                 <Table stickyHeader containerClassName="max-h-[32rem]">
                   <TableHeader>
                 <TableRow>
-                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-gray-50">Pay Period</TableHead>
+                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-neutral-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
                   <TableHead>Purpose</TableHead>
                   <TableHead>Employees</TableHead>
@@ -907,24 +907,24 @@ export function PayPeriods() {
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Processed</TableHead>
-                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-slate-200 bg-gray-50 text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-neutral-200 bg-neutral-50 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {visiblePayPeriods.map((period, index) => {
                   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
-                  const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                  const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-neutral-100';
                   const periodReadOnly = readOnlyWorkspace || period.test_workspace_role === 'baseline';
                   const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {formatDateRange(period.start_date, period.end_date)}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="text-sm text-gray-700">
+                        <span className="text-sm text-neutral-700">
                           {new Date(period.pay_date).toLocaleDateString('en-US', {
                             weekday: 'short',
                             month: 'short',
@@ -946,17 +946,17 @@ export function PayPeriods() {
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="text-sm text-gray-700">
+                        <span className="text-sm text-neutral-700">
                           {period.employee_count || 0}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {period.total_gross ? formatCurrency(period.total_gross) : '—'}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {period.total_net ? formatCurrency(period.total_net) : '—'}
                         </span>
                       </TableCell>
@@ -981,28 +981,28 @@ export function PayPeriods() {
                       <TableCell className={rowTone}>
                         {period.processed_at ? (
                           <div className="text-sm">
-                            <p className="font-medium text-gray-900">
+                            <p className="font-medium text-neutral-900">
                               {formatGuamDateTimeShort(period.processed_at)}
                             </p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-neutral-600">
                               {period.processed_by_name ? `by ${period.processed_by_name}` : 'Operator not recorded'}
                             </p>
                           </div>
                         ) : (
-                          <span className="text-sm text-gray-400">Not processed</span>
+                          <span className="text-sm text-neutral-600">Not processed</span>
                         )}
                       </TableCell>
-                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-slate-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
+                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-neutral-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
                         <div className="flex max-w-[232px] flex-wrap items-center justify-end gap-2 [&_button]:min-h-11">
                           <div className="flex items-center gap-1 text-sm">
                             <button
-                              className="text-gray-500 hover:text-gray-800 hover:underline"
+                              className="text-neutral-600 hover:text-neutral-800 hover:underline"
                               onClick={() => navigate(recordDestination(period, 'overview'))}
                             >
                               View
                             </button>
-                            {!periodReadOnly && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!periodReadOnly && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.edit && <><span className="text-neutral-300">·</span><button className="text-neutral-600 hover:text-neutral-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
                           {!periodReadOnly && period.capabilities.enter_hours && (
@@ -1074,42 +1074,42 @@ export function PayPeriods() {
             <h3 className="sr-only">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-gray-600">1</span>
+                <div className="w-8 h-8 bg-neutral-100 rounded-full flex items-center justify-center">
+                  <span className="text-sm font-medium text-neutral-600">1</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Draft</p>
-                  <p className="text-sm text-gray-500">Create pay period</p>
+                  <p className="font-medium text-neutral-900">Draft</p>
+                  <p className="text-sm text-neutral-600">Create pay period</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-yellow-600">2</span>
+                  <span className="text-sm font-medium text-warning-800">2</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Calculated</p>
-                  <p className="text-sm text-gray-500">Review totals</p>
+                  <p className="font-medium text-neutral-900">Calculated</p>
+                  <p className="text-sm text-neutral-600">Review totals</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-blue-600">3</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Approved</p>
-                  <p className="text-sm text-gray-500">Ready to commit</p>
+                  <p className="font-medium text-neutral-900">Approved</p>
+                  <p className="text-sm text-neutral-600">Ready to commit</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-green-600">4</span>
+                  <span className="text-sm font-medium text-success-800">4</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Committed</p>
-                  <p className="text-sm text-gray-500">Locked & finalized</p>
+                  <p className="font-medium text-neutral-900">Committed</p>
+                  <p className="text-sm text-neutral-600">Locked & finalized</p>
                 </div>
               </div>
             </div>
@@ -1233,7 +1233,7 @@ export function PayPeriods() {
                   onChange={(e) => setFormData({ ...formData, starting_check_number: e.target.value })}
                   placeholder="Use current check settings"
                 />
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-neutral-600">
                   {loadingCheckSettings
                     ? 'Checking current company check settings...'
                     : checkSettingsError

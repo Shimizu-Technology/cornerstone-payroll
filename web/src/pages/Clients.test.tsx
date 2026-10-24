@@ -421,7 +421,7 @@ describe('Clients name-only rename', () => {
     await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(6, { name: "MoSa's Hotbox, Inc." }));
     expect(apiMocks.update).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('Client name updated.')).toBeTruthy();
-    expect(screen.queryByRole('dialog', { name: 'Rename client' })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename client' })).toBeNull());
     resolveRefresh();
   });
 
@@ -436,7 +436,7 @@ describe('Clients name-only rename', () => {
     dialog = await openRename(user);
     await user.click(within(dialog).getByRole('button', { name: 'Save client name' }));
     expect(apiMocks.update).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('keeps failed saves available without reporting success', async () => {
@@ -503,7 +503,7 @@ describe('Clients name-only rename', () => {
     await act(async () => { resolveSave(); });
     await waitFor(() => expect(refreshCompanies).toHaveBeenCalledOnce());
     expect(apiMocks.list).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByText('Client name updated.')).toBeNull();
     apiMocks.activeCompanyId = 6;
   });
@@ -517,7 +517,7 @@ describe('Clients name-only rename', () => {
     rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
     resolveSave();
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByText('Client name updated.')).toBeNull();
     expect(refreshCompanies).not.toHaveBeenCalled();
     expect(apiMocks.list).toHaveBeenCalledTimes(1);

@@ -64,11 +64,11 @@ function simpleValue(column: SimpleColumn, value: string | number | null) {
 
 function simpleCellClass(column: SimpleColumn, header = false) {
   const numeric = column.format === 'currency' || column.format === 'number' || column.format === 'count';
-  const calculated = column.calculated ? 'bg-blue-50/90' : header ? 'bg-slate-50' : 'bg-white';
+  const calculated = column.calculated ? 'bg-blue-50/90' : header ? 'bg-neutral-50' : 'bg-white';
   const sticky = column.key === 'count'
-    ? `sticky left-0 z-20 ${header ? 'bg-slate-50' : calculated}`
+    ? `sticky left-0 z-20 ${header ? 'bg-neutral-50' : calculated}`
     : column.key === 'employee'
-      ? `sticky left-12 z-20 ${header ? 'bg-slate-50' : calculated}`
+      ? `sticky left-12 z-20 ${header ? 'bg-neutral-50' : calculated}`
       : calculated;
   return `${sticky} ${numeric ? 'text-right tabular-nums' : 'text-left'}`;
 }
@@ -136,9 +136,9 @@ function payrollAdjustmentAmount(worker: PayrollWorker, column: PayrollAdjustmen
 function PayrollAdjustmentHeader({ column }: PayrollAdjustmentHeaderProps): ReactElement {
   const tone = column.group === 'deduction' ? 'bg-amber-50 text-amber-950' : 'bg-emerald-50 text-emerald-950';
   return (
-    <th className={`${tone} min-w-40 border-b border-r border-slate-200 px-4 py-2 align-bottom`}>
+    <th className={`${tone} min-w-40 border-b border-r border-neutral-200 px-4 py-2 align-bottom`}>
       <span className="block font-bold leading-4">{column.label}</span>
-      <span className="mt-2 block text-[10px] font-medium leading-3 opacity-70">{column.treatment} · {column.source}</span>
+      <span className="mt-2 block text-xs font-medium leading-3 opacity-70">{column.treatment} · {column.source}</span>
     </th>
   );
 }
@@ -146,8 +146,8 @@ function PayrollAdjustmentHeader({ column }: PayrollAdjustmentHeaderProps): Reac
 function PayrollAdjustmentCell({ worker, column }: PayrollAdjustmentCellProps): ReactElement {
   const amount = payrollAdjustmentAmount(worker, column);
   return (
-    <td className="border-b border-r border-slate-100 bg-white px-4 py-2 text-right tabular-nums">
-      {amount === null ? <span className="text-slate-400">—</span> : currency(amount)}
+    <td className="border-b border-r border-neutral-100 bg-white px-4 py-2 text-right tabular-nums">
+      {amount === null ? <span className="text-neutral-600">—</span> : currency(amount)}
     </td>
   );
 }
@@ -218,9 +218,9 @@ function PayrollFieldHeader({ column }: { column: PayrollFieldColumn }) {
       ? 'Included in deductions'
       : 'Employer only';
   return (
-    <th className={`${payrollFieldHeaderClass(column.group)} min-w-36 border-b border-r border-slate-200 px-3 py-2 align-bottom`}>
+    <th className={`${payrollFieldHeaderClass(column.group)} min-w-36 border-b border-r border-neutral-200 px-3 py-2 align-bottom`}>
       <span className="block font-bold leading-4">{column.label}</span>
-      <span className="mt-1 block text-[10px] font-medium leading-3 opacity-70">{column.treatment} · {inclusion}</span>
+      <span className="mt-1 block text-xs font-medium leading-3 opacity-70">{column.treatment} · {inclusion}</span>
     </th>
   );
 }
@@ -228,8 +228,8 @@ function PayrollFieldHeader({ column }: { column: PayrollFieldColumn }) {
 function PayrollFieldCell({ worker, column }: { worker: PayrollWorker; column: PayrollFieldColumn }) {
   const amount = payrollFieldAmount(worker, column);
   return (
-    <td className="border-b border-r border-slate-100 bg-white px-3 py-2 text-right tabular-nums">
-      {amount === null ? <span className="text-slate-400">—</span> : currency(amount)}
+    <td className="border-b border-r border-neutral-100 bg-white px-3 py-2 text-right tabular-nums">
+      {amount === null ? <span className="text-neutral-600">—</span> : currency(amount)}
     </td>
   );
 }
@@ -242,7 +242,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
     <div className="space-y-5">
       <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <div className="bg-[#1f4e78] px-5 py-4 text-white">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-100">Payroll register</p>
+          <p className="text-xs font-bold text-blue-100">Payroll register</p>
           <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold tracking-tight">{report.meta.company_name || 'Payroll client'}</h2>
@@ -250,7 +250,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
                 {report.pay_period.start_date} – {report.pay_period.end_date} · Pay date {report.pay_period.pay_date}
               </p>
             </div>
-            <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+            <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
               {report.pay_period.status}
             </span>
           </div>
@@ -258,11 +258,11 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
 
         <div className="space-y-4 p-5">
           <div>
-            <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-neutral-500">Pay period information</h3>
+            <h3 className="text-sm font-bold text-neutral-600">Pay period information</h3>
             <dl className="mt-3 grid gap-x-8 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
               {simple.pay_period_information.map((row) => (
                 <div key={row.label} className="min-w-0">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{row.label}</dt>
+                  <dt className="text-xs font-semibold text-neutral-600">{row.label}</dt>
                   <dd className="mt-1 break-words text-sm font-medium text-neutral-900">{row.value || 'Not recorded'}</dd>
                 </div>
               ))}
@@ -294,7 +294,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
                 {simple.columns.map((column) => (
                   <th
                     key={`hint-${column.key}`}
-                    className={`${simpleCellClass(column, true)} min-w-12 border-b border-r border-blue-100 px-2.5 py-2 align-bottom text-[10px] font-medium italic leading-4 text-slate-500`}
+                    className={`${simpleCellClass(column, true)} min-w-12 border-b border-r border-blue-100 px-2.5 py-2 align-bottom text-xs font-medium italic leading-4 text-neutral-600`}
                     title={column.hint || undefined}
                   >
                     {column.hint}
@@ -305,7 +305,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
                 {simple.columns.map((column) => (
                   <th
                     key={column.key}
-                    className={`${simpleCellClass(column, true)} border-b-2 border-r border-slate-200 px-2.5 py-2.5 font-bold text-slate-900`}
+                    className={`${simpleCellClass(column, true)} border-b-2 border-r border-neutral-200 px-2.5 py-2.5 font-bold text-neutral-900`}
                   >
                     {column.label}
                   </th>
@@ -318,7 +318,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
                   {simple.columns.map((column) => (
                     <td
                       key={column.key}
-                      className={`${simpleCellClass(column)} border-b border-r border-slate-100 px-2.5 py-2 text-slate-800 group-hover:bg-blue-50/70 ${column.key === 'employee' ? 'min-w-56 font-semibold' : ''}`}
+                      className={`${simpleCellClass(column)} border-b border-r border-neutral-100 px-2.5 py-2 text-neutral-950 group-hover:bg-blue-50/70 ${column.key === 'employee' ? 'min-w-56 font-semibold' : ''}`}
                     >
                       {simpleValue(column, row[column.key])}
                     </td>
@@ -331,7 +331,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
                 {simple.columns.map((column) => (
                   <td
                     key={column.key}
-                    className={`${simpleCellClass(column)} border-t-2 border-r border-[#7f9db9] bg-[#eaf2f8] px-2.5 py-2.5 font-bold text-slate-950`}
+                    className={`${simpleCellClass(column)} border-t-2 border-r border-[#7f9db9] bg-[#eaf2f8] px-2.5 py-2.5 font-bold text-neutral-950`}
                   >
                     {simpleValue(column, simple.total[column.key])}
                   </td>
@@ -352,23 +352,23 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+              <thead className="bg-neutral-100 text-left text-xs text-neutral-600">
                 <tr>
-                  <th className="border-b border-r border-slate-200 px-4 py-2.5">Contractor</th>
-                  <th className="border-b border-r border-slate-200 px-4 py-2.5">Type</th>
-                  <th className="border-b border-r border-slate-200 px-4 py-2.5 text-right">Gross pay</th>
-                  <th className="border-b border-r border-slate-200 px-4 py-2.5 text-right">Net pay</th>
-                  <th className="border-b border-slate-200 px-4 py-2.5">Check #</th>
+                  <th className="border-b border-r border-neutral-200 px-4 py-2.5">Contractor</th>
+                  <th className="border-b border-r border-neutral-200 px-4 py-2.5">Type</th>
+                  <th className="border-b border-r border-neutral-200 px-4 py-2.5 text-right">Gross pay</th>
+                  <th className="border-b border-r border-neutral-200 px-4 py-2.5 text-right">Net pay</th>
+                  <th className="border-b border-neutral-200 px-4 py-2.5">Check #</th>
                 </tr>
               </thead>
               <tbody>
                 {report.contractors.map((contractor) => (
                   <tr key={contractor.employee_id} className="hover:bg-blue-50/50">
-                    <td className="border-b border-r border-slate-100 px-4 py-2.5 font-semibold">{contractor.employee_name}</td>
-                    <td className="border-b border-r border-slate-100 px-4 py-2.5 capitalize">{contractor.employment_type}</td>
-                    <td className="border-b border-r border-slate-100 px-4 py-2.5 text-right tabular-nums">{currency(contractor.gross_pay)}</td>
-                    <td className="border-b border-r border-slate-100 px-4 py-2.5 text-right font-semibold tabular-nums">{currency(contractor.net_pay)}</td>
-                    <td className="border-b border-slate-100 px-4 py-2.5 font-mono">{contractor.check_number || ''}</td>
+                    <td className="border-b border-r border-neutral-100 px-4 py-2.5 font-semibold">{contractor.employee_name}</td>
+                    <td className="border-b border-r border-neutral-100 px-4 py-2.5 capitalize">{contractor.employment_type}</td>
+                    <td className="border-b border-r border-neutral-100 px-4 py-2.5 text-right tabular-nums">{currency(contractor.gross_pay)}</td>
+                    <td className="border-b border-r border-neutral-100 px-4 py-2.5 text-right font-semibold tabular-nums">{currency(contractor.net_pay)}</td>
+                    <td className="border-b border-neutral-100 px-4 py-2.5 font-mono">{contractor.check_number || ''}</td>
                   </tr>
                 ))}
               </tbody>
@@ -454,7 +454,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary-700">Detailed payroll register</p>
+        <p className="text-xs font-bold text-primary-700">Detailed payroll register</p>
         <h2 className="mt-1 text-xl font-bold text-neutral-950">{report.meta.company_name || 'Payroll client'}</h2>
         <p className="mt-1 text-sm text-neutral-500">
           {report.pay_period.start_date} – {report.pay_period.end_date} · Pay date {report.pay_period.pay_date}
@@ -462,8 +462,8 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           {summaryItems.map(([label, value]) => (
             <div key={label} className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
-              <p className="mt-1 text-lg font-bold text-neutral-950">{value}</p>
+              <p className="text-xs font-semibold text-neutral-600">{label}</p>
+              <p className="mt-1 text-lg font-bold text-neutral-950 tabular-nums">{value}</p>
             </div>
           ))}
         </div>
@@ -473,112 +473,112 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-neutral-200 px-5 py-4">
           <h3 className="font-bold text-neutral-950">Payroll worker detail</h3>
           {(fieldColumns.length > 0 || adjustmentColumns.length > 0) && (
-            <p className="max-w-2xl text-xs leading-5 text-neutral-500">
+            <p className="max-w-2xl text-xs leading-5 text-neutral-600">
               Snapshotted payroll components appear beside the totals they affect. Source labels distinguish employee setup from manual pay-period entries. A dash means the component did not apply to that worker.
             </p>
           )}
         </div>
         <div className="max-h-[60vh] overflow-auto">
           <table className="text-xs" style={{ minWidth: `${2050 + (fieldColumns.length * 144) + (adjustmentColumns.length * 160)}px` }}>
-            <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
+            <thead className="sticky top-0 z-10 bg-neutral-100 text-left text-neutral-700">
               <tr>
-                <th className="sticky left-0 z-20 min-w-52 border-b border-r border-slate-200 bg-slate-100 px-3 py-2.5 font-bold">Employee</th>
+                <th className="sticky left-0 z-20 min-w-52 border-b border-r border-neutral-200 bg-neutral-100 px-3 py-2.5 font-bold">Employee</th>
                 {['Type', 'Hours', 'OT Hours', 'Reported Tips', 'Tips Out'].map((label) => (
-                  <th key={label} className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">{label}</th>
+                  <th key={label} className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">{label}</th>
                 ))}
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Bonus</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Bonus</th>
                 {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {additionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Gross Pay</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Withholding</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Add&apos;l W/H</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Social Security</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Medicare</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Gross Pay</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Withholding</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Add&apos;l W/H</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Social Security</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Medicare</th>
                 {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {deductionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Straight Loan</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Installment Loan</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Deductions</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Net Pay</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Employer Contributions</th>
-                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Employer Cost</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Straight Loan</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Installment Loan</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Deductions</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Net Pay</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Employer Contributions</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Employer Cost</th>
                 {employerColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
-                <th className="border-b border-slate-200 px-3 py-2.5 font-bold">Check #</th>
+                <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Check #</th>
               </tr>
             </thead>
             <tbody>
               {workerSections.map((section) => (
                 <Fragment key={section.label}>
-                  <tr className="bg-slate-50">
-                    <td colSpan={columnCount} className="border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                  <tr className="bg-neutral-50">
+                    <td colSpan={columnCount} className="border-b border-neutral-200 px-3 py-2 text-xs font-bold text-neutral-600">
                       {section.label} · {section.workers.length}
                     </td>
                   </tr>
                   {section.workers.map((worker) => (
                     <tr key={worker.employee_id} className="group hover:bg-blue-50/50">
-                      <td className="sticky left-0 z-[1] border-b border-r border-slate-100 bg-white px-3 py-2 font-semibold group-hover:bg-blue-50">{worker.employee_name}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 capitalize">{worker.employment_type}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.hours_worked)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.overtime_hours)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.reported_tips)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.tips_paid_out)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.bonus)}</td>
+                      <td className="sticky left-0 z-[1] border-b border-r border-neutral-100 bg-white px-3 py-2 font-semibold group-hover:bg-blue-50">{worker.employee_name}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 capitalize">{worker.employment_type}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{decimal(worker.hours_worked)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{decimal(worker.overtime_hours)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.reported_tips)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.tips_paid_out)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.bonus)}</td>
                       {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {additionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.withholding_tax)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.additional_withholding)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.social_security_tax)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.withholding_tax)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.additional_withholding)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.social_security_tax)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
                       {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {deductionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.straight_loan_deduction)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.installment_loan_payment)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_contributions_total)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_payroll_cost)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.straight_loan_deduction)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.installment_loan_payment)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_contributions_total)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_payroll_cost)}</td>
                       {employerColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
-                      <td className="border-b border-slate-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
+                      <td className="border-b border-neutral-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
                     </tr>
                   ))}
                 </Fragment>
               ))}
             </tbody>
-            <tfoot className="sticky bottom-0 z-10 bg-slate-100 text-slate-950">
+            <tfoot className="sticky bottom-0 z-10 bg-neutral-100 text-neutral-950">
               <tr>
-                <td className="sticky left-0 z-20 border-t-2 border-r border-slate-300 bg-slate-100 px-3 py-2.5 font-bold">TOTALS</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5" />
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('hours_worked'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('overtime_hours'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('reported_tips'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('tips_paid_out'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('bonus'))}</td>
+                <td className="sticky left-0 z-20 border-t-2 border-r border-neutral-300 bg-neutral-100 px-3 py-2.5 font-bold">TOTALS</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5" />
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('hours_worked'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('overtime_hours'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('reported_tips'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('tips_paid_out'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('bonus'))}</td>
                 {adjustmentAdditionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-neutral-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
                 ))}
                 {additionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
                 {(['gross_pay', 'withholding_tax', 'additional_withholding', 'social_security_tax', 'medicare_tax'] as Array<keyof PayrollWorker>).map((key) => (
-                  <td key={key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total(key))}</td>
+                  <td key={key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total(key))}</td>
                 ))}
                 {adjustmentDeductionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-neutral-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
                 ))}
                 {deductionColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('straight_loan_deduction'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('installment_loan_payment'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('total_deductions'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('net_pay'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_contributions_total'))}</td>
-                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_payroll_cost'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('straight_loan_deduction'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('installment_loan_payment'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('total_deductions'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('net_pay'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_contributions_total'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_payroll_cost'))}</td>
                 {employerColumns.map((column) => (
-                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                  <td key={column.key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
-                <td className="border-t-2 border-slate-300 px-3 py-2.5" />
+                <td className="border-t-2 border-neutral-300 px-3 py-2.5" />
               </tr>
             </tfoot>
           </table>
@@ -638,7 +638,7 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
   return (
     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
       <div className="border-b border-neutral-200 px-5 py-4">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Payroll components</p>
+        <p className="text-xs font-bold text-primary-700">Payroll components</p>
         <h3 className="mt-2 font-bold text-neutral-950">Recurring fields and pay-period adjustments</h3>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-neutral-600">
           These snapshotted values are already reflected in gross pay, deductions, net pay, and taxable wages. Their source shows whether they came from employee setup or were entered for this pay period; later setup changes do not rewrite this payroll.
@@ -649,7 +649,7 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
         {totals.map((total) => (
           <div key={`${total.componentType}:${total.identity}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 shadow-sm">
             <p className="truncate text-sm font-bold text-neutral-950" title={total.label}>{total.label}</p>
-            <p className="mt-2 text-xs text-neutral-500">{total.componentType} · {total.treatment} · {total.effect}</p>
+            <p className="mt-2 text-xs text-neutral-600">{total.componentType} · {total.treatment} · {total.effect}</p>
             <p className="mt-2 text-lg font-bold tabular-nums text-neutral-950">{currency(total.amount)}</p>
           </div>
         ))}
@@ -657,27 +657,27 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
 
       <div className="max-h-[45vh] overflow-auto">
         <table className="min-w-[1080px] w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+          <thead className="sticky top-0 z-10 bg-neutral-100 text-left text-xs text-neutral-600">
             <tr>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Worker</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Component type</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Component</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Treatment</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Payroll effect</th>
-              <th className="border-b border-r border-slate-200 px-4 py-2">Source</th>
-              <th className="border-b border-slate-200 px-4 py-2 text-right">Amount</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Worker</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Component type</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Component</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Treatment</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Payroll effect</th>
+              <th className="border-b border-r border-neutral-200 px-4 py-2">Source</th>
+              <th className="border-b border-neutral-200 px-4 py-2 text-right">Amount</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, index) => (
               <tr key={`${row.worker}:${row.label}:${index}`} className="hover:bg-blue-50/50">
-                <td className="border-b border-r border-slate-100 px-4 py-2 font-semibold text-neutral-950">{row.worker}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2">{row.componentType}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2">{row.label}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2">{row.treatment}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2">{row.effect}</td>
-                <td className="border-b border-r border-slate-100 px-4 py-2">{row.source}</td>
-                <td className="border-b border-slate-100 px-4 py-2 text-right font-bold tabular-nums">{currency(row.amount)}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2 font-semibold text-neutral-950">{row.worker}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2">{row.componentType}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2">{row.label}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2">{row.treatment}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2">{row.effect}</td>
+                <td className="border-b border-r border-neutral-100 px-4 py-2">{row.source}</td>
+                <td className="border-b border-neutral-100 px-4 py-2 text-right font-bold tabular-nums">{currency(row.amount)}</td>
               </tr>
             ))}
           </tbody>
@@ -749,7 +749,7 @@ export function PayrollRegisterPreviewModal({
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-white sm:px-5">
           <div className="min-w-0">
             <p className="truncate text-sm font-bold sm:text-base">Payroll Register</p>
-            <p className="truncate text-xs text-neutral-400">
+            <p className="truncate text-xs text-neutral-300">
               {report ? `${report.pay_period.start_date} – ${report.pay_period.end_date}` : 'Loading report preview'}
             </p>
           </div>
@@ -761,7 +761,7 @@ export function PayrollRegisterPreviewModal({
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {loading && (
             <div className="flex min-h-[420px] items-center justify-center">
               <div className="flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-5 py-3 text-sm font-semibold text-neutral-600 shadow-sm">
@@ -777,7 +777,7 @@ export function PayrollRegisterPreviewModal({
             </div>
           )}
           {!loading && !error && report && <PayrollRegisterPreviewContent report={report} />}
-        </main>
+        </div>
       </div>
     </div>,
     document.body

@@ -218,7 +218,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
       )}>
         {icon}
         {!collapsed && (
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
+          <span className="text-xs font-semibold text-neutral-600">
             {label}
           </span>
         )}
@@ -317,7 +317,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           {!collapsed && (
             <div>
               <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
-              <p className="text-xs text-neutral-500">Payroll workspace</p>
+              <p className="text-xs text-neutral-600">Payroll workspace</p>
             </div>
           )}
         </NavLink>
@@ -425,7 +425,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             {!collapsed && (
               <>
                 <span className="text-xs">Command menu</span>
-                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 group-hover:text-neutral-600">
+                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900">
                   {platformShortcut('K')}
                 </span>
               </>
@@ -452,7 +452,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               : <>
                   <PanelLeftClose className="h-4 w-4" />
                   <span className="text-xs">Collapse</span>
-                  <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 group-hover:text-neutral-600">
+                  <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900">
                     {platformShortcut('B')}
                   </span>
                 </>
@@ -469,8 +469,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               {!collapsed && (
                 <div className="border-b border-neutral-100 px-4 py-3">
                   <p className="truncate text-sm font-semibold text-neutral-900">{user?.name || 'User'}</p>
-                  <p className="truncate text-xs text-neutral-500">{user?.email}</p>
-                  <p className="mt-1 truncate text-xs text-neutral-500">{user?.company_name}</p>
+                  <p className="truncate text-xs text-neutral-600">{user?.email}</p>
+                  <p className="mt-1 truncate text-xs text-neutral-600">{user?.company_name}</p>
                 </div>
               )}
               <button
@@ -506,7 +506,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             {!collapsed && (
               <div className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
-                <p className="truncate text-xs text-neutral-500">
+                <p className="truncate text-xs text-neutral-600">
                   {formatRoleLabel(user?.role)}
                 </p>
               </div>

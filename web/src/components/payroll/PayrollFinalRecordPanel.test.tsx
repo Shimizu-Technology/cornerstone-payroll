@@ -182,7 +182,7 @@ describe('PayrollFinalRecordPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View record' }));
     apiMocks.payrollFinalRecord.mockReturnValueOnce(next.promise);
     rerender(<PayrollFinalRecordPanel companyId={companyId} payPeriodId={payPeriodId} />);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByText('$750.00 net')).toBeNull();
     expect((screen.getByRole('button', { name: 'PDF record (.pdf)' }) as HTMLButtonElement).disabled).toBe(true);
     await act(async () => next.resolve({ final_record: { ...voidedFinalRecordFixture,

@@ -173,9 +173,6 @@ export function GeneralTransmittals() {
 
   useEffect(() => {
     if (previewUrl) return () => URL.revokeObjectURL(previewUrl);
-    // Preview can disable its opener while loading. Restore it after the shared
-    // dialog has released its background focus guard, even if loading blurred it.
-    if (previewTriggerRef.current?.isConnected) previewTriggerRef.current.focus();
   }, [previewUrl]);
 
   const loadTransmittal = useCallback(async (id: number) => {
@@ -443,14 +440,14 @@ export function GeneralTransmittals() {
               <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
                 <FileCheck2 className="h-5 w-5" />
               </div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary-200">One authoritative workflow</p>
+              <p className="text-xs font-semibold text-primary-200">One authoritative workflow</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight">Build the delivery record from the work already completed.</h2>
               <p className="mt-3 max-w-xl text-sm leading-6 text-primary-100">
                 Payroll checks, non-employee checks, reports, and calculated obligations arrive as a starting point. You decide what the client receives.
               </p>
             </div>
             <div className="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15 backdrop-blur-sm">
-              <label className="text-xs font-semibold uppercase tracking-[0.12em] text-primary-100">Start from pay period</label>
+              <label className="text-xs font-semibold text-primary-100">Start from pay period</label>
               <select
                 value={selectedPayPeriodId}
                 onChange={(event) => setSelectedPayPeriodId(event.target.value)}
@@ -534,7 +531,7 @@ export function GeneralTransmittals() {
                     <h3 className="font-semibold text-neutral-900">Packet contents</h3>
                     <p className="text-sm text-neutral-500">Include, exclude, relabel, annotate, and reorder before generation.</p>
                   </div>
-                  <div className="text-right"><p className="text-xs uppercase tracking-[0.1em] text-neutral-400">Included total</p><p className="text-lg font-semibold">{currency(totalAmount)}</p></div>
+                  <div className="text-right"><p className="text-xs text-neutral-600">Included total</p><p className="text-lg font-semibold">{currency(totalAmount)}</p></div>
                 </div>
 
                 {visibleItems.length === 0 ? (
@@ -544,15 +541,15 @@ export function GeneralTransmittals() {
                     {visibleItems.map((item, index) => (
                       <div key={item.local_id} className={`rounded-xl border p-4 transition-opacity ${itemTone[item.item_type] || itemTone.manual} ${item.included ? '' : 'opacity-55'}`}>
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-                          <label className="flex items-center gap-2 pt-2 text-sm font-medium text-neutral-800">
+                          <label className="flex items-center gap-2 pt-2 text-xs font-medium text-neutral-600">
                             <input type="checkbox" checked={item.included} onChange={(event) => updateItem(item.local_id, { included: event.target.checked })} className="h-4 w-4 rounded border-neutral-300 text-primary-600" />
                             Include
                           </label>
                           <div className="grid min-w-0 flex-1 gap-3 md:grid-cols-2">
-                            <label className="space-y-1 md:col-span-2"><span className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Label</span><Input value={item.title} onChange={(event) => updateItem(item.local_id, { title: event.target.value })} /></label>
-                            <label className="space-y-1"><span className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Payable to</span><Input value={item.payable_to || ''} onChange={(event) => updateItem(item.local_id, { payable_to: event.target.value })} placeholder="Optional" /></label>
-                            <label className="space-y-1"><span className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Amount</span><Input type="number" step="0.01" min="0" value={item.amount ?? ''} onChange={(event) => updateItem(item.local_id, { amount: event.target.value === '' ? null : Number(event.target.value) })} /></label>
-                            <label className="space-y-1 md:col-span-2"><span className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Details / annotation</span><Textarea rows={2} value={item.details_text} onChange={(event) => updateItem(item.local_id, { details_text: event.target.value })} placeholder="One line per detail" /></label>
+                            <label className="space-y-1 md:col-span-2"><span className="text-xs font-semibold text-neutral-600">Label</span><Input value={item.title} onChange={(event) => updateItem(item.local_id, { title: event.target.value })} /></label>
+                            <label className="space-y-1"><span className="text-xs font-semibold text-neutral-600">Payable to</span><Input value={item.payable_to || ''} onChange={(event) => updateItem(item.local_id, { payable_to: event.target.value })} placeholder="Optional" /></label>
+                            <label className="space-y-1"><span className="text-xs font-semibold text-neutral-600">Amount</span><Input type="number" step="0.01" min="0" value={item.amount ?? ''} onChange={(event) => updateItem(item.local_id, { amount: event.target.value === '' ? null : Number(event.target.value) })} /></label>
+                            <label className="space-y-1 md:col-span-2"><span className="text-xs font-semibold text-neutral-600">Details / annotation</span><Textarea rows={2} value={item.details_text} onChange={(event) => updateItem(item.local_id, { details_text: event.target.value })} placeholder="One line per detail" /></label>
                             {item.item_type === 'tax_obligation' && <p className="md:col-span-2 text-xs font-medium text-amber-700">Calculated obligation only. This does not indicate that a payment was made.</p>}
                           </div>
                           <div className="flex gap-1 lg:flex-col">
@@ -585,7 +582,7 @@ export function GeneralTransmittals() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-semibold text-neutral-900">Transmittal history</h2>
-                    <p className="text-xs text-neutral-500">Drafts and generated packets</p>
+                    <p className="text-xs text-neutral-600">Drafts and generated packets</p>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => setForm(emptyForm())}><Plus className="h-4 w-4" /></Button>
                 </div>
@@ -606,7 +603,7 @@ export function GeneralTransmittals() {
                             {transmittal.source_kind === 'pay_period' ? 'Payroll' : 'Standalone'}
                           </Badge>
                         </div>
-                        <div className="mt-2 flex justify-between text-xs text-neutral-500">
+                        <div className="mt-2 flex justify-between text-xs text-neutral-600">
                           <span>{transmittal.item_count} included</span>
                           <span>{transmittal.artifact_count} versions</span>
                         </div>
@@ -622,18 +619,18 @@ export function GeneralTransmittals() {
                 <CardContent className="space-y-3">
                   <div>
                     <h2 className="font-semibold text-neutral-900">Generated versions</h2>
-                    <p className="text-xs text-neutral-500">Immutable evidence of exactly what was produced</p>
+                    <p className="text-xs text-neutral-600">Immutable evidence of exactly what was produced</p>
                   </div>
                   {form.artifacts.map((artifact) => (
                     <div key={artifact.id} className="rounded-xl border border-neutral-200 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-semibold text-neutral-900">Version {artifact.version_number}</p>
-                          <p className="text-xs text-neutral-500">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
+                          <p className="text-xs text-neutral-600">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
                         </div>
                         <FileClock className="h-4 w-4 text-primary-600" />
                       </div>
-                      <p className="mt-2 truncate font-mono text-[10px] text-neutral-400" title={artifact.sha256}>SHA-256 {artifact.sha256}</p>
+                      <p className="mt-2 truncate font-mono text-xs text-neutral-600" title={artifact.sha256}>SHA-256 {artifact.sha256}</p>
                       <div className="mt-3 flex gap-2">
                         <Button size="sm" variant="outline" className="flex-1" onClick={(event) => previewArtifact(artifact, event.currentTarget)}><Eye className="mr-1.5 h-3.5 w-3.5" />View</Button>
                         <Button size="sm" variant="outline" className="flex-1" onClick={() => downloadArtifact(artifact)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>
@@ -648,7 +645,7 @@ export function GeneralTransmittals() {
         </div>
       </main>
 
-      <Dialog open={Boolean(previewUrl)} onOpenChange={(open) => { if (!open) setPreviewUrl(null); }}>
+      <Dialog returnFocusRef={previewTriggerRef} open={Boolean(previewUrl)} onOpenChange={(open) => { if (!open) setPreviewUrl(null); }}>
         <DialogContent className="dialog-wide dialog-center-mobile !mx-auto flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden !rounded-2xl !p-0">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4">
             <div className="flex items-center gap-2"><FileText className="h-5 w-5 shrink-0 text-primary-600" /><DialogTitle>Transmittal preview</DialogTitle></div>
