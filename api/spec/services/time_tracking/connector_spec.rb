@@ -4,6 +4,7 @@ require "rails_helper"
 require "webmock/rspec"
 
 RSpec.describe TimeTracking::Connector do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   let(:company) { create(:company) }
   let(:actor) { create(:user, company: company) }
   let(:source) { create(:time_tracking_source, company: company, source_type: "custom", authorization_origin: "https://neutral.example.com") }

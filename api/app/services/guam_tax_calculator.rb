@@ -33,6 +33,12 @@ class GuamTaxCalculator
         pay_frequency: pay_frequency
       )
     end
+    unless @source_rule_snapshot.present?
+      AnnualTaxConfig.require_verified!(tax_year)
+      unless tax_year.to_i <= 2026 && @tax_table.verification_status == "verified"
+        raise ArgumentError, AnnualTaxConfig.unverified_message(tax_year)
+      end
+    end
     @allowances = allowances
     @pay_frequency = pay_frequency
     @periods_per_year = PAY_FREQUENCIES[pay_frequency]
@@ -46,6 +52,13 @@ class GuamTaxCalculator
   # @return [Hash] { withholding:, social_security:, medicare: }
   def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil,
                 reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
+    unless @source_rule_snapshot.present?
+      AnnualTaxConfig.require_verified!(tax_table.tax_year)
+      current = TaxTable.lock("FOR SHARE").find(tax_table.id)
+      unless current.verification_status == "verified" && current.updated_at == tax_table.updated_at
+        raise ArgumentError, AnnualTaxConfig.unverified_message(tax_table.tax_year)
+      end
+    end
     withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
     bases = taxable_bases(
       gross_pay: gross_pay,

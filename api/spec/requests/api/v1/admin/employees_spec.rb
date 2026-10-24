@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::Employees", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:company) { create(:company) }
   let!(:department) { create(:department, company: company) }
   let!(:admin_user) do
