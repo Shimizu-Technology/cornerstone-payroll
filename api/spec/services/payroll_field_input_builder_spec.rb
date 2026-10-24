@@ -3,6 +3,22 @@
 require "rails_helper"
 
 RSpec.describe PayrollFieldInputBuilder do
+  it "supplies hidden taxable additions for estimates without exposing worksheet controls" do
+    company = create(:company)
+    employee = create(:employee, company: company)
+    period = create(:pay_period, company: company)
+    field = create(:payroll_field_definition, company: company, name: "Hidden allowance",
+      kind: "addition", tax_treatment: "taxable_addition", default_amount: 25, show_in_payroll_grid: false)
+    employee.employee_payroll_fields.create!(payroll_field_definition: field, active: true)
+    result = described_class.new(pay_period: period, company_id: company.id).call
+    expect(result.fetch(:fields)).to be_empty
+    expect(result.fetch(:assignments)).to be_empty
+    expect(result.fetch(:estimate_only_assignments)).to contain_exactly(include(
+      employee_id: employee.id, payroll_field_definition_id: field.id, default_amount: 25.0,
+      tax_treatment: "taxable_addition", editable: false
+    ))
+  end
+
   it "returns a field referenced by a saved payroll item after its employee is terminated" do
     company = create(:company)
     employee = create(:employee, company: company, status: "terminated", termination_date: Date.new(2026, 6, 5))

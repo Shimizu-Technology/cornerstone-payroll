@@ -384,6 +384,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]).to have_key("payroll_items")
     end
 
+    it "exposes earning provenance for draft estimates without changing saved components" do
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        custom_earnings: [ { "label" => "One-time work", "amount" => 55 } ],
+        custom_columns_data: { "custom_earnings_source" => "manual", "payroll_adjustments_overridden" => true })
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      row = response.parsed_body.fetch("pay_period").fetch("payroll_items").find { |entry| entry["id"] == item.id }
+      expect(row.fetch("draft_earning_sources")).to include("custom_earnings" => "manual", "payroll_adjustments_overridden" => true)
+      expect(item.reload.custom_earnings).to eq([ { "label" => "One-time work", "amount" => 55.0 } ])
+    end
+
     it "batches payment activity across the whole run while preserving cancellation guards" do
       pay_period.update!(status: "committed", committed_at: Time.current)
       items = 4.times.map do |index|
@@ -1156,6 +1166,15 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
           { min_income: 1938.47, max_income: 999999999, rate: 0.22, base_tax: 223.07, threshold: 1938.47 }
         ]
       end
+    end
+
+    it "retains the operator's reason for calculating without imported source hours in the audit trail" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } }, source_coverage_reason: "  Manual hours verified against approved timecards.  "
+      }
+      expect(response).to have_http_status(:ok)
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("source_coverage_reason")).to eq("Manual hours verified against approved timecards.")
     end
 
     it "calculates payroll for employees with pay activity" do

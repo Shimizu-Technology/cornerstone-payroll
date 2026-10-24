@@ -96,7 +96,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
         <div className="flex flex-col gap-4 border-b border-primary-100 bg-primary-50/60 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-display text-lg font-bold text-neutral-950">Live time tracking readiness</h3>
+              <h3 className="font-display text-lg font-bold text-neutral-950">Hours ready for payroll</h3>
               <Badge variant="info">Live preview</Badge>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-700">
@@ -109,7 +109,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           </Button>
         </div>
 
-        {loading && review && !error && <p role="status" className="px-6 py-3 text-sm text-neutral-600">Refreshing live time tracking readiness…</p>}
+        {loading && review && !error && <p role="status" className="px-6 py-3 text-sm text-neutral-600">Refreshing hours ready for payroll…</p>}
         {loading && !review ? (
           <div className="flex items-center justify-center gap-4 px-6 py-10 text-sm text-neutral-600">
             <Loader2 className="h-5 w-5 animate-spin text-primary-700" /> Comparing time tracking with the hours entered in Payroll…
@@ -123,17 +123,17 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
           <>
             <div className="grid gap-4 border-b border-neutral-200 bg-white p-4 sm:grid-cols-3 sm:p-6">
               <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking payable now</p>
+                <p className="text-xs font-semibold text-neutral-500">Time tracking payable now</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(review.summary.total_hours)} hrs</p>
                 <p className="mt-2 text-xs text-neutral-600">{hours(review.summary.regular_hours)} regular · {hours(review.summary.overtime_hours)} OT</p>
               </div>
               <div className={`rounded-xl border p-4 ${mismatchCount ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Current payroll entries</p>
+                <p className="text-xs font-semibold text-neutral-500">Current payroll entries</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{matchedCount}/{rows.length} employees</p>
                 <p className="mt-2 text-xs text-neutral-600">{mismatchCount ? `${mismatchCount} differ from this live preview` : 'Regular and OT totals match'}</p>
               </div>
               <div className={`rounded-xl border p-4 ${attentionCount ? 'border-warning-200 bg-warning-50' : 'border-neutral-200 bg-neutral-50'}`}>
-                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Needs attention</p>
+                <p className="text-xs font-semibold text-neutral-500">Needs attention</p>
                 <p className="mt-2 font-display text-xl font-bold text-neutral-950">{attentionCount}</p>
                 <p className="mt-2 text-xs text-neutral-600">Review exclusions, categories, and negative corrections</p>
               </div>
@@ -156,13 +156,13 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                   </div>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking currently shows</p>
+                      <p className="text-xs font-semibold text-neutral-500">Time tracking currently shows</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
                       {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
                       {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
                     </div>
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Entered in Payroll</p>
+                      <p className="text-xs font-semibold text-neutral-500">Entered in Payroll</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(payrollRegular)} regular · {hours(payrollOvertime)} OT</p>
                       {!matched && employee.cornerstone.status === 'mapped' && <p className="mt-2 text-xs text-warning-900">The verified batch will replace manual entry after cutoff.</p>}
                     </div>
@@ -174,7 +174,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
 
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
+                <thead className="border-b border-neutral-200 bg-neutral-50 text-xs text-neutral-500">
                   <tr><th className="px-6 py-4 font-semibold">Employee</th><th className="px-4 py-4 font-semibold">Time tracking currently shows</th><th className="px-4 py-4 font-semibold">Entered in Payroll</th><th className="px-6 py-4 font-semibold">Result</th></tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
