@@ -1160,7 +1160,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       historicalContractorRow.getByRole('cell').nth(headerLabels.indexOf('Hours')),
     ).toHaveText('4');
 
-    const registerSearch = page.getByPlaceholder('Search employees and checks...', { exact: true });
+    const registerSearch = page.locator('#payroll-results').getByRole('textbox', { name: 'Search employees', exact: true });
     await registerSearch.fill('Alpha');
     await expect(totalsRow).toContainText('Totals (1 employee)');
     expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80.00');
