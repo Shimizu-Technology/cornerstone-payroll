@@ -55,11 +55,11 @@ import type { NonEmployeeCheck, PayPeriod, PayrollItem } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
 
-const tabs: Array<{ id: PayRunWorkspaceTab; label: string; icon: typeof ClipboardList }> = [
-  { id: 'work', label: 'Payroll', icon: Banknote },
-  { id: 'checks', label: 'Checks & payments', icon: Printer },
-  { id: 'reports', label: 'Reports', icon: ReceiptText },
-  { id: 'activity', label: 'Activity', icon: Activity },
+const tabs: Array<{ id: PayRunWorkspaceTab; label: string; mobileLabel: string; icon: typeof ClipboardList }> = [
+  { id: 'work', label: 'Payroll', mobileLabel: 'Payroll', icon: Banknote },
+  { id: 'checks', label: 'Checks & payments', mobileLabel: 'Checks', icon: Printer },
+  { id: 'reports', label: 'Reports', mobileLabel: 'Reports', icon: ReceiptText },
+  { id: 'activity', label: 'Activity', mobileLabel: 'Activity', icon: Activity },
 ];
 const tabIds = new Set([...tabs.map((tab) => tab.id), 'overview']);
 
@@ -674,7 +674,7 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <div className={`min-w-0 px-3 py-2 first:pl-0 ${label.toLowerCase().includes('net') ? 'col-span-2 sm:col-span-1' : ''}`}><p className="flex items-center gap-1 text-xs font-medium text-neutral-600"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</p><p className="mt-1 break-words text-xl font-semibold tabular-nums text-neutral-950">{value}</p><p className="mt-1 text-xs text-neutral-600">{detail}</p></div>;
+  return <div className={`min-w-0 py-2 sm:px-3 sm:first:pl-0 ${label.toLowerCase().includes('net') ? 'order-last col-span-2 sm:order-none sm:col-span-1' : ''}`}><p className="flex items-center gap-1 text-xs font-medium text-neutral-600"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{label}</p><p className="mt-1 break-words text-xl font-semibold tabular-nums text-neutral-950">{value}</p><p className="mt-1 text-xs text-neutral-600">{detail}</p></div>;
 }
 
 interface ContextRowProps {

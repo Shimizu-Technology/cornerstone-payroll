@@ -1722,6 +1722,31 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview`);
     await expect(page.getByLabel('Pay run identity')).toBeVisible();
+    const totals = page.getByRole('region', { name: 'Saved payroll totals' });
+    const positions = await totals.locator('dl > div').evaluateAll(cells => cells.map(cell => {
+      const label = cell.querySelector('dt')!;
+      const value = cell.querySelector('dd')!;
+      const rect = cell.getBoundingClientRect();
+      return { label: label.textContent, x: label.getBoundingClientRect().x, valueX: value.getBoundingClientRect().x, y: rect.y, width: rect.width };
+    }));
+    const metric = (label: string) => positions.find(position => position.label === label)!;
+    for (const label of ['Total deductions', 'Net pay']) {
+      expect(metric(label).x).toBe(metric('Employees').x);
+      expect(metric(label).valueX).toBe(metric('Employees').valueX);
+    }
+    expect(metric('DRT deposit').x).toBe(metric('Gross pay').x);
+    expect(metric('DRT deposit').valueX).toBe(metric('Gross pay').valueX);
+    expect(metric('Net pay').y).toBeGreaterThan(metric('DRT deposit').y);
+    expect(metric('Net pay').width).toBeGreaterThan(metric('Gross pay').width * 1.8);
+    const workspaceTabs = page.getByRole('navigation', { name: 'Pay-run workspace sections' });
+    const tabPositions = await workspaceTabs.getByRole('link').evaluateAll(links => links.map(link => {
+      const rect = link.getBoundingClientRect();
+      return { text: link.textContent, left: rect.left, right: rect.right };
+    }));
+    for (const position of tabPositions) {
+      expect(position.left).toBeGreaterThanOrEqual(0);
+      expect(position.right).toBeLessThanOrEqual(390);
+    }
     await page.locator('summary').filter({ hasText: /^Saved payroll records/ }).click();
     const savedRecord = page.getByRole('button', { name: 'Open payroll item for Avery Example', exact: true });
     await expect(savedRecord).toBeVisible();
