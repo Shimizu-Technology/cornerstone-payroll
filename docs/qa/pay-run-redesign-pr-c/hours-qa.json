@@ -7,9 +7,30 @@
     "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
   },
   {
-    "mode": "salary",
+    "mode": "salary-recorded",
     "width": 1280,
     "hours": "16.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-missing",
+    "width": 1280,
+    "hours": "Not recorded",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-excluded",
+    "width": 1280,
+    "hours": "—",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-zero",
+    "width": 1280,
+    "hours": "0.00",
     "status": "passed",
     "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
   },
@@ -28,9 +49,30 @@
     "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
   },
   {
-    "mode": "salary",
+    "mode": "salary-recorded",
     "width": 390,
     "hours": "16.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-missing",
+    "width": 390,
+    "hours": "Not recorded",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-excluded",
+    "width": 390,
+    "hours": "—",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary-zero",
+    "width": 390,
+    "hours": "0.00",
     "status": "passed",
     "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
   },

@@ -1,6 +1,6 @@
 # Pay-run redesign C
 
-Owner: `payroll-redesign`. Application source: `72e5cc30` (prior UI logic/layout in `5a6e9754`, count labels in `04fd3b86`); integrates staging-v2 `ce12d1da` (#385). Lead reviews and merges. PR A #383 and PR B #384 are already merged.
+Owner: `payroll-redesign`. Application source: `973f61f2` (UI logic b374803a) (prior UI logic/layout in `5a6e9754`, count labels in `04fd3b86`); integrates staging-v2 `ce12d1da` (#385). Lead reviews and merges. PR A #383 and PR B #384 are already merged.
 
 Payroll now follows Hours → Results → Approve & commit. Saved status chooses the current step; disclosure state only changes what the accountant inspects. Committed runs keep Results open for post-commit review. Hours and commitment collapse to a saved summary. Adjustment and late-hours runs state their selected-employee scope; parallel runs explain that commitment is unavailable.
 
@@ -26,4 +26,6 @@ Full logs, raw axe results, seed/capture/inventory scripts, six WebM recordings 
 
 Headless Chromium used 1280×800 and 390×844, copied local payroll/AIRE fixtures and synthetic records. These are agent-executed checks. No physical device, printer, live provider/payment/filing/email operation, successful connected import, late-hours financial execution or separate two-app certification is claimed. The financial saved-outcome check uses fresh manual runs; connected fixtures retain their actual source/provenance guards. No API implementation, migration, schema, dependency or deployment change belongs to C. Backend specs were not rerun under the lead's explicit web-only C gates.
 
-The final [hours follow-up](REVIEW-2.md) hides misleading regular/OT splits on desktop and phone, with six regressions and six browser checks. The fresh web gate passes 1,248 tests; the release lane passes 45. Prior-round broad acceptance remains recorded separately.
+The prior [hours follow-up](REVIEW-2.md) hides misleading regular/OT splits on desktop and phone, with six regressions and six browser checks. The fresh web gate passes 1,248 tests; the release lane passes 45. Prior-round broad acceptance remains recorded separately.
+
+[Review round 3](REVIEW-3.md) fixes retained-feedback tab redirects, preserves salary-hours wording and adds explicit helper/test return types. Fresh gates: 1,259 web tests, release 45 and refresh 10. Twelve desktop/phone hours checks pass. Earlier broad QA remains separately identified.
