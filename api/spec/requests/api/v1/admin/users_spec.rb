@@ -438,7 +438,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       )
     end
 
-    it "confirms a completed resend even when the exact audit insert fails" do
+    it "confirms a queued resend even when the exact audit insert fails" do
       allow_any_instance_of(Api::V1::Admin::UsersController)
         .to receive(:create_clerk_invitation)
         .and_return({ success: true, url: "https://accounts.example.test/invitations/new", invitation_id: "inv_new" })
@@ -446,6 +446,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         .to receive(:send_invite_email)
         .with(managed_user, "https://accounts.example.test/invitations/new")
         .once
+        .and_return("queued")
       allow_any_instance_of(Api::V1::Admin::UsersController)
         .to receive(:record_user_audit!)
         .and_raise(ActiveRecord::ConnectionNotEstablished, "audit database unavailable")
@@ -455,7 +456,8 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body).to include(
-        "invitation_sent" => true,
+        "invitation_delivery_status" => "queued",
+        "invitation_sent" => false,
         "invitation_error" => nil
       )
       expect(managed_user.reload.invited_at).to be > previous_invited_at

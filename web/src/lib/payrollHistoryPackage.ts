@@ -1,3 +1,4 @@
+import { isStaging, stagingCsv, stagingFilename, stagingLabel } from './staging';
 import JSZip from 'jszip';
 import type { BlobDownload, PayrollHistoryRecord, PayrollRegisterReport } from '@/services/api';
 
@@ -134,15 +135,17 @@ export async function buildPayrollHistoryPackage({
 
   const generatedAtIso = generatedAt.toISOString();
   const manifest = {
+    ...(isStaging ? { environment_warning: stagingLabel } : {}),
     company: companyName,
     generated_at: generatedAtIso,
     report_format: format,
     payroll_run_count: manifestRows.length,
     payroll_runs: manifestRows,
   };
-  zip.file('manifest.csv', manifestCsv(manifestRows));
+  zip.file('manifest.csv', stagingCsv(manifestCsv(manifestRows)));
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
   zip.file('README.txt', [
+    ...(isStaging ? [stagingLabel, ''] : []),
     `Complete payroll history for ${companyName}`,
     '',
     `This package contains one ${format.toUpperCase()} payroll register for every reportable payroll run,`,
@@ -160,6 +163,6 @@ export async function buildPayrollHistoryPackage({
 
   return {
     blob: await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }),
-    filename: `payroll_history_${slug(companyName)}_${generatedAtIso.slice(0, 10)}.zip`,
+    filename: stagingFilename(`payroll_history_${slug(companyName)}_${generatedAtIso.slice(0, 10)}.zip`),
   };
 }

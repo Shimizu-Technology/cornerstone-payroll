@@ -35,6 +35,7 @@ class R2StorageService
   STAGING_STORAGE_ROOT = Rails.root.join("storage", "local_r2_storage")
 
   def initialize
+    StagingOutboundPolicy.validate_storage!
     validate_configuration!
   end
 
@@ -45,6 +46,7 @@ class R2StorageService
   # @param content_type [String] MIME type (default: application/pdf)
   # @return [String] The object URL
   def upload(key, data, content_type: "application/pdf")
+    validate_staging_storage!
     return upload_locally(key, data) unless configured?
 
     client.put_object(
@@ -65,6 +67,7 @@ class R2StorageService
   # @param key [String] The object key
   # @return [String] Binary data
   def download(key)
+    validate_staging_storage!
     return download_locally(key) unless configured?
 
     response = client.get_object(
@@ -86,6 +89,7 @@ class R2StorageService
   # @param max_bytes [Integer] Maximum allowed object size
   # @return [String, nil] Binary data
   def download_with_limit(key, max_bytes:)
+    validate_staging_storage!
     return download_locally_with_limit(key, max_bytes: max_bytes) unless configured?
 
     metadata = client.head_object(bucket: bucket_name, key: key)
@@ -106,6 +110,7 @@ class R2StorageService
   # @param key [String] The object key
   # @return [Boolean]
   def exists?(key)
+    validate_staging_storage!
     return File.exist?(local_path_for(key)) unless configured?
 
     client.head_object(bucket: bucket_name, key: key)
@@ -118,6 +123,7 @@ class R2StorageService
   #
   # @param key [String] The object key
   def delete(key)
+    validate_staging_storage!
     return delete_locally(key) unless configured?
 
     client.delete_object(bucket: bucket_name, key: key)
@@ -132,6 +138,8 @@ class R2StorageService
   # @param expires_in [Integer] Seconds until expiration (default: 1 hour)
   # @return [String] Pre-signed URL
   def signed_url(key, expires_in: 3600)
+    validate_staging_storage!
+    StagingStoragePolicy.block_urls!
     return "local-r2://#{key}" unless configured?
 
     signer = Aws::S3::Presigner.new(client: client)
@@ -148,6 +156,7 @@ class R2StorageService
   # @param prefix [String] Key prefix to filter by
   # @return [Array<String>] List of keys
   def list(prefix: nil)
+    validate_staging_storage!
     unless configured?
       pattern = prefix.present? ? File.join(local_storage_root.to_s, prefix, "**", "*") : File.join(local_storage_root.to_s, "**", "*")
       return Dir.glob(pattern).select { |path| File.file?(path) }.map { |path| Pathname(path).relative_path_from(local_storage_root).to_s }
@@ -163,7 +172,18 @@ class R2StorageService
 
   private
 
+  def validate_staging_storage!
+    return unless StagingOutboundPolicy.staging?
+
+    StagingStoragePolicy.validate!
+    return unless @client
+
+    config = @client.config
+    StagingStoragePolicy.validate!(bucket: bucket_name, access_key: config.credentials.credentials.access_key_id, secret_access_key: config.credentials.credentials.secret_access_key, endpoint: config.endpoint.to_s.delete_suffix("/"), region: config.region)
+  end
+
   def client
+    validate_staging_storage!
     @client ||= Aws::S3::Client.new(
       access_key_id: access_key_id,
       secret_access_key: secret_access_key,
@@ -198,6 +218,8 @@ class R2StorageService
   end
 
   def object_url(key)
+    return "r2://#{bucket_name}/#{key}" if StagingOutboundPolicy.staging?
+
     if public_url.present?
       "#{public_url}/#{key}"
     else

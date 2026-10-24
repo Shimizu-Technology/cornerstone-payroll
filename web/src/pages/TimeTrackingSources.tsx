@@ -1,3 +1,4 @@
+import { stagingNavigationUrl } from '@/lib/staging';
 import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -267,7 +268,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
     setSuccess(null);
     try {
       const response = await timeTrackingSourcesApi.createAireAccountLink(form.id);
-      navigateToAuthorization(response.authorization_url);
+      navigateToAuthorization(stagingNavigationUrl(response.authorization_url, form.authorization_origin || undefined));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the time tracking account connection.');
       setAccountLinkBusy(false);
