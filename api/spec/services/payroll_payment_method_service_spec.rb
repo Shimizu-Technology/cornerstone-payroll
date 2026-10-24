@@ -218,6 +218,7 @@ RSpec.describe 'Audited payment delivery changes' do
   end
 
   it 'rolls approved runs back for fresh review without changing calculated amounts' do
+    ensure_verified_test_tax_years(2024)
     period.update!(status: 'approved', approved_by_id: actor.id, approved_at: Time.current)
     item.update!(check_number: nil)
     original_net = item.net_pay

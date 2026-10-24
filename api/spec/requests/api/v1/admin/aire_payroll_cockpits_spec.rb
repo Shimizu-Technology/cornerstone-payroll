@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::AirePayrollCockpits", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let(:company) { create(:company) }
   let(:admin) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }

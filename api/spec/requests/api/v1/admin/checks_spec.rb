@@ -4,6 +4,7 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe "Api::V1::Admin::Checks", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:company) do
     create(:company,
       name: "MoSa's Restaurant",
