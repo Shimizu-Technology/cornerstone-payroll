@@ -13,7 +13,7 @@ class PayrollReminderService
       PayrollReminderConfig.where(enabled: true).includes(:company).find_each do |config|
         process_company(config)
       rescue StandardError => e
-        Rails.logger.error("[PayrollReminder] Error for company #{config.company_id}: #{e.class} #{e.message}")
+        Rails.logger.error("[PayrollReminder] Error for company #{config.company_id}: #{e.class} #{e.message}") unless StagingOutboundPolicy.staging?
       end
     end
 
@@ -140,11 +140,11 @@ class PayrollReminderService
 
       deliver_to_recipients(config, subject, html)
 
-      Rails.logger.info("[PayrollReminder] Sent #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}")
+      Rails.logger.info("[PayrollReminder] Sent #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}") unless StagingOutboundPolicy.staging?
     rescue ActiveRecord::RecordNotUnique
-      Rails.logger.info("[PayrollReminder] Duplicate #{reminder_type} skipped for company=#{company.id} pay_period=#{pay_period.id}")
+      Rails.logger.info("[PayrollReminder] Duplicate #{reminder_type} skipped for company=#{company.id} pay_period=#{pay_period.id}") unless StagingOutboundPolicy.staging?
     rescue StandardError => e
-      Rails.logger.error("[PayrollReminder] Failed #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}: #{e.class} #{e.message}")
+      Rails.logger.error("[PayrollReminder] Failed #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}: #{e.class} #{e.message}") unless StagingOutboundPolicy.staging?
     end
 
     def send_create_reminder(config, company, expected)
@@ -163,16 +163,16 @@ class PayrollReminderService
 
       deliver_to_recipients(config, subject, html)
 
-      Rails.logger.info("[PayrollReminder] Sent create_payroll for company=#{company.id} expected_pay_date=#{expected[:pay_date]}")
+      Rails.logger.info("[PayrollReminder] Sent create_payroll for company=#{company.id} expected_pay_date=#{expected[:pay_date]}") unless StagingOutboundPolicy.staging?
     rescue ActiveRecord::RecordNotUnique
-      Rails.logger.info("[PayrollReminder] Duplicate create_payroll skipped for company=#{company.id} expected_pay_date=#{expected[:pay_date]}")
+      Rails.logger.info("[PayrollReminder] Duplicate create_payroll skipped for company=#{company.id} expected_pay_date=#{expected[:pay_date]}") unless StagingOutboundPolicy.staging?
     rescue StandardError => e
-      Rails.logger.error("[PayrollReminder] Failed create_payroll for company=#{company.id}: #{e.class} #{e.message}")
+      Rails.logger.error("[PayrollReminder] Failed create_payroll for company=#{company.id}: #{e.class} #{e.message}") unless StagingOutboundPolicy.staging?
     end
 
     def deliver_to_recipients(config, subject, html)
       config.recipients.each do |email|
-        Resend::Emails.send({
+        StagingMailTransport.deliver({
           from: from_email,
           to: email,
           subject: subject,
@@ -207,13 +207,13 @@ class PayrollReminderService
     # -----------------------------------------------------------------------
 
     def email_configured?
-      if ENV["RESEND_API_KEY"].blank?
-        Rails.logger.warn("[PayrollReminder] RESEND_API_KEY not configured; skipping reminders")
+      if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
+        Rails.logger.warn("[PayrollReminder] RESEND_API_KEY not configured; skipping reminders") unless StagingOutboundPolicy.staging?
         return false
       end
 
       if from_email.blank?
-        Rails.logger.warn("[PayrollReminder] RESEND_FROM_EMAIL not configured; skipping reminders")
+        Rails.logger.warn("[PayrollReminder] RESEND_FROM_EMAIL not configured; skipping reminders") unless StagingOutboundPolicy.staging?
         return false
       end
 

@@ -8,7 +8,7 @@ class TimeTrackingCorrectionReceipt < ApplicationRecord
   validate :exact_disposition_payload
 
   def self.dispatch_pending!
-    where(delivered_at: nil).where("enqueued_at IS NULL OR enqueued_at < ?", 30.minutes.ago).find_each(&:dispatch!)
+    StagingQuarantine.excluding(where(delivered_at: nil)).where("enqueued_at IS NULL OR enqueued_at < ?", 30.minutes.ago).find_each(&:dispatch!)
   end
 
   def retryable?
@@ -23,6 +23,7 @@ class TimeTrackingCorrectionReceipt < ApplicationRecord
   end
 
   def dispatch!(retry_failed: false)
+    return false if StagingQuarantine.suppressed?(self.class.table_name, id)
     with_lock do
       return false if delivered_at.present?
       return false if enqueued_at.present? && enqueued_at >= 30.minutes.ago && !(retry_failed && last_error.present?)

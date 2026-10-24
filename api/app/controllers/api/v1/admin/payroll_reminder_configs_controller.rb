@@ -57,7 +57,7 @@ module Api
               revalidate_current_company_write_access!(capability: :manage_client_configuration)
             end
             begin
-              Resend::Emails.send(payload)
+              StagingMailTransport.deliver(payload)
             rescue StandardError => e
               failures << { email: email, error: e.message }
             end

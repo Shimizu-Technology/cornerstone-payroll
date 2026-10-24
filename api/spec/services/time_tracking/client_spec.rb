@@ -166,7 +166,7 @@ RSpec.describe TimeTracking::Client do
       expect(request).not_to have_been_requested
     end
 
-    it "permits the exact private AIRE service only under the production staging guards" do
+    it "rejects the legacy private HTTP staging destination before resolving it" do
       policy = TimeTracking::DestinationPolicy.new(
         environment: "production",
         env: {
@@ -180,7 +180,7 @@ RSpec.describe TimeTracking::Client do
       private_uri = URI.parse("http://aire-api:3000/api/v1/payroll/cockpit/manual_review")
 
       expect { client.send(:require_secure_payroll_transport!, private_uri) }.not_to raise_error
-      expect(policy.resolve_public_addresses!(private_uri)).to eq([ "172.24.0.8" ])
+      expect { policy.resolve_public_addresses!(private_uri) }.to raise_error(StagingOutboundPolicy::Blocked)
     end
 
     it "reads a period and literal time entries with bounded query parameters" do

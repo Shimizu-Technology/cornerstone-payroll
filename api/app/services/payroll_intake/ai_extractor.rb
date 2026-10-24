@@ -21,6 +21,7 @@ module PayrollIntake
     end
 
     def call
+      StagingOutboundPolicy.block!("AI/OCR")
       return unavailable_result if api_key.blank?
 
       payload = call_openrouter

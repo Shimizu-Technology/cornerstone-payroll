@@ -1,3 +1,4 @@
+import { stagingCsv } from '../lib/staging';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -543,7 +544,7 @@ export function ChecksPayments() {
       check.created_at,
     ]);
     const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([stagingCsv(csv)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const date = new Date().toISOString().slice(0, 10);

@@ -15,7 +15,7 @@ class UserInviteEmailService
       button_link = "#{frontend_url}/login"
       display_url = frontend_url
 
-      response = Resend::Emails.send(
+      response = StagingMailTransport.deliver(
         {
           from: from_email,
           to: user.email,
@@ -24,21 +24,21 @@ class UserInviteEmailService
         }
       )
 
-      Rails.logger.info("[InviteEmail] Sent invite to #{user.email} response=#{response.inspect}")
+      Rails.logger.info("[InviteEmail] Sent invite to #{user.email} response=#{response.inspect}") unless StagingOutboundPolicy.staging?
       true
     rescue StandardError => e
-      Rails.logger.error("[InviteEmail] Failed for #{user.email}: #{e.class} #{e.message}")
+      Rails.logger.error("[InviteEmail] Failed for #{user.email}: #{e.class} #{e.message}") unless StagingOutboundPolicy.staging?
       false
     end
 
     def configured?
-      if ENV["RESEND_API_KEY"].blank?
-        Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email")
+      if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
+        Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email") unless StagingOutboundPolicy.staging?
         return false
       end
 
       if from_email.blank?
-        Rails.logger.warn("[InviteEmail] RESEND_FROM_EMAIL not configured; skipping invite email")
+        Rails.logger.warn("[InviteEmail] RESEND_FROM_EMAIL not configured; skipping invite email") unless StagingOutboundPolicy.staging?
         return false
       end
 
