@@ -27,6 +27,7 @@ class PayPeriodLifecycleService
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_annual_fica_context!
+      validate_employer_contribution_tracking!
       validate_client_approval!
       validate_payment_delivery!
       validate_source_earnings!
@@ -77,6 +78,7 @@ class PayPeriodLifecycleService
       validate_variable_period_pay!
       validate_employee_document_readiness!
       validate_annual_fica_context!
+      validate_employer_contribution_tracking!
       validate_client_approval!
       validate_payment_delivery!
       validate_source_earnings!
@@ -118,6 +120,18 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_employer_contribution_tracking!
+    pay_period.payroll_items.financially_reportable.each do |item|
+      if item.payroll_item_field_entries.any? { |row| row.active? && row.employer_contribution? && row.amount.to_d.nonzero? && row.metadata.to_h.dig(PayrollComponentMirrors::IDENTITY_KEY, "version") != 1 }
+        raise PayrollComponentMirrors::AmbiguousHistoryError
+      end
+      PayrollEmployerContributions.sources(item)
+      PayrollInsuranceComponents.scalar_amount(item)
+    end
+  rescue PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
+    raise InvalidTransitionError, "Recalculate this payroll — it was calculated before employer contribution tracking was added"
+  end
 
   def validate_annual_fica_context!
     items = pay_period.payroll_items.financially_reportable.includes(:employee).reject { |item| item.employment_type == "contractor" }

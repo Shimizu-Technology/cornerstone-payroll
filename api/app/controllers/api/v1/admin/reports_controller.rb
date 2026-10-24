@@ -2747,7 +2747,7 @@ module Api
           item.payroll_item_deductions.map { |deduction| deduction_row(deduction) } +
             Array(item.custom_deductions).filter_map do |deduction|
               amount = deduction["amount"].to_f
-              amount.positive? ? custom_deduction_row(deduction) : nil
+              amount.nonzero? ? custom_deduction_row(deduction) : nil
             end
         end
 
@@ -3496,7 +3496,7 @@ module Api
             earning[:category].to_s.in?(%w[regular overtime])
           end
           amount = wage_earnings.sum { |earning| earning[:amount].to_f }
-          return money(amount) if amount.positive?
+          return money(amount) if amount.nonzero?
 
           rate = emp[:pay_rate].to_f
           money((emp[:hours_worked].to_f * rate) + (emp[:overtime_hours].to_f * rate * 1.5))
@@ -3509,7 +3509,7 @@ module Api
             earning[:category].to_s == "salary"
           end
           amount = salary_earnings.sum { |earning| earning[:amount].to_f }
-          return money(amount) if amount.positive?
+          return money(amount) if amount.nonzero?
 
           taxable_additions = emp[:bonus].to_f + emp[:reported_tips].to_f + emp[:custom_earnings_total].to_f + emp[:payroll_field_taxable_additions_total].to_f
           money([ emp[:gross_pay].to_f - taxable_additions, 0.0 ].max)
@@ -3644,7 +3644,7 @@ module Api
           rows = [ [ pay_period.company.name ], [ "Payroll summary by employee report" ], [ qb.qb_date_range_label ], [], headers ]
 
           add_qb_matrix_row(rows, "Hours - total", items.sum { |item| item.total_hours.to_f }, items.map { |item| item.total_hours.to_f })
-          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item) }).select { |line| line.hours.to_f.positive? && line.label != "Gross" }.each do |line|
+          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item) }).select { |line| line.hours.to_f.nonzero? && line.label != "Gross" }.each do |line|
             add_qb_matrix_row(rows, "Hours - #{line.label}", line.hours.to_f, items.map { |item| (qb.earnings_lines_for(item).find { |candidate| candidate.label == line.label }&.hours || 0).to_f })
           end
 
