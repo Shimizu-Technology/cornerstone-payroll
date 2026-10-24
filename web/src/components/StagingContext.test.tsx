@@ -81,3 +81,30 @@ for (const eventType of ['click', 'auxclick']) {
     expect(event.defaultPrevented).toBe(false)
   })
 }
+
+it('reserves the measured ribbon height and releases it when unmounted', async () => {
+  vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging')
+  let height = 54
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 390, height))
+  let resize: (() => void) | undefined
+  const disconnect = vi.fn()
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { resize = callback }
+    observe = vi.fn()
+    disconnect = disconnect
+  })
+  try {
+    const { StagingContext } = await import('./StagingContext')
+    const { unmount } = render(<StagingContext />)
+    expect(document.documentElement.style.getPropertyValue('--staging-context-height')).toBe('54px')
+    height = 76
+    resize?.()
+    expect(document.documentElement.style.getPropertyValue('--staging-context-height')).toBe('76px')
+    unmount()
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(document.documentElement.style.getPropertyValue('--staging-context-height')).toBe('')
+  } finally {
+    rect.mockRestore()
+    vi.unstubAllGlobals()
+  }
+})
