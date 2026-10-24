@@ -140,7 +140,7 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     expect(described_class.new(payroll_item).call.sole.ytd).to eq(217.70.to_d)
   end
 
-  it "includes earlier reportable payroll, excludes voided and future payroll, and includes the current item once" do
+  it "includes earlier reportable payroll, excludes reversed and future payroll, and includes the current item once" do
     earlier_period = create(:pay_period, :committed, company: company,
       start_date: Date.new(2026, 8, 24), end_date: Date.new(2026, 9, 6), pay_date: Date.new(2026, 9, 10))
     earlier = create(:payroll_item, pay_period: earlier_period, company: company, employee: employee,
@@ -148,7 +148,7 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     earlier.payroll_item_earnings.create!(category: "regular", label: "Joint", amount: 50)
     voided = create(:payroll_item, pay_period: create(:pay_period, :committed, company: company,
       start_date: Date.new(2026, 8, 10), end_date: Date.new(2026, 8, 23), pay_date: Date.new(2026, 8, 27)),
-      company: company, employee: employee, employment_type: "hourly", gross_pay: 1_000, voided: true)
+      company: company, employee: employee, employment_type: "hourly", gross_pay: 1_000, voided: true, **payroll_reversal_fixture)
     voided.payroll_item_earnings.create!(category: "regular", label: "Joint", amount: 1_000)
     future_period = create(:pay_period, :committed, company: company,
       start_date: Date.new(2026, 9, 21), end_date: Date.new(2026, 10, 4), pay_date: Date.new(2026, 10, 8))

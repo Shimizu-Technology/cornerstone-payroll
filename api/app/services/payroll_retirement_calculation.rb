@@ -540,7 +540,7 @@ class PayrollRetirementCalculation
     return historical_evidence.dig(:employer_match, :prior_ytd).to_d if historical_mode
     @prior_employer_match ||= begin
       period = payroll_item.pay_period
-      live = employee.payroll_items.joins(:pay_period).not_voided.reportable
+      live = employee.payroll_items.joins(:pay_period).financially_reportable.reportable
         .where(pay_periods: { id: PayPeriod.reportable_for_company(period.company).where(pay_date: Date.new(period.pay_date.year, 1, 1)..period.pay_date).select(:id) })
         .where("pay_periods.pay_date < ? OR (pay_periods.pay_date = ? AND pay_periods.id < ?)", period.pay_date, period.pay_date, period.id)
         .sum("payroll_items.employer_retirement_match + payroll_items.employer_roth_retirement_match").to_d
@@ -557,7 +557,7 @@ class PayrollRetirementCalculation
   def prior_payroll_items
     @prior_payroll_items ||= begin
       period = payroll_item.pay_period
-      employee.payroll_items.joins(:pay_period).not_voided.reportable
+      employee.payroll_items.joins(:pay_period).financially_reportable.reportable
         .where(pay_periods: { id: PayPeriod.reportable_for_company(period.company).where(pay_date: Date.new(tax_year, 1, 1)..period.pay_date).select(:id) })
         .where("pay_periods.pay_date < ? OR (pay_periods.pay_date = ? AND pay_periods.id < ?)", period.pay_date, period.pay_date, period.id)
         .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type).to_a

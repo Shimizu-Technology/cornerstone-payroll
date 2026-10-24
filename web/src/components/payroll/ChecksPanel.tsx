@@ -34,7 +34,8 @@ interface ChecksPanelProps {
 type CheckAction = 'preview' | 'stub';
 
 function checkStatusBadge(item: CheckItem): ReactElement {
-  if (item.voided) return <Badge variant="danger">Voided</Badge>;
+  if (item.payroll_included === false) return <Badge variant="danger">Paycheck reversed</Badge>;
+  if (item.voided) return <Badge variant="warning">Check voided — wages still owed, reissue or reverse</Badge>;
   if (item.check_status === 'delivered') return <Badge variant="success">Issued</Badge>;
   if (item.check_printed_at)
     return (
@@ -124,6 +125,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const [checkNumberSaveError, setCheckNumberSaveError, checkNumberSaveErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
 
   // Modal state
+  const [reverseTarget, setReverseTarget] = useState<CheckItem | null>(null);
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
   const [depositTarget, setDepositTarget] = useState<DirectDepositItem | null>(null);
@@ -158,7 +160,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const depositsById = useMemo(() => new Map(directDepositItems.map(item => [item.id, item])), [directDepositItems]);
 
   useEffect(() => {
-    setDepositTarget(null); setDeliveryTarget(null); setVoidTarget(null); setReprintTarget(null);
+    setDepositTarget(null); setDeliveryTarget(null); setVoidTarget(null); setReverseTarget(null); setReprintTarget(null);
     previewRequest.current++;
     setCheckPreview(null);
     setPreviewItem(null);
@@ -385,6 +387,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
   const handleVoidComplete = async () => {
     if (currentRunScope.current !== runScope) return;
     setVoidTarget(null);
+    setReverseTarget(null);
     await Promise.all([load(), onChecksChanged?.()]);
   };
 
@@ -717,7 +720,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         Record Issued
                       </Button>
                     )}
-                    {!readOnly && !item.voided && item.check_number && (
+                    {!readOnly && item.payroll_included !== false && item.check_number && (
                       <Button size="sm" variant="outline" onClick={() => setReprintTarget(item)} disabled={actionLoading?.id === item.id} className="border-orange-300 text-orange-700 hover:bg-orange-50">
                         Reissue
                       </Button>
@@ -727,6 +730,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         Void
                       </Button>
                     )}
+                    {!readOnly && item.voided && item.payroll_included !== false && <Button size="sm" variant="outline" onClick={() => setReverseTarget(item)}>Reverse paycheck</Button>}
                     {item.voided && <span className="text-xs italic text-red-600" title={item.void_reason ?? undefined}>Voided</span>}
                   </MobileCardActions>
                 </MobileRecordCard>
@@ -848,7 +852,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                       )}
 
                       {/* Reissue physical check */}
-                      {!readOnly && !item.voided && item.check_number && (
+                      {!readOnly && item.payroll_included !== false && item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -873,6 +877,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
                         </Button>
                       )}
 
+                      {!readOnly && item.voided && item.payroll_included !== false && <Button size="sm" variant="outline" onClick={() => setReverseTarget(item)}>Reverse paycheck</Button>}
                       {/* Void history indicator */}
                       {item.voided && (
                         <span className="text-xs text-red-600 italic" title={item.void_reason ?? undefined}>
@@ -892,6 +897,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0, onCh
       {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{companyReadOnlyMessage(activeCompany)}</p>}
 
       {/* Modals */}
+      {reverseTarget && <VoidCheckModal operation="reverse" readOnly={readOnly} item={reverseTarget} onClose={() => setReverseTarget(null)} onComplete={handleVoidComplete} />}
       {voidTarget && (
         <VoidCheckModal
           readOnly={readOnly}

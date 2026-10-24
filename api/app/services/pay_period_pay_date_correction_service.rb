@@ -131,7 +131,7 @@ class PayPeriodPayDateCorrectionService
                                    .pluck(:id)
 
     PayrollItem.includes(:employee, :pay_period)
-               .where(pay_period_id: affected_period_ids, voided: false)
+               .financially_reportable.where(pay_period_id: affected_period_ids)
                .find_each do |item|
       period = item.pay_period
       ytd = item.employee.ytd_totals_before(

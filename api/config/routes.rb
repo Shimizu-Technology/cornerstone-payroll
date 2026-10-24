@@ -426,6 +426,7 @@ Rails.application.routes.draw do
         post "payroll_items/:payroll_item_id/check/mark_delivered", to: "checks#mark_delivered", as: :payroll_item_check_mark_delivered
         patch "payroll_items/:payroll_item_id/check_number",      to: "checks#update_check_number", as: :payroll_item_check_number
         post "payroll_items/:payroll_item_id/direct_deposit/confirm_payment", to: "checks#confirm_direct_deposit_payment"
+        post "payroll_items/:payroll_item_id/reverse_paycheck", to: "checks#reverse_paycheck"
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
         # Replace (uncashed) — void + cut a corrected check on the same item.

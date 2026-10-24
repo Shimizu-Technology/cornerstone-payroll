@@ -42,7 +42,7 @@ class PayrollFinalRecordService
   attr_reader :pay_period
 
   def items
-    @items ||= pay_period.payroll_items.not_voided.reportable.includes(
+    @items ||= pay_period.payroll_items.financially_reportable.reportable.includes(
       :employee,
       :check_events,
       :check_reconciliation_events,
@@ -153,8 +153,8 @@ class PayrollFinalRecordService
       assigned_count: check_rows.count { |row| row[:check_number].present? },
       printed_count: check_rows.count { |row| row[:issuance_status].in?(%w[printed delivered]) },
       delivered_count: check_rows.count { |row| row[:issuance_status] == "delivered" },
-      reconciled_count: check_rows.count { |row| row[:reconciliation_status].in?(%w[cleared voided]) },
-      outstanding_count: check_rows.count { |row| !row[:reconciliation_status].in?(%w[cleared voided]) },
+      reconciled_count: check_rows.count { |row| row[:reconciliation_status].in?(%w[cleared]) },
+      outstanding_count: check_rows.count { |row| !row[:reconciliation_status].in?(%w[cleared]) },
       total_amount: money(rows.sum(0.to_d) { |row| row[:amount].to_d }),
       by_status: status_counts,
       rows:
@@ -193,7 +193,7 @@ class PayrollFinalRecordService
     )
     native = PayrollItem.joins(:pay_period)
       .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-      .not_voided.reportable
+      .financially_reportable.reportable
       .where(company_id: pay_period.company_id, pay_periods: {
         id: PayPeriod.reportable_committed.where(company_id: pay_period.company_id, pay_date: period.range).select(:id)
       }).to_a
