@@ -2,6 +2,7 @@
 
 require "rails_helper"
 require "pdf/reader"
+require "roo"
 
 RSpec.describe "Corrective component ledger" do
   let!(:tax_table) { create(:tax_table) }
@@ -301,6 +302,30 @@ RSpec.describe "Corrective component ledger" do
     expect { issue(overtime_hours: 8) }.to raise_error(IssueCorrectivePaycheckService::UnsupportedEmployeeError, /daily salary-coverage/)
     [ original, second, repair ].each { |item| assert_cash(item) }
     expect(employee.ytd_totals_for(2024).reload.overtime_pay).to eq(196.88)
+  end
+
+
+  describe "signed register exports", type: :request do
+    it "keeps negative custom deductions in the JSON register and signed hours in the employee workbook" do
+      original!(custom_deductions: [ { "label" => "Uniform", "amount" => 10 } ])
+      correction = issue(hours_worked: 55, custom_deductions: [ { "label" => "Uniform", "amount" => 5 } ])
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id).and_return(company.id)
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(actor)
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: correction.pay_period_id }
+      expect(response).to have_http_status(:ok)
+      worker = response.parsed_body.fetch("report").fetch("employees").sole
+      expect(worker.fetch("deductions_breakdown")).to include(hash_including("label" => "Uniform", "amount" => -5))
+      get "/api/v1/admin/reports/payroll_summary_by_employee_xlsx", params: { pay_period_id: correction.pay_period_id }
+      expect(response).to have_http_status(:ok)
+      Tempfile.create([ "signed-correction", ".xlsx" ]) do |file|
+        file.binmode
+        file.write(response.body)
+        file.flush
+        workbook = Roo::Excelx.new(file.path)
+        rows = workbook.sheet("QB Summary Matrix").to_a
+        expect(rows).to include([ "Hours - Regular Pay", -5, -5 ])
+      end
+    end
   end
 
   describe "negative full package", type: :request do
