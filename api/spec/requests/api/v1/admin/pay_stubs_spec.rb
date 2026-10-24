@@ -349,4 +349,16 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response.parsed_body.fetch("error")).to include("only direct-deposit")
     end
   end
+  it "marks a stored staging PDF through the real pay-stub route" do
+    original = Prawn::Document.new { text "Synthetic preserved statement" }.render
+    allow(storage).to receive(:download).with(legacy_key).and_return(original)
+    old = ENV["DEPLOYMENT_ENV"]
+    ENV["DEPLOYMENT_ENV"] = "staging"
+    get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Content-Disposition"]).to include("STAGING_")
+    expect(PDF::Reader.new(StringIO.new(response.body)).pages.first.text).to include(StagingOutboundPolicy::LABEL)
+  ensure
+    old ? ENV["DEPLOYMENT_ENV"] = old : ENV.delete("DEPLOYMENT_ENV")
+  end
 end

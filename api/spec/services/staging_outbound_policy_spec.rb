@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe StagingOutboundPolicy do
-  let(:env) { { "DEPLOYMENT_ENV" => "staging", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test", "STAGING_TESTER_BINDINGS" => '{"leon@example.test":"user_leon","chels@example.test":"user_chels"}' } }
+  let(:env) { { "DEPLOYMENT_ENV" => "staging", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test", "STAGING_TESTER_BINDINGS" => '[{"user_id":1,"email":"leon@example.test","clerk_subject":"user_leon"},{"user_id":2,"email":"chels@example.test","clerk_subject":"user_chels"}]' } }
 
   it "denies unknown, AI, tax, geocoding and production integration destinations" do
     %w[https://openrouter.ai/api/v1/chat/completions https://nominatim.openstreetmap.org/search https://maps.googleapis.com/maps/api/place https://tax.example.test/ingest https://aire.example.test/api].each do |url|
@@ -68,6 +68,13 @@ RSpec.describe StagingOutboundPolicy do
         "STAGING_STORAGE_BUCKET" => "synthetic-staging-bucket",
         "PRODUCTION_STORAGE_BUCKET" => "synthetic-live-bucket",
         "AWS_S3_BUCKET" => "synthetic-staging-bucket",
+        "AWS_ACCOUNT_ID" => "111122223333",
+        "AWS_REGION" => "us-east-1",
+        "STAGING_STORAGE_ACCOUNT_ID" => "111122223333",
+        "PRODUCTION_STORAGE_ACCOUNT_ID" => "999988887777",
+        "STAGING_STORAGE_ENDPOINT" => "https://s3.us-east-1.amazonaws.com",
+        "PRODUCTION_STORAGE_ENDPOINT" => "https://s3.us-west-2.amazonaws.com",
+        "STAGING_STORAGE_REGION" => "us-east-1",
         "AWS_ACCESS_KEY_ID" => "synthetic-staging-key",
         "AWS_SECRET_ACCESS_KEY" => "synthetic-only",
         "STAGING_STORAGE_ACCESS_KEY_SHA256" => Digest::SHA256.hexdigest("synthetic-staging-key"),

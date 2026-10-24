@@ -2,8 +2,12 @@
 
 class StagingCloneContainment
   QUEUE_TABLES = %w[solid_queue_ready_executions solid_queue_scheduled_executions solid_queue_claimed_executions solid_queue_blocked_executions solid_queue_failed_executions solid_queue_recurring_executions solid_queue_recurring_tasks solid_queue_pauses solid_queue_semaphores solid_queue_processes].freeze
-  DISPATCH = { "aire_payroll_acknowledgements" => "delivered_at IS NULL", "aire_payroll_entry_acknowledgements" => "delivered_at IS NULL", "time_tracking_correction_receipts" => "delivered_at IS NULL", "aire_payroll_calendar_publications" => "delivery_status IN ('pending', 'failed')", "invoice_send_schedules" => "status IN ('pending', 'queued', 'sending', 'failed')", "payroll_reminder_configs" => "enabled = TRUE", "invoice_recurrences" => "active = TRUE", "pay_periods" => "tax_sync_status IN ('pending', 'syncing', 'failed')", "historical_client_bootstraps" => "status IN ('pending', 'failed')", "historical_client_bootstrap_dispatches" => "completed_at IS NULL" }.freeze
+  DISPATCH = { "aire_payroll_events" => "verification_status IN ('pending', 'failed')", "aire_payroll_acknowledgements" => "delivered_at IS NULL", "aire_payroll_entry_acknowledgements" => "delivered_at IS NULL", "time_tracking_correction_receipts" => "delivered_at IS NULL", "aire_payroll_calendar_publications" => "delivery_status IN ('pending', 'failed')", "invoice_send_schedules" => "status IN ('pending', 'queued', 'sending', 'failed')", "payroll_reminder_configs" => "enabled = TRUE", "invoice_recurrences" => "active = TRUE", "pay_periods" => "tax_sync_status IN ('pending', 'syncing', 'failed')", "historical_client_bootstraps" => "status IN ('pending', 'failed')", "historical_client_bootstrap_dispatches" => "completed_at IS NULL" }.freeze
   TOKEN_TABLES = %w[user_sessions time_tracking_delegations cable_connection_tickets].freeze
+
+  def self.queue_schema_complete?(connection: ActiveRecord::Base.connection)
+    ([ "solid_queue_jobs" ] + QUEUE_TABLES).all? { |table| connection.data_source_exists?(table) }
+  end
 
   def initialize(env: ENV, connection: ActiveRecord::Base.connection)
     @env = env
@@ -48,11 +52,8 @@ class StagingCloneContainment
     unless TimeTrackingSource.column_names.include?("authorization_origin")
       raise StagingOutboundPolicy::ConfigurationError, "Migrate the quarantined clone with db:safe_prepare before staging:clone:configure"
     end
-    testers = StagingOutboundPolicy.bindings(env)
-    testers.each_key do |email|
-      count = User.unscoped.where("lower(email) = ?", email).count
-      raise StagingOutboundPolicy::ConfigurationError, "Each STAGING_TESTER_BINDINGS email must match exactly one existing user" unless count == 1
-    end
+    verified_testers = StagingTesterIdentity.verify!(env: env)
+    testers = verified_testers.to_h { |tester| [ tester.fetch("email"), tester.fetch("clerk_subject") ] }
     url = StagingOutboundPolicy.require_setting!("STAGING_AIRE_BASE_URL", env)
     StagingOutboundPolicy.integration!(url, env: env)
     authorization_origin = StagingOutboundPolicy.require_setting!("STAGING_AIRE_FRONTEND_ORIGIN", env)
@@ -100,12 +101,11 @@ class StagingCloneContainment
 
   def guard!
     StagingOutboundPolicy.validate_database!(env: env)
-    actual_host = connection.pool.db_config.configuration_hash[:host].to_s.downcase
-    approved = StagingOutboundPolicy.list("STAGING_DATABASE_HOSTS", env)
-    denied = StagingOutboundPolicy.list("PRODUCTION_DATABASE_HOSTS", env)
-    unless approved.include?(actual_host) && !denied.include?(actual_host)
-      raise StagingOutboundPolicy::ConfigurationError, "Actual database connection failed STAGING_DATABASE_HOSTS assertion"
+    unless self.class.queue_schema_complete?(connection: connection)
+      raise StagingOutboundPolicy::ConfigurationError, "Staging requires the complete Solid Queue schema before containment"
     end
+    StagingDatabasePolicy.validate_parameters!(connection.pool.db_config.configuration_hash, env: env)
+    StagingDatabasePolicy.validate_live!(connection.raw_connection, env: env)
     true
   end
 
@@ -137,6 +137,7 @@ class StagingCloneContainment
   def capture(table, predicate = "TRUE")
     columns = connection.columns(table).map(&:name)
     state = if columns.include?("delivery_status") then :delivery_status
+    elsif columns.include?("verification_status") then :verification_status
     elsif columns.include?("status") then :status
     end
     relation(table).where(predicate).in_batches(of: 1_000) do |batch|

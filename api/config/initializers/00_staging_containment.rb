@@ -2,6 +2,23 @@
 
 require Rails.root.join("lib/staging_outbound_policy")
 StagingOutboundPolicy.validate!
+StagingDatabasePolicy.validate_rails!
+
+require "active_record/connection_adapters/postgresql_adapter"
+module StagingDatabaseConnectionGuard
+  def new_client(parameters)
+    StagingDatabasePolicy.validate_parameters!(parameters)
+    raw = super
+    begin
+      StagingDatabasePolicy.validate_live!(raw)
+    rescue StagingOutboundPolicy::ConfigurationError
+      raw.close
+      raise
+    end
+    raw
+  end
+end
+ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.singleton_class.prepend(StagingDatabaseConnectionGuard)
 
 module StagingHttpGuard
   def request(request, *args, &block)
@@ -17,13 +34,3 @@ module StagingHttpGuard
   end
 end
 Net::HTTP.prepend(StagingHttpGuard)
-
-# Includes presigning/direct uploads as well as ordinary object operations.
-require "active_storage/service/s3_service"
-module StagingStorageGuard
-  def initialize(bucket:, **options)
-    StagingOutboundPolicy.validate_storage!(bucket: bucket, access_key: options[:access_key_id])
-    super
-  end
-end
-ActiveStorage::Service::S3Service.prepend(StagingStorageGuard)

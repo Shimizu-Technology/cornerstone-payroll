@@ -528,4 +528,21 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response.body).to include("'=HYPERLINK")
     expect(response.body).not_to include(",=HYPERLINK")
   end
+  it "marks the staging streamed export and filename while retaining lazy batches" do
+    old = ENV["DEPLOYMENT_ENV"]
+    ENV["DEPLOYMENT_ENV"] = "staging"
+    get "/api/v1/admin/audit_logs/export"
+    expect(response).to have_http_status(:ok)
+    expect(response.body.lines.first.chomp.b).to eq(StagingOutboundPolicy::LABEL.b)
+    expect(response.body.lines.second).to start_with("Time,Person,Activity")
+    expect(response.headers["Content-Disposition"]).to include("STAGING_audit-history-")
+
+    controller = Api::V1::Admin::AuditLogsController.new
+    expect(controller).not_to receive(:export_batch)
+    stream = controller.send(:audit_csv_stream, AuditLog.none)
+    expect(stream).to be_a(Enumerator)
+    expect(stream.next.chomp).to eq(StagingOutboundPolicy::LABEL)
+  ensure
+    old ? ENV["DEPLOYMENT_ENV"] = old : ENV.delete("DEPLOYMENT_ENV")
+  end
 end

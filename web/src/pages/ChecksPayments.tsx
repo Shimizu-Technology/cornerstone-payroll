@@ -1,4 +1,4 @@
-import { stagingCsv } from '../lib/staging';
+import { stagingCsv, stagingFilename } from '../lib/staging';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -549,7 +549,7 @@ export function ChecksPayments() {
     const link = document.createElement('a');
     const date = new Date().toISOString().slice(0, 10);
     link.href = url;
-    link.download = `checks_payments_register_${date}.csv`;
+    link.download = stagingFilename(`checks_payments_register_${date}.csv`);
     document.body.appendChild(link);
     link.click();
     link.remove();

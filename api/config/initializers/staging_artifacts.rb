@@ -8,7 +8,7 @@ module StagingPdfWatermark
   def render(*args, &block)
     if StagingOutboundPolicy.staging? && !@staging_watermarked
       @staging_watermarked = true
-      repeat(:all) do
+      repeat(:all, dynamic: true) do
         canvas do
           fill_color "9A3412"
           font("Helvetica", style: :bold) do

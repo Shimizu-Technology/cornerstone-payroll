@@ -1,13 +1,15 @@
+import { assertDeploymentFlags, assertStagingOrigin, stagingBrowserContainment } from './build/staging'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  if (env.DEPLOYMENT_ENV === 'staging' && env.VITE_DEPLOYMENT_ENV !== 'staging') throw new Error('DEPLOYMENT_ENV=staging requires VITE_DEPLOYMENT_ENV=staging')
-  if (env.VITE_DEPLOYMENT_ENV === 'staging' && mode !== 'test') {
+  assertDeploymentFlags(env, command === 'build' ? 'production' : mode)
+  if (env.VITE_DEPLOYMENT_ENV === 'staging' && (mode !== 'test' || command === 'build')) {
+    assertStagingOrigin(env.VITE_STAGING_AIRE_FRONTEND_ORIGIN, 'VITE_STAGING_AIRE_FRONTEND_ORIGIN')
     for (const key of ['VITE_STAGING_SNAPSHOT_AT', 'VITE_STAGING_CODE_SHA', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']) {
       if (!env[key]) throw new Error(`Staging build requires ${key}`)
     }
@@ -21,18 +23,7 @@ export default defineConfig(({ mode }) => {
     if (env.VITE_AUTH_ENABLED === 'false') throw new Error('Staging build requires authentication')
   }
   return {
-  plugins: [{
-    name: 'staging-browser-containment',
-    enforce: 'pre' as const,
-    transform(code: string, id: string) {
-      if (env.VITE_DEPLOYMENT_ENV !== 'staging' || !id.endsWith('/src/index.css')) return
-      return code.replace(/^@import url\(['"]https:\/\/fonts\.googleapis\.com[^\n]+\n/m, '')
-    },
-    transformIndexHtml(html: string) {
-      if (env.VITE_DEPLOYMENT_ENV !== 'staging') return html
-      return html.replace(/<link[^>]+(?:fonts\.googleapis\.com|fonts\.gstatic\.com)[^>]*>/g, '')
-    },
-  }, react(), tailwindcss()],
+  plugins: [stagingBrowserContainment(env.VITE_DEPLOYMENT_ENV === 'staging'), react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -47,7 +47,7 @@ const source = {
   last_synced_at: null,
 };
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.resetModules(); });
 
 describe('TimeTrackingSources AIRE account connection', () => {
   beforeEach(() => {
@@ -151,4 +151,18 @@ describe('TimeTrackingSources AIRE account connection', () => {
     expect(screen.getByText(/source installation identity is verified/i)).toBeTruthy();
     expect(screen.getByText(/Verified contract 1.0: 2 supported features/i)).toBeTruthy();
   });
+});
+
+it.each(['https://aire-services-guam.netlify.app/admin/payroll-link?token=synthetic', 'https://AIRE-STAGING.example.test/admin/payroll-link?token=synthetic', 'https://aire-staging.example.test/admin/payroll-link?token=synthetic'])('validates staging administrator authorization before navigating to %s', async destination => {
+  vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging');
+  vi.stubEnv('VITE_STAGING_AIRE_FRONTEND_ORIGIN', 'https://aire-staging.example.test');
+  const { TimeTrackingSources: StagingSources } = await import('./TimeTrackingSources');
+  apiMocks.list.mockResolvedValue({ time_tracking_sources: [source] });
+  apiMocks.getAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
+  apiMocks.createAireAccountLink.mockResolvedValue({ authorization_url: destination });
+  const navigate = vi.fn();
+  render(<StagingSources navigateToAuthorization={navigate} />);
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
+  if (destination.startsWith('https://aire-staging.')) expect(navigate).toHaveBeenCalledWith(destination);
+  else { await screen.findByRole('alert'); expect(navigate).not.toHaveBeenCalled(); }
 });

@@ -30,6 +30,13 @@ RSpec.describe StagingReadiness do
     expect(report.failures.map(&:name)).to include("staging clone containment manifest exists", "Solid Queue worker has a recent heartbeat")
   end
 
+  it "rejects an incomplete durable queue schema" do
+    allow(StagingOutboundPolicy).to receive(:validate!).and_return(true)
+    allow(StagingCloneContainment).to receive(:queue_schema_complete?).and_return(false)
+    report = described_class.new.run(live: false)
+    expect(report.failures.map(&:name)).to include("complete Solid Queue schema exists")
+  end
+
   it "rejects async execution even when a worker heartbeat exists" do
     allow(StagingOutboundPolicy).to receive(:validate!).and_return(true)
     allow(StagingQuarantine).to receive(:complete?).and_return(true)

@@ -5,6 +5,8 @@ require "json"
 require "mail"
 require "net/http"
 require "uri"
+require_relative "staging_database_policy"
+require_relative "staging_storage_policy"
 
 # Deployment containment is independent of Rails.env and company payroll mode.
 # Errors contain setting names only; never URLs, recipients, payloads or secrets.
@@ -12,12 +14,22 @@ class StagingOutboundPolicy
   class Blocked < StandardError; end
   class ConfigurationError < Blocked; end
   LABEL = "STAGING – DO NOT ISSUE OR FILE"
-  KNOWN_PRODUCTION_HOSTS = %w[cornerstone-payroll-api.onrender.com cornerstone-payroll.onrender.com aire-services-api.onrender.com aire-services.onrender.com payroll.shimizu-technology.com aire-services-guam.netlify.app].freeze
+  KNOWN_PRODUCTION_HOSTS = %w[cornerstone-payroll-api.onrender.com cornerstone-payroll.onrender.com aire-services-api.onrender.com aire-services.onrender.com payroll.shimizu-technology.com aire-services-guam.netlify.app app.aireservicesguam.com].freeze
   DATABASE_SETTINGS = %w[DATABASE_URL MIGRATION_DATABASE_URL CACHE_DATABASE_URL QUEUE_DATABASE_URL CABLE_DATABASE_URL CACHE_MIGRATION_DATABASE_URL QUEUE_MIGRATION_DATABASE_URL CABLE_MIGRATION_DATABASE_URL MIGRATION_CACHE_DATABASE_URL MIGRATION_QUEUE_DATABASE_URL MIGRATION_CABLE_DATABASE_URL].freeze
 
   class << self
     def staging?(env = ENV)
-      env["DEPLOYMENT_ENV"] == "staging"
+      value = env["DEPLOYMENT_ENV"]
+      raise ConfigurationError, "Invalid DEPLOYMENT_ENV" if value && !value.empty? && !%w[staging production test development].include?(value)
+      value == "staging"
+    end
+
+    def validate_deployment!(env: ENV, environment: Rails.env)
+      staging?(env)
+      if (environment.to_s == "production" || env["RAILS_ENV"] == "production") && !%w[staging production].include?(env["DEPLOYMENT_ENV"])
+        raise ConfigurationError, "Production boot requires explicit DEPLOYMENT_ENV=production or staging"
+      end
+      true
     end
 
     def list(name, env)
@@ -30,18 +42,30 @@ class StagingOutboundPolicy
       value
     end
 
-    def bindings(env = ENV)
-      raw = JSON.parse(require_setting!("STAGING_TESTER_BINDINGS", env))
-      valid = raw.is_a?(Hash) && !raw.empty? && raw.all? { |email, id| email.match?(URI::MailTo::EMAIL_REGEXP) && id.is_a?(String) && id.match?(/\Auser_[A-Za-z0-9]+\z/) }
-      raise ConfigurationError, "Invalid STAGING_TESTER_BINDINGS" unless valid && raw.values.uniq.size == raw.size
-      raw.transform_keys(&:downcase)
+    def tester_records(env = ENV)
+      records = JSON.parse(require_setting!("STAGING_TESTER_BINDINGS", env))
+      valid = records.is_a?(Array) && (1..2).cover?(records.size) && records.all? do |record|
+        record.is_a?(Hash) && record["user_id"].is_a?(Integer) && record["user_id"].positive? &&
+          record["email"].is_a?(String) && record["email"] == record["email"].strip && record["email"].match?(URI::MailTo::EMAIL_REGEXP) &&
+          record["clerk_subject"].is_a?(String) && record["clerk_subject"].match?(/\Auser_[A-Za-z0-9]+\z/)
+      end
+      raise ConfigurationError, "Invalid STAGING_TESTER_BINDINGS: require explicit user_id/email/clerk_subject triples" unless valid
+      records = records.map { |record| record.merge("email" => record["email"].downcase) }
+      unless %w[user_id email clerk_subject].all? { |key| records.map { |record| record[key] }.uniq.size == records.size }
+        raise ConfigurationError, "STAGING_TESTER_BINDINGS must be unique"
+      end
+      records
     rescue JSON::ParserError
       raise ConfigurationError, "Invalid STAGING_TESTER_BINDINGS"
     end
 
-    def tester?(email:, id:, env: ENV)
+    def bindings(env = ENV)
+      tester_records(env).to_h { |record| [ record.fetch("email"), record.fetch("clerk_subject") ] }
+    end
+
+    def tester?(email:, id:, user_id: nil, env: ENV)
       return true unless staging?(env)
-      bindings(env)[email.to_s.downcase] == id && !id.to_s.empty?
+      tester_records(env).any? { |record| record["user_id"] == user_id && record["email"] == email.to_s.downcase && record["clerk_subject"] == id }
     end
 
     def clerk_target!(email: nil, id: nil, env: ENV)
@@ -67,9 +91,9 @@ class StagingOutboundPolicy
     def frontend_origin!(value, env: ENV)
       return true unless staging?(env)
       uri = URI.parse(value.to_s)
-      origin = "#{uri.scheme}://#{uri.host}"
+      origin = "#{uri.scheme}://#{uri.host.to_s.downcase}"
       allowed = env.values_at("STAGING_AIRE_FRONTEND_ORIGIN", "STAGING_PAYROLL_FRONTEND_ORIGIN")
-      valid = uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && allowed.include?(origin) && !KNOWN_PRODUCTION_HOSTS.include?(uri.host)
+      valid = uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && allowed.compact.map(&:downcase).include?(origin) && !(KNOWN_PRODUCTION_HOSTS + list("PRODUCTION_FRONTEND_HOSTS", env) + list("PRODUCTION_INTEGRATION_HOSTS", env)).include?(uri.host.to_s.downcase)
       raise Blocked, "Browser redirect blocked by staging frontend origins" unless valid
       true
     rescue URI::InvalidURIError
@@ -82,50 +106,15 @@ class StagingOutboundPolicy
     end
 
     def validate_database!(env: ENV)
-      raise ConfigurationError, "Clone containment requires DEPLOYMENT_ENV=staging" unless staging?(env)
-      allowed = list("STAGING_DATABASE_HOSTS", env)
-      denied = list("PRODUCTION_DATABASE_HOSTS", env)
-      raise ConfigurationError, "Staging requires STAGING_DATABASE_HOSTS and PRODUCTION_DATABASE_HOSTS" if allowed.empty? || denied.empty? || !(allowed & denied).empty?
-      require_setting!("DATABASE_URL", env)
-      DATABASE_SETTINGS.each do |name|
-        next if env[name].to_s.empty?
-        uri = URI.parse(env[name])
-        host = uri.host.to_s.downcase
-        raise ConfigurationError, "Unsafe #{name}: staging database host assertion failed" unless %w[postgres postgresql].include?(uri.scheme) && allowed.include?(host) && !denied.include?(host)
-      end
-      primary = URI.parse(env.fetch("DATABASE_URL"))
-      %w[QUEUE_DATABASE_URL CACHE_DATABASE_URL CABLE_DATABASE_URL].each do |name|
-        next if env[name].to_s.empty?
-        role = URI.parse(env[name])
-        primary_identity = [ primary.host.to_s.sub("-pooler.", "."), primary.port || 5432, primary.path ]
-        role_identity = [ role.host.to_s.sub("-pooler.", "."), role.port || 5432, role.path ]
-        unless primary_identity == role_identity
-          raise ConfigurationError, "Separate #{name} is unsupported by staging clone containment; use the primary clone database"
-        end
-      end
-      true
-    rescue URI::InvalidURIError
-      raise ConfigurationError, "Invalid staging database URL"
+      StagingDatabasePolicy.validate_config!(env: env)
     end
 
     def validate_storage!(env: ENV, bucket: nil, access_key: nil)
-      return true unless staging?(env)
-      expected = require_setting!("STAGING_STORAGE_BUCKET", env)
-      production = require_setting!("PRODUCTION_STORAGE_BUCKET", env)
-      actual = bucket || env["R2_BUCKET_NAME"] || env["R2_BUCKET"] || env["AWS_S3_BUCKET"]
-      valid = expected.match?(/(?:\A|[-_])staging(?:[-_]|\z)/) && expected != production && actual == expected
-      raise ConfigurationError, "Unsafe STAGING_STORAGE_BUCKET / PRODUCTION_STORAGE_BUCKET" unless valid
-      key = access_key || env["R2_ACCESS_KEY_ID"] || env["AWS_ACCESS_KEY_ID"]
-      fingerprint = Digest::SHA256.hexdigest(key.to_s)
-      approved = require_setting!("STAGING_STORAGE_ACCESS_KEY_SHA256", env)
-      denied = require_setting!("PRODUCTION_STORAGE_ACCESS_KEY_SHA256", env)
-      valid_key = approved.match?(/\A[0-9a-f]{64}\z/) && denied.match?(/\A[0-9a-f]{64}\z/) && approved != denied && fingerprint == approved && fingerprint != denied
-      raise ConfigurationError, "Unsafe STAGING_STORAGE_ACCESS_KEY_SHA256 / PRODUCTION_STORAGE_ACCESS_KEY_SHA256" unless valid_key
-      require_setting!(env.key?("R2_ACCESS_KEY_ID") ? "R2_SECRET_ACCESS_KEY" : "AWS_SECRET_ACCESS_KEY", env)
-      true
+      StagingStoragePolicy.validate!(env: env, bucket: bucket, access_key: access_key)
     end
 
     def validate!(env: ENV)
+      validate_deployment!(env: env)
       return true unless staging?(env)
       validate_database!(env: env)
       validate_storage!(env: env)
@@ -148,7 +137,7 @@ class StagingOutboundPolicy
       end
       frontend = require_setting!("STAGING_FRONTEND_ORIGIN", env)
       front_uri = URI.parse(frontend)
-      unless front_uri.is_a?(URI::HTTPS) && front_uri.port == 443 && front_uri.userinfo.nil? && [ "", "/" ].include?(front_uri.path) && !KNOWN_PRODUCTION_HOSTS.include?(front_uri.host)
+      unless front_uri.is_a?(URI::HTTPS) && front_uri.port == 443 && front_uri.userinfo.nil? && [ "", "/" ].include?(front_uri.path) && !(KNOWN_PRODUCTION_HOSTS + list("PRODUCTION_FRONTEND_HOSTS", env) + list("PRODUCTION_INTEGRATION_HOSTS", env)).include?(front_uri.host.to_s.downcase)
         raise ConfigurationError, "Unsafe STAGING_FRONTEND_ORIGIN"
       end
       raise ConfigurationError, "FRONTEND_URL must match STAGING_FRONTEND_ORIGIN" unless env["FRONTEND_URL"] == frontend
@@ -216,13 +205,7 @@ class StagingOutboundPolicy
     end
 
     def storage_hosts(env)
-      if env["R2_ACCOUNT_ID"]
-        [ URI(env["R2_ENDPOINT"] || "https://#{env['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com").host ]
-      else
-        bucket = env["STAGING_STORAGE_BUCKET"]
-        region = env["AWS_REGION"]
-        [ "#{bucket}.s3.#{region}.amazonaws.com", "s3.#{region}.amazonaws.com", "#{bucket}.s3.amazonaws.com", "s3.amazonaws.com" ]
-      end
+      StagingStoragePolicy.hosts(env)
     end
 
     def http_request!(http, request, env: ENV)

@@ -1,12 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactElement } from 'react'
 import { isStaging, stagingCodeSha, stagingLabel, stagingSnapshot } from '../lib/staging'
 import './StagingContext.css'
 
-export function StagingContext() {
+export function StagingContext(): ReactElement | null {
   useEffect(() => {
     if (!isStaging) return
     document.documentElement.dataset.staging = 'true'
-    const prefixTitle = () => {
+    const prefixTitle = (): void => {
       if (!document.title.startsWith('[STAGING]')) document.title = `[STAGING] ${document.title}`
     }
     prefixTitle()
@@ -18,7 +18,7 @@ export function StagingContext() {
     favicon.href = '/staging-favicon.svg'
     document.head.appendChild(favicon)
     // Cloned contact links must not open a real communication application.
-    const containContactLink = (event: MouseEvent) => {
+    const containContactLink = (event: MouseEvent): void => {
       const link = (event.target as Element).closest?.('a')
       if (link && /^(mailto:|tel:|sms:|https:\/\/(wa\.me|api\.whatsapp\.com)\/)/i.test(link.href)) {
         event.preventDefault()
@@ -26,11 +26,13 @@ export function StagingContext() {
       }
     }
     document.addEventListener('click', containContactLink, true)
+    document.addEventListener('auxclick', containContactLink, true)
     return () => {
       observer.disconnect()
       favicon.remove()
       delete document.documentElement.dataset.staging
       document.removeEventListener('click', containContactLink, true)
+      document.removeEventListener('auxclick', containContactLink, true)
     }
   }, [])
 

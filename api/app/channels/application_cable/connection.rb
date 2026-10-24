@@ -23,7 +23,7 @@ module ApplicationCable
       payload = cable_ticket_payload
       user = User.find_by(id: payload&.dig("user_id"))
       reject_unauthorized_connection unless user&.payroll_access_allowed?
-      reject_unauthorized_connection unless StagingOutboundPolicy.tester?(email: user.email, id: user.clerk_id)
+      reject_unauthorized_connection unless StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: user.clerk_id)
 
       user
     end
