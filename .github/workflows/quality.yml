@@ -84,6 +84,9 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=moderate
       - run: npm run gate
+        env:
+          DEPLOYMENT_ENV: production
+          VITE_DEPLOYMENT_ENV: production
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:public
         env:
@@ -285,7 +288,12 @@ jobs:
           STAGING_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
         run: >-
           docker build --file web/Dockerfile --tag cornerstone-payroll-web:ci
-          --build-arg VITE_API_URL=/api/v1
+          --build-arg DEPLOYMENT_ENV=staging
+          --build-arg VITE_DEPLOYMENT_ENV=staging
+          --build-arg VITE_STAGING_SNAPSHOT_AT=1970-01-01T00:00:00Z
+          --build-arg VITE_STAGING_CODE_SHA="${{ github.sha }}"
+          --build-arg VITE_STAGING_AIRE_FRONTEND_ORIGIN=https://aire-staging.example.test
+          --build-arg VITE_API_URL=https://payroll-api-staging.example.test/api/v1
           --build-arg VITE_AUTH_ENABLED=true
           --build-arg VITE_CLERK_PUBLISHABLE_KEY="${STAGING_CLERK_PUBLISHABLE_KEY}"
           web
@@ -348,6 +356,11 @@ jobs:
             ghcr.io/shimizu-technology/${{ matrix.image }}:${{ github.sha }}
             ghcr.io/shimizu-technology/${{ matrix.image }}:staging-v2
           build-args: |
-            VITE_API_URL=/api/v1
+            DEPLOYMENT_ENV=staging
+            VITE_DEPLOYMENT_ENV=staging
+            VITE_STAGING_SNAPSHOT_AT=${{ vars.STAGING_SNAPSHOT_AT }}
+            VITE_STAGING_CODE_SHA=${{ github.sha }}
+            VITE_STAGING_AIRE_FRONTEND_ORIGIN=${{ vars.STAGING_AIRE_FRONTEND_ORIGIN }}
+            VITE_API_URL=${{ vars.STAGING_API_URL }}
             VITE_AUTH_ENABLED=true
             VITE_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}

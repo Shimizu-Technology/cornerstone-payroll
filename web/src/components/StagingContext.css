@@ -17,7 +17,10 @@
 }
 .staging-context strong { color: #ffffff; letter-spacing: .12em; }
 .staging-context-meta, .staging-context-note { font-weight: 400; }
-html[data-staging] body { padding-bottom: 100px; }
+html[data-staging] body { padding-bottom: var(--staging-context-height, 100px); }
+html[data-staging] [data-testid="app-shell"] {
+  height: calc(100dvh - var(--staging-context-height, 100px));
+}
 @media (max-width: 600px) {
   .staging-context { gap: 3px 8px; padding-inline: 10px; font-size: 11px; }
   .staging-context-meta { flex-basis: 100%; text-align: center; }
@@ -34,6 +37,7 @@ html[data-staging] body { padding-bottom: 100px; }
 @media print {
   html[data-staging] { page: staging; }
   html[data-staging] body { padding-bottom: 0; margin: 0; }
+  html[data-staging] [data-testid="app-shell"] { height: auto; }
   /* Margin-box warnings repeat without covering the page content. Keep a
      normal-flow warning too for print engines without margin-box support. */
   .staging-context {
