@@ -83,7 +83,7 @@ class PayrollStatementYtdBreakdown
     components = case kind
     when :deduction
       report_data.deduction_contribution_entries_for_item(item).filter_map do |entry|
-        next unless entry.bucket.in?(%w[pre_tax post_tax]) && entry.employee_amount.to_d.positive?
+        next unless entry.bucket.in?(%w[pre_tax post_tax]) && entry.employee_amount.to_d.nonzero?
 
         Component.new(
           label: statement_label_for_entry(entry),
@@ -93,13 +93,13 @@ class PayrollStatementYtdBreakdown
       end
     when :other_pay
       report_data.other_pay_lines_for(item).filter_map do |line|
-        next unless line.amount.to_d.positive?
+        next unless line.amount.to_d.nonzero?
 
         Component.new(label: line.label, amount: line.amount.to_d, semantic: semantic_for_other_pay(line.label))
       end
     when :employer_contribution
       report_data.deduction_contribution_entries_for_item(item).filter_map do |entry|
-        next unless entry.company_amount.to_d.positive?
+        next unless entry.company_amount.to_d.nonzero?
 
         Component.new(
           label: statement_label_for_entry(entry),

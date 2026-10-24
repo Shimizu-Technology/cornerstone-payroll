@@ -504,6 +504,7 @@ describe('AirePayrollCockpit', () => {
 
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
     await screen.findByText('Time tracking payroll workspace');
+    await user.click(screen.getByText(/Review timecards, held hours and team/));
     await user.click(screen.getByRole('button', { name: /Payment history 4/i }));
 
     const paymentSection = screen.getByRole('heading', { name: 'Hour and payment status' }).closest('section');

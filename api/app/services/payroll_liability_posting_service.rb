@@ -41,6 +41,33 @@ class PayrollLiabilityPostingService
     new(...).post!
   end
 
+  def self.verify_employer_contributions!(item)
+    return [] unless item.pay_period.payroll_liability_postings.exists?
+
+    expected = PayrollEmployerContributions.sources(item)
+    known = %w[retirement_employer roth_retirement_employer benefit_employer]
+    legacy = PayrollLegacyEmployerComponents.eligible?(item)
+    PayrollLegacyEmployerComponents.verify_posting_shape!(item) if legacy
+    known << "insurance_employer" if legacy
+    entries = PayrollLiabilityEntry.where(payroll_item_id: item.id).select do |entry|
+      key = entry.metadata["source_field"].presence || entry.component_key
+      expected.key?(key) || known.include?(entry.category) || entry.metadata["employer_contribution"]
+    end
+    unless entries.all? { |entry| entry.category == PayrollLegacyEmployerComponents.category_for(item, entry.metadata["source_field"].presence || entry.component_key, legacy: legacy) }
+      raise InvalidStateError, "Saved employer contribution classifications do not reconcile to their liability entries; arrange a reviewed benefit-ledger correction"
+    end
+    posted = entries.each_with_object(Hash.new(0.to_d)) do |entry, totals|
+      totals[entry.metadata["source_field"].presence || entry.component_key] += entry.amount.to_d
+    end.reject { |_key, amount| amount.zero? }
+    return [] if expected == posted
+    omissions = PayrollLegacyEmployerComponents.omissions(item, expected, posted)
+    return omissions if omissions
+
+    raise InvalidStateError, "Saved employer contribution components do not reconcile to their liability entries; arrange a reviewed benefit-ledger correction"
+  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+    raise InvalidStateError, e.message
+  end
+
   def self.reverse!(...)
     new(...).reverse!
   end
@@ -81,6 +108,8 @@ class PayrollLiabilityPostingService
         metadata: metadata
       )
     end
+  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+    raise InvalidStateError, e.message
   end
 
   def reverse!
@@ -178,6 +207,21 @@ class PayrollLiabilityPostingService
     existing = PayrollLiabilityPosting.find_by(idempotency_key: key)
     return existing if existing
 
+    legacy_capture = posting_type.in?(%w[historical_backfill replacement])
+    insurance_ids = legacy_capture ? ambiguous_insurance_item_ids(locked) : Set.new
+    employer_ids = legacy_capture ? ambiguous_employer_item_ids(locked) : Set.new
+    legacy_ids = insurance_ids | employer_ids
+    if legacy_capture
+      legacy_ids |= locked.payroll_items.select { |item| PayrollLegacyEmployerComponents.eligible?(item) }.map(&:id).to_set
+    end
+    metadata = metadata.merge("ambiguous_insurance_history" => true) if insurance_ids.any?
+    metadata = metadata.merge("ambiguous_employer_contribution_history" => true) if employer_ids.any?
+    metadata = metadata.merge(PayrollLegacyEmployerComponents::LIFECYCLE_CAPTURE_KEY => true) if legacy_capture
+    metadata = metadata.merge(PayrollLegacyEmployerComponents::POSTING_VERSION_KEY => 1) unless legacy_capture
+    %w[legacy_unposted_employer_component legacy_employer_posting_compatibility].each do |key_name|
+      values = locked.payroll_items.flat_map { |item| Array(item.calculation_context_snapshot.to_h.dig("corrective_paycheck", key_name)) }
+      metadata = metadata.merge(key_name => values) if values.any?
+    end
     snapshot_builder = PayComponentRuleSnapshotBuilder.new(company: locked.company, effective_on: liability_date)
     posting = PayrollLiabilityPosting.create!(
       company: locked.company,
@@ -192,7 +236,7 @@ class PayrollLiabilityPostingService
       metadata: metadata
     )
 
-    entries = build_entries(locked, posting, snapshot_builder)
+    entries = build_entries(locked, posting, snapshot_builder, legacy_insurance_item_ids: legacy_ids)
     PayrollLiabilityEntry.insert_all!(entries) if entries.any?
     posting.reload
   end
@@ -202,6 +246,12 @@ class PayrollLiabilityPostingService
                PayrollLiabilityPosting.find_by(idempotency_key: key)
     return existing if existing
 
+    if source.metadata["ambiguous_insurance_history"] || source.entries.where(payroll_item_id: ambiguous_insurance_item_ids(locked).to_a).exists?
+      metadata = metadata.merge("ambiguous_insurance_history" => true)
+    end
+    if source.metadata["ambiguous_employer_contribution_history"] || source.entries.where(payroll_item_id: ambiguous_employer_item_ids(locked).to_a).exists?
+      metadata = metadata.merge("ambiguous_employer_contribution_history" => true)
+    end
     reversal = PayrollLiabilityPosting.create!(
       company: locked.company,
       pay_period: locked,
@@ -235,14 +285,15 @@ class PayrollLiabilityPostingService
     reversal.reload
   end
 
-  def build_entries(locked, posting, snapshot_builder)
+  def build_entries(locked, posting, snapshot_builder, legacy_insurance_item_ids: Set.new)
     now = Time.current
     locked.payroll_items.where(payroll_reversed_at: nil).includes(
       payroll_item_field_entries: :payroll_field_definition,
       payroll_item_deductions: :deduction_type
     ).flat_map do |item|
+      legacy_insurance = legacy_insurance_item_ids.include?(item.id)
       core = CORE_COMPONENTS.filter_map do |component_key, (field, category, authority)|
-        amount = core_component_amount(item, component_key, field)
+        amount = core_component_amount(item, component_key, field, legacy_insurance: legacy_insurance)
         next if amount.zero?
 
         entry_row(
@@ -253,12 +304,16 @@ class PayrollLiabilityPostingService
           authority: authority,
           amount: amount,
           rule: snapshot_builder.rule_for(component_key.sub("guam_additional_income_tax_withheld", "guam_income_tax_withheld")),
-          metadata: { "source_field" => field.to_s },
+          metadata: { "source_field" => field.to_s }.tap { |values| values["employer_contribution"] = true if field.in?(%i[employer_retirement_match employer_roth_retirement_match]) },
           now: now
         )
       end
 
-      core + payroll_field_liability_rows(posting, item, now) + itemized_liability_rows(posting, item, now)
+      rows = core + payroll_field_liability_rows(posting, item, now, legacy: legacy_insurance) + itemized_liability_rows(posting, item, now, legacy_insurance: legacy_insurance)
+      # A labelled legacy capture preserves old bookkeeping; it is not proof
+      # that these sources satisfy new corrective conservation requirements.
+      reconcile_employer_contributions!(item, rows) unless legacy_insurance
+      rows
     end
   end
 
@@ -269,23 +324,23 @@ class PayrollLiabilityPostingService
   # preventing the additional tax from being payable twice. Keep the result
   # signed because corrective paychecks use negative amounts to reduce an
   # existing liability.
-  def core_component_amount(item, component_key, field)
-    amount = item.public_send(field).to_d
+  def core_component_amount(item, component_key, field, legacy_insurance: false)
+    amount = component_key == "insurance_employee" && !legacy_insurance ? PayrollInsuranceComponents.scalar_amount(item) : item.public_send(field).to_d
     amount -= item.additional_medicare_tax.to_d if component_key == "medicare_employee"
     amount.round(2)
   end
 
-  def payroll_field_liability_rows(posting, item, now)
+  def payroll_field_liability_rows(posting, item, now, legacy: false)
     item.payroll_item_field_entries.filter_map do |field_entry|
       next unless field_entry.active? && field_entry.amount.to_d.nonzero?
       next unless field_entry.kind.in?(%w[deduction employer_contribution])
 
       category, default_authority = FIELD_CATEGORY_MAP[field_entry.category]
-      next unless category
-
       if field_entry.employer_contribution?
-        category = category.sub("_employee", "_employer")
+        category = legacy ? category&.sub("_employee", "_employer") : employer_liability_category(field_entry.category)
+        default_authority ||= BENEFIT_PROVIDER
       end
+      next unless category
       definition = field_entry.payroll_field_definition
       authority = definition&.payee_name.presence || default_authority
       component_key = "payroll_field:#{definition&.id || "snapshot"}:#{field_entry.id}"
@@ -304,30 +359,31 @@ class PayrollLiabilityPostingService
           "label" => field_entry.label,
           "tax_treatment" => field_entry.tax_treatment,
           "reporting_group" => field_entry.reporting_group
-        },
+        }.tap { |values| values["employer_contribution"] = true if field_entry.employer_contribution? && !legacy },
         now: now
       )
     end
   end
 
-  def itemized_liability_rows(posting, item, now)
-    payroll_field_labels = item.payroll_item_field_entries.map(&:label).to_set
-
+  def itemized_liability_rows(posting, item, now, legacy_insurance: false)
     item.payroll_item_deductions.filter_map do |deduction|
       type = deduction.deduction_type
       sub_category = type&.sub_category
-      next unless sub_category.in?(%w[retirement garnishment child_support benefit])
-      next if payroll_field_labels.include?(deduction.label)
+      next if legacy_insurance && !sub_category.in?(%w[retirement garnishment child_support benefit])
+      next unless deduction.employer_contribution? || sub_category.in?(%w[retirement garnishment child_support benefit])
+      next if legacy_insurance ? item.payroll_item_field_entries.any? { |field| field.label == deduction.label } : PayrollComponentMirrors.field_for(item, deduction)
       next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if deduction.amount.to_d.zero?
 
-      category = case sub_category
-      when "retirement"
-        deduction.employer_contribution? ? "retirement_employer" : "retirement_employee"
-      when "garnishment" then "garnishment"
-      when "child_support" then "child_support"
-      when "benefit"
-        deduction.employer_contribution? ? "benefit_employer" : "benefit_employee"
+      category = if deduction.employer_contribution? && !(legacy_insurance && sub_category.in?(%w[garnishment child_support]))
+        employer_liability_category(sub_category)
+      else
+        case sub_category
+        when "retirement" then "retirement_employee"
+        when "garnishment" then "garnishment"
+        when "child_support" then "child_support"
+        when "benefit" then "benefit_employee"
+        end
       end
 
       entry_row(
@@ -344,10 +400,52 @@ class PayrollLiabilityPostingService
           "label" => deduction.label,
           "sub_category" => sub_category,
           "reporting_group" => deduction.reporting_group
-        },
+        }.tap { |values| values["employer_contribution"] = true if deduction.employer_contribution? },
         now: now
       )
     end
+  end
+
+  def employer_liability_category(sub_category)
+    case sub_category
+    when "retirement" then "retirement_employer"
+    when "insurance", "benefit" then "benefit_employer"
+    else "other_payroll_liability"
+    end
+  end
+
+  def reconcile_employer_contributions!(item, rows)
+    expected = PayrollEmployerContributions.sources(item)
+    posted = rows.each_with_object(Hash.new(0.to_d)) do |row, totals|
+      next unless row.fetch(:metadata)["employer_contribution"]
+
+      totals[row.fetch(:metadata)["source_field"].presence || row.fetch(:component_key)] += row.fetch(:amount).to_d
+    end.reject { |_key, amount| amount.zero? }
+    return if expected == posted
+
+    raise InvalidStateError, "Saved employer contribution components do not reconcile to their liability entries; review the contribution ledger before committing payroll"
+  end
+
+  def ambiguous_insurance_item_ids(locked)
+    locked.payroll_items.where(payroll_reversed_at: nil).includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type).filter_map do |item|
+      begin
+        PayrollInsuranceComponents.scalar_amount(item)
+        nil
+      rescue PayrollInsuranceComponents::AmbiguousHistoryError, PayrollComponentMirrors::AmbiguousHistoryError
+        item.id
+      end
+    end.to_set
+  end
+
+  def ambiguous_employer_item_ids(locked)
+    locked.payroll_items.where(payroll_reversed_at: nil).includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type).filter_map do |item|
+      begin
+        PayrollEmployerContributions.sources(item)
+        nil
+      rescue PayrollComponentMirrors::AmbiguousHistoryError
+        item.id
+      end
+    end.to_set
   end
 
   def entry_row(posting:, item:, component_key:, category:, authority:, amount:, rule:, metadata:, now:)

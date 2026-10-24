@@ -18,7 +18,7 @@ module PayrollAdjustable
   }.freeze
 
   class_methods do
-    def normalize_payroll_adjustments(entries)
+    def normalize_payroll_adjustments(entries, signed: false)
       Array(entries).filter_map do |entry|
         data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
         label = data["label"].to_s.strip
@@ -27,7 +27,7 @@ module PayrollAdjustable
         notes = data["notes"].to_s.strip
         active = data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true
 
-        next if label.blank? || amount <= 0 || !amount.finite? || !ADJUSTMENT_TREATMENTS.include?(treatment)
+        next if label.blank? || !amount.finite? || (signed ? amount.zero? : amount <= 0) || !ADJUSTMENT_TREATMENTS.include?(treatment)
 
         normalized = {
           "label" => label,
@@ -44,7 +44,7 @@ module PayrollAdjustable
   end
 
   def active_payroll_adjustments
-    self.class.normalize_payroll_adjustments(payroll_adjustment_entries).select { |adjustment| adjustment["active"] != false }
+    self.class.normalize_payroll_adjustments(payroll_adjustment_entries, signed: respond_to?(:signed_correction_components?) && signed_correction_components?).select { |adjustment| adjustment["active"] != false }
   end
 
   def payroll_adjustments_total(*treatments)
