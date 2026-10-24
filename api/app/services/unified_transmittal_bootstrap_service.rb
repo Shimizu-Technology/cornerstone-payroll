@@ -70,10 +70,10 @@ class UnifiedTransmittalBootstrapService
   end
 
   def source_specs(period)
-    payroll_items = period.payroll_items.not_voided.reportable.includes(:employee).order(:id).to_a
+    payroll_items = period.payroll_items.financially_reportable.reportable.includes(:employee).order(:id).to_a
     non_employee_checks = period.non_employee_checks.active.order(:id).to_a
 
-    payroll_check_specs(payroll_items) +
+    payroll_check_specs(payroll_items.reject(&:voided?)) +
       non_employee_check_specs(non_employee_checks) +
       report_specs(period) +
       obligation_specs(payroll_items, period)

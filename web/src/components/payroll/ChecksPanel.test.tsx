@@ -16,12 +16,13 @@ const apiMocks = vi.hoisted(() => ({
   checkPdf: vi.fn(),
   markDelivered: vi.fn(),
   confirmDirectDepositPayment: vi.fn(),
+  reversePaycheck: vi.fn(),
   batchPdf: vi.fn(),
   directDepositStubsPdf: vi.fn(),
 }));
 
 vi.mock('@/services/api', () => ({
-  checksApi: { checkPdf: apiMocks.checkPdf, list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
+  checksApi: { reversePaycheck: apiMocks.reversePaycheck, checkPdf: apiMocks.checkPdf, list: apiMocks.list, markDelivered: apiMocks.markDelivered, confirmDirectDepositPayment: apiMocks.confirmDirectDepositPayment },
   payStubsApi: { batchPdf: apiMocks.batchPdf, directDepositStubsPdf: apiMocks.directDepositStubsPdf },
 }));
 
@@ -489,4 +490,33 @@ it('does not promise payment or official statement actions on a valid approved w
   render(<ChecksPanel payPeriod={{ id: 8, company_id: 7, status: 'approved', parallel_run: true, test_workspace_role: 'baseline' } as PayPeriod} />);
   expect(screen.getByText(/Payments and official earnings statements are unavailable in test workspaces/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Print|Download|View stub|Issue|Record/i })).toBeNull();
+});
+
+describe('retired check obligations', () => {
+  afterEach(cleanup);
+  it('explains wages remain owed and offers reissue and a distinct reversal', async () => {
+    apiMocks.list.mockResolvedValue({ checks: [{ ...check, voided: true, payroll_included: true, check_status: 'voided' }], direct_deposit_items: [], meta });
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    expect((await screen.findAllByText(/Check voided — wages still owed, reissue or reverse/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Reissue' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Reverse paycheck' }).length).toBeGreaterThan(0);
+  });
+});
+
+
+describe('explicit paycheck reversal', () => {
+  afterEach(cleanup);
+  it('keeps the accounting reason visible after a rejected reversal', async () => {
+    apiMocks.list.mockReset().mockResolvedValue({ checks: [{ ...check, voided: true, payroll_included: true, check_status: 'voided' }], direct_deposit_items: [], meta });
+    apiMocks.reversePaycheck.mockReset().mockRejectedValue(new Error('Review issued payment evidence first'));
+    render(<ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Reverse paycheck' }))[0]);
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Erroneous duplicate earned wages' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reverse paycheck' }));
+    await waitFor(() => expect(apiMocks.reversePaycheck).toHaveBeenCalledWith(42, 'Erroneous duplicate earned wages'));
+    expect((await within(dialog).findByText('Review issued payment evidence first')).textContent).toContain('issued payment evidence');
+    expect((within(dialog).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Erroneous duplicate earned wages');
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+  });
 });

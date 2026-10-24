@@ -93,7 +93,7 @@ class PayrollRevisionPaymentPreflight
   def retire!(actor:, reason:)
     employee_items.each do |item|
       next if item.voided? || item.check_number.blank?
-      item.void!(user: actor, reason: reason)
+      item.void!(user: actor, reason: reason, payroll_obligation_retained: false)
     end
     other_payments.each do |payment|
       next if payment.voided?

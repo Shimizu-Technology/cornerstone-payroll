@@ -71,6 +71,19 @@ RSpec.describe PayrollTaxSyncService, type: :service do
       end
     end
 
+    context "when the last paycheck was explicitly financially reversed" do
+      it "delivers a zero-balance snapshot with explicit reversed item identity" do
+        payroll_item.update!(payroll_reversed_at: Time.current)
+        stub_request(:post, "https://cst.example.com/api/v1/ingest").with { |request|
+          body = JSON.parse(request.body)
+          body.fetch("line_items").empty? && body.dig("totals", "gross_pay") == 0 &&
+            body.dig("pay_period", "reversed_payroll_item_ids") == [ payroll_item.id ]
+        }.to_return(status: 200, body: '{"status":"accepted"}')
+        service.sync!
+        expect(pay_period.reload.tax_sync_status).to eq("synced")
+      end
+    end
+
     context "when CST returns 200" do
       before do
         stub_request(:post, "https://cst.example.com/api/v1/ingest")

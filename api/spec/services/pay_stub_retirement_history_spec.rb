@@ -72,11 +72,11 @@ RSpec.describe "Pay stub retirement history" do
     expect(total.to_s("F")).to eq("0.3")
   end
 
-  it "excludes prior drafts, voided checks, later same-day runs, future payroll and other employees" do
+  it "excludes prior drafts, financial reversals, later same-day runs, future payroll and other employees" do
     earlier = prior_item(date: pay_date, amount: 10)
     item
     prior_item(date: pay_date - 14, status: "draft", amount: 1000)
-    prior_item(date: pay_date - 14, amount: 1000).update!(voided: true)
+    prior_item(date: pay_date - 14, amount: 1000).update!(voided: true, payroll_reversed_at: Time.current)
     prior_item(date: pay_date, amount: 1000)
     prior_item(date: pay_date + 14, amount: 1000)
     other_employee = create(:employee, company: company)

@@ -108,12 +108,20 @@ class PayrollItem < ApplicationRecord
   # Check-related scopes
   # ---------------------------------------------------------------------------
   scope :with_check_number,  -> { where.not(check_number: nil) }
+  # Instrument availability only. Financial readers must use financially_reportable.
   scope :not_voided,         -> { where(voided: false) }
+  scope :financially_reportable, -> {
+    where(payroll_reversed_at: nil).where(pay_period_id: PayPeriod.where.not(correction_status: "voided").or(PayPeriod.where(correction_status: nil)).select(:id))
+  }
   scope :checks_only,        -> { with_check_number.not_voided }
   scope :voided_checks,      -> { where(voided: true) }
   scope :reportable,         -> { where.not(id: PayrollItemLegacyDisposition.select(:payroll_item_id)) }
   scope :printed,            -> { where.not(check_printed_at: nil) }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
+
+  def payroll_included?
+    payroll_reversed_at.nil? && !pay_period.voided?
+  end
 
   def check_prepared?
     check_printed_at.present? || (check_prepared_at.present? && check_prepared_source_updated_at == updated_at)
@@ -244,9 +252,10 @@ class PayrollItem < ApplicationRecord
     raise ActiveRecord::RecordInvalid, self
   end
 
-  def void!(user:, reason:, ip_address: nil)
-    message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+  def void!(user:, reason:, ip_address: nil, payroll_obligation_retained: true)
+    message = payroll_obligation_retained ? TimeTracking::PaymentCancellationBridge.blocker_for(self) : TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
     raise ArgumentError, message if message
+    raise ArgumentError, "This paycheck has already been reversed" unless payroll_included?
     raise ArgumentError, "This item has an exact source accounting correction. Voiding is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support." if source_accounting_correction_linked?
     raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Already voided" if voided?
@@ -256,11 +265,15 @@ class PayrollItem < ApplicationRecord
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
+      message = payroll_obligation_retained ? TimeTracking::PaymentCancellationBridge.blocker_for(self) : TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+      raise ArgumentError, message if message
+      raise ArgumentError, "This paycheck has already been reversed" unless payroll_included?
       raise ArgumentError, "This item has an exact source accounting correction; review the linked correction before voiding" if source_accounting_correction_linked?
       raise ArgumentError, "Already voided" if voided? # re-check under lock
       raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
+      cancel_payment = payroll_obligation_retained && PayrollPaymentMethodEligibility.new(self).check_has_activity?
       update!(
         voided: true,
         voided_at: Time.current,
@@ -272,6 +285,12 @@ class PayrollItem < ApplicationRecord
         event_type: "voided",
         check_number: check_number,
         reason: reason,
+        evidence_reference: reason.to_s.strip.first(200),
+        details: {
+          payroll_obligation_retained: payroll_obligation_retained,
+          payment_delivery_change: cancel_payment,
+          original_check_cancelled: cancel_payment
+        },
         ip_address: ip_address
       )
     end

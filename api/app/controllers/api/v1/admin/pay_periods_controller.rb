@@ -976,7 +976,7 @@ module Api
             }
           end
 
-          committed_items = @pay_period.payroll_items.not_voided.to_a
+          committed_items = @pay_period.payroll_items.financially_reportable.to_a
           create_fit_tax_deposit_check!(committed_items)
 
           fit_check = NonEmployeeCheck.find_by(fit_query)
@@ -1048,7 +1048,7 @@ module Api
         end
 
         def pay_period_business_summary(record)
-          aggregates = record.payroll_items.not_voided.reportable.pick(
+          aggregates = record.payroll_items.financially_reportable.reportable.pick(
             Arel.sql("COUNT(*)"),
             Arel.sql("COALESCE(SUM(gross_pay), 0)"),
             Arel.sql("COALESCE(SUM(total_deductions), 0)"),
@@ -1133,7 +1133,7 @@ module Api
             voided: false
           )
 
-          w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
+          w2_items = items.select { |i| i.employment_type != "contractor" && i.payroll_included? }
           total_fit = w2_items.sum(&:total_income_tax_withheld)
           return if total_fit <= 0
 
@@ -1182,7 +1182,7 @@ module Api
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items
           if items.loaded?
-            arr = items.to_a.reject { |item| item.voided? || item.legacy_disposition.present? }
+            arr = items.to_a.reject { |item| !item.payroll_included? || item.legacy_disposition.present? }
             {
               count: arr.size,
               gross: arr.sum { |i| i.gross_pay.to_f },
@@ -1191,7 +1191,7 @@ module Api
               employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
             }
           else
-            row = items.not_voided.reportable.pick(
+            row = items.financially_reportable.reportable.pick(
               Arel.sql("COUNT(*)"),
               Arel.sql("COALESCE(SUM(gross_pay), 0)"),
               Arel.sql("COALESCE(SUM(net_pay), 0)"),
@@ -1400,6 +1400,7 @@ module Api
         def payroll_item_json(item, print_activity: nil)
           {
             id: item.id,
+            payroll_included: item.payroll_included?,
             employee_id: item.employee_id,
             employee_first_name: item.employee&.first_name,
             employee_last_name: item.employee&.last_name,
@@ -1905,7 +1906,7 @@ module Api
           if committed_period_ids.any?
             aggregate_columns = Employee.ytd_aggregate_columns_for_year(year)
             rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
-                              .not_voided
+                              .financially_reportable
                               .group(:employee_id)
                               .pluck(
                                 :employee_id,
@@ -1915,7 +1916,7 @@ module Api
               map[employee_id] = aggregate_columns.keys.zip(values.map(&:to_f)).to_h
             end
             retirement_totals = PayrollRetirementTotals.for_scope_by_employee(
-              PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).not_voided
+              PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).financially_reportable
             )
             retirement_totals.each { |employee_id, totals| ytd_map.fetch(employee_id).merge!(totals) }
           else

@@ -71,8 +71,8 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
         expect(payload[:line_items].size).to eq(1)
       end
 
-      it "excludes voided payroll items" do
-        create(:payroll_item, :voided,
+      it "excludes financially reversed payroll items" do
+        create(:payroll_item, :voided, payroll_reversed_at: Time.current,
           pay_period: pay_period,
           employee: create(:employee, company: company, first_name: "Voided", last_name: "Worker"),
           gross_pay: 175.00,
@@ -116,8 +116,8 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
         expect(totals[:total_tax_liability]).to eq(expected)
       end
 
-      it "excludes voided payroll items from totals" do
-        create(:payroll_item, :voided,
+      it "excludes financially reversed payroll items from totals" do
+        create(:payroll_item, :voided, payroll_reversed_at: Time.current,
           pay_period: pay_period,
           employee: create(:employee, company: company),
           gross_pay: 175.00,

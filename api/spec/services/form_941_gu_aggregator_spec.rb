@@ -176,8 +176,8 @@ RSpec.describe Form941GuAggregator do
         expect(lines[:line6_total_taxes_before_adj]).to eq(lines[:line5e_total_ss_medicare])
       end
 
-      it "excludes voided payroll items from quarterly totals" do
-        create(:payroll_item, :voided,
+      it "excludes financially reversed payroll items from quarterly totals" do
+        create(:payroll_item, :voided, payroll_reversed_at: Time.current,
           pay_period: pp_may,
           employee: employee2,
           gross_pay: 10_000.00,
