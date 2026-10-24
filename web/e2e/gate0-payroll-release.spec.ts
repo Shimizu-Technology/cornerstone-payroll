@@ -124,6 +124,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
   for (const width of [390, 1440]) {
     test(`prints zero-net statements and safely changes a printed check at ${width}px`, async ({ browser }): Promise<void> => {
+      // This journey cold-starts the PDF worker, downloads two statements and verifies saved payment changes.
+      test.slow();
       const context = await browser.newContext({ viewport: { width, height: 900 }, extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.delivery_company_id),
       } });
