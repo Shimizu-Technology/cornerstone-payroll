@@ -1210,7 +1210,8 @@ export function HistoricalPayroll(): ReactElement {
         actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading || batchListLoading}><RefreshCw className={`mr-2 h-4 w-4 ${batchListLoading ? 'animate-spin' : ''}`} />Refresh</Button>}
       />
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <h2 className="sr-only">Historical payroll workspace</h2>
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {error && Object.keys(validationErrors).length > 0 && (
           <div role="region" aria-label="Import validation details" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
@@ -2020,7 +2021,7 @@ export function HistoricalPayroll(): ReactElement {
         )}
 
         {archive && archive.applied_batch_count > 0 && <p className="pb-2 text-center text-xs text-neutral-600">Archive coverage: {archive.paycheck_count.toLocaleString()} paychecks · {archive.worker_count.toLocaleString()} workers · {shortDate(archive.first_pay_date)} through {shortDate(archive.last_pay_date)}</p>}
-      </main>
+      </div>
 
       <Dialog open={Boolean(paycheck)} onOpenChange={(open) => !open && setPaycheck(null)}>
         <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
