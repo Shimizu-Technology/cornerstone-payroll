@@ -148,7 +148,7 @@ class PayPeriod < ApplicationRecord
     signatures = {}
     # Historical corrective entries retain the original committed rule snapshot.
     # New ordinary runs must prove which verified rules produced their money.
-    stale = payroll_items.not_voided.any? do |item|
+    stale = payroll_items.financially_reportable.any? do |item|
       next false if item.correction_entry?
 
       snapshot = item.tax_rule_snapshot
