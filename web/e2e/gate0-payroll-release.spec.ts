@@ -1094,7 +1094,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/pay-periods/${fixture.bonus_sync_pay_period_id}`);
     await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();
 
+    const calculation = page.waitForResponse((response): boolean =>
+      response.request().method() === 'POST' &&
+      response.url().includes(`/pay_periods/${fixture.bonus_sync_pay_period_id}/run_payroll`)
+    );
     await page.getByRole('button', { name: 'Calculate Payroll' }).click();
+    expect((await calculation).ok()).toBeTruthy();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
     const payrollTable = page.getByRole('table').filter({
