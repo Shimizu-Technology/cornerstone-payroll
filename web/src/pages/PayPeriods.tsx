@@ -34,6 +34,7 @@ import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspac
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
+import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
@@ -409,6 +410,12 @@ export function PayPeriods() {
       setActionInFlight(`run-${id}`);
       setError(null);
       setCalculationResult(null);
+      const current = await payPeriodsApi.get(id);
+      if (!isCurrentMutation()) return;
+      if (needsSourceCoverageAcknowledgement(current.pay_period)) {
+        navigate(payRunDestination(id, 'work'));
+        return;
+      }
       const response = await payPeriodsApi.runPayroll(id);
       if (!isCurrentMutation()) return;
       const failed = response.results.errors.length;
