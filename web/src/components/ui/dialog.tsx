@@ -71,18 +71,19 @@ function acquireDialog(documentValue: Document, portal: HTMLElement, restoreTarg
   updatePortalInert(state);
 }
 
-function releaseDialog(documentValue: Document, portal: HTMLElement): void {
+function releaseDialog(documentValue: Document, portal: HTMLElement, explicitRestoreTarget?: HTMLElement | null): void {
   const state = documentDialogStates.get(documentValue);
   if (!state) return;
 
   const portalIndex = state.portals.findIndex(({ element }) => element === portal);
   if (portalIndex === -1) return;
+  if (portalIndex === 0 && explicitRestoreTarget?.isConnected) state.restoreTarget = explicitRestoreTarget;
   const wasTopPortal = portalIndex === state.portals.length - 1;
   const [closedPortal] = state.portals.splice(portalIndex, 1);
   if (state.portals.length > 0) {
     updatePortalInert(state);
     if (wasTopPortal) {
-      const restoreTarget = closedPortal.restoreTarget;
+      const restoreTarget = explicitRestoreTarget ?? closedPortal.restoreTarget;
       if (restoreTarget?.isConnected && !restoreTarget.closest('[inert]')) {
         restoreTarget.focus();
       } else {
@@ -136,14 +137,23 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
     setTitleId(resolvedId);
     return () => setTitleId((current) => current === resolvedId ? generatedTitleId : current);
   }, [generatedTitleId]);
+  // An async action can disable or replace its opener while this dialog is open.
+  // Resolve the caller's latest explicit target when ownership is released.
+  const getReturnFocusTarget = React.useCallback((): HTMLElement | null | undefined => returnFocusRef?.current, [returnFocusRef]);
+  const releaseOwnership = React.useRef<(() => void) | null>(null);
 
   React.useLayoutEffect(() => {
+    // Run after React restores selection for this commit, so it cannot overwrite
+    // the opener focus. Release still precedes passive onAfterClose handoffs.
+    const release = releaseOwnership.current;
+    releaseOwnership.current = null;
+    release?.();
     if (!active || typeof document === 'undefined') return undefined;
 
     const portal = portalRef.current;
     if (!portal) return undefined;
 
-    const previouslyFocused = returnFocusRef?.current ?? (document.activeElement instanceof HTMLElement
+    const previouslyFocused = getReturnFocusTarget() ?? (document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null);
     acquireDialog(document, portal, previouslyFocused);
@@ -179,11 +189,27 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
     };
     document.addEventListener('keydown', handleKeyDown, true);
 
-    return () => {
+    releaseOwnership.current = () => {
       document.removeEventListener('keydown', handleKeyDown, true);
-      releaseDialog(document, portal);
+      releaseDialog(document, portal, getReturnFocusTarget());
     };
-  }, [active, returnFocusRef]);
+  }, [active, getReturnFocusTarget]);
+
+  React.useLayoutEffect(() => () => {
+    const release = releaseOwnership.current;
+    releaseOwnership.current = null;
+    if (!release) return;
+    const previousFocus = document.activeElement;
+    release();
+    const restoredFocus = document.activeElement;
+    // Actual unmount cleanup runs before React restores selection. Repair only
+    // that restoration; never replace focus chosen by a new dialog or caller.
+    queueMicrotask(() => {
+      if (previousFocus !== restoredFocus && document.activeElement === previousFocus
+        && restoredFocus instanceof HTMLElement && restoredFocus.isConnected
+        && !restoredFocus.closest('[inert]')) restoredFocus.focus();
+    });
+  }, []);
 
   React.useEffect(() => {
     const portal = portalRef.current;

@@ -84,3 +84,30 @@ it('hands off after release using the latest committed close callback', async ()
   await waitFor(() => expect(committed).toHaveBeenCalledTimes(1));
   expect(first).not.toHaveBeenCalled();
 });
+
+it('returns to an explicit opener whose ref attaches after dialog acquisition in the same commit', async (): Promise<void> => {
+  const opener = React.createRef<HTMLButtonElement>();
+  const view = (open: boolean): React.ReactElement => <>
+    <Dialog open={open} onOpenChange={vi.fn()} returnFocusRef={opener}><DialogContent><DialogTitle>Late opener</DialogTitle></DialogContent></Dialog>
+    <button ref={opener}>Late attached opener</button>
+  </>;
+  const { rerender } = render(view(true));
+  rerender(view(false));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(document.activeElement).toBe(opener.current);
+});
+
+it('returns to the explicit opener when unmounted before initial focus runs', async (): Promise<void> => {
+  vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(1);
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((): void => {});
+  const opener = React.createRef<HTMLButtonElement>();
+  const view = (show: boolean): React.ReactElement => <>
+    <button ref={opener}>Unmount opener</button><button autoFocus>Prior focus</button>
+    {show && <Dialog open onOpenChange={vi.fn()} returnFocusRef={opener}><DialogContent><DialogTitle>Unmount</DialogTitle></DialogContent></Dialog>}
+  </>;
+  const { rerender } = render(view(true));
+  await act(async (): Promise<void> => { rerender(view(false)); });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(opener.current?.closest('[inert]')).toBeNull();
+  expect(document.activeElement).toBe(opener.current);
+});
