@@ -397,7 +397,8 @@ class IssueCorrectivePaycheckService
     increments = annual_fica_context.increment(
       wages_delta: item.medicare_taxable_wages.to_d - recorded_value(:medicare_taxable_wages),
       tips_delta: item.cash_tips_reported.to_d - recorded_value(:cash_tips_reported),
-      rules: original_item.tax_rule_snapshot
+      rules: original_item.tax_rule_snapshot,
+      correcting_bases: { wages: recorded_value(:social_security_taxable_wages), tips: recorded_value(:social_security_taxable_tips) }
     )
     old_employee_tax = item.social_security_tax.to_d + item.medicare_tax.to_d
     increments.each { |field, amount| item.public_send("#{field}=", recorded_value(field) + amount) }

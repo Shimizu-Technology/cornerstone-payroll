@@ -9,6 +9,8 @@ class EmployeeYearFicaContext
   class UnreconciledLedgerError < ArgumentError; end
 
   STALE_MESSAGE = "Recalculate — another payroll for this employee changed their year-to-date".freeze
+  MISSING_MESSAGE = "Recalculate — this payroll lacks annual context verification. If approved, unapprove it, then recalculate, review and approve again.".freeze
+  UNLOADED = Object.new.freeze
   LEDGER_FIELDS = %w[
     id pay_period_id gross_pay cash_tips_reported reported_tips medicare_taxable_wages
     social_security_taxable_wages social_security_taxable_tips social_security_tax
@@ -17,52 +19,90 @@ class EmployeeYearFicaContext
     employer_retirement_match employer_roth_retirement_match net_pay
   ].freeze
 
-  # Keep reportability in one place so instrument-void policy changes also
-  # reach calculation, corrective previews, and stale-context validation.
-  def self.reportable_items(employee:, year:, excluding_pay_period_id: nil)
-    periods = PayPeriod.reportable_for_company(employee.company).for_year(year)
+  OPENING_FIELDS = %w[
+    id employee_id historical_ytd_bridge_id tax_year through_pay_date through_period_end
+    medicare_taxable_wages social_security_taxable_wages social_security_taxable_tips reported_tips
+  ].freeze
+
+  FINGERPRINT_FIELDS = (LEDGER_FIELDS + %w[correction_for_payroll_item_id]).freeze
+  ROW_FIELDS = (FINGERPRINT_FIELDS + [ "employee_id",
+    Arel.sql("tax_rule_snapshot -> 'annual_fica_context' AS recorded_annual_fica_context") ]).freeze
+
+  # One reportability query for single-employee and batch operations. P-void's
+  # financial inclusion policy must be applied here, not at individual callers.
+  def self.reportable_items(employee: nil, company: nil, employee_ids: nil, year:, excluding_pay_period_id: nil)
+    company ||= employee.company
+    employee_ids ||= [ employee.id ]
+    periods = PayPeriod.reportable_for_company(company).for_year(year)
     periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-    employee.payroll_items.not_voided.where(pay_period_id: periods.select(:id))
+    PayrollItem.not_voided.where(company_id: company.id, employee_id: employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor")
   end
 
-  def initialize(employee:, year:, excluding_pay_period_id: nil)
+  def self.opening_balances(employee_ids:, year:, company:)
+    HistoricalEmployeeYtdBalance.joins(:historical_ytd_bridge)
+      .where(employee_id: employee_ids, company_id: company.id, tax_year: year, historical_ytd_bridges: { status: "applied" })
+      .select(*OPENING_FIELDS.map { |field| "historical_employee_ytd_balances.#{field}" })
+      .order(employee_id: :asc, through_pay_date: :desc, "historical_ytd_bridges.applied_at" => :desc,
+        "historical_ytd_bridges.id" => :desc, id: :desc)
+  end
+
+  # Call within the operation's existing Company -> PayPeriod financial lock.
+  # Each employee's rows retain deterministic ID order, without large JSON blobs.
+  def self.batch(company:, employees:, year:, excluding_pay_period_id: nil)
+    employees = employees.uniq(&:id)
+    return {} if employees.empty?
+
+    ids = employees.map(&:id)
+    rows = reportable_items(company: company, employee_ids: ids, year: year,
+      excluding_pay_period_id: excluding_pay_period_id).select(*ROW_FIELDS)
+      .order(:employee_id, :id).to_a.group_by(&:employee_id)
+    balances = opening_balances(employee_ids: ids, year: year, company: company).to_a.group_by(&:employee_id)
+    employees.to_h do |employee|
+      [ employee.id, new(employee: employee, company: company, year: year, rows: rows.fetch(employee.id, []),
+        opening_balance: balances[employee.id]&.first) ]
+    end
+  end
+
+  def initialize(employee:, year:, excluding_pay_period_id: nil, company: nil, rows: nil, opening_balance: UNLOADED)
     @employee = employee
+    @company = company || employee.company
     @year = year
     @excluding_pay_period_id = excluding_pay_period_id
+    @rows = rows if rows
+    @opening_balance = opening_balance unless opening_balance.equal?(UNLOADED)
   end
 
   def snapshot
-    { "year" => year, "employee_id" => employee.id, "fingerprint" => fingerprint }
+    { "version" => 2, "year" => year, "employee_id" => employee.id, "fingerprint" => fingerprint }
   end
 
   def fingerprint
     @fingerprint ||= Digest::SHA256.hexdigest(JSON.generate([
-      year, employee.id, rows.map { |row| row.attributes.slice(*LEDGER_FIELDS) },
-      opening_balance&.attributes
+      2, year, employee.id, rows.map { |row| row.attributes.slice(*FINGERPRINT_FIELDS) },
+      opening_balance&.attributes&.slice(*OPENING_FIELDS)
     ]))
   end
 
   # Monetary amounts use decimal arithmetic and round half up at the stored
   # paycheck component boundary, matching the existing tax calculators.
-  # Wages take priority over tips within the shared Social Security cap.
-  def increment(wages_delta:, tips_delta:, rules:)
+  # Allocate wages before tips within this check, preserving committed buckets.
+  def increment(wages_delta:, tips_delta:, rules:, correcting_bases: nil)
     delta = wages_delta.to_d.round(2)
     tips_delta = tips_delta.to_d.round(2)
     cap = rules.fetch("social_security_wage_base").to_d
-    validate_recorded_cap!(cap)
-    before = cumulative_wages
-    after = before + delta
-    prior_ss = recorded_ss_bases(cap)
+    prior_ss = recorded_ss_bases(rules)
+    validate_recorded_cap!(cap, prior_ss.fetch(:total))
+    after = cumulative_wages + delta
     ss_total = capped(after, cap) - prior_ss.fetch(:total)
-    ss_wages = capped(after - cumulative_tips - tips_delta, cap) - prior_ss.fetch(:wages)
-    additional_base = excess(after, 200_000.to_d) - recorded_additional_base
+    ss_wages, ss_tips = split_ss_delta(ss_total, delta - tips_delta, tips_delta, correcting_bases)
+    additional_base = excess(after, 200_000.to_d) - recorded_additional_base(rules)
     ss_tax = money(ss_total * rules.fetch("social_security_rate").to_d)
     base_medicare = money(delta * rules.fetch("medicare_rate").to_d)
     additional = money(additional_base * rules.fetch("additional_medicare_rate").to_d)
     {
       social_security_taxable_wages: money(ss_wages),
-      social_security_taxable_tips: money(ss_total - ss_wages),
+      social_security_taxable_tips: money(ss_tips),
       medicare_taxable_wages: delta,
       additional_medicare_taxable_wages: money(additional_base),
       social_security_tax: ss_tax, employer_social_security_tax: ss_tax,
@@ -80,55 +120,108 @@ class EmployeeYearFicaContext
 
   private
 
-  attr_reader :employee, :year, :excluding_pay_period_id
+  attr_reader :employee, :year, :excluding_pay_period_id, :company
 
   def rows
-    @rows ||= self.class.reportable_items(employee: employee, year: year,
-      excluding_pay_period_id: excluding_pay_period_id).order(:id).to_a
+    @rows ||= self.class.reportable_items(employee: employee, company: company, year: year,
+      excluding_pay_period_id: excluding_pay_period_id).select(*ROW_FIELDS).order(:id).to_a
   end
 
   def opening_balance
     return @opening_balance if defined?(@opening_balance)
 
-    @opening_balance = employee.historical_employee_ytd_balances.joins(:historical_ytd_bridge)
-      .where(tax_year: year, historical_ytd_bridges: { status: "applied" })
-      .order(through_pay_date: :desc, "historical_ytd_bridges.applied_at" => :desc,
-        "historical_ytd_bridges.id" => :desc, id: :desc).first
+    @opening_balance = self.class.opening_balances(employee_ids: [ employee.id ], year: year, company: company).first
   end
 
-  # Voiding one signed adjustment can leave a later adjustment's capped
-  # bases behind. Reconcile that remaining balance in the next reviewed
-  # calculation, rather than treating a capped base as uncapped earnings.
-  def recorded_ss_bases(cap)
-    if rows.any? { |row| row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? }
-      return { total: capped(cumulative_wages, cap), wages: capped(cumulative_wages - cumulative_tips, cap) }
+  # Preserve each known signed base. A missing base is recoverable only
+  # when its captured annual fingerprint proves the unchanged prior ledger,
+  # replay agrees with every known component, and stored taxes corroborate it.
+  # Rounded tax alone does not establish a partial wage or tip base.
+  def recorded_ss_bases(rules)
+    totals = { wages: opening_balance&.social_security_taxable_wages.to_d,
+      tips: opening_balance&.social_security_taxable_tips.to_d }
+    rows.each do |row|
+      wages, tips = row.social_security_taxable_wages, row.social_security_taxable_tips
+      if wages.nil? || tips.nil?
+        recovered = recovered_bases(row, rules)
+        supported = row.social_security_tax == recovered.fetch(:social_security_tax) &&
+          row.employer_social_security_tax == recovered.fetch(:employer_social_security_tax) &&
+          (wages.nil? || wages == recovered.fetch(:social_security_taxable_wages)) &&
+          (tips.nil? || tips == recovered.fetch(:social_security_taxable_tips))
+        hold_legacy!(row, "Social Security wage/tip") unless supported
+        wages ||= recovered.fetch(:social_security_taxable_wages)
+        tips ||= recovered.fetch(:social_security_taxable_tips)
+      end
+      totals[:wages] += wages
+      totals[:tips] += tips
     end
-
-    wages = rows.sum(0.to_d) { |row| row.social_security_taxable_wages.to_d } + opening_balance&.social_security_taxable_wages.to_d
-    tips = rows.sum(0.to_d) { |row| row.social_security_taxable_tips.to_d } + opening_balance&.social_security_taxable_tips.to_d
-    { total: wages + tips, wages: wages }
+    totals.merge(total: totals[:wages] + totals[:tips])
   end
 
-  def recorded_additional_base
-    return excess(cumulative_wages, 200_000.to_d) if rows.any? { |row| row.additional_medicare_taxable_wages.nil? }
+  def recorded_additional_base(rules)
+    rows.sum(0.to_d) do |row|
+      next row.additional_medicare_taxable_wages if row.additional_medicare_taxable_wages.present?
 
-    rows.sum(0.to_d) { |row| row.additional_medicare_taxable_wages.to_d } +
-      excess(opening_balance&.medicare_taxable_wages.to_d, 200_000.to_d)
+      recovered = recovered_bases(row, rules)
+      hold_legacy!(row, "Additional Medicare") unless row.additional_medicare_tax == recovered.fetch(:additional_medicare_tax)
+      recovered.fetch(:additional_medicare_taxable_wages)
+    end + excess(opening_balance&.medicare_taxable_wages.to_d, 200_000.to_d)
   end
 
-  def validate_recorded_cap!(cap)
-    return if rows.any? { |row| row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? }
+  def recovered_bases(row, rules)
+    @recovered_bases ||= {}
+    @recovered_bases[row.id] ||= begin
+      # Signed corrections need their reviewed target's allocations; missing
+      # correction bases cannot safely be replayed as an ordinary paycheck.
+      hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
+      prior_rows = rows.take_while { |prior| prior.id < row.id }
+      prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
+      stored = row[:recorded_annual_fica_context].to_h
+      proof = if stored["version"] == 2
+        prior.fingerprint
+      elsif opening_balance.nil?
+        # v1 fingerprints included the complete opening row; only the
+        # no-opening-balance form can be verified from this bounded projection.
+        Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
+      end
+      unless proof && stored["year"] == year && stored["employee_id"] == employee.id && stored["fingerprint"] == proof
+        hold_legacy!(row, "FICA")
+      end
+      prior.increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
+        tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
+    end
+  end
 
-    recorded = rows.sum(0.to_d) { |row| row.social_security_taxable_wages + row.social_security_taxable_tips }
-    recorded += opening_balance.social_security_taxable_wages + opening_balance.social_security_taxable_tips if opening_balance
+  def hold_legacy!(row, component)
+    raise UnreconciledLedgerError,
+      "Payroll item ##{row.id} lacks verified #{component} bases. Hold payroll for an explicit reviewed annual reconciliation."
+  end
+
+  def validate_recorded_cap!(cap, recorded)
     return if recorded <= cap
 
     raise UnreconciledLedgerError,
       "Annual Social Security history already exceeds the wage base. Hold payroll for a separately reviewed annual adjustment."
   end
 
-  def cumulative_tips
-    rows.sum(0.to_d) { |row| (row.cash_tips_reported || row.reported_tips).to_d } + opening_balance&.reported_tips.to_d
+  # Signed reclassifications belong to the reviewed target only. Ordinary
+  # wage-only checks cannot move last quarter's taxed tips into wages.
+  def split_ss_delta(total, wage_delta, tip_delta, correcting_bases)
+    to_tips = 0.to_d
+    to_wages = 0.to_d
+    if correcting_bases
+      to_tips = [ [ tip_delta, 0.to_d ].max, [ -wage_delta, 0.to_d ].max, [ correcting_bases.fetch(:wages).to_d, 0.to_d ].max ].min
+      to_wages = [ [ wage_delta, 0.to_d ].max, [ -tip_delta, 0.to_d ].max, [ correcting_bases.fetch(:tips).to_d, 0.to_d ].max ].min
+    end
+    direction = total.negative? ? -1 : 1
+    available_wages = [ wage_delta * direction - (direction.positive? ? to_wages : to_tips), 0.to_d ].max
+    available_tips = [ tip_delta * direction - (direction.positive? ? to_tips : to_wages), 0.to_d ].max
+    wages = [ total.abs, available_wages ].min
+    tips = [ total.abs - wages, available_tips ].min
+    unless wages + tips == total.abs
+      raise UnreconciledLedgerError, "Annual Social Security bases need an explicit reviewed reconciliation beyond this check's wage/tip changes."
+    end
+    [ wages * direction + to_wages - to_tips, tips * direction + to_tips - to_wages ]
   end
 
   def capped(value, cap)

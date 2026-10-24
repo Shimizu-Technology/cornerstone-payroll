@@ -1765,8 +1765,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         gross_pay: 150.00,
         net_pay: 120.00,
         withholding_tax: 10.00,
-        social_security_tax: 9.30,
-        medicare_tax: 2.18
+        social_security_tax: 9.30, employer_social_security_tax: 9.30,
+        medicare_tax: 2.18, employer_medicare_tax: 2.18, additional_medicare_tax: 0,
+        social_security_taxable_wages: 150, social_security_taxable_tips: 0,
+        medicare_taxable_wages: 150, additional_medicare_taxable_wages: 0
       )
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {

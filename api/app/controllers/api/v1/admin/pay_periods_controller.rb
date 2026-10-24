@@ -364,6 +364,8 @@ module Api
                                      .index_by(&:id)
 
           preload_ytd_caches!(employees_by_id.values, @pay_period)
+          annual_fica_contexts = EmployeeYearFicaContext.batch(company: current_company, employees: employees_by_id.values,
+            year: @pay_period.pay_date.year, excluding_pay_period_id: @pay_period.id)
           payroll_field_input_applier = PayrollFieldInputApplier.new(
             pay_period: @pay_period,
             company_id: current_company_id
@@ -506,7 +508,7 @@ module Api
                 unless @preserve_entered_pay_rates || payroll_item.timekeeping_source == "correction_reference"
                   PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 end
-                payroll_item.calculate!
+                payroll_item.calculate!(annual_fica_context: annual_fica_contexts.fetch(employee.id))
                 case PayrollItemActivity.classify(payroll_item)
                 when :verified_empty
                   # The worksheet includes the active roster, but an employee
