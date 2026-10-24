@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::BatchImportPreviewService do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   def confirm_mapping!(company:, source:, employee:, source_user_id: "aire-user-1")
     TimeTrackingEmployeeMapping.create!(
       company: company,

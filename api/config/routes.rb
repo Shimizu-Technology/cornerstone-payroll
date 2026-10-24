@@ -647,9 +647,12 @@ Rails.application.routes.draw do
         get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
 
         # Tax Configuration Management
+        get "tax_year_readiness", to: "tax_year_readiness#show"
         resources :tax_configs, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :activate
+            post :verify
+            post :replace_withholding
             get :audit_logs
           end
           collection do

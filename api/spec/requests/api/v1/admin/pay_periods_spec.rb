@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:organization) { create(:organization, name: "Pay Period Firm") }
   let!(:company) { Company.create!(name: "Test Company", organization: organization) }
   let!(:department) { Department.create!(name: "Engineering", company: company) }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_24_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_24_093000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -191,13 +191,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_040000) do
     t.bigint "created_by_id"
     t.boolean "is_active", default: false, null: false
     t.decimal "medicare_rate", precision: 6, scale: 5, default: "0.0145", null: false
+    t.text "source_references"
     t.decimal "ss_rate", precision: 6, scale: 5, default: "0.062", null: false
     t.decimal "ss_wage_base", precision: 12, scale: 2, null: false
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
+    t.string "verification_status", default: "draft", null: false
+    t.datetime "verified_at"
+    t.string "verified_by"
     t.index [ "is_active" ], name: "index_annual_tax_configs_on_is_active"
     t.index [ "tax_year" ], name: "index_annual_tax_configs_on_tax_year", unique: true
+    t.check_constraint "verification_status::text = ANY (ARRAY['draft'::character varying::text, 'verified'::character varying::text])", name: "annual_tax_verification_status"
   end
 
   create_table "audit_logs", force: :cascade do |t|
@@ -3388,7 +3393,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_040000) do
     t.decimal "standard_deduction", precision: 10, scale: 2, default: "0.0"
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
+    t.string "verification_status", default: "draft", null: false
     t.index [ "tax_year", "filing_status", "pay_frequency" ], name: "idx_tax_tables_year_status_frequency", unique: true
+    t.check_constraint "verification_status::text = ANY (ARRAY['draft'::character varying::text, 'verified'::character varying::text])", name: "legacy_tax_verification_status"
   end
 
   create_table "time_tracking_classification_reconciliations", force: :cascade do |t|

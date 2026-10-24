@@ -248,6 +248,7 @@ RSpec.describe IssueCorrectivePaycheckService do
     end
 
     it "holds cross-year posting for a separately reviewed prior-year process" do
+      ensure_verified_test_tax_years(2025)
       before = employee.ytd_totals_for(2024).reload.attributes
       expect {
         issue_target({ hours_worked: 80 }, pay_date: Date.new(2025, 1, 5))

@@ -19,6 +19,7 @@ class PayrollCalculator
   attr_reader :employee, :payroll_item
 
   def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil, annual_fica_context: nil)
+    AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
     TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
@@ -56,6 +57,7 @@ class PayrollCalculator
         return snapshotted_tax_calculator
       end
 
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year)
       config = AnnualTaxConfig.current(pay_period.pay_date.year)
 
       if config.present?
@@ -933,6 +935,17 @@ class PayrollCalculator
 
   def capture_calculation_context!
     return if historical_calculation?
+
+    if payroll_item.tax_rule_snapshot["engine"] == "contractor_no_withholding"
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year, lock: true)
+      config = AnnualTaxConfig.current(pay_period.pay_date.year, lock: true)
+      if config
+        payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge(
+          "tax_year_verification_at" => config.verified_at&.utc&.iso8601(6),
+          "tax_year_rules_digest" => config.rules_digest
+        )
+      end
+    end
 
     payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(
       employee: employee,
