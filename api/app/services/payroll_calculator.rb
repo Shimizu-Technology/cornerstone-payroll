@@ -925,7 +925,10 @@ class PayrollCalculator
       config = AnnualTaxConfig.current(pay_period.pay_date.year, lock: true)
       raise ArgumentError, AnnualTaxConfig.unverified_message(pay_period.pay_date.year) unless config
 
-      payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge("tax_year_verification_at" => config.verified_at&.utc&.iso8601(6))
+      payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge(
+        "tax_year_verification_at" => config.verified_at&.utc&.iso8601(6),
+        "tax_year_rules_digest" => config.rules_digest
+      )
     end
 
     payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(

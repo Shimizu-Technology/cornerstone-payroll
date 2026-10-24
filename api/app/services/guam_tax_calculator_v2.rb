@@ -35,6 +35,7 @@ class GuamTaxCalculatorV2
       normalized_filing_status = FilingStatusConfig.normalize(filing_status)
       @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
                               raise(ArgumentError, "No filing status config found for #{filing_status}")
+      @rules_digest = @annual_config.rules_digest(@filing_status_config.filing_status)
       @withholding_method = @annual_config.official_2026_withholding_config?(@filing_status_config) ?
         "irs_pub_15_t_worksheet_1a_2026" : "legacy_progressive"
     end
@@ -61,7 +62,7 @@ class GuamTaxCalculatorV2
     unless @source_rule_snapshot.present?
       current = AnnualTaxConfig.current(annual_config.tax_year, lock: true)
       raise ArgumentError, AnnualTaxConfig.unverified_message(annual_config.tax_year) unless current
-      if current.verified_at != annual_config.verified_at
+      if current.verified_at != annual_config.verified_at || current.rules_digest(filing_status_config.filing_status) != @rules_digest
         raise ArgumentError, "#{annual_config.tax_year} tax verification changed. Calculate payroll again using the reviewed rules."
       end
     end
@@ -100,6 +101,7 @@ class GuamTaxCalculatorV2
       "engine" => "annual_tax_config_v2",
       "annual_tax_config_id" => annual_config.id,
       "tax_year_verification_at" => annual_config.verified_at&.utc&.iso8601(6),
+      "tax_year_rules_digest" => @rules_digest,
       "tax_year" => annual_config.tax_year,
       "annual_tax_config_updated_at" => annual_config.updated_at&.iso8601,
       "social_security_wage_base" => annual_config.ss_wage_base.to_f,
