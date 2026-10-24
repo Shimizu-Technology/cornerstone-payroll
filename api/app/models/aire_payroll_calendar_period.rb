@@ -29,7 +29,7 @@ class AirePayrollCalendarPeriod < ApplicationRecord
   end
 
   def latest_delivered_publication
-    publications.where(delivery_status: "delivered").order(schedule_version: :desc).first
+    publications.where(delivery_status: "delivered").reorder(schedule_version: :desc).first
   end
 
   def latest_verified_event

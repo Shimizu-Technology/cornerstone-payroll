@@ -42,6 +42,22 @@ RSpec.describe AirePayrollEvents::Receiver do
     expect(AuditLog.find_by!(action: "aire_payroll_event#received").company_id).to eq(company.id)
   end
 
+  it "accepts the latest delivered revision and rejects a superseded legacy revision" do
+    original = publication
+    latest = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+      schedule_version: 2, delivery_status: "delivered")
+    payload = build_aire_finalized_event(calendar_period: calendar_period, publication: latest, batch_payload: batch_payload)
+
+    result = described_class.new(payload: payload, shared_secret: "integration-secret", idempotency_key: payload.fetch("event_id")).call
+    expect(result.event.aire_payroll_calendar_publication).to eq(latest)
+    expect(calendar_period.latest_delivered_publication).to eq(latest)
+
+    stale = build_aire_finalized_event(calendar_period: calendar_period, publication: original, batch_payload: batch_payload)
+    expect do
+      described_class.new(payload: stale, shared_secret: "integration-secret", idempotency_key: stale.fetch("event_id")).call
+    end.to raise_error(described_class::ConflictError, /did not confirm as delivered/)
+  end
+
   it "returns an idempotent replay without another event or queue dispatch" do
     first = described_class.new(
       payload: event_payload,

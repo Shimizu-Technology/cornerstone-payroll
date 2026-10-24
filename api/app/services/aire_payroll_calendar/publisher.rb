@@ -42,7 +42,7 @@ module AirePayrollCalendar
           @source.connector.calendar_contract(@pay_period).validate!
 
           calendar_period = find_or_create_calendar_period!
-          latest = calendar_period.publications.lock.order(schedule_version: :desc).first
+          latest = calendar_period.publications.lock.reorder(schedule_version: :desc).first
           contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
           if latest && same_contract?(latest.payload, contract_fields)

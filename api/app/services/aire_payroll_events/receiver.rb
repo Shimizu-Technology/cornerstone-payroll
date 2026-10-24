@@ -78,7 +78,7 @@ module AirePayrollEvents
         publication_id: source_period["publication_id"]
       )
       raise ConflictError, "AIRE finalized an unknown calendar revision" unless publication
-      latest_delivered = calendar_period.publications.where(delivery_status: "delivered").order(schedule_version: :desc).first
+      latest_delivered = calendar_period.latest_delivered_publication
       raise ConflictError, "AIRE finalized a calendar revision that Cornerstone did not confirm as delivered" unless publication == latest_delivered
 
       publication
