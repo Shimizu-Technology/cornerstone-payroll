@@ -184,7 +184,7 @@ module TimeTracking
           raise ArgumentError, "The exact source entry version is missing or does not advance the original frozen version"
         end
       end
-      prior = PayrollItem.joins(:pay_period).where(correction_for_payroll_item_id: original.id).where(pay_periods: { status: "committed" }).not_voided
+      prior = PayrollItem.joins(:pay_period).where(correction_for_payroll_item_id: original.id).where(pay_periods: { status: "committed" }).financially_reportable
       raise ArgumentError, "An existing corrective payroll makes this line ambiguous; review cumulative corrections separately" if prior.exists?
       inputs = { hours_worked: original.hours_worked.to_d + line["regular_hours"].to_d,
         overtime_hours: original.overtime_hours.to_d + line["overtime_hours"].to_d }

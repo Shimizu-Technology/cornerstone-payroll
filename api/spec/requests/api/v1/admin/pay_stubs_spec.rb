@@ -109,13 +109,13 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(text).to include("Earnings statement only - no payment issued")
     end
 
-    it "does not generate a current statement for voided or no-activity records" do
-      payroll_item.update!(voided: true, voided_at: Time.current, void_reason: "Cancelled test payroll")
+    it "does not generate a current statement for financially reversed or no-activity records" do
+      payroll_item.update!(voided: true, payroll_reversed_at: Time.current, voided_at: Time.current, void_reason: "Cancelled test payroll")
       get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("Voided payroll")
+      expect(response.parsed_body.fetch("error")).to include("Reversed payroll")
 
-      payroll_item.update!(voided: false, gross_pay: 0, net_pay: 0)
+      payroll_item.update!(voided: false, payroll_reversed_at: nil, gross_pay: 0, net_pay: 0)
       get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("no earnings-statement activity")
@@ -131,7 +131,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
       voided_employee = create(:employee, company: company, department: department, first_name: "Vera", last_name: "Voided")
       create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
-      create(:payroll_item, :voided, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
+      create(:payroll_item, :voided, payroll_reversed_at: Time.current, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
 
       post "/api/v1/admin/pay_stubs/batch_generate", params: { pay_period_id: pay_period.id }
 
@@ -261,7 +261,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response.parsed_body.fetch("details")).to include(unpaid_employee.full_name)
     end
 
-    it "reports selected voided payroll items clearly" do
+    it "reports selected financially reversed payroll items clearly" do
       voided_employee = create(
         :employee,
         company: company,
@@ -272,6 +272,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       voided_item = create(
         :payroll_item,
         :voided,
+        payroll_reversed_at: Time.current,
         pay_period: pay_period,
         employee: voided_employee,
         gross_pay: 1200.0,
@@ -284,7 +285,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to eq("Voided checks do not have printable pay stubs")
+      expect(response.parsed_body.fetch("error")).to eq("Reversed payroll does not have printable pay stubs")
       expect(response.parsed_body.fetch("details")).to include(voided_employee.full_name)
     end
   end

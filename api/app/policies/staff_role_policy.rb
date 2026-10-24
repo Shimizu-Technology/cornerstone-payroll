@@ -132,6 +132,7 @@ class StaffRolePolicy
     "api/v1/admin/payroll_go_live#apply_setup" => :manage_platform,
     "api/v1/admin/payroll_filing_responsibilities#upsert" => :manage_filing_review,
     "api/v1/admin/payroll_filing_records#create_event" => :manage_filing_review,
+    "api/v1/admin/checks#reverse_paycheck" => :payroll_operations,
     "api/v1/admin/non_employee_checks#mark_paid" => :payroll_operations,
     "api/v1/admin/payroll_items#update_payment_method" => :payroll_operations,
     "api/v1/admin/pay_periods#promoted_payment_preview" => :manage_organization,

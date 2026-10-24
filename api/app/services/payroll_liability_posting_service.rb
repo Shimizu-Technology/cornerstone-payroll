@@ -237,7 +237,7 @@ class PayrollLiabilityPostingService
 
   def build_entries(locked, posting, snapshot_builder)
     now = Time.current
-    locked.payroll_items.includes(
+    locked.payroll_items.where(payroll_reversed_at: nil).includes(
       payroll_item_field_entries: :payroll_field_definition,
       payroll_item_deductions: :deduction_type
     ).flat_map do |item|

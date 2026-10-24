@@ -434,7 +434,7 @@ class IssueCorrectivePaycheckService
   end
 
   def active_correctives
-    @active_correctives ||= original_item.correction_payroll_items.not_voided
+    @active_correctives ||= original_item.correction_payroll_items.financially_reportable
       .joins(:pay_period).merge(PayPeriod.reportable_committed).order(:id).to_a.tap do |items|
         items.each do |item|
           unless item.company_id == original_item.company_id && item.employee_id == original_item.employee_id &&
@@ -679,7 +679,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     scope = @employee.payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
@@ -695,7 +695,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     @employee.payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
@@ -913,7 +913,7 @@ class IssueCorrectivePaycheckService
   def create_supplemental_fit_check!(supplemental)
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
-      .not_voided
+      .financially_reportable
       .sum { |item| item.total_income_tax_withheld }
 
     return if fit_total.to_f <= 0 # no positive FIT delta → no deposit needed

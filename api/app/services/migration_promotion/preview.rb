@@ -116,9 +116,9 @@ module MigrationPromotion
         end_date: period.end_date,
         pay_date: period.pay_date,
         status: period.status,
-        employee_count: period.payroll_items.not_voided.distinct.count(:employee_id),
-        gross_pay: period.payroll_items.not_voided.sum(:gross_pay).to_d,
-        net_pay: period.payroll_items.not_voided.sum(:net_pay).to_d
+        employee_count: period.payroll_items.financially_reportable.distinct.count(:employee_id),
+        gross_pay: period.payroll_items.financially_reportable.sum(:gross_pay).to_d,
+        net_pay: period.payroll_items.financially_reportable.sum(:net_pay).to_d
       }
     end
 

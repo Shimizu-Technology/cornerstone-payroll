@@ -41,7 +41,7 @@ RSpec.describe PayrollRetirementTotals do
       employee.id => { retirement: 945.00.to_d, roth_retirement: 110.to_d }
     )
     expect(item.reload.attributes).to eq(snapshot)
-    item.update_columns(voided: true)
+    item.update_columns(voided: true, payroll_reversed_at: Time.current)
     expect(employee.ytd_totals_through(year: 2024, pay_date: period.pay_date, pay_period_id: period.id)).to include(retirement: 0, roth_retirement: 0)
   end
 

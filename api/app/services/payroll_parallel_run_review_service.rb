@@ -85,7 +85,7 @@ class PayrollParallelRunReviewService
   end
 
   def cornerstone_totals
-    items = pay_period.payroll_items.not_voided.to_a
+    items = pay_period.payroll_items.financially_reportable.to_a
     tax_total = items.sum do |item|
       PayrollTaxSummary.new(item).total
     end.round(2)

@@ -13,7 +13,7 @@ RSpec.describe Form1099NecAggregator, type: :service do
     end
   end
 
-  it "excludes voided contractor payments from 1099 compensation" do
+  it "excludes financially reversed contractor payroll from 1099 compensation" do
     create(:payroll_item,
       pay_period: pay_period,
       employee: contractor,
@@ -23,7 +23,7 @@ RSpec.describe Form1099NecAggregator, type: :service do
       net_pay: 500.00,
       withholding_tax: 0.00
     )
-    create(:payroll_item, :voided,
+    create(:payroll_item, :voided, payroll_reversed_at: Time.current,
       pay_period: voided_pay_period,
       employee: contractor,
       company: company,

@@ -238,13 +238,13 @@ module TimeTracking
         persist_remote_transition!(allocation, "committed", "issued", result)
         return true
       end
-      return false unless item.voided?
+      return false if item.payroll_included?
 
       result = client_for(allocation).void_payroll_manual_allocation(
         allocation_id: allocation.remote_allocation_id,
         command_id: allocation.void_command_id,
         expected_version: allocation.remote_version,
-        occurred_at: item.voided_at.iso8601(6),
+        occurred_at: (item.payroll_reversed_at || item.pay_period.voided_at || item.voided_at).iso8601(6),
         reason: "Cornerstone payroll item #{allocation.payroll_item_id} was voided"
       )
       persist_remote_transition!(allocation, "committed", "voided", result)

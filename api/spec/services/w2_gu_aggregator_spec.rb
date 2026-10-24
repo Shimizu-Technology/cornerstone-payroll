@@ -75,7 +75,7 @@ RSpec.describe W2GuAggregator do
       expect(Rails.logger).to have_received(:warn).with(include("reported_tips=100.0 exceed gross_pay=50.0"))
     end
 
-    it "excludes voided payroll items from W-2GU boxes and totals" do
+    it "excludes financially reversed payroll items from W-2GU boxes and totals" do
       live_period = create(:pay_period, :committed,
         company: company,
         start_date: Date.new(2025, 2, 1),
@@ -96,7 +96,7 @@ RSpec.describe W2GuAggregator do
         medicare_tax: 14.5,
         retirement_payment: 50.0,
         reported_tips: 25.0)
-      create(:payroll_item, :voided,
+      create(:payroll_item, :voided, payroll_reversed_at: Time.current,
         pay_period: voided_period,
         employee: employee,
         gross_pay: 500.0,
