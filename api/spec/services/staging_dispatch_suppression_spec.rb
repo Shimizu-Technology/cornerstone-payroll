@@ -57,6 +57,24 @@ RSpec.describe "durable staging dispatch suppression" do
     expect(AirePayrollCalendar::Delivery.new(publication_id: copied.id).call).to include(status: "quarantined")
   end
 
+  it "enqueues only the fresh due calendar publication after clone quarantine" do
+    copied = publication
+    copied.update!(next_delivery_attempt_at: 1.minute.ago)
+    StagingCloneContainment.new.quarantine(apply: true)
+    fresh = publication
+    fresh.update!(next_delivery_attempt_at: 1.minute.ago)
+    expect(StagingQuarantine.records.where(source_table: copied.class.table_name, source_id: copied.id)).to exist
+    expect(AirePayrollCalendarPublication.due_for_delivery).to contain_exactly(copied, fresh)
+
+    queued = []
+    dispatched = AirePayrollCalendarPublication.dispatch_due!(enqueue: ->(id) { queued << id })
+
+    expect(dispatched).to eq([ fresh.id ])
+    expect(queued).to eq([ fresh.id ])
+    expect(copied.reload.delivery_enqueued_until).to be_nil
+    expect(fresh.reload.delivery_enqueued_until).to be_present
+  end
+
   it "returns before each copied receipt job loads its record" do
     StagingCloneContainment.new.quarantine(apply: true)
     [ [ AirePayrollStatusSyncJob, AirePayrollAcknowledgement ], [ AirePayrollEntryStatusSyncJob, AirePayrollEntryAcknowledgement ], [ TimeTrackingCorrectionReceiptJob, TimeTrackingCorrectionReceipt ] ].each do |job, model|
