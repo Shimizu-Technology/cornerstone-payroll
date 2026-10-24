@@ -69,6 +69,31 @@ RSpec.describe "Saved payroll earnings rounding" do
     expect(data.other_pay_lines_for(item).sum { |row| row.amount.to_d }).to eq(15)
   end
 
+  %w[hourly contractor].each do |employment_type|
+    context "#{employment_type} custom earning input compatibility" do
+      let(:employee) do
+        attributes = { company: company, pay_rate: "10.50", employment_type: employment_type }
+        attributes[:contractor_pay_type] = "hourly" if employment_type == "contractor"
+        create(:employee, **attributes)
+      end
+
+      [ [ "blank", "", 0 ], [ "nil", nil, 0 ], [ "non-numeric", "abc", 0 ],
+        [ "NaN string", "NaN", 0 ], [ "infinity string", "Infinity", 0 ],
+        [ "numeric prefix", "2.25 dollars", 2.25 ] ].each do |description, amount, expected|
+        it "calculates with a #{description} amount using the legacy numeric value" do
+          entry = amount.nil? ? { "amount" => nil } : { "label" => "X", "amount" => amount }
+          item = calculate_buckets([ "0.01", "0.01" ], custom_earnings: [ entry ])
+          assert_totals(item, gross: "0.22".to_d + expected.to_d)
+          expect(item.total_additions).to eq(expected.to_d)
+          custom_lines = item.payroll_item_earnings.where(category: "other")
+          expect(custom_lines.sum(:amount)).to eq(expected.to_d)
+          expect(custom_lines.count).to eq(expected.zero? ? 0 : 1)
+          expect(item.custom_earnings).to eq([ entry ])
+        end
+      end
+    end
+  end
+
   context "an hourly contractor" do
     let(:employee) { create(:employee, :contractor, company: company, pay_rate: "10.50", contractor_pay_type: "hourly") }
 
