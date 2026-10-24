@@ -835,7 +835,13 @@ class PayrollCalculator
         next unless deduction.category == deduction_category
         loan_id = entry.metadata.to_h["employee_loan_id"]
         same_loan = loan_id.present? && deduction.employee_loan_id == loan_id.to_i
-        next unless same_loan || deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+        mirror_type_id = entry.metadata.to_h.dig(PayrollComponentMirrors::IDENTITY_KEY, "deduction_type_id")
+        mirrored = if mirror_type_id.present?
+          deduction.deduction_type_id == mirror_type_id.to_i
+        else
+          deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+        end
+        next unless same_loan || mirrored
 
         deduction.amount = next_amount
       end

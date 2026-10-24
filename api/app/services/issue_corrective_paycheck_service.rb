@@ -187,6 +187,8 @@ class IssueCorrectivePaycheckService
         employee_id: @employee.id,
         employee_name: @employee.full_name,
         active_corrective_count: active_correctives.length,
+        legacy_unposted_employer_component: @legacy_employer_omissions || [],
+        legacy_employer_posting_compatibility: @legacy_employer_evidence || [],
         review_digest: review_digest,
         will_generate_check: net_delta.positive?,
         is_zero_change: zero_change?
@@ -252,6 +254,11 @@ class IssueCorrectivePaycheckService
       )
 
       commit_supplemental!(supplemental)
+      if @legacy_employer_evidence.present?
+        AuditLog.record!(user: @actor, company_id: supplemental.company_id, action: "payroll#corrective_paycheck_issued",
+          record_type: "PayrollItem", record_id: corrective_item.id,
+          metadata: { legacy_unposted_employer_component: @legacy_employer_omissions, legacy_employer_posting_compatibility: @legacy_employer_evidence })
+      end
 
       # Reload with associations so callers (and the API payload) see the
       # final committed state including check number assignment etc.
@@ -594,6 +601,8 @@ class IssueCorrectivePaycheckService
       original_period: @original_pay_period.attributes.slice(*period_fields),
       original_item: original_item.attributes.slice(*item_fields),
       component_deltas: component_ledger.snapshot,
+      legacy_unposted_employer_component: @legacy_employer_omissions || [],
+      legacy_employer_posting_compatibility: @legacy_employer_evidence || [],
       original_earnings: original_item.payroll_item_earnings.order(:id).map { |earning| earning.attributes.slice("id", "category", "label", "rate", "hours", "amount", "updated_at") },
       active_correctives: active_correctives.map do |item|
         { item: item.attributes.slice(*item_fields), period: item.pay_period.attributes.slice(*period_fields) }
@@ -878,10 +887,11 @@ class IssueCorrectivePaycheckService
   def validate_component_ledger!
     component_ledger # Reject unsupported histories before any component/posting checks.
     annual_retirement_context.validate!(corrected_item)
-    [ original_item, *active_correctives ].each do |item|
+    @legacy_employer_omissions = [ original_item, *active_correctives ].flat_map do |item|
       PayrollInsuranceComponents.verify_postings!(item)
       PayrollLiabilityPostingService.verify_employer_contributions!(item)
     end
+    @legacy_employer_evidence = [ original_item, *active_correctives ].filter_map { |item| PayrollLegacyEmployerComponents.evidence(item) }
     supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
       corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
     create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
@@ -913,6 +923,8 @@ class IssueCorrectivePaycheckService
       calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
         "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments,
           "catch_up_ledger_version" => 1, "catch_up_classification_delta" => annual_retirement_context.catch_up_delta(corrected_item).to_s("F") }.tap do |context|
+          context["legacy_unposted_employer_component"] = @legacy_employer_omissions if @legacy_employer_omissions.present?
+          context["legacy_employer_posting_compatibility"] = @legacy_employer_evidence if @legacy_employer_evidence.present?
           context["source_accounting_target"] = @source_accounting_target.resolve.fetch(:evidence) if @source_accounting_target
         end
       ),

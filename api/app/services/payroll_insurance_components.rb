@@ -17,6 +17,10 @@ class PayrollInsuranceComponents
     mirror_amount = mirrors.sum(0.to_d) { |row| row.amount.to_d }.round(2)
     if rows.any?
       unless [ direct_amount, direct_amount + mirror_amount ].include?(scalar)
+        if PayrollLegacyEmployerComponents.eligible?(item)
+          old_aggregate = rows.sum(0.to_d) { |row| row.amount.to_d }.round(2)
+          return direct_amount if scalar == old_aggregate
+        end
         if employer_rows.any?
           raise AmbiguousHistoryError, "Employer insurance aggregate provenance requires a reviewed benefit-ledger correction"
         end
@@ -44,6 +48,9 @@ class PayrollInsuranceComponents
     entries = PayrollLiabilityEntry.where(payroll_item_id: item.id, category: "insurance_employee")
     return unless item.pay_period.payroll_liability_postings.exists?
     return if entries.sum(:amount).to_d.round(2) == total(item)
+    if PayrollLegacyEmployerComponents.eligible?(item)
+      return if entries.sum(:amount).to_d.round(2) == item.insurance_payment.to_d + field_amount(item)
+    end
 
     raise AmbiguousHistoryError, "Saved insurance liability entries do not reconcile with the insurance components; arrange a reviewed insurance-ledger correction"
   end
