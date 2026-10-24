@@ -6,7 +6,8 @@ module TimeTracking
 
     attr_reader :pay_period, :source, :start_date, :end_date
 
-    def initialize(pay_period:, source:, start_date: nil, end_date: nil)
+    def initialize(pay_period:, source:, start_date: nil, end_date: nil, supplemental_payload: nil)
+      @supplemental_payload = supplemental_payload
       @pay_period = pay_period
       @source = source
       @start_date = parse_date(start_date.presence || pay_period.start_date, "start_date")
@@ -17,8 +18,9 @@ module TimeTracking
       validate_request!
       workweek = legal_workweek!
       client = Client.new(source)
-      batch_summary = discover_batch!(client)
-      raw = client.payroll_batch(batch_id: batch_summary.fetch("id"))
+      batch_summary = discover_batch!(client) unless @supplemental_payload
+      raw = @supplemental_payload || client.payroll_batch(batch_id: batch_summary.fetch("id"))
+      validate_supplemental_target!(raw) if @supplemental_payload
       PayrollBatchPayloadValidator.new(
         payload: raw,
         expected_source: source.connector.source_identifier,
@@ -26,7 +28,7 @@ module TimeTracking
         end_date: end_date,
         allow_legacy_uncategorized: pay_period.committed?
       ).validate!
-      validate_summary_identity!(batch_summary, raw)
+      validate_summary_identity!(batch_summary, raw) if batch_summary
       validate_source_workweeks!(raw, workweek)
 
       processed = process(raw, workweek: workweek)
@@ -41,6 +43,13 @@ module TimeTracking
     end
 
     private
+
+    def validate_supplemental_target!(raw)
+      unless pay_period.run_purpose == "adjustment" && pay_period.late_hours_run &&
+          raw["purpose"] == "supplemental" && raw["target_external_pay_period_id"] == pay_period.id.to_s
+        raise ArgumentError, "The supplemental batch does not name this late-hours adjustment"
+      end
+    end
 
     def validate_request!
       source.connector.require!(:finalized_batch_v2)
@@ -188,7 +197,7 @@ module TimeTracking
       employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
       return result unless employee&.hourly? || employee&.contractor_hourly?
 
-      active_rates = employee.active_wage_rates.reject { |rate| rate.rate.nil? }
+      active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates).reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
         rate, method = find_wage_rate(category, active_rates)
