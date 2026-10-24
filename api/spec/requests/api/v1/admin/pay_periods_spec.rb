@@ -384,6 +384,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]).to have_key("payroll_items")
     end
 
+    it "exposes earning provenance for draft estimates without changing saved components" do
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        custom_earnings: [ { "label" => "One-time work", "amount" => 55 } ],
+        custom_columns_data: { "custom_earnings_source" => "manual", "payroll_adjustments_overridden" => true })
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      row = response.parsed_body.fetch("pay_period").fetch("payroll_items").find { |entry| entry["id"] == item.id }
+      expect(row.fetch("draft_earning_sources")).to include("custom_earnings" => "manual", "payroll_adjustments_overridden" => true)
+      expect(item.reload.custom_earnings).to eq([ { "label" => "One-time work", "amount" => 55.0 } ])
+    end
+
     it "batches payment activity across the whole run while preserving cancellation guards" do
       pay_period.update!(status: "committed", committed_at: Time.current)
       items = 4.times.map do |index|

@@ -1492,6 +1492,11 @@ module Api
             department_id: item.employee&.department_id,
             department_name: item.employee&.department&.name,
             custom_earnings: item.custom_earnings || [],
+            draft_earning_sources: {
+              custom_earnings: item.custom_columns_data.to_h[PayrollItem::CUSTOM_EARNINGS_SOURCE_KEY],
+              payroll_adjustments: item.custom_columns_data.to_h[PayrollItem::PAYROLL_ADJUSTMENTS_SOURCE_KEY],
+              payroll_adjustments_overridden: item.payroll_adjustments_overridden?
+            },
             check_number: item.check_number,
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
