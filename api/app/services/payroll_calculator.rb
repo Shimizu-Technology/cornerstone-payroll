@@ -855,7 +855,8 @@ class PayrollCalculator
     end
     payroll_item.loan_payment = (itemized_loan_payment + payroll_item.loan_deduction.to_f).round(2)
     payroll_item.insurance_payment = payroll_item.payroll_item_deductions.sum do |deduction|
-      deduction.deduction_type&.sub_category == "insurance" ? deduction.amount.to_f : 0.0
+      deduction.deduction_type&.sub_category == "insurance" && !deduction.employer_contribution? &&
+        !PayrollComponentMirrors.field_for(payroll_item, deduction) ? deduction.amount.to_f : 0.0
     end.round(2)
   end
 

@@ -231,6 +231,7 @@ class IssueCorrectivePaycheckService
       # Force corrected_item to be rebuilt against the freshly-locked
       # original (its inputs are derived from `original_item.*`).
       @annual_fica_context = nil
+      @annual_retirement_context = nil
       @corrected_item = nil
       @recalculated_original_item = nil
       @active_correctives = nil
@@ -408,6 +409,7 @@ class IssueCorrectivePaycheckService
   def corrected_item
     @corrected_item ||= begin
       item = build_and_calculate_item(effective_inputs.merge(@corrected_inputs))
+      item.insurance_payment = PayrollInsuranceComponents.scalar_amount(item)
       reconcile_annual_fica!(item)
       item
     end
@@ -561,6 +563,9 @@ class IssueCorrectivePaycheckService
   end
 
   def recorded_value(field)
+    if field == :insurance_payment
+      return [ original_item, *active_correctives ].sum { |item| PayrollInsuranceComponents.scalar_amount(item) }
+    end
     original_value = REPORTING_DELTA_FIELDS.include?(field) ? original_reporting_value(field) : original_item.public_send(field).to_d
     original_value + active_correctives.sum { |item| item.public_send(field).to_d }
   end
@@ -581,6 +586,7 @@ class IssueCorrectivePaycheckService
     state = {
       version: 2,
       annual_fica_context: annual_fica_context.snapshot,
+      annual_retirement_context: annual_retirement_context.snapshot,
       original_period: @original_pay_period.attributes.slice(*period_fields),
       original_item: original_item.attributes.slice(*item_fields),
       component_deltas: component_ledger.snapshot,
@@ -859,10 +865,18 @@ class IssueCorrectivePaycheckService
     CorrectivePayrollComponents.new(original: original_item, corrected: corrected_item, active: active_correctives)
   end
 
+  def annual_retirement_context
+    @annual_retirement_context ||= CorrectiveRetirementContext.new(employee: @employee, original: original_item, active: active_correctives)
+  end
+
   def validate_component_ledger!
+    annual_retirement_context.validate!(corrected_item)
+    [ original_item, *active_correctives ].each { |item| PayrollInsuranceComponents.verify_postings!(item) }
     supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
       corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
     create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
+  rescue PayrollInsuranceComponents::AmbiguousHistoryError => e
+    raise MissingHistoricalContextError, e.message
   end
 
   def create_corrective_item!(supplemental:, original_item:, persist: true)
@@ -944,6 +958,7 @@ class IssueCorrectivePaycheckService
   # the delta values authoritatively).
   def commit_supplemental!(supplemental)
     supplemental.update!(status: "committed", committed_at: Time.current)
+    PayrollYtdSnapshotRefresh.call(pay_period: supplemental, employee_ids: [ @employee.id ])
 
     # YTD and check number — same primitives the regular commit uses.
     supplemental.payroll_items.each do |item|
@@ -958,6 +973,8 @@ class IssueCorrectivePaycheckService
       pay_period: supplemental,
       actor: @actor
     )
+
+    supplemental.payroll_items.each { |item| PayrollInsuranceComponents.verify_postings!(item) }
 
     # Only assign a check number if there's actually money to pay out.
     # Negative net (clawback) supplementals exist as accounting entries
