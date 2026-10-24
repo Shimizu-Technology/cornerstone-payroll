@@ -96,7 +96,7 @@ RSpec.describe W2GuAggregator do
         medicare_tax: 14.5,
         retirement_payment: 50.0,
         reported_tips: 25.0)
-      create(:payroll_item, :voided, payroll_reversed_at: Time.current,
+      create(:payroll_item, :voided, **payroll_reversal_fixture,
         pay_period: voided_period,
         employee: employee,
         gross_pay: 500.0,
@@ -106,15 +106,20 @@ RSpec.describe W2GuAggregator do
         retirement_payment: 10.0,
         reported_tips: 10.0)
 
+      create(:payroll_item, :voided, pay_period: create(:pay_period, :committed, company: company, pay_date: live_period.pay_date), employee: employee,
+        gross_pay: 200, withholding_tax: 20, social_security_tax: 12.4, medicare_tax: 2.9,
+        retirement_payment: 10, reported_tips: 5)
       report = described_class.new(company, 2025).generate
       row = report[:employees].find { |employee_row| employee_row[:employee_id] == employee.id }
 
-      expect(row[:box1_wages_tips_other_comp]).to eq(950.0)
-      expect(row[:box2_federal_income_tax_withheld]).to eq(100.0)
-      expect(row[:box4_social_security_tax_withheld]).to eq(62.0)
-      expect(row[:box6_medicare_tax_withheld]).to eq(14.5)
-      expect(row[:reported_tips_total]).to eq(25.0)
-      expect(report[:totals][:box1_wages_tips_other_comp]).to eq(950.0)
+      expect(row[:box1_wages_tips_other_comp]).to eq(1140.0)
+      expect(row[:box2_federal_income_tax_withheld]).to eq(120.0)
+      expect(row[:box3_social_security_wages]).to eq(1170.0)
+      expect(row[:box4_social_security_tax_withheld]).to eq(74.4)
+      expect(row[:box5_medicare_wages_tips]).to eq(1200.0)
+      expect(row[:box6_medicare_tax_withheld]).to eq(17.4)
+      expect(row[:reported_tips_total]).to eq(30.0)
+      expect(report[:totals][:box1_wages_tips_other_comp]).to eq(1140.0)
     end
 
     it "includes W-4 Step 4(c) extra withholding in W-2GU Box 2" do

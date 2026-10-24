@@ -73,7 +73,7 @@ RSpec.describe PayrollTaxSyncService, type: :service do
 
     context "when the last paycheck was explicitly financially reversed" do
       it "delivers a zero-balance snapshot with explicit reversed item identity" do
-        payroll_item.update!(payroll_reversed_at: Time.current)
+        payroll_item.update!(**payroll_reversal_fixture)
         stub_request(:post, "https://cst.example.com/api/v1/ingest").with { |request|
           body = JSON.parse(request.body)
           body.fetch("line_items").empty? && body.dig("totals", "gross_pay") == 0 &&

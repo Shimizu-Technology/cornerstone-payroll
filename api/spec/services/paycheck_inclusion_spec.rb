@@ -80,6 +80,94 @@ RSpec.describe "Earned payroll and retired checks" do
     end
   end
 
+  %w[delivered cleared direct_deposit].each do |payment_state|
+    it "reverses the selected paycheck while another employee's payment is #{payment_state}" do
+      other = create(:employee, company: company)
+      other_item = create(:payroll_item, :with_check, pay_period: period, employee: other, check_number: "9001")
+      other.ytd_totals_for(2024).add_payroll_item!(other_item)
+      CompanyYtdTotal.find_by!(company: company, year: 2024).add_payroll_item!(other_item)
+      case payment_state
+      when "delivered"
+        other_item.check_events.create!(user: actor, event_type: "delivered", check_number: other_item.check_number)
+      when "cleared"
+        CheckReconciliationEvent.create!(company: company, pay_period: period, payroll_item: other_item, recorded_by: actor,
+          event_type: "cleared", check_number: other_item.check_number, amount: other_item.net_pay,
+          effective_on: period.pay_date, evidence_type: "bank_statement", idempotency_key: "other-cleared-check")
+      else
+        other_item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+      end
+      other_before = other_item.reload.attributes
+
+      ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Reverse selected incorrect paycheck only")
+
+      expect(item.reload).not_to be_payroll_included
+      expect(other_item.reload.attributes).to eq(other_before)
+      expect(other.ytd_totals_for(2024).reload.gross_pay).to eq(other_item.gross_pay)
+      expect(CompanyYtdTotal.find_by!(company: company, year: 2024).gross_pay).to eq(other_item.gross_pay)
+    end
+  end
+
+  it "still blocks the selected paycheck's own positive direct deposit" do
+    item.update!(payment_delivery_method: "direct_deposit", check_number: nil)
+    before = financial_snapshot
+    expect { ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Cannot reverse an external deposit") }
+      .to raise_error(ArgumentError, /direct-deposit reversal/)
+    expect(financial_snapshot).to eq(before)
+  end
+
+  it "records a financial void rather than retained-obligation cancellation when reversing an active check" do
+    item.check_events.create!(user: actor, event_type: "printed", check_number: item.check_number)
+    ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Reverse an incorrect unpaid paycheck")
+    event = item.check_events.voids.last
+    expect(event.details).to include("payroll_obligation_retained" => false, "original_check_cancelled" => false)
+    expect(event.payment_cancellation?).to be(false)
+  end
+
+  it "nets restated liability components once and preserves every reversed entry id" do
+    old_date = period.pay_date
+    period.update!(pay_date: old_date + 14)
+    PayrollLiabilityPostingService.restate_for_pay_date!(pay_period: period, actor: actor,
+      old_pay_date: old_date, new_pay_date: period.pay_date)
+    entries = PayrollLiabilityEntry.joins(:payroll_liability_posting)
+      .where(payroll_liability_postings: { pay_period_id: period.id }, payroll_item_id: item.id).to_a
+
+    ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Reverse after pay date restatement")
+
+    reversal = period.payroll_liability_postings.find_by!(posting_type: "paycheck_reversal")
+    expect(reversal.entries.pluck(:component_key).uniq.size).to eq(reversal.entries.count)
+    entries.group_by(&:component_key).each do |key, components|
+      offset = reversal.entries.find_by!(component_key: key)
+      expect(offset.amount).to eq(-components.sum(&:amount))
+      expect(offset.metadata.fetch("reverses_entry_ids")).to match_array(components.map(&:id))
+    end
+    expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
+  end
+
+  it "omits a liability component whose prior journal entries already net to zero" do
+    source = period.payroll_liability_postings.first
+    entry = source.entries.first
+    prior_offset = PayrollLiabilityPosting.create!(company: company, pay_period: period, posting_type: "reversal",
+      source_posting: source, liability_date: period.pay_date, posted_at: Time.current, posted_by: actor,
+      reason: "Previously offset component", idempotency_key: "prior-component-offset")
+    prior_offset.entries.create!(entry.attributes.except("id", "created_at", "updated_at", "payroll_liability_posting_id")
+      .merge("amount" => -entry.amount))
+
+    ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Reverse remaining financial components")
+
+    reversal = period.payroll_liability_postings.find_by!(posting_type: "paycheck_reversal")
+    expect(reversal.entries.where(component_key: entry.component_key)).to be_empty
+    expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
+  end
+
+  %i[payroll_reversed_at payroll_reversed_by_id payroll_reversal_reason].combination(1).to_a
+    .concat(%i[payroll_reversed_at payroll_reversed_by_id payroll_reversal_reason].combination(2).to_a).each do |fields|
+    it "rejects partial reversal audit fields #{fields.join(', ')} at the database boundary" do
+      values = { payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Reviewed reversal" }
+      expect { item.update_columns(values.slice(*fields)) }
+        .to raise_error(ActiveRecord::StatementInvalid, /check_payroll_item_reversal_fields/)
+    end
+  end
+
   it "refreshes later saved statement YTD without recalculating its earned amounts" do
     later_period = create(:pay_period, :committed, company: company, start_date: Date.new(2024, 1, 15), end_date: Date.new(2024, 1, 28), pay_date: Date.new(2024, 2, 2))
     later = later_period.payroll_items.build(employee: employee, employment_type: "hourly", pay_rate: 15, hours_worked: 60)

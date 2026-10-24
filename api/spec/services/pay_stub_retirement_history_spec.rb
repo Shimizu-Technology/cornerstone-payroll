@@ -76,7 +76,7 @@ RSpec.describe "Pay stub retirement history" do
     earlier = prior_item(date: pay_date, amount: 10)
     item
     prior_item(date: pay_date - 14, status: "draft", amount: 1000)
-    prior_item(date: pay_date - 14, amount: 1000).update!(voided: true, payroll_reversed_at: Time.current)
+    prior_item(date: pay_date - 14, amount: 1000).update!(voided: true, **payroll_reversal_fixture)
     prior_item(date: pay_date, amount: 1000)
     prior_item(date: pay_date + 14, amount: 1000)
     other_employee = create(:employee, company: company)

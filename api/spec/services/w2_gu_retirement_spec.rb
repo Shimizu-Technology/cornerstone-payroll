@@ -81,9 +81,9 @@ RSpec.describe W2GuAggregator, "fixed and flexible retirement" do
   end
 
   it "uses the same exclusions for retirement and wage totals" do
-    item.update_columns(voided: true, payroll_reversed_at: Time.current)
+    item.update_columns(voided: true, **payroll_reversal_fixture)
     expect(described_class.new(company, 2025, include_historical: false).generate.fetch(:totals)).to include(box12_code_d_total: 0, box12_code_aa_total: 0)
-    item.update_columns(voided: false, payroll_reversed_at: nil, employment_type: "contractor")
+    item.update_columns(voided: false, payroll_reversed_at: nil, payroll_reversed_by_id: nil, payroll_reversal_reason: nil, employment_type: "contractor")
     expect(described_class.new(company, 2025, include_historical: false).generate.fetch(:employees)).to be_empty
     item.update_columns(employment_type: "salary")
     period.update_columns(correction_status: "voided")

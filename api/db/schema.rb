@@ -2931,6 +2931,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_040000) do
     t.check_constraint "jsonb_typeof(named_loan_payments) = 'object'::text", name: "payroll_items_named_loan_payments_object"
     t.bigint "financial_correction_origin_item_id"
     t.index [ "financial_correction_origin_item_id" ], name: "index_payroll_items_on_financial_correction_origin_item_id"
+    t.check_constraint "payroll_reversed_at IS NULL AND payroll_reversed_by_id IS NULL AND payroll_reversal_reason IS NULL OR payroll_reversed_at IS NOT NULL AND payroll_reversed_by_id IS NOT NULL AND payroll_reversal_reason IS NOT NULL", name: "check_payroll_item_reversal_fields"
   end
 
   create_table "payroll_liability_check_allocations", force: :cascade do |t|

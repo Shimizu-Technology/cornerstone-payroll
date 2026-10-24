@@ -72,7 +72,7 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
       end
 
       it "excludes financially reversed payroll items" do
-        create(:payroll_item, :voided, payroll_reversed_at: Time.current,
+        create(:payroll_item, :voided, **payroll_reversal_fixture,
           pay_period: pay_period,
           employee: create(:employee, company: company, first_name: "Voided", last_name: "Worker"),
           gross_pay: 175.00,
@@ -84,7 +84,12 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
           employer_medicare_tax: 0.00
         )
 
-        expect(payload[:line_items].map { |item| item[:employee_name] }).to eq([ "John Doe" ])
+        retired = create(:payroll_item, :voided, pay_period: pay_period,
+          employee: create(:employee, company: company), gross_pay: 175, net_pay: 150,
+          withholding_tax: 10, social_security_tax: 10.85, medicare_tax: 2.54,
+          employer_social_security_tax: 10.85, employer_medicare_tax: 2.54)
+        expect(payload[:line_items].map { |item| item[:payroll_item_id] }).to contain_exactly(payroll_item.id, retired.id)
+        expect(payload[:line_items].find { |item| item[:payroll_item_id] == retired.id }).to include(gross_pay: 175.0, net_pay: 150.0)
       end
 
       it "includes correct employee payroll data" do
@@ -117,7 +122,7 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
       end
 
       it "excludes financially reversed payroll items from totals" do
-        create(:payroll_item, :voided, payroll_reversed_at: Time.current,
+        create(:payroll_item, :voided, **payroll_reversal_fixture,
           pay_period: pay_period,
           employee: create(:employee, company: company),
           gross_pay: 175.00,
@@ -125,9 +130,15 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
           withholding_tax: 0.00
         )
 
-        expect(payload[:totals][:employee_count]).to eq(1)
-        expect(payload[:totals][:gross_pay]).to eq(2400.0)
-        expect(payload[:totals][:net_pay]).to eq(1800.0)
+        create(:payroll_item, :voided, pay_period: pay_period,
+          employee: create(:employee, company: company), gross_pay: 175, net_pay: 150,
+          withholding_tax: 10, social_security_tax: 10.85, medicare_tax: 2.54,
+          employer_social_security_tax: 10.85, employer_medicare_tax: 2.54)
+        expect(payload[:totals][:employee_count]).to eq(2)
+        expect(payload[:totals][:gross_pay]).to eq(2575.0)
+        expect(payload[:totals][:net_pay]).to eq(1950.0)
+        expect(payload[:totals][:withholding_tax]).to eq(335.0)
+        expect(payload[:totals][:total_tax_liability]).to eq(728.98)
       end
     end
   end

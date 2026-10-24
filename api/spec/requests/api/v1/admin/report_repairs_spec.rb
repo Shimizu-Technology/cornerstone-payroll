@@ -180,7 +180,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
     create(:payroll_item, company: company, employee: create(:employee, :contractor, company: company),
       pay_period: period, employment_type: "contractor", gross_pay: 200, withholding_tax: 0, additional_withholding: 99)
     create(:payroll_item, :voided, company: company, employee: create(:employee, company: company),
-      pay_period: period, payroll_reversed_at: Time.current, withholding_tax: 1000, additional_withholding: 1000)
+      pay_period: period, **payroll_reversal_fixture, withholding_tax: 1000, additional_withholding: 1000)
 
     get "/api/v1/admin/reports/payroll_summary_by_employee_xlsx", params: { pay_period_id: period.id }
 

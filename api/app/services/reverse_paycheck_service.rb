@@ -29,10 +29,9 @@ class ReversePaycheckService
         if item.time_tracking_entry_allocations.exists? || item.time_tracking_manual_allocations.exists? || item.time_tracking_financial_correction_links.exists?
           raise ArgumentError, "This paycheck reserves connected source hours; use the reviewed source correction workflow"
         end
-        # Filing, bank payment, clearing and liability-payment guards are shared
-        # with whole-payroll reversal. Conservative period-wide preflight avoids
-        # invalidating an already paid or filed shared obligation.
-        payments = PayrollRevisionPaymentPreflight.new(pay_period: period, lock: true).ensure_eligible!
+        # Employee payment evidence belongs to this paycheck. Filing evidence
+        # and shared liability payments still apply to the entire period.
+        payments = PayrollRevisionPaymentPreflight.new(pay_period: period, lock: true, payroll_item: item).ensure_eligible!
         if payments.other_payments.any? { |payment| !payment.voided? }
           raise ArgumentError, "This payroll has shared liability payments; reconcile them before reversing one paycheck"
         end
@@ -49,7 +48,7 @@ class ReversePaycheckService
         # reversal later reverses both the original posting and this offset.
         PayrollLiabilityPostingService.post!(pay_period: period, actor: actor) unless period.payroll_liability_postings.exists?
         reverse_liabilities!(period)
-        item.void!(user: actor, reason: reason) if item.check_number.present? && !item.voided?
+        item.void!(user: actor, reason: reason, payroll_obligation_retained: false) if item.check_number.present? && !item.voided?
         employee_ytd.subtract_payroll_item!(item)
         company_ytd.subtract_payroll_item!(item)
         LoanTransaction.payments.where(payroll_item_id: item.id, source: "payroll").order(:employee_loan_id, :id).each do |payment|
@@ -84,10 +83,15 @@ class ReversePaycheckService
       posted_by: actor, reason: reason, idempotency_key: "payroll-item:#{item.id}:reverse",
       metadata: { payroll_item_id: item.id })
     # Net every existing journal entry, including prior pay-date restatements.
-    rows = PayrollLiabilityEntry.where(payroll_liability_posting_id: entries.select(:id), payroll_item_id: item.id).map do |entry|
+    components = PayrollLiabilityEntry.where(payroll_liability_posting_id: entries.select(:id), payroll_item_id: item.id).order(:id).group_by(&:component_key)
+    rows = components.values.filter_map do |component_entries|
+      amount = -component_entries.sum(&:amount)
+      next if amount.zero?
+
+      entry = component_entries.last
       entry.attributes.except("id", "created_at", "updated_at").merge(
-        "payroll_liability_posting_id" => posting.id, "amount" => -entry.amount,
-        "metadata" => entry.metadata.merge("reverses_entry_id" => entry.id),
+        "payroll_liability_posting_id" => posting.id, "amount" => amount,
+        "metadata" => entry.metadata.except("reverses_entry_id").merge("reverses_entry_ids" => component_entries.map(&:id)),
         "created_at" => Time.current, "updated_at" => Time.current
       )
     end
