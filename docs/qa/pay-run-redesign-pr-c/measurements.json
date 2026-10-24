@@ -1,0 +1,382 @@
+[
+  {
+    "state": "connected-committed-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 2255,
+      "screens": 2.82,
+      "totalsY": 164,
+      "resultsY": 1116,
+      "cards": 7,
+      "buttons": 46,
+      "callouts": 3
+    },
+    "after": {
+      "scrollHeight": 1358,
+      "screens": 1.7,
+      "totalsY": 164,
+      "resultsY": 582,
+      "cards": 5,
+      "buttons": 57,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 7063,
+      "screens": 8.83,
+      "totalsY": 275,
+      "resultsY": 1358,
+      "cards": 22,
+      "buttons": 123,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "connected-draft-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 3263,
+      "screens": 4.08,
+      "totalsY": 164,
+      "resultsY": null,
+      "cards": 6,
+      "buttons": 14,
+      "callouts": 4
+    },
+    "after": {
+      "scrollHeight": 2102,
+      "screens": 2.63,
+      "totalsY": 164,
+      "resultsY": null,
+      "cards": 4,
+      "buttons": 24,
+      "callouts": 1
+    },
+    "original_audit": {
+      "scrollHeight": 6406,
+      "screens": 8.01,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 9,
+      "buttons": 38,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "adjustment-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 1891,
+      "screens": 2.36,
+      "totalsY": 164,
+      "resultsY": 1015,
+      "cards": 4,
+      "buttons": 6,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 1358,
+      "screens": 1.7,
+      "totalsY": 164,
+      "resultsY": 582,
+      "cards": 4,
+      "buttons": 12,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 5785,
+      "screens": 7.23,
+      "totalsY": 275,
+      "resultsY": 1258,
+      "cards": 19,
+      "buttons": 48,
+      "callouts": 5
+    }
+  },
+  {
+    "state": "manual-committed-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 1646,
+      "screens": 2.06,
+      "totalsY": 164,
+      "resultsY": 647,
+      "cards": 4,
+      "buttons": 8,
+      "callouts": 3
+    },
+    "after": {
+      "scrollHeight": 1358,
+      "screens": 1.7,
+      "totalsY": 164,
+      "resultsY": 582,
+      "cards": 4,
+      "buttons": 15,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 4636,
+      "screens": 5.79,
+      "totalsY": 275,
+      "resultsY": 843,
+      "cards": 17,
+      "buttons": 64,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "fresh-draft-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 1109,
+      "screens": 1.39,
+      "totalsY": 164,
+      "resultsY": null,
+      "cards": 3,
+      "buttons": 6,
+      "callouts": 0
+    },
+    "after": {
+      "scrollHeight": 1386,
+      "screens": 1.73,
+      "totalsY": 164,
+      "resultsY": null,
+      "cards": 3,
+      "buttons": 12,
+      "callouts": 0
+    }
+  },
+  {
+    "state": "fresh-calculated-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 2194,
+      "screens": 2.74,
+      "totalsY": 164,
+      "resultsY": 569,
+      "cards": 5,
+      "buttons": 9,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 1270,
+      "screens": 1.59,
+      "totalsY": 164,
+      "resultsY": 582,
+      "cards": 5,
+      "buttons": 17,
+      "callouts": 0
+    }
+  },
+  {
+    "state": "fresh-approved-1280-work",
+    "width": 1280,
+    "before": {
+      "scrollHeight": 1742,
+      "screens": 2.18,
+      "totalsY": 164,
+      "resultsY": 569,
+      "cards": 4,
+      "buttons": 5,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 800,
+      "screens": 1,
+      "totalsY": 164,
+      "resultsY": null,
+      "cards": 4,
+      "buttons": 12,
+      "callouts": 0
+    }
+  },
+  {
+    "state": "connected-committed-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 4558,
+      "screens": 5.4,
+      "totalsY": 284,
+      "resultsY": 1483,
+      "cards": 7,
+      "buttons": 46,
+      "callouts": 3
+    },
+    "after": {
+      "scrollHeight": 1892,
+      "screens": 2.24,
+      "totalsY": 284,
+      "resultsY": 706,
+      "cards": 5,
+      "buttons": 62,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 13849,
+      "screens": 16.41,
+      "totalsY": 299,
+      "resultsY": null,
+      "cards": 22,
+      "buttons": 123,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "connected-draft-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 7421,
+      "screens": 8.79,
+      "totalsY": 240,
+      "resultsY": null,
+      "cards": 6,
+      "buttons": 14,
+      "callouts": 4
+    },
+    "after": {
+      "scrollHeight": 4533,
+      "screens": 5.37,
+      "totalsY": 240,
+      "resultsY": null,
+      "cards": 4,
+      "buttons": 24,
+      "callouts": 1
+    },
+    "original_audit": {
+      "scrollHeight": 13665,
+      "screens": 16.19,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 9,
+      "buttons": 38,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "adjustment-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 2748,
+      "screens": 3.26,
+      "totalsY": 240,
+      "resultsY": 1138,
+      "cards": 4,
+      "buttons": 6,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 1329,
+      "screens": 1.57,
+      "totalsY": 240,
+      "resultsY": 662,
+      "cards": 4,
+      "buttons": 14,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 9232,
+      "screens": 10.94,
+      "totalsY": 299,
+      "resultsY": null,
+      "cards": 19,
+      "buttons": 48,
+      "callouts": 5
+    }
+  },
+  {
+    "state": "manual-committed-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 2687,
+      "screens": 3.18,
+      "totalsY": 220,
+      "resultsY": 690,
+      "cards": 4,
+      "buttons": 8,
+      "callouts": 3
+    },
+    "after": {
+      "scrollHeight": 1482,
+      "screens": 1.76,
+      "totalsY": 220,
+      "resultsY": 642,
+      "cards": 4,
+      "buttons": 18,
+      "callouts": 0
+    },
+    "original_audit": {
+      "scrollHeight": 8615,
+      "screens": 10.21,
+      "totalsY": 299,
+      "resultsY": null,
+      "cards": 17,
+      "buttons": 64,
+      "callouts": 7
+    }
+  },
+  {
+    "state": "fresh-draft-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 1900,
+      "screens": 2.25,
+      "totalsY": 220,
+      "resultsY": null,
+      "cards": 3,
+      "buttons": 6,
+      "callouts": 0
+    },
+    "after": {
+      "scrollHeight": 2127,
+      "screens": 2.52,
+      "totalsY": 220,
+      "resultsY": null,
+      "cards": 3,
+      "buttons": 12,
+      "callouts": 0
+    }
+  },
+  {
+    "state": "fresh-calculated-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 3273,
+      "screens": 3.88,
+      "totalsY": 220,
+      "resultsY": 781,
+      "cards": 5,
+      "buttons": 9,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 1201,
+      "screens": 1.42,
+      "totalsY": 220,
+      "resultsY": 642,
+      "cards": 5,
+      "buttons": 19,
+      "callouts": 0
+    }
+  },
+  {
+    "state": "fresh-approved-390-work",
+    "width": 390,
+    "before": {
+      "scrollHeight": 2419,
+      "screens": 2.87,
+      "totalsY": 220,
+      "resultsY": 781,
+      "cards": 4,
+      "buttons": 5,
+      "callouts": 2
+    },
+    "after": {
+      "scrollHeight": 867,
+      "screens": 1.03,
+      "totalsY": 220,
+      "resultsY": null,
+      "cards": 4,
+      "buttons": 14,
+      "callouts": 0
+    }
+  }
+]
