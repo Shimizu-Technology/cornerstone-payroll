@@ -136,11 +136,11 @@ it('shows lifecycle instants in Guam across a non-Guam midnight boundary while r
       payment_resolutions: [{ ...savedMatch, status: 'matched', original_report: { ...savedMatch.original_report, attested_at: instant } }] });
     const user = userEvent.setup();
     render(<AirePaymentEvidenceHolds payPeriodId={12} onChanged={vi.fn()} />);
-    await screen.findByText(/Reported Sep 19, 2026, 1:30:00 AM GMT\+10/);
-    expect(screen.getByText(/resolved Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    await screen.findByText(/Reported Sep 19, 2026, 1:30:00 AM ChST/);
+    expect(screen.getByText(/resolved Sep 19, 2026, 1:30:00 AM ChST/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Match existing payment' }));
     await user.selectOptions(screen.getByLabelText('Existing issued payroll payment'), '88');
-    expect(screen.getByText(/Scheduled pay date Sep 18, 2026 · payment date Sep 18, 2026 · evidence recorded Sep 19, 2026, 1:30:00 AM GMT\+10/)).toBeTruthy();
+    expect(screen.getByText(/Scheduled pay date Sep 18, 2026 · payment date Sep 18, 2026 · evidence recorded Sep 19, 2026, 1:30:00 AM ChST/)).toBeTruthy();
     expect(screen.getByText(/Synthetic Worker · Sep 3, 2026 · 4.00 hours/)).toBeTruthy();
   } finally {
     if (originalTimezone == null) delete process.env.TZ;

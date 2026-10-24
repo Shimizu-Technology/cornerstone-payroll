@@ -52,10 +52,10 @@ export function formatGuamDateTime(dateString?: string | null, options?: Intl.Da
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
-    timeZoneName: 'short',
     ...options,
     timeZone: 'Pacific/Guam',
-  }).format(new Date(dateString));
+    timeZoneName: undefined,
+  }).format(new Date(dateString)) + ' ChST';
 }
 
 export function formatGuamDateTimeShort(dateString?: string | null): string {
@@ -67,8 +67,7 @@ export function formatGuamDateTimeShort(dateString?: string | null): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-    timeZoneName: 'short',
-  }).format(new Date(dateString));
+  }).format(new Date(dateString)) + ' ChST';
 }
 
 /**
@@ -160,23 +159,23 @@ export function calculateGrossPay(
 export const payPeriodStatusConfig = {
   draft: {
     label: 'Draft',
-    color: 'bg-gray-100 text-gray-800',
-    dotColor: 'bg-gray-400',
+    color: 'bg-neutral-100 text-neutral-800',
+    dotColor: 'bg-neutral-400',
   },
   calculated: {
     label: 'Calculated',
-    color: 'bg-yellow-100 text-yellow-800',
-    dotColor: 'bg-yellow-400',
+    color: 'bg-warning-100 text-warning-800',
+    dotColor: 'bg-warning-400',
   },
   approved: {
     label: 'Approved',
-    color: 'bg-blue-100 text-blue-800',
-    dotColor: 'bg-blue-400',
+    color: 'bg-primary-100 text-primary-800',
+    dotColor: 'bg-primary-400',
   },
   committed: {
     label: 'Committed',
-    color: 'bg-green-100 text-green-800',
-    dotColor: 'bg-green-400',
+    color: 'bg-success-100 text-success-800',
+    dotColor: 'bg-success-400',
   },
 };
 
@@ -186,15 +185,15 @@ export const payPeriodStatusConfig = {
 export const employeeStatusConfig = {
   active: {
     label: 'Active',
-    color: 'bg-green-100 text-green-800',
+    color: 'bg-success-100 text-success-800',
   },
   inactive: {
     label: 'Inactive',
-    color: 'bg-gray-100 text-gray-800',
+    color: 'bg-neutral-100 text-neutral-800',
   },
   terminated: {
     label: 'Terminated',
-    color: 'bg-red-100 text-red-800',
+    color: 'bg-danger-100 text-danger-800',
   },
 };
 

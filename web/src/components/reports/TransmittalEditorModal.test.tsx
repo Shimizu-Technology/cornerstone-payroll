@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import userEvent from '@testing-library/user-event';
 import { TransmittalEditorModal } from './ReportsDownloadPanel';
 const api = vi.hoisted(() => ({ preview: vi.fn() }));
 vi.mock('@/services/api', () => ({ transmittalApi: api, reportsApi: {} }));
@@ -51,4 +53,33 @@ it('submits an explicitly cleared final non-employee check override', async () =
   fireEvent.change(await screen.findByDisplayValue('MANUAL987'), { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: 'Generate Full Print Package' }));
   expect(generate.mock.calls[0][0].nonEmployeeCheckNumbers).toEqual({ 8: '' });
+});
+
+it('gives the package editor the shared modal focus contract and restores its trigger', async () => {
+  api.preview.mockResolvedValue(preview);
+  vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; });
+  const user = userEvent.setup();
+  function Package(): React.ReactElement {
+    const [open, setOpen] = useState(false);
+    return <><button onClick={() => setOpen(true)}>Edit package</button><TransmittalEditorModal open={open} onClose={() => setOpen(false)} onGenerate={vi.fn()} targetLabel="Full Print Package" fixedReports payPeriodId={2} onOpenForm500={vi.fn()} /></>;
+  }
+  const { container } = render(<Package />);
+  const trigger = screen.getByRole('button', { name: 'Edit package' });
+  await user.click(trigger);
+  const dialog = screen.getByRole('dialog', { name: 'Edit Full Print Package' });
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  await screen.findByDisplayValue('Saved preparer');
+  await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+  expect(container.closest('[inert]')).not.toBeNull();
+  const close = within(dialog).getByRole('button', { name: 'Close Full Print Package editor' });
+  close.focus();
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Generate Full Print Package' }));
+  await user.tab();
+  expect(document.activeElement).toBe(close);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(document.activeElement).toBe(trigger);
+  expect(container.closest('[inert]')).toBeNull();
+  vi.restoreAllMocks();
 });

@@ -162,7 +162,7 @@ const emptyBillingProfileForm = (): BillingProfileFormState => ({
 });
 
 const statusColors: Record<InvoiceStatus, string> = {
-  draft: 'bg-gray-100 text-gray-700',
+  draft: 'bg-neutral-100 text-neutral-700',
   open: 'bg-blue-100 text-blue-700',
   partially_paid: 'bg-violet-100 text-violet-700',
   overdue: 'bg-amber-100 text-amber-800',
@@ -1356,17 +1356,17 @@ export function InvoiceMaker() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
-                    <p className="truncate text-xs text-neutral-500">
+                    <p className="truncate text-xs text-neutral-600">
                       {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
                     </p>
                   </div>
                   <Badge className={statusColors[invoice.status]}>{invoiceStatusLabel(invoice.status)}</Badge>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
+                <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
                   <span>{formatDateOnly(invoice.invoice_date)}</span>
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
                 </div>
-                <div className="mt-1 text-[11px] text-neutral-400">
+                <div className="mt-1 text-xs text-neutral-600">
                   {invoice.generated_at ? `Issued ${formatDateOnly(invoice.generated_at)}` : 'Draft not issued'}
                   {invoice.archived_at ? ` · Archived ${formatDateOnly(invoice.archived_at)}` : ''}
                 </div>
@@ -1437,7 +1437,7 @@ export function InvoiceMaker() {
               className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
             >
               <span className="font-medium text-neutral-900">{recipient.name}</span>
-              <span className="block truncate text-xs text-neutral-500">{recipient.email || recipient.payment_terms || 'No defaults set'}</span>
+              <span className="block truncate text-xs text-neutral-600">{recipient.email || recipient.payment_terms || 'No defaults set'}</span>
             </button>
           ))}
         </div>
@@ -1486,8 +1486,8 @@ export function InvoiceMaker() {
             <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
             <div className="rounded-xl border border-neutral-200 bg-white p-3">
               <div className="flex items-center gap-2 text-sm font-medium text-neutral-900"><ImagePlus className="h-4 w-4 text-primary-700" />Invoice logo</div>
-              <p className="mt-1 text-xs leading-relaxed text-neutral-500">Optional PNG or JPEG, up to 1 MB. It appears on new PDF previews and issued invoices. Existing issued PDFs keep their original appearance.</p>
-              <label className="mt-3 block text-sm font-medium text-neutral-700">Choose logo
+              <p className="mt-1 text-xs leading-relaxed text-neutral-600">Optional PNG or JPEG, up to 1 MB. It appears on new PDF previews and issued invoices. Existing issued PDFs keep their original appearance.</p>
+              <label className="mt-3 block text-xs font-medium text-neutral-600">Choose logo
                 <input type="file" accept="image/png,image/jpeg" className="mt-1 block w-full text-sm" onChange={(event) => {
                   const file = event.target.files?.[0] || null;
                   if (file && (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 1_048_576)) {
@@ -1507,7 +1507,7 @@ export function InvoiceMaker() {
                 </div>
               )}
             </div>
-            <label className="flex items-center gap-2 text-sm text-neutral-600">
+            <label className="flex items-center gap-2 text-xs text-neutral-600">
               <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
               Use as default profile
             </label>
@@ -1529,8 +1529,8 @@ export function InvoiceMaker() {
               className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
             >
               <span className="font-medium text-neutral-900">{profile.name}</span>
-              {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">Default</span>}
-              <span className="block truncate text-xs text-neutral-500">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'}</span>
+              {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">Default</span>}
+              <span className="block truncate text-xs text-neutral-600">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'}</span>
             </button>
           ))}
         </div>
@@ -1674,7 +1674,7 @@ export function InvoiceMaker() {
                   <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
-                      <p className="text-xs text-neutral-500">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
+                      <p className="text-xs text-neutral-600">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
                     </div>
                     <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceStatusLabel(invoiceForm.status || 'draft')}</Badge>
                   </div>
@@ -1684,9 +1684,9 @@ export function InvoiceMaker() {
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {invoiceLifecycle.map((event) => (
                         <div key={`${event.label}-${event.value}`} className="rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{event.label}</p>
+                          <p className="text-xs font-semibold text-neutral-600">{event.label}</p>
                           <p className="mt-1 text-sm font-medium text-neutral-800">{formatDateTime(event.value)}</p>
-                          {event.actor && <p className="text-xs text-neutral-500">by {event.actor}</p>}
+                          {event.actor && <p className="text-xs text-neutral-600">by {event.actor}</p>}
                         </div>
                       ))}
                     </div>
@@ -1760,7 +1760,7 @@ export function InvoiceMaker() {
 
               <div className="space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
+                  <h3 className="text-sm font-semibold text-neutral-600">Line Items</h3>
                   <div className="flex items-center justify-between gap-3 sm:justify-start">
                     <span className="text-sm font-medium text-neutral-700">{currency(invoiceSubtotal)}</span>
                     <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
@@ -1779,7 +1779,7 @@ export function InvoiceMaker() {
                     {activeLineItems.map((item, index) => (
                       <div key={item.local_id} className="rounded-xl border border-neutral-200 bg-white p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
-                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">Line {index + 1}</span>
+                          <span className="text-xs font-semibold text-neutral-600">Line {index + 1}</span>
                           <button
                             type="button"
                             onClick={() => removeLineItem(item.local_id)}
@@ -1819,7 +1819,7 @@ export function InvoiceMaker() {
 
               <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-4">
                 <h3 className="text-sm font-semibold text-neutral-900">Discount</h3>
-                <p className="mt-1 text-xs text-neutral-500">Applied to the subtotal when this draft is issued.</p>
+                <p className="mt-1 text-xs text-neutral-600">Applied to the subtotal when this draft is issued.</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Type</span>
@@ -1859,7 +1859,7 @@ export function InvoiceMaker() {
                       <Mail className="h-4 w-4 text-primary-600" />
                       Email Draft
                     </h3>
-                    <p className="text-xs text-neutral-500">Used when you send the issued invoice from Invoice Center. You can also copy it for manual delivery.</p>
+                    <p className="text-xs text-neutral-600">Used when you send the issued invoice from Invoice Center. You can also copy it for manual delivery.</p>
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={copyEmail} disabled={!invoiceForm.email_subject && !invoiceForm.email_body}>
                     <Copy className="mr-1.5 h-4 w-4" />
@@ -1877,7 +1877,7 @@ export function InvoiceMaker() {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <span className="text-sm font-medium text-neutral-700">Official invoice lifecycle</span>
-                      <p className="text-xs text-neutral-500">Issued invoice records are immutable here. Manage payments, credits, delivery, archival, and collection status in Invoice Center.</p>
+                      <p className="text-xs text-neutral-600">Issued invoice records are immutable here. Manage payments, credits, delivery, archival, and collection status in Invoice Center.</p>
                     </div>
                     <Link
                       to="/tools/invoices"
@@ -1996,7 +1996,7 @@ export function InvoiceMaker() {
                                 <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
                                 <div>
                                   <p className="font-medium text-neutral-800">Preparing invoice preview</p>
-                                  <p className="text-xs text-neutral-500">Reading the request and matching saved bill-to profiles.</p>
+                                  <p className="text-xs text-neutral-600">Reading the request and matching saved bill-to profiles.</p>
                                 </div>
                               </div>
                             ) : (
@@ -2176,7 +2176,7 @@ export function InvoiceMaker() {
                 ) : activePreview?.status === 'preview' ? (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                      <p className="text-xs font-semibold text-neutral-600">
                         From {previewBillingProfileName(activePreview)}
                       </p>
                       <p className="text-sm font-semibold text-neutral-900">
@@ -2188,7 +2188,7 @@ export function InvoiceMaker() {
                         </p>
                       )}
                       <p className="mt-1 text-2xl font-semibold text-neutral-900">{currency(previewTotal(activePreview))}</p>
-                      <p className="mt-1 text-xs text-neutral-500">
+                      <p className="mt-1 text-xs text-neutral-600">
                         Preview v{activeChatSession?.current_preview_version}
                         {activePreview.invoice_date ? ` · ${formatDateOnly(activePreview.invoice_date)}` : ''}
                       </p>
@@ -2200,7 +2200,7 @@ export function InvoiceMaker() {
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium text-neutral-900">{item.description}</p>
-                              <p className="text-xs text-neutral-500">
+                              <p className="text-xs text-neutral-600">
                                 {Number(item.quantity || 0)} x {currency(Number(item.rate || 0))}
                               </p>
                             </div>
@@ -2214,7 +2214,7 @@ export function InvoiceMaker() {
 
                     {(activePreview.email_subject || activePreview.email_body) && (
                       <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Email draft</p>
+                        <p className="text-xs font-semibold text-neutral-600">Email draft</p>
                         {activePreview.email_subject && <p className="mt-2 text-sm font-medium text-neutral-900">{activePreview.email_subject}</p>}
                         {activePreview.email_body && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-neutral-600">{activePreview.email_body}</p>}
                       </div>
@@ -2255,7 +2255,7 @@ export function InvoiceMaker() {
                     New
                   </Button>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-neutral-600">
+                <label className="flex items-center gap-2 text-xs text-neutral-600">
                   <input
                     type="checkbox"
                     checked={showArchivedChatSessions}
@@ -2286,7 +2286,7 @@ export function InvoiceMaker() {
                               <p className="truncate text-sm font-semibold text-neutral-900">
                                 {session.invoice_number || session.recipient_name || session.title}
                               </p>
-                              <p className="truncate text-xs text-neutral-500">
+                              <p className="truncate text-xs text-neutral-600">
                                 {session.message_count} message{session.message_count === 1 ? '' : 's'}
                               </p>
                             </div>
@@ -2295,7 +2295,7 @@ export function InvoiceMaker() {
                             </Badge>
                           </div>
                         </button>
-                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500">
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-600">
                           <span>{new Date(session.updated_at).toLocaleDateString()}</span>
                           {session.archived ? (
                             <button
