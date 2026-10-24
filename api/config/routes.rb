@@ -302,6 +302,10 @@ Rails.application.routes.draw do
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
             get :exceptions
+            get :late_hours
+            post :late_hours, action: :pay_late_hours
+            post "late_hours/:late_hours_run_id/retry", action: :retry_late_hours
+            post "late_hours/:late_hours_run_id/cancel", action: :cancel_late_hours
             get :settlement_cases
             post :employee_mapping, action: :confirm_employee_mapping
             post :finalize
@@ -321,6 +325,10 @@ Rails.application.routes.draw do
             post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
             get :exceptions
+            get :late_hours
+            post :late_hours, action: :pay_late_hours
+            post "late_hours/:late_hours_run_id/retry", action: :retry_late_hours
+            post "late_hours/:late_hours_run_id/cancel", action: :cancel_late_hours
             get :settlement_cases
             post :employee_mapping, action: :confirm_employee_mapping
             post :finalize

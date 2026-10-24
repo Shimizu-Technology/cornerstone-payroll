@@ -91,7 +91,7 @@ module TimeTracking
           time_tracking_import: import,
           status: "committed",
           occurred_at: pay_period.committed_at || import.reconciled_at
-        ).id
+        ).id unless import.supplemental_batch?
         ids[:entries].concat(record_entry_lifecycle!.map(&:id))
 
         { reconciled: linked, rounding_exceptions: rounding_exceptions, errors: [] }

@@ -154,6 +154,37 @@ module TimeTracking
       )
     end
 
+    def payroll_cockpit_late_hours(external_pay_period_id:)
+      require_capability!(:payroll_cockpit)
+      uri = source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}/late_hours")
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def create_payroll_late_hours(external_pay_period_id:, **payload)
+      require_capability!(:payroll_cockpit)
+      uri = source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}/late_hours")
+      delegated_request_json(uri, body: payload)
+    end
+
+    def recover_payroll_late_hours(external_pay_period_id:, source_command_id:, **payload)
+      late_hours_resolution(external_pay_period_id, source_command_id, "recover", payload)
+    end
+
+    def cancel_payroll_late_hours(external_pay_period_id:, source_command_id:, **payload)
+      late_hours_resolution(external_pay_period_id, source_command_id, "cancel", payload)
+    end
+
+    def late_hours_resolution(external_pay_period_id, source_command_id, action, payload)
+      require_capability!(:payroll_cockpit)
+      unless source_command_id.to_s.match?(/\A[0-9a-f-]{36}\z/i)
+        raise Error, "Invalid late-hours source command"
+      end
+      uri = source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}/late_hours/#{source_command_id}/#{action}")
+      delegated_request_json(uri, body: payload)
+    end
+    private :late_hours_resolution
+
     def payroll_cockpit_period(external_pay_period_id:)
       require_capability!(:payroll_cockpit)
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
@@ -618,7 +649,7 @@ module TimeTracking
       raise Error, "#{@source.name} returned invalid JSON"
     rescue DestinationPolicy::Error => e
       raise Error, "#{@source.name} destination rejected: #{e.message}"
-    rescue Timeout::Error, SystemCallError, SocketError, Net::OpenTimeout, Net::ReadTimeout,
+    rescue Timeout::Error, SystemCallError, SocketError, IOError, Net::OpenTimeout, Net::ReadTimeout,
            OpenSSL::SSL::SSLError
       raise Error, "Could not securely reach #{@source.name}"
     end

@@ -152,6 +152,42 @@ module Api
           render_source_error(e)
         end
 
+        def late_hours
+          render json: late_hours_service.review
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def pay_late_hours
+          permitted = params.permit(:command_id, :pay_date, :expected_version, cases: [ :id, :version ])
+          run = late_hours_service.create!(**permitted.to_h.symbolize_keys)
+          render json: { late_hours_run: late_hours_service.present(run) }, status: :created
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid, PayrollGoLiveGate::BlockedError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_late_hours
+          run = late_hours_service.retry!(params[:late_hours_run_id])
+          render json: { late_hours_run: late_hours_service.present(run) }
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid, PayrollGoLiveGate::BlockedError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def cancel_late_hours
+          run = late_hours_service.cancel!(params[:late_hours_run_id], reason: params.require(:reason))
+          render json: { late_hours_run: late_hours_service.present(run) }
+        rescue ActionController::ParameterMissing, TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def settlement_cases
           payload = cockpit_client.payroll_cockpit_settlement_cases(
             external_pay_period_id: external_pay_period_id,
@@ -376,6 +412,10 @@ module Api
         end
 
         private
+
+        def late_hours_service
+          @late_hours_service ||= TimeTracking::LateHoursRunService.new(pay_period: @pay_period, source: @source, actor: current_user)
+        end
 
         def payment_resolution_service
           @payment_resolution_service ||= TimeTracking::PaymentAttestationResolutionService.new(
