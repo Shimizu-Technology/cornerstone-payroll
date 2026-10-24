@@ -45,7 +45,7 @@ Automated coverage includes the exact two-bucket case; 101 buckets; signed curre
 
 Final engineering-gate counts and reviewer status are recorded in the PR and the task output's `RESULT.md`. An early full suite loaded the superseded aggregate-rounding fixture and failed that one expectation ($0.05 versus $0.06); the shared fixture was updated to the new line policy before the final full suite. An initial Node 26 frontend run was invalid for the pinned toolchain. A browser run interrupted by dependency reinstallation was discarded and its fixture rebuilt. Those logs are retained separately.
 
-## Final engineering gate
+## Original implementation engineering gate
 
 | Check | Result |
 | --- | --- |
@@ -63,3 +63,15 @@ Final engineering-gate counts and reviewer status are recorded in the PR and the
 | Pay-items E2E | 24 passed |
 
 API gate logs use the `final-` prefix; combined web/public logs use `rebased-`; release/refresh/items logs are the final unprefixed files. `gates.jsonl` retains all attempts. Required acceptance has no remaining local blocker. CodeRabbit/CI status and the final process/database cleanup receipt are reported separately in `RESULT.md`; no merge or deploy was performed by this worker.
+
+## Review follow-up: custom earning input compatibility
+
+The follow-up to CodeRabbit comment `4366994692` starts from reviewed head `aa5456ff`. `PayrollEarningsRounding.line_amount` now retains exact decimal parsing for valid finite amounts and falls back to the legacy `to_f` conversion for other inputs. Blank, nil, non-numeric, `"NaN"` and `"Infinity"` custom amounts therefore calculate as zero; numeric-prefix strings retain their previous numeric value. The original custom earning input is preserved. Captured wage inputs, the rounding policy and historical committed amounts are unchanged.
+
+The caller audit found raw custom JSON in `custom_earnings_total`; wage and saved-line callers supply computed numeric components, and custom saved-line construction already uses `to_f`. The frozen-source guard validates finite hours and rates before multiplication and the rounding call, so this fallback does not weaken source validation.
+
+Twelve new integration regressions cover six input forms for both hourly employees and hourly contractors. Each calculates, saves and reloads the split-bucket item, then checks taxable earnings, gross, additions, deductions/net, saved custom lines and unchanged input. Failing-first evidence: `review-fix-red.log` (8 examples / 8 failures), followed by `review-fix-nonfinite-red.log` (4 examples / 4 failures). The final affected suite passes **153 examples / 0 failures** (`review-fix-focused-final.log`). The first full-suite attempt was deliberately interrupted after 1,391 examples / 0 failures to add the four nonfinite-string cases; it is not counted as a complete gate.
+
+The complete follow-up backend gate passes: schema load and `db:integrity`; RuboCop **1,502 files / 0 offenses**; full RSpec **5,287 examples / 0 failures**; Brakeman **0 errors / 0 warnings**; bundler-audit **0 vulnerabilities / 1,269 advisories checked**. Logs use the `review-fix-final-` prefix; all six command exits are zero in `gates.jsonl`.
+
+This follow-up changes no web files. The desktop/phone saved-outcome evidence and frontend gates above belong to the original implementation and were not rerun for this backend input compatibility fix. CodeRabbit was not requested again; the existing thread receives the fix and verification results after push.

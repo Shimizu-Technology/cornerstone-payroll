@@ -9,7 +9,11 @@ module PayrollEarningsRounding
   MESSAGE = "Saved earnings do not reconcile to gross and net pay. Recalculate this payroll before approval or commitment."
 
   def self.line_amount(amount)
-    BigDecimal(amount.to_s).round(2, :half_up)
+    # Custom earning inputs historically use to_f, including blank/nil and
+    # non-numeric values. Keep valid decimals exact and retain that fallback.
+    decimal = BigDecimal(amount.to_s, exception: false)
+    decimal = amount.to_f.to_d unless decimal&.finite?
+    decimal.round(2, :half_up)
   end
 
   def self.taxable_total(item)
