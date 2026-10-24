@@ -441,8 +441,9 @@ export default function TaxConfigs() {
               {loadingDetailId && <span className="ml-2 inline-block w-4 h-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600 align-middle" />}
             </h2>
             <button
+              aria-label="Close tax configuration"
               onClick={() => setSelectedConfig(null)}
-              className="text-neutral-600 hover:text-neutral-600"
+              className="text-neutral-600 hover:text-neutral-900"
             >
               ✕
             </button>
@@ -473,7 +474,7 @@ export default function TaxConfigs() {
                   </button>
                   <button
                     onClick={saveGlobalConfig}
-                    className="inline-flex items-center text-sm text-success-800 hover:text-green-800"
+                    className="inline-flex items-center text-sm text-success-800 hover:text-success-900"
                     disabled={saving}
                   >
                     <Save className="h-4 w-4 mr-1" />
@@ -485,11 +486,12 @@ export default function TaxConfigs() {
             
             <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-5">
               <div>
-                <label className="block text-xs font-medium text-neutral-600">
+                <label htmlFor="tax-ss_wage_base" className="block text-xs font-medium text-neutral-600">
                   SS wage base
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-ss_wage_base"
                     value={editableConfig.ss_wage_base}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_wage_base: value ?? 0 })}
                     fixedDecimalsOnBlur={2}
@@ -502,11 +504,12 @@ export default function TaxConfigs() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-neutral-600">
+                <label htmlFor="tax-ss_rate" className="block text-xs font-medium text-neutral-600">
                   SS rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-ss_rate"
                     value={editableConfig.ss_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
@@ -519,11 +522,12 @@ export default function TaxConfigs() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-neutral-600">
+                <label htmlFor="tax-medicare_rate" className="block text-xs font-medium text-neutral-600">
                   Medicare rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-medicare_rate"
                     value={editableConfig.medicare_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, medicare_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
@@ -536,11 +540,12 @@ export default function TaxConfigs() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-neutral-600">
+                <label htmlFor="tax-additional_medicare_rate" className="block text-xs font-medium text-neutral-600">
                   Add'l Medicare rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-additional_medicare_rate"
                     value={editableConfig.additional_medicare_rate}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_rate: value ?? 0 })}
                     fixedDecimalsOnBlur={3}
@@ -553,11 +558,12 @@ export default function TaxConfigs() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-neutral-600">
+                <label htmlFor="tax-additional_medicare_threshold" className="block text-xs font-medium text-neutral-600">
                   Add'l Medicare threshold
                 </label>
                 {isEditingGlobal && editableConfig ? (
                   <NumericInput
+                    id="tax-additional_medicare_threshold"
                     value={editableConfig.additional_medicare_threshold}
                     onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_threshold: value ?? 0 })}
                     fixedDecimalsOnBlur={2}
@@ -583,14 +589,16 @@ export default function TaxConfigs() {
                   <div className="flex items-center space-x-4">
                     {editingFilingStatus === fs.filing_status ? (
                       <div className="flex items-center space-x-2">
-                        <span className="text-sm text-neutral-600">Standard Deduction: $</span>
+                        <label htmlFor={`standard-deduction-${fs.id}`} className="text-xs font-medium text-neutral-600">Standard deduction ($)</label>
                         <NumericInput
+                          id={`standard-deduction-${fs.id}`}
                           value={editableStandardDeduction}
                           onValueChange={(value) => setEditableStandardDeduction(value ?? 0)}
                           fixedDecimalsOnBlur={2}
                           className="w-32"
                         />
                         <button
+                          aria-label={`Cancel ${formatFilingStatus(fs.filing_status)} deduction edit`}
                           onClick={() => setEditingFilingStatus(null)}
                           className="text-neutral-600 hover:text-neutral-800"
                           disabled={saving}
@@ -598,8 +606,9 @@ export default function TaxConfigs() {
                           <X className="h-4 w-4" />
                         </button>
                         <button
+                          aria-label={`Save ${formatFilingStatus(fs.filing_status)} deduction`}
                           onClick={saveFilingStatus}
-                          className="text-success-800 hover:text-green-800"
+                          className="text-success-800 hover:text-success-900"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4" />
@@ -685,7 +694,7 @@ export default function TaxConfigs() {
                         </button>
                         <button
                           onClick={saveBrackets}
-                          className="inline-flex items-center text-sm text-success-800 hover:text-green-800"
+                          className="inline-flex items-center text-sm text-success-800 hover:text-success-900"
                           disabled={saving}
                         >
                           <Save className="h-4 w-4 mr-1" />
@@ -706,6 +715,7 @@ export default function TaxConfigs() {
                           <tr key={bracket.bracket_order} className="text-sm">
                             <td className="py-2">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} rate (%)`}
                                 value={bracket.rate * 100}
                                 onValueChange={(value) => updateBracket(bracket.bracket_order, 'rate', (value ?? 0) / 100)}
                                 fixedDecimalsOnBlur={1}
@@ -715,6 +725,7 @@ export default function TaxConfigs() {
                             </td>
                             <td className="py-2 text-right">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} minimum income`}
                                 value={bracket.min_income}
                                 onValueChange={(value) => updateBracket(bracket.bracket_order, 'min_income', value ?? 0)}
                                 fixedDecimalsOnBlur={2}
@@ -723,6 +734,7 @@ export default function TaxConfigs() {
                             </td>
                             <td className="py-2 text-right">
                               <NumericInput
+                                aria-label={`${formatFilingStatus(fs.filing_status)} bracket ${bracket.bracket_order} maximum income`}
                                 value={bracket.max_income}
                                 emptyValue={null}
                                 placeholder="∞"
@@ -758,10 +770,11 @@ export default function TaxConfigs() {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-neutral-700">
+                <label htmlFor="new-tax-year" className="block text-xs font-medium text-neutral-600">
                   Tax year
                 </label>
                 <NumericInput
+                  id="new-tax-year"
                   value={newYear}
                   onValueChange={(value) => setNewYear(Math.round(value ?? new Date().getFullYear() + 1))}
                   fixedDecimalsOnBlur={0}
@@ -771,13 +784,14 @@ export default function TaxConfigs() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-700">
-                  Copy From (optional)
+                <label htmlFor="copy-tax-year" className="block text-xs font-medium text-neutral-600">
+                  Copy from (optional)
                 </label>
                 <select
+                  id="copy-tax-year"
                   value={copyFromYear || ''}
                   onChange={(e) => setCopyFromYear(e.target.value ? parseInt(e.target.value) : null)}
-                  className="mt-1 block w-full rounded-md border-neutral-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-md border-neutral-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-base sm:text-sm"
                 >
                   <option value="">Start from scratch</option>
                   {configs.map((c) => (
@@ -831,8 +845,9 @@ export default function TaxConfigs() {
                 Change History
               </h3>
               <button
+                aria-label="Close tax configuration history"
                 onClick={() => setShowAuditModal(false)}
-                className="text-neutral-600 hover:text-neutral-600"
+                className="text-neutral-600 hover:text-neutral-900"
               >
                 ✕
               </button>

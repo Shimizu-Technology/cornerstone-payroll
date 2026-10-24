@@ -425,7 +425,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             {!collapsed && (
               <>
                 <span className="text-xs">Command menu</span>
-                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-600">
+                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900">
                   {platformShortcut('K')}
                 </span>
               </>
@@ -452,7 +452,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               : <>
                   <PanelLeftClose className="h-4 w-4" />
                   <span className="text-xs">Collapse</span>
-                  <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-600">
+                  <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900">
                     {platformShortcut('B')}
                   </span>
                 </>

@@ -4,11 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ReportsDownloadPanel } from './ReportsDownloadPanel';
-const api = vi.hoisted(() => ({ preview: vi.fn(), defaults: vi.fn(), pdf: vi.fn(), signoff: vi.fn(), formPdf: vi.fn() }));
-vi.mock('@/services/api', () => ({ transmittalApi: { preview: api.preview }, form500Api: { defaults: api.defaults, preview: api.formPdf }, reportsApi: { fullPrintPackagePdf: api.pdf, checkSignoffPreview: api.signoff } }));
+const api = vi.hoisted(() => ({ preview: vi.fn(), defaults: vi.fn(), pdf: vi.fn(), signoff: vi.fn(), formPdf: vi.fn(), signoffPdf: vi.fn() }));
+vi.mock('@/services/api', () => ({ transmittalApi: { preview: api.preview }, form500Api: { defaults: api.defaults, preview: api.formPdf }, reportsApi: { fullPrintPackagePdf: api.pdf, checkSignoffPreview: api.signoff, checkSignoffPdf: api.signoffPdf } }));
 const preview = { company: { name: 'Synthetic' }, payroll_checks: { numbers: [], count: 0 }, non_employee_checks: [], tax_totals: { fit: 20, total_fica: 10 }, saved_transmittal: { notes: [], report_list: [], payroll_check_numbers: [], custom_entries: [] } };
 beforeEach((): void => {
-  api.preview.mockResolvedValue(preview);api.signoff.mockResolvedValue({});api.defaults.mockResolvedValue({data:{company_name:'Synthetic',tax_year:'2026',tax_period_quarter:4}});api.pdf.mockResolvedValue({blob:new Blob(['pdf']),filename:'package.pdf'});
+  api.preview.mockResolvedValue(preview);api.signoff.mockResolvedValue({company_name:'Synthetic',entries:[{name:'Example, Avery',check_number:'101'}],saved_signoff:null});api.defaults.mockResolvedValue({data:{company_name:'Synthetic',tax_year:'2026',tax_period_quarter:4}});api.pdf.mockResolvedValue({blob:new Blob(['pdf']),filename:'package.pdf'});
   vi.spyOn(HTMLElement.prototype,'offsetParent','get').mockImplementation(function(this:HTMLElement): Element | null { return this.parentElement; });
   vi.stubGlobal('URL', {createObjectURL:vi.fn(()=> 'blob:synthetic'),revokeObjectURL:vi.fn()});
 });
@@ -49,4 +49,29 @@ it('returns focus when a generating preview is cancelled and ignores its late PD
  await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
  finish({blob:new Blob(['late pdf']),filename:'late.pdf'});await waitFor(()=>expect(URL.createObjectURL).not.toHaveBeenCalled());
+});
+
+it('names the sign-off editor, contains focus, and returns to its opener on close or Escape', async (): Promise<void> => {
+ const user=userEvent.setup();render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
+ const row=screen.getByText('Check Sign-Off Sheet',{exact:true}).parentElement!.parentElement!;
+ const trigger=within(row).getByRole('button',{name:'View'});await user.click(trigger);
+ const dialog=await screen.findByRole('dialog',{name:'Edit Check Sign-Off Sheet'});
+ await within(dialog).findByDisplayValue('Example, Avery');await waitFor(()=>expect(dialog.contains(document.activeElement)).toBe(true));
+ expect(trigger.closest('[inert]')).not.toBeNull();await user.tab({shift:true});expect(dialog.contains(document.activeElement)).toBe(true);
+ await user.click(within(dialog).getByRole('button',{name:'Close check sign-off editor'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(document.activeElement).toBe(trigger);
+ await user.click(trigger);await screen.findByRole('dialog');await user.keyboard('{Escape}');
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(document.activeElement).toBe(trigger);
+});
+
+it('hands sign-off generation to its preview after exit and ignores a cancelled late PDF',async():Promise<void>=>{
+ let finish!:(value:{blob:Blob;filename:string})=>void;api.signoffPdf.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ const user=userEvent.setup();render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
+ const row=screen.getByText('Check Sign-Off Sheet',{exact:true}).parentElement!.parentElement!;const trigger=within(row).getByRole('button',{name:'View'});
+ await user.click(trigger);const editor=await screen.findByRole('dialog',{name:'Edit Check Sign-Off Sheet'});await within(editor).findByDisplayValue('Example, Avery');
+ await user.click(within(editor).getByRole('button',{name:'Generate Sign-Off Sheet'}));expect(api.signoffPdf).not.toHaveBeenCalled();
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Edit Check Sign-Off Sheet'})).toBeNull());
+ const pdf=await screen.findByRole('dialog',{name:'Check Sign-Off Sheet'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
+ await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
+ finish({blob:new Blob(['late signoff']),filename:'signoff.pdf'});await waitFor(()=>expect(URL.createObjectURL).not.toHaveBeenCalled());
 });
