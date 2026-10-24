@@ -40,3 +40,13 @@ it('returns from an asynchronously generated Form 500 preview to its disabled-wh
  const pdf=await screen.findByRole('dialog',{name:'Form 500 Preview'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
  await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Form 500 Preview'})).toBeNull());expect(document.activeElement).toBe(trigger);
 });
+
+it('returns focus when a generating preview is cancelled and ignores its late PDF result', async (): Promise<void> => {
+ let finish!: (value: {blob: Blob; filename: string}) => void;
+ api.pdf.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+ const {user,trigger,dialog}=await openPackage();await user.click(within(dialog).getByRole('button',{name:'Generate Full Print Package'}));
+ const pdf=await screen.findByRole('dialog',{name:'Full Print Package'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
+ await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
+ finish({blob:new Blob(['late pdf']),filename:'late.pdf'});await waitFor(()=>expect(URL.createObjectURL).not.toHaveBeenCalled());
+});

@@ -1122,6 +1122,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   const navigate = useNavigate();
   const transmittalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pendingTransmittalPreview = useRef<(() => void) | null>(null);
+  const previewRequest = useRef(0);
+  useEffect(() => () => { previewRequest.current += 1; }, [payPeriodId]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [payrollPreviewState, setPayrollPreviewState] = useState<{
@@ -1171,11 +1173,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
   const cleanupPreview = useCallback(() => {
+    previewRequest.current += 1;
+    if (previewState.key) setLoading(current => ({ ...current, [`${previewState.key}:preview`]: false }));
     if (previewState.pdfUrl) {
       URL.revokeObjectURL(previewState.pdfUrl);
     }
     setPreviewState(current => ({ ...current, open: false }));
-  }, [previewState.pdfUrl]);
+  }, [previewState.pdfUrl, previewState.key]);
 
   const cleanupPayrollPreview = useCallback(() => {
     setPayrollPreviewState({ open: false, loading: false, report: null, error: null });
@@ -1214,19 +1218,22 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     }
 
     const key = loadingKey(reportKey, 'preview');
+    const request = ++previewRequest.current;
     setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
     try {
       const blobData = await fetchReport(reportKey, payPeriodId, payDate, transmittalOpts);
+      if (request !== previewRequest.current) return;
       const url = URL.createObjectURL(blobData.blob);
       setPreviewState(prev => ({ ...prev, pdfUrl: url, blobData }));
     } catch (err) {
+      if (request !== previewRequest.current) return;
       setPreviewState(prev => ({ ...prev, open: false }));
       setError(err instanceof Error ? err.message : 'Failed to generate report');
     } finally {
-      setLoading(prev => ({ ...prev, [key]: false }));
+      if (request === previewRequest.current) setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
