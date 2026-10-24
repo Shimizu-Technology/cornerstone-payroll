@@ -15,14 +15,18 @@ module AirePayrollCalendar
       return publication if publication.is_a?(Hash)
 
       period = publication.aire_payroll_calendar_period
-      response = @client_factory.call(period.time_tracking_source).publish_payroll_calendar_period(
-        external_pay_period_id: period.external_pay_period_id,
-        payload: publication.payload,
-        idempotency_key: publication.publication_id
-      )
-      source_state = response.fetch("payroll_calendar_period")
-      validate_response!(period, publication, source_state)
-      mark_delivered!(publication, source_state)
+      period.time_tracking_source.with_lock do
+        response = @client_factory.call(period.time_tracking_source).publish_payroll_calendar_period(
+          external_pay_period_id: period.external_pay_period_id,
+          payload: publication.payload,
+          idempotency_key: publication.publication_id
+        )
+        source_state = response.fetch("payroll_calendar_period")
+        validate_response!(period, publication, source_state)
+        result = mark_delivered!(publication, source_state)
+        SourceState.new(period.time_tracking_source).record(source_state)
+        result
+      end
     rescue StandardError => e
       mark_failed!(e) if @attempt_claimed
       { publication_id: @publication_id, status: "failed", error: safe_error(e) }

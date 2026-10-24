@@ -125,4 +125,37 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
     expect(AirePayrollCalendarPublication).to have_received(:dispatch_one!).with(publication.id)
     expect(publication.reload.next_delivery_attempt_at).to be_within(2.seconds).of(Time.current)
   end
+  it "lets payroll staff explicitly refresh shared source state and returns both aliases" do
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::AirePayrollCalendarsController).to receive(:current_user).and_return(accountant)
+    calendar = create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period)
+    publication = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar, delivery_status: "delivered")
+    state = { "external_pay_period_id" => calendar.external_pay_period_id, "publication_id" => publication.publication_id,
+      "schedule_version" => 1, "next_scheduled_cutoff_at" => nil }
+    allow_any_instance_of(TimeTracking::Client).to receive(:payroll_calendar_period).and_return("payroll_calendar_period" => state)
+
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar/refresh"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("aire_payroll_calendar")).to include("next_scheduled_cutoff_at" => nil,
+      "next_scheduled_cutoff_status" => "available")
+    expect(response.parsed_body["time_tracking_calendar"]).to eq(response.parsed_body["aire_payroll_calendar"])
+    expect(source.reload.payroll_calendar_source_state["status"]).to eq("available")
+  end
+
+  it "keeps failed refresh distinguishable from no upcoming scheduled cutoff" do
+    create(:aire_payroll_calendar_publication, delivery_status: "delivered",
+      aire_payroll_calendar_period: create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period))
+    allow_any_instance_of(TimeTracking::Client).to receive(:payroll_calendar_period).and_raise(TimeTracking::Client::Error, "Offline")
+    post "/api/v1/admin/pay_periods/#{pay_period.id}/time_tracking_calendar/refresh"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("aire_payroll_calendar")).to include("next_scheduled_cutoff_at" => nil,
+      "next_scheduled_cutoff_status" => "unavailable")
+  end
+
+  it "does not refresh another client's source" do
+    other_period = create(:pay_period)
+    expect_any_instance_of(TimeTracking::Client).not_to receive(:payroll_calendar_period)
+    post "/api/v1/admin/pay_periods/#{other_period.id}/aire_payroll_calendar/refresh"
+    expect(response).to have_http_status(:not_found)
+  end
 end

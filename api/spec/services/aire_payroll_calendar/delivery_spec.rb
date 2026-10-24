@@ -216,4 +216,14 @@ RSpec.describe AirePayrollCalendar::Delivery do
       expect(publication.reload.last_error).to include("does not match")
     end
   end
+  it "refreshes source-wide next-cutoff state from the authenticated publication response" do
+    state = source_state.merge("next_scheduled_cutoff_at" => "2026-11-07T17:00:00+10:00")
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => state)
+    result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+    expect(result[:status]).to eq("delivered")
+    expect(calendar_period.time_tracking_source.reload.payroll_calendar_source_state).to include(
+      "status" => "available", "next_scheduled_cutoff_at" => "2026-11-07T17:00:00+10:00")
+    expect(publication.reload.source_state).to eq(state)
+  end
 end

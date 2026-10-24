@@ -11,6 +11,15 @@ module Api
           render json: { time_tracking_calendar: state, aire_payroll_calendar: state }
         end
 
+        def refresh
+          source = @pay_period.aire_payroll_calendar_period&.time_tracking_source || active_aire_source!
+          AirePayrollCalendar::SourceState.new(source).refresh
+          state = AirePayrollCalendar::Presenter.call(@pay_period.reload)
+          render json: { time_tracking_calendar: state, aire_payroll_calendar: state }
+        rescue AirePayrollCalendar::Publisher::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def publish
           result = AirePayrollCalendar::Publisher.new(
             pay_period: @pay_period,
