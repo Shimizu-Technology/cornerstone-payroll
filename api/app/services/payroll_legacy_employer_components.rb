@@ -15,6 +15,7 @@ class PayrollLegacyEmployerComponents
   end
 
   def self.field_mirror?(item, field, row)
+    return false unless row.deduction_type&.company_id == item.company_id
     return false unless eligible?(item) && field.employer_contribution?
     return false if PayrollComponentMirrors.independent_type_ids(item).include?(row.deduction_type_id)
     return false unless row.deduction_type&.name == field.label && row.deduction_type.category == "employer_contribution"
@@ -33,7 +34,7 @@ class PayrollLegacyEmployerComponents
   end
 
   def self.built_in_mirror?(item, row, field)
-    eligible?(item) && row.deduction_type&.name == row.label && row.amount.to_d == item.public_send(field).to_d &&
+    row.deduction_type&.company_id == item.company_id && eligible?(item) && row.deduction_type.name == row.label && row.amount.to_d == item.public_send(field).to_d &&
       item.payroll_item_field_entries.none? { |entry| entry.active? && entry.label == row.label }
   end
 
