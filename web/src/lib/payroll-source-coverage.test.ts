@@ -5,6 +5,7 @@ const period = { status: 'draft', run_purpose: 'regular', time_tracking: { aire_
 describe('scheduled source coverage', () => {
   it('requires acknowledgement before calculating without imported hours, including a verified batch awaiting import', () => {
     expect(needsSourceCoverageAcknowledgement(period)).toBe(true);
+    expect(needsSourceCoverageAcknowledgement({ ...period, status: 'approved' })).toBe(true);
     expect(needsSourceCoverageAcknowledgement({ ...period, time_tracking: { ...period.time_tracking!, aire_calendar: { ...period.time_tracking!.aire_calendar!, cutoff_state: 'batch_verified' } } })).toBe(true);
   });
   it('leaves imported, manual, special and committed workflows alone', () => {

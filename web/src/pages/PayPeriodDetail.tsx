@@ -395,7 +395,10 @@ export function PayPeriodDetail({
   const [sourceCoverageOpen, setSourceCoverageOpen] = useState(false);
   const [sourceCoverageReason, setSourceCoverageReason] = useState('');
   const [sourceCoverageAcknowledged, setSourceCoverageAcknowledged] = useState(false);
-  const sourceCoverageReasonRef = useRef<string | null>(null);
+  const pendingCoverageActionRef = useRef<{
+    action: 'calculate' | 'refresh'; companyId: number; payRunId: number; generation: number;
+    refreshScope?: { includes_recurring_items: boolean; includes_base_salary: boolean };
+  } | null>(null);
   const [savedImportReloadRequired, setSavedImportReloadRequired] = useState(false);
   const savedImportReloadRequiredRef = useRef(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
@@ -609,6 +612,8 @@ export function PayPeriodDetail({
     setReviewingItem(null);
     setCommitPeriodId(null);
     setRefreshSetupOpen(false);
+    setSourceCoverageOpen(false);
+    pendingCoverageActionRef.current = null;
     if (refreshInFlightRouteRef.current !== null) {
       refreshInFlightRouteRef.current = null;
       setProcessing(false);
@@ -845,12 +850,18 @@ export function PayPeriodDetail({
     }));
   };
 
-  const handleRunPayroll = async () => {
+  type CoverageAcknowledgement = { source_coverage_reason: string; source_coverage_acknowledged: true };
+  const requestSourceCoverage = (action: 'calculate' | 'refresh', refreshScope?: { includes_recurring_items: boolean; includes_base_salary: boolean }) => {
+    pendingCoverageActionRef.current = { action, companyId, payRunId, generation: commitRouteGenerationRef.current, refreshScope };
+    setSourceCoverageReason('');
+    setSourceCoverageAcknowledged(false);
+    setSourceCoverageOpen(true);
+  };
+
+  const handleRunPayroll = async (coverage?: CoverageAcknowledgement) => {
     if (savedImportReloadRequiredRef.current || !payPeriod) return;
-    if (needsSourceCoverageAcknowledgement(payPeriod) && !sourceCoverageReasonRef.current) {
-      setSourceCoverageReason('');
-      setSourceCoverageAcknowledged(false);
-      setSourceCoverageOpen(true);
+    if (needsSourceCoverageAcknowledgement(payPeriod) && !coverage) {
+      requestSourceCoverage('calculate');
       return;
     }
     try {
@@ -998,7 +1009,7 @@ export function PayPeriodDetail({
       const selectedRecords = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([employeeId]) => selectedEmployeeIds.has(Number(employeeId))));
 
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
-        ...(sourceCoverageReasonRef.current ? { source_coverage_reason: sourceCoverageReasonRef.current } : {}),
+        ...coverage,
         hours,
         ...(Object.keys(bonusEdits).length > 0 ? { bonuses: selectedRecords(bonusEdits) } : {}),
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides: selectedRecords(salary_overrides) } : {}),
@@ -1043,13 +1054,19 @@ export function PayPeriodDetail({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
-      sourceCoverageReasonRef.current = null;
       setProcessing(false);
     }
   };
 
-  const handleRefreshSetup = async () => {
+  const handleRefreshSetup = async (
+    refreshScope = { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary },
+    coverage?: CoverageAcknowledgement,
+  ) => {
     if (savedImportReloadRequiredRef.current || !payPeriod || payPeriod.id !== payRunId || processing || refreshInFlightRouteRef.current !== null) return;
+    if (payrollItems.length > 0 && needsSourceCoverageAcknowledgement(payPeriod) && !coverage) {
+      requestSourceCoverage('refresh', refreshScope);
+      return;
+    }
     const scope = { companyId, payRunId, generation: commitRouteGenerationRef.current };
     const isCurrentRoute = () => scope.companyId === activePageScopeRef.current.companyId &&
       scope.payRunId === activePageScopeRef.current.payRunId && scope.generation === commitRouteGenerationRef.current;
@@ -1059,7 +1076,7 @@ export function PayPeriodDetail({
     setCalculationFailures([]);
     setCalculationNotice(null);
     try {
-      const response = await payPeriodsApi.refreshSetup(payPeriod.id, { includes_recurring_items: refreshRecurring, includes_base_salary: refreshBaseSalary });
+      const response = await payPeriodsApi.refreshSetup(payPeriod.id, { ...refreshScope, ...coverage });
       if (!isCurrentRoute()) return;
       setRefreshSetupOpen(false);
       const reloaded = await loadPayPeriod(scope.payRunId, true);
@@ -1821,14 +1838,14 @@ export function PayPeriodDetail({
       {isDraft && needsSourceCoverageAcknowledgement(payPeriod) && <p role="status" className="max-w-lg rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">Time tracking hours have not been added. Review &amp; add hours first. Calculating now requires a reason and acknowledgement of missing hourly pay.</p>}
       {isDraft && (
         <>
-          <Button variant={needsSourceCoverageAcknowledgement(payPeriod) ? 'outline' : 'primary'} onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+          <Button variant={needsSourceCoverageAcknowledgement(payPeriod) ? 'outline' : 'primary'} onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
       )}
       {isCalculated && (
         <>
-          <Button variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+          <Button variant="outline" onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld}>
             Recalculate
           </Button>
           <Button
@@ -1948,7 +1965,10 @@ export function PayPeriodDetail({
 
   return (
     <div>
-      <Dialog open={sourceCoverageOpen} onOpenChange={setSourceCoverageOpen}>
+      <Dialog open={sourceCoverageOpen} onOpenChange={open => {
+        setSourceCoverageOpen(open);
+        if (!open) pendingCoverageActionRef.current = null;
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Calculate without time tracking hours?</DialogTitle>
@@ -1958,11 +1978,15 @@ export function PayPeriodDetail({
           <Textarea id="source-coverage-reason" maxLength={1000} value={sourceCoverageReason} onChange={event => setSourceCoverageReason(event.target.value)} />
           <label className="flex items-start gap-3 text-sm text-neutral-700"><input type="checkbox" checked={sourceCoverageAcknowledged} onChange={event => setSourceCoverageAcknowledged(event.target.checked)} className="mt-1" />I understand that hourly employees from time tracking will be missing unless entered manually.</label>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSourceCoverageOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { pendingCoverageActionRef.current = null; setSourceCoverageOpen(false); }}>Cancel</Button>
             <Button disabled={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() || processing} title={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() ? 'Enter a reason and acknowledge the missing hours.' : undefined} onClick={() => {
-              sourceCoverageReasonRef.current = sourceCoverageReason.trim();
+              const pending = pendingCoverageActionRef.current;
+              pendingCoverageActionRef.current = null;
               setSourceCoverageOpen(false);
-              void handleRunPayroll();
+              if (!pending || pending.companyId !== companyId || pending.payRunId !== payRunId || pending.generation !== commitRouteGenerationRef.current) return;
+              const coverage: CoverageAcknowledgement = { source_coverage_reason: sourceCoverageReason.trim(), source_coverage_acknowledged: true };
+              if (pending.action === 'refresh') void handleRefreshSetup(pending.refreshScope, coverage);
+              else void handleRunPayroll(coverage);
             }}>Calculate without imported hours</Button>
           </DialogFooter>
         </DialogContent>
@@ -2280,7 +2304,7 @@ export function PayPeriodDetail({
           </Card>
         )}
 
-        {refreshSetupOpen && (
+        {refreshSetupOpen && !sourceCoverageOpen && (
           <Dialog open onOpenChange={open => { if (!processing) setRefreshSetupOpen(open); }}>
             <DialogContent>
               <DialogHeader>
@@ -2308,7 +2332,7 @@ export function PayPeriodDetail({
               </div>
               <DialogFooter>
                 <Button variant="outline" disabled={processing} onClick={() => setRefreshSetupOpen(false)}>Cancel</Button>
-                <Button disabled={processing} onClick={handleRefreshSetup}>{processing ? 'Refreshing…' : 'Refresh and recalculate'}</Button>
+                <Button disabled={processing} onClick={() => void handleRefreshSetup()}>{processing ? 'Refreshing…' : 'Refresh and recalculate'}</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -2521,7 +2545,7 @@ export function PayPeriodDetail({
                   </ul>
                 </div>
                 {additionalEmployeeIds.size > 0 && (
-                  <Button size="sm" className="min-h-11" variant="outline" onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+                  <Button size="sm" className="min-h-11" variant="outline" onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld}>
                     {isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added
                   </Button>
                 )}
