@@ -1,0 +1,365 @@
+[
+  {
+    "mode": "workspace_access",
+    "width": 1280,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 5,
+    "period_id": 11,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": false,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "payroll_summary_by_employee_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "deductions_contributions_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "paycheck_history_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "retirement_plans_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "installment_loans_pdf",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "workspace_access",
+    "width": 1280,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 5,
+    "period_id": 11,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": false,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "backup_snapshot",
+    "width": 1280,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 6,
+    "period_id": 12,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": true,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "payroll_summary_by_employee_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "deductions_contributions_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "paycheck_history_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "retirement_plans_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "installment_loans_pdf",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "backup_snapshot",
+    "width": 1280,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 6,
+    "period_id": 12,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": true,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "training_baseline",
+    "width": 1280,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 7,
+    "period_id": 13,
+    "realPermissions": {
+      "workspace_can_write": true,
+      "test_workspace_read_only": false,
+      "test_workspace_role": "baseline"
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "payroll_summary_by_employee_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "deductions_contributions_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "paycheck_history_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "retirement_plans_pdf",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "installment_loans_pdf",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "training_baseline",
+    "width": 1280,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 7,
+    "period_id": 13,
+    "realPermissions": {
+      "workspace_can_write": true,
+      "test_workspace_read_only": false,
+      "test_workspace_role": "baseline"
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "workspace_access",
+    "width": 390,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 5,
+    "period_id": 11,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": false,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "workspace_access",
+    "width": 390,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 5,
+    "period_id": 11,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": false,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": true
+  },
+  {
+    "mode": "backup_snapshot",
+    "width": 390,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 6,
+    "period_id": 12,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": true,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "backup_snapshot",
+    "width": 390,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 6,
+    "period_id": 12,
+    "realPermissions": {
+      "workspace_can_write": false,
+      "test_workspace_read_only": true,
+      "test_workspace_role": null
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": true
+  },
+  {
+    "mode": "training_baseline",
+    "width": 390,
+    "entry": "reports",
+    "status": "passed",
+    "company_id": 7,
+    "period_id": 13,
+    "realPermissions": {
+      "workspace_can_write": true,
+      "test_workspace_read_only": false,
+      "test_workspace_role": "baseline"
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": false
+  },
+  {
+    "mode": "training_baseline",
+    "width": 390,
+    "entry": "work",
+    "status": "passed",
+    "company_id": 7,
+    "period_id": 13,
+    "realPermissions": {
+      "workspace_can_write": true,
+      "test_workspace_read_only": false,
+      "test_workspace_role": "baseline"
+    },
+    "writerControls": 0,
+    "postAttempts": [],
+    "forbiddenResponses": [],
+    "readRequests": [
+      {
+        "endpoint": "payroll_register",
+        "status": 200,
+        "method": "GET"
+      }
+    ],
+    "downloadPDFVerified": true
+  }
+]

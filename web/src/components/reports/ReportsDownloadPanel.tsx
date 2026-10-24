@@ -16,6 +16,7 @@ interface ReportsDownloadPanelProps {
   payPeriodId: number;
   payPeriodStatus: string;
   payDate: string;
+  readOnly?: boolean;
 }
 
 type ReportKey =
@@ -40,6 +41,11 @@ const REPORTS: { key: ReportKey; label: string; description: string }[] = [
   { key: 'installmentLoans', label: 'Employee Installment Loans', description: 'Loan balances and transaction history' },
   { key: 'fullPrintPackage', label: 'Full Print Package', description: 'All reports combined into a single PDF' },
 ];
+
+const READ_ONLY_REPORTS = new Set<ReportKey>([
+  'payrollRegister', 'payrollSummaryByEmployee', 'deductionsContributions',
+  'paycheckHistory', 'retirementPlans', 'installmentLoans',
+]);
 
 const DEFAULT_REPORT_LIST = [
   'Payroll Summary by Employee',
@@ -1121,7 +1127,7 @@ function PdfPreviewModal({
   );
 }
 
-export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
+export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate, readOnly = false }: ReportsDownloadPanelProps) {
   const navigate = useNavigate();
   const transmittalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pendingTransmittalPreview = useRef<(() => void) | null>(null);
@@ -1174,11 +1180,11 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   const isReportLoading = (reportKey: ReportKey, action: ReportAction) => Boolean(loading[loadingKey(reportKey, action)]);
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!isReady || readOnly) return;
     transmittalApi.preview(payPeriodId).then((data) => {
       setSavedTransmittal(data.saved_transmittal);
     }).catch(() => { /* ignore */ });
-  }, [payPeriodId, isReady]);
+  }, [payPeriodId, isReady, readOnly]);
 
   const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
@@ -1196,6 +1202,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   }, []);
 
   const handlePreview = async (reportKey: ReportKey, label: string, transmittalOpts?: TransmittalOptions) => {
+    if (readOnly && !READ_ONLY_REPORTS.has(reportKey)) return;
     if (reportKey === 'transmittalLog' && !transmittalOpts) {
       navigate(`/tools/transmittals?pay_period_id=${payPeriodId}`);
       return;
@@ -1248,6 +1255,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const handleDownload = async (reportKey: ReportKey, transmittalOpts?: TransmittalOptions) => {
+    if (readOnly && !READ_ONLY_REPORTS.has(reportKey)) return;
     if (reportKey === 'transmittalLog' && !transmittalOpts) {
       navigate(`/tools/transmittals?pay_period_id=${payPeriodId}`);
       return;
@@ -1272,6 +1280,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const handleSpreadsheetDownload = async (reportKey: ReportKey) => {
+    if (readOnly && !READ_ONLY_REPORTS.has(reportKey)) return;
     const key = loadingKey(reportKey, 'spreadsheet');
     setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
@@ -1331,6 +1340,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const handleTransmittalGenerate = async (options: TransmittalOptions) => {
+    if (readOnly) return;
     const { key, mode } = transmittalEditor;
     setTransmittalEditor(current => ({ ...current, open: false }));
     if (!key) return;
@@ -1363,15 +1373,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   useEffect(() => {
-    if (!isReady) return;
+    if (!isReady || readOnly) return;
     reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
       if (data.saved_signoff?.generated_at) {
         setSignoffSavedAt(data.saved_signoff.generated_at);
       }
     }).catch(() => {});
-  }, [payPeriodId, isReady]);
+  }, [payPeriodId, isReady, readOnly]);
 
   const handleSignoffGenerate = async (entries: { name: string; check_number: string }[], notes: string[]) => {
+    if (readOnly) return;
     const { mode } = signoffEditor;
     const request = ++signoffRequest.current;
 
@@ -1465,7 +1476,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {REPORTS.map(report => {
+            {REPORTS.filter(report => !readOnly || READ_ONLY_REPORTS.has(report.key)).map(report => {
               const hasSaved = savedTransmittal && needsTransmittalEditor(report.key);
               const previewLoading = isReportLoading(report.key, 'preview');
               const downloadLoading = isReportLoading(report.key, 'download');
@@ -1556,7 +1567,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       </Card>
 
       {/* Check Sign-Off Sheet */}
-      <Card className="mt-4">
+      {!readOnly && <Card className="mt-4">
         <div className="p-4 bg-neutral-50 flex items-center justify-between">
           <div className="mr-3 min-w-0">
             <h3 className="font-semibold text-neutral-900">Check Sign-Off Sheet</h3>
@@ -1618,7 +1629,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             </Button>
           </div>
         </div>
-      </Card>
+      </Card>}
 
       <PdfPreviewModal
         open={previewState.open}
@@ -1656,7 +1667,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         ]}
       />
 
-      <TransmittalEditorModal
+      {!readOnly && <><TransmittalEditorModal
         open={transmittalEditor.open}
         onClose={() => setTransmittalEditor(current => ({ ...current, open: false }))}
         onGenerate={handleTransmittalGenerate}
@@ -1711,7 +1722,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             }
           }
         }}
-      />
+      /></>}
     </>
   );
 }

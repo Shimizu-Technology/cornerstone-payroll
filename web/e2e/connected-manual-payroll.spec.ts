@@ -1,3 +1,4 @@
+import { showPayrollTab } from './helpers/pay-run-actions';
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -20,8 +21,10 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(user.capabilities).not.toContain('manage_client_configuration');
   const path = `/companies/${fixture.company_id}/pay-runs/${periodId}/work`;
   await page.goto(path);
+  await showPayrollTab(page, 'Activity');
   await page.getByText('Run notes and processing history', { exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Processing Timeline', exact: true })).toBeVisible({ timeout: 30_000 });
+  await showPayrollTab(page, 'Payroll');
   const selection = page.getByRole('listitem').filter({ has: page.getByText(fixture.manual_employee_name, { exact: true }) });
   await expect(selection).toHaveCount(1);
   await selection.getByRole('button', { name: 'Enter pay', exact: true }).click();
@@ -34,7 +37,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await overtimeHours.press('Tab');
   await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  await page.getByRole('button', { name: 'Commit & Finalize', exact: true }).click();
+  await page.getByRole('button', { name: 'Commit', exact: true }).click();
   const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
   await expect(commitDialog).toBeVisible();
   await expect(commitDialog.getByText(`#${periodId}`, { exact: true })).toBeVisible();
@@ -51,6 +54,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   expect(Number(item.overtime_hours)).toBe(0);
 
   // Generate the saved check package through the real printing controls.
+  await showPayrollTab(page, 'Checks & payments');
   await page.getByRole('button', { name: 'Print checks', exact: true }).click();
   const printDialog = page.getByRole('dialog');
   const generate = printDialog.getByRole('button', { name: 'Generate and save package', exact: true });
@@ -99,6 +103,7 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   try {
     const phone = await mobile.newPage();
     await phone.goto(new URL(path, page.url()).href);
+    await showPayrollTab(phone, 'Checks & payments');
     const mobileReview = phone.getByLabel('Manual time tracking payroll reconciliation');
     await expect(mobileReview.getByText('Linked; payment evidence pending')).toBeVisible();
     await mobileReview.scrollIntoViewIfNeeded();

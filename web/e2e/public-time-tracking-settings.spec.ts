@@ -1,3 +1,4 @@
+import { openPayrollActions, showPayrollTab } from './helpers/pay-run-actions';
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockWorkspace(page: Page, options: { sources?: string[]; status?: string; linked?: boolean; voided?: boolean; secondClient?: boolean } = {}) {
@@ -14,6 +15,7 @@ async function mockWorkspace(page: Page, options: { sources?: string[]; status?:
     let body: unknown = { data: [], meta: { total_pages: 1 } };
     if (path.endsWith('/auth/me')) body = { user: { id: 1, email: 'review@example.test', name: 'Review Admin', role: 'admin', organization_id: 1, company_id: 1, assigned_company_ids: companies.map((item) => item.id) } };
     else if (path.endsWith('/companies')) body = { companies, can_manage_clients: true, can_switch_company: !!options.secondClient, current_company_id: 1 };
+    else if (path.includes('/record_activities/')) body = { data: [], meta: { current_page: 1, total_pages: 1 } };
     else if (path.endsWith('/pay_periods/71')) body = { pay_period: {
       id: 71, company_id: 1, status: options.status || 'committed', correction_status: options.voided ? 'voided' : null,
       start_date: '2026-09-01', end_date: '2026-09-15', pay_date: '2026-09-18', run_purpose: 'regular', includes_base_salary: true,
@@ -53,14 +55,17 @@ for (const scenario of [
   test(`shows only relevant integration actions for ${scenario.name}`, async ({ page }) => {
     const { errors } = await mockWorkspace(page, scenario);
     await page.goto('/companies/1/pay-runs/71/work');
-    await expect(page.getByRole('region', { name: 'Process payroll workspace' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Payroll workspace' })).toBeVisible();
+    await showPayrollTab(page, 'Activity');
     await page.getByText('Run notes and processing history', { exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Processing Timeline', exact: true })).toBeVisible();
     await expect(page.getByText('Failed to load pay period', { exact: false })).toHaveCount(0);
+    await openPayrollActions(page);
     // Wait for the actual processing component, not just its loading container.
     await expect(page.getByRole('button', { name: scenario.status === 'draft' ? 'Calculate Payroll' : 'Correct Pay Date', exact: true })).toHaveCount(scenario.voided ? 0 : 1);
     await expect(page.getByRole('button', { name: 'Link time tracking record', exact: true })).toHaveCount(scenario.link ? 1 : 0);
     await expect(page.getByRole('button', { name: 'Import time tracking', exact: true })).toHaveCount(scenario.import ? 1 : 0);
+    await openPayrollActions(page);
     await expect(page.getByRole('button', { name: 'View linked time record', exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -69,6 +74,7 @@ for (const scenario of [
 test('reviews saved AIRE records while disabled without fetching or mutating the source', async ({ page }) => {
   const { requests, errors } = await mockWorkspace(page, { linked: true });
   await page.goto('/companies/1/pay-runs/71/work');
+  await openPayrollActions(page);
   await page.getByRole('button', { name: 'View linked time record', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Linked time tracking records' });
   await expect(dialog).toBeVisible();
@@ -80,7 +86,7 @@ test('reviews saved AIRE records while disabled without fetching or mutating the
   expect(requests.some((request) => /time_tracking_sources|time_tracking_import/.test(request))).toBe(false);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'View linked time record', exact: true })).toBeFocused();
+  await expect(page.getByLabel('More payroll actions', { exact: true })).toBeFocused();
   expect(errors).toEqual([]);
 });
 

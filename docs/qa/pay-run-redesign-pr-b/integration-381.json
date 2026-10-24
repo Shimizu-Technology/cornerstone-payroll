@@ -1,0 +1,152 @@
+{
+  "merged_source": "89cd40eecf142b9d4fc838990e889315e85fd854",
+  "base": "a7c43a055479844d880b4cecd04102210bb184b0",
+  "web_tree": "bdff3da1773f71d88ac0284b952a810f542da746",
+  "api_tree": "aaa7f1f608fff11982f83aeb0e11706978686ca4",
+  "api_identical_to_base": true,
+  "upstream_backend_gate": {
+    "executed_by": "#381 owner (not this rerun)",
+    "source": "0f8e42c50f31015d52ca577b2fd7910777afec13",
+    "api_tree": "aaa7f1f608fff11982f83aeb0e11706978686ca4",
+    "examples": 5254,
+    "failures": 0,
+    "pending": 0,
+    "evidence": "docs/qa/corrective-component-ledger-2026-10-24.md \u2014 Fifth review follow-up"
+  },
+  "merge_conflicts": 0,
+  "product_integration_edits": 0,
+  "lead_review": "Accepted phone, F1/F2 and tabs at cdbce693; lead owns merge after CI",
+  "web_gate": {
+    "exit": 0,
+    "files": 126,
+    "tests": 1190,
+    "command": "npm run gate"
+  },
+  "browser_gates": {
+    "release": {
+      "startTime": "2026-10-24T10:52:06.429Z",
+      "duration": 211746.45200000002,
+      "expected": 45,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "refresh": {
+      "startTime": "2026-10-24T10:55:49.764Z",
+      "duration": 76812.139,
+      "expected": 10,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "pay-items": {
+      "startTime": "2026-10-24T10:57:15.978Z",
+      "duration": 71575.272,
+      "expected": 24,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "accepted_files_preserved": [
+    {
+      "file": "web/src/components/reports/ReportsDownloadPanel.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "78adc54de17ac64ce5c762064e2e06fd1ff15064a9367336e777a884a3bc7d36"
+    },
+    {
+      "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "c4051a80968b74c435060c5e4b7ffb482cbc8cdb1c7d20c6eb995c544de3bd51"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunRecordHeader.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "f2ea6065e7865c1c5e78a08d5d9822284bbe7f31265bd7398e6fe2c7642329cc"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunSummary.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "c7989e82c58fc34d572fab7e50e550666a15d4146f99dba2c8cd8e018f45bccb"
+    },
+    {
+      "file": "web/src/components/records/WorkspaceTabs.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "fd29862095bfaa55fc0a55b23da30a595b886a05c903d306e9528f006f7374b2"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "48af6af1b76839df0bfb48f7e2633dfe3d7824e18474b9c44ddba211ff288cdd"
+    },
+    {
+      "file": "web/src/components/payroll/PayLateHours.tsx",
+      "identical_to_lead_accepted_head": "cdbce693",
+      "sha256": "d117f800da1aa43f32783acbcdc9cae8ae5487391ccde5a314155fb49aee3bd4"
+    }
+  ],
+  "cleanup": {
+    "active_owned_resources": 0,
+    "databases": [
+      {
+        "database": "payroll_redesign_release_20261024",
+        "asserted": "payroll_redesign_release_20261024",
+        "dropExit": 0
+      },
+      {
+        "database": "payroll_redesign_refresh_20261024",
+        "asserted": "payroll_redesign_refresh_20261024",
+        "dropExit": 0
+      },
+      {
+        "database": "payroll_redesign_pay_items_20261024",
+        "asserted": "payroll_redesign_pay_items_20261024",
+        "dropExit": 0
+      }
+    ],
+    "ports": [
+      {
+        "port": 48741,
+        "free": true
+      },
+      {
+        "port": 48742,
+        "free": true
+      },
+      {
+        "port": 48743,
+        "free": true
+      },
+      {
+        "port": 48744,
+        "free": true
+      },
+      {
+        "port": 48745,
+        "free": true
+      },
+      {
+        "port": 48746,
+        "free": true
+      },
+      {
+        "port": 48747,
+        "free": true
+      },
+      {
+        "port": 48748,
+        "free": true
+      },
+      {
+        "port": 48749,
+        "free": true
+      }
+    ]
+  },
+  "not_rerun": [
+    "Full backend suite by this worker; identical API tree has #381 owner full gate evidence",
+    "Public browser lane; prior 131-pass result is pre-integration",
+    "Phone contact sheets/axe/motion; accepted layout files unchanged"
+  ],
+  "PR_C": "Not started; wait for lead confirmed B merge"
+}

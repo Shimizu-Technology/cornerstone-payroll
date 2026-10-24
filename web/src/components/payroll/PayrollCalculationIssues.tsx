@@ -1,3 +1,4 @@
+import { Alert } from '@/components/ui/alert';
 import { Link } from 'react-router';
 import { employeePath, retirementSetupPath } from '@/lib/routes';
 import { errorRecovery } from '@/lib/error-recovery';
@@ -17,7 +18,7 @@ export function PayrollCalculationIssues({ failures, names, companyId, year, ret
 }) {
   const groups = new Map<string, PayrollCalculationFailure[]>();
   failures.forEach((failure) => groups.set(failure.error, [...(groups.get(failure.error) || []), failure]));
-  return <section id="payroll-calculation-issues" tabIndex={-1} aria-labelledby="payroll-calculation-issues-title" className="scroll-mt-24 rounded-2xl border border-danger-200 bg-danger-50 p-4 sm:p-5">
+  return <Alert tone="error" id="payroll-calculation-issues" tabIndex={-1} aria-labelledby="payroll-calculation-issues-title" className="scroll-mt-24 rounded-2xl border border-danger-200 bg-danger-50 p-4 sm:p-5">
     <h2 id="payroll-calculation-issues-title" className="text-base font-bold text-danger-900">Resolve these employees before approval</h2>
     <p className="mt-2 text-sm leading-6 text-danger-900">Keep this payroll tab open to retain your entered values. Review links open an employee in a new tab. Resolve the issue, then return to this tab and calculate payroll again.</p>
     <div className="mt-4 space-y-4">{Array.from(groups, ([message, employees]) => {
@@ -38,5 +39,5 @@ export function PayrollCalculationIssues({ failures, names, companyId, year, ret
         </li>)}</ul>
       </div>;
     })}</div>
-  </section>;
+  </Alert>;
 }
