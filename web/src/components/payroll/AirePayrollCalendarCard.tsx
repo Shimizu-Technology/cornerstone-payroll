@@ -33,8 +33,8 @@ const stateLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
   schedule_changed: 'Update required',
   scheduled: 'Scheduled',
   upcoming: 'Scheduled',
-  due: 'Cutoff due',
-  cutoff_due: 'Cutoff due',
+  due: 'Waiting for hours to lock',
+  cutoff_due: 'Waiting for hours to lock',
   finalized: 'Batch finalized',
   batch_verifying: 'Verifying batch',
   batch_verification_failed: 'Verification retrying',
@@ -97,7 +97,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   ].includes(calendar.eligibility_code || '');
 
   return (
-    <Card className="overflow-hidden border-primary-200 bg-gradient-to-br from-primary-50/90 via-white to-white">
+    <Card className="overflow-hidden border-primary-200 bg-white">
       <CardContent className="p-0">
         <div className="flex flex-col gap-4 border-b border-primary-100 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex max-w-3xl items-start gap-4">
@@ -111,7 +111,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                {calendar.cutoff_at ? `Cutoff ${formatGuamDateTime(calendar.cutoff_at)}. ` : ''}Approved hours are frozen at cutoff; held time stays separate.
+                {calendar.cutoff_at ? `Cutoff ${formatGuamDateTime(calendar.cutoff_at)}. ` : ''}Time tracking locks approved hours after cutoff; held time stays separate.
               </p>
             </div>
           </div>
@@ -136,17 +136,23 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         </div>
 
+        {['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
+          <p className="font-semibold">Cutoff reached — waiting for time tracking to lock the hours</p>
+          {calendar.cutoff_at && <p className="mt-1">Waiting since {formatGuamDateTime(calendar.cutoff_at)} ({Math.max(0, Math.floor((now.getTime() - new Date(calendar.cutoff_at).getTime()) / 60000))} minutes).</p>}
+          {calendar.publication?.next_delivery_attempt_at && <p className="mt-1">Next retry: {formatGuamDateTime(calendar.publication.next_delivery_attempt_at)}</p>}
+          <p className="mt-1">Refresh to check for locked hours. If the connection needs attention, an authorized operator can retry it.</p>
+        </div>}
         <details className="group"><summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800">Cutoff and connection details</summary>
         <div className="grid divide-y divide-primary-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0" aria-live="polite">
           <div className="px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Cutoff</p>
+            <p className="text-xs font-semibold text-neutral-600">Cutoff</p>
             <p className="mt-2 font-semibold text-neutral-950">
               {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not available'}
             </p>
             {distance && <p className="mt-2 text-xs text-neutral-500">{distance}</p>}
           </div>
           <div className="px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking delivery</p>
+            <p className="text-xs font-semibold text-neutral-600">Time tracking delivery</p>
             <p className="mt-2 font-semibold text-neutral-950">
               {calendar.publication?.delivery_status === 'delivered'
                 ? 'Schedule received'
@@ -157,7 +163,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             <p className="mt-2 text-xs text-neutral-500">{calendar.source_name}</p>
           </div>
           <div className="px-6 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Locked batch</p>
+            <p className="text-xs font-semibold text-neutral-600">Locked batch</p>
             <p className="mt-2 font-semibold text-neutral-950">{batchCopy.headline}</p>
             <p className="mt-2 text-xs text-neutral-500">{batchCopy.detail}</p>
           </div>

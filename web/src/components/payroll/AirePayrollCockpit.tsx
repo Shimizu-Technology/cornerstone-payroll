@@ -274,7 +274,7 @@ function Metric({ label, value, detail, tone = 'neutral' }: { label: string; val
     : tone === 'warning' ? 'border-warning-200 bg-warning-50/70' : 'border-neutral-200 bg-white';
   return (
     <div role="group" aria-label={label} className={`rounded-xl border p-4 ${toneClass}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
+      <p className="text-xs font-semibold text-neutral-500">{label}</p>
       <p className="mt-2 font-display text-2xl font-bold tracking-tight text-neutral-950">{value}</p>
       <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p>
     </div>
@@ -907,7 +907,7 @@ function AirePayrollCockpitWorkspace({
                 {overview.payroll_period.status === 'finalized' && (
                   <div className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p><span className="font-semibold">Time tracking cutoff locked.</span> Batch {overview.finalized_batch?.id || overview.payroll_period.payroll_batch_id || 'is being prepared'} contains the eligible hours. Held hours remain visible below for the next available payroll.</p>
+                    <p><span className="font-semibold">Time tracking cutoff locked.</span> The locked hours are ready to review. Held hours remain visible below for the next available payroll.</p>
                   </div>
                 )}
 
@@ -1030,7 +1030,7 @@ function AirePayrollCockpitWorkspace({
                                     {settlementCase.time.category?.name ? ` · ${settlementCase.time.category.name}` : ''}
                                   </p>
                                   <p className="mt-1 text-xs leading-5 text-neutral-500">
-                                    {correctionCase ? 'Source ' : 'Excluded because '}{settlementCase.origin.reason.replaceAll('_', ' ')} · time tracking batch {settlementCase.origin.payroll_batch_id}
+                                    {correctionCase ? 'Source ' : 'Excluded because '}{settlementCase.origin.reason.replaceAll('_', ' ')}
                                   </p>
                                   {correctionCase ? (
                                     <p className="mt-2 rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2 text-xs font-medium leading-5 text-primary-900">
@@ -1046,7 +1046,7 @@ function AirePayrollCockpitWorkspace({
                                   )}
                                   <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                                     <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Destination</p>
+                                      <p className="text-xs font-semibold text-neutral-500">Destination</p>
                                       <p className="mt-1 font-medium text-neutral-900">
                                         {settlementCase.routing.destination_kind === 'regular'
                                           ? routeOption ? `${formatDateRange(routeOption.start_date, routeOption.end_date)} · pay ${formatDate(routeOption.pay_date)}` : 'Future regular payroll'
@@ -1055,15 +1055,16 @@ function AirePayrollCockpitWorkspace({
                                       <p className="mt-1 text-xs text-neutral-500">Action due {formatDate(settlementCase.routing.action_due_on)}</p>
                                     </div>
                                     <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{correctionCase ? 'Correction processing' : 'Latest payment fact'}</p>
+                                      <p className="text-xs font-semibold text-neutral-500">{correctionCase ? 'Correction processing' : 'Latest payment fact'}</p>
                                       <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || (correctionCase ? 'No processing acknowledgment for this correction yet' : 'Not imported into payroll')}</p>
                                       <p className="mt-1 text-xs text-neutral-500">
                                         {settlementCase.processing?.payment_reference
                                           ? `Reference ${settlementCase.processing.payment_reference}`
-                                          : settlementCase.included_payroll_batch_id ? `Time tracking batch ${settlementCase.included_payroll_batch_id}` : correctionCase ? 'Review original payment evidence in the source history.' : 'No payment has been recorded'}
+                                          : settlementCase.included_payroll_batch_id ? 'Added to payroll' : correctionCase ? 'Review original payment evidence in the source history.' : 'No payment has been recorded'}
                                       </p>
                                     </div>
                                   </div>
+                                  <details className="mt-3 text-xs text-neutral-600"><summary className="cursor-pointer font-semibold">Technical details</summary><p className="mt-2 break-all">Original batch: {settlementCase.origin.payroll_batch_id}</p>{settlementCase.included_payroll_batch_id && <p className="break-all">Included batch: {settlementCase.included_payroll_batch_id}</p>}</details>
                                   {settlementCase.routing.note && <p className="mt-3 text-xs italic text-neutral-500">Last review note: {settlementCase.routing.note}</p>}
                                 </div>
                                 {canManage && (
@@ -1134,7 +1135,7 @@ function AirePayrollCockpitWorkspace({
                       <div className="space-y-6">
                         {paymentHistory.length > 0 && (
                           <section aria-labelledby="aire-payment-events-heading">
-                            <h4 id="aire-payment-events-heading" className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Hour and payment status</h4>
+                            <h4 id="aire-payment-events-heading" className="text-xs font-semibold text-neutral-500">Hour and payment status</h4>
                             <div className="mt-3 space-y-3">
                               {paymentHistory.map((event) => (
                                 <div key={event.key} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
@@ -1154,7 +1155,7 @@ function AirePayrollCockpitWorkspace({
                         )}
                         {batchHistory.length > 0 && (
                           <section aria-labelledby="aire-batch-events-heading">
-                            <h4 id="aire-batch-events-heading" className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Batch history</h4>
+                            <h4 id="aire-batch-events-heading" className="text-xs font-semibold text-neutral-500">Batch history</h4>
                             <div className="mt-3 space-y-3">
                               {batchHistory.map((event) => (
                                 <div key={event.event_id} className="flex items-start gap-3 rounded-xl border border-neutral-200 p-4">
@@ -1192,7 +1193,7 @@ function AirePayrollCockpitWorkspace({
             </DialogHeader>
             {commandError && <div role="alert" className="mt-4 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{commandError}</div>}
             <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Time tracking identity</p>
+              <p className="text-xs font-semibold text-neutral-500">Time tracking identity</p>
               <p className="mt-2 font-semibold text-neutral-950">{employeeMapping.employee.full_name}</p>
               <p className="mt-1 text-sm text-neutral-600">{employeeMapping.employee.email || 'No email in time tracking'}</p>
             </div>

@@ -54,7 +54,9 @@ module Api
               active_employees: Employee.active.where(company_id: current_company_id).count,
               current_pay_period: current_pay_period_summary,
               ytd_totals: ytd_company_totals,
-              recent_payrolls: recent_payroll_summary
+              recent_payrolls: recent_payroll_summary,
+              last_regular_payroll: last_payroll_summary(regular: true),
+              last_adjustment_payroll: last_payroll_summary(regular: false)
             }
           }
         end
@@ -1843,7 +1845,7 @@ module Api
         def current_pay_period_summary
           pp = PayPeriod.where(company_id: current_company_id)
                        .where(status: %w[draft calculated approved])
-                       .order(pay_date: :desc)
+                       .order(Arel.sql("CASE WHEN run_purpose = 'regular' THEN 0 ELSE 1 END"), :pay_date, :id)
                        .first
 
           return nil unless pp
@@ -1853,10 +1855,46 @@ module Api
             period_description: pp.period_description,
             pay_date: pp.pay_date,
             status: pp.status,
+            run_purpose: pp.run_purpose,
+            next_action: dashboard_next_action(pp),
+            blocker: dashboard_source_missing?(pp) ? "Time tracking hours have not been added. Review and add hours before calculating, or explain a manual or salary-only run." : nil,
             employee_count: pp.payroll_items.financially_reportable.reportable.count,
             total_gross: pp.payroll_items.financially_reportable.reportable.sum(:gross_pay),
             total_net: pp.payroll_items.financially_reportable.reportable.sum(:net_pay)
           }
+        end
+
+        def dashboard_source_missing?(period)
+          return false unless period.run_purpose == "regular"
+
+          calendar = AirePayrollCalendar::Presenter.call(period)
+          calendar.present? && calendar[:cutoff_at].present? &&
+            !period.time_tracking_imports.where(status: "applied").where.not(external_batch_id: nil).exists?
+        end
+
+        def dashboard_next_action(period)
+          return "Review & add hours" if period.draft? && dashboard_source_missing?(period)
+          return "Enter hours and pay" if period.draft? && period.payroll_items.empty?
+          return "Calculate payroll" if period.draft?
+          return "Review calculated payroll" if period.calculated?
+
+          "Commit approved payroll"
+        end
+
+        def last_payroll_summary(regular:)
+          scope = PayPeriod.reportable_for_company(current_company).where(status: "committed")
+          scope = regular ? scope.where(run_purpose: "regular") : scope.where.not(run_purpose: "regular")
+          period = scope.order(pay_date: :desc, id: :desc).first
+          native = if period
+            { id: period.id, key: "native:#{period.id}", record_type: "native", run_purpose: period.run_purpose,
+              period_description: period.period_description, pay_date: period.pay_date,
+              total_net: period.payroll_items.financially_reportable.reportable.sum(:net_pay) }
+          end
+          imported = if regular
+            PayrollHistoryQuery.new(company_id: current_company_id,
+              params: { per_page: 1, source: "quickbooks", status: "locked", sort: "pay_date", direction: "desc" }).call.data.first
+          end
+          [ native, imported ].compact.max_by { |row| row[:pay_date].to_date }
         end
 
         def payroll_reporting_period
@@ -2221,7 +2259,7 @@ module Api
               .reverse
               .first(5)
               .map do |row|
-            row.slice(:key, :record_type, :id, :pay_date, :employee_count, :total_net, :source).merge(
+            row.slice(:key, :record_type, :id, :pay_date, :employee_count, :total_net, :source, :run_purpose).merge(
               period_description: payroll_history_period_description(row)
             )
           end

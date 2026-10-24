@@ -862,7 +862,7 @@ export function TimeTrackingImportModal({
                             )}
                             <h3 className="font-semibold text-neutral-950">{row.source_display_name}</h3>
                             {Object.entries(row.source_kind_counts || {}).map(([kind, count]) => Number(count) > 0 && (
-                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold capitalize text-neutral-700">{kind} {count}</span>
+                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{count} time {Number(count) === 1 ? 'entry' : 'entries'}{kind === 'current' ? '' : ` · ${kind === 'carryover' ? 'from earlier periods' : kind.replaceAll('_', ' ')}`}</span>
                             ))}
                           </div>
                           {row.source_email && <div className="mt-2 text-xs text-neutral-600">{row.source_email}</div>}
@@ -922,7 +922,7 @@ export function TimeTrackingImportModal({
                       {categories.length > 0 && (
                         <div className="mt-4 border-t border-neutral-200 pt-4">
                           <div className="text-xs font-semibold text-neutral-600">
-                            {isHistoricalReconciliation ? 'time tracking earning breakdown' : 'Payable earning dimensions'}
+                            Hours and pay rates
                           </div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
                             {categories.map((category) => {
@@ -1033,7 +1033,7 @@ export function TimeTrackingImportModal({
               {isFinalizedBatch && (
                 <details className="rounded-xl border border-neutral-200 bg-neutral-50 text-sm">
                   <summary className="cursor-pointer rounded-xl px-4 py-3 font-medium text-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">
-                    Batch audit details
+                    Technical details
                   </summary>
                   <dl className="grid min-w-0 gap-4 border-t border-neutral-200 p-4 sm:grid-cols-2">
                     <div className="min-w-0">
