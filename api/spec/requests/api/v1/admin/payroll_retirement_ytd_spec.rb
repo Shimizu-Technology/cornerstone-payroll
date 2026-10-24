@@ -19,7 +19,9 @@ RSpec.describe "Retirement YTD across batch payroll", type: :request do
     type = DeductionType.create!(company: company, name: "Fixed 401(k)", category: "pre_tax", sub_category: "retirement", reporting_group: "401k_pre_tax")
     EmployeeDeduction.create!(employee: employee, deduction_type: type, amount: 75)
     prior = create(:pay_period, :committed, company: company, start_date: Date.new(2024, 1, 2))
-    prior_item = create(:payroll_item, employee: employee, pay_period: prior)
+    prior_item = create(:payroll_item, employee: employee, pay_period: prior,
+      social_security_taxable_wages: 0, social_security_taxable_tips: 0,
+      medicare_taxable_wages: 0, additional_medicare_taxable_wages: 0)
     prior_item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: "pre_tax", reporting_group: "401k_pre_tax", amount: 100)
     current = create(:pay_period, company: company, start_date: Date.new(2024, 1, 15), end_date: Date.new(2024, 1, 28), pay_date: Date.new(2024, 2, 2))
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)

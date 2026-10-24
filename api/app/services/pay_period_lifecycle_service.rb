@@ -120,7 +120,7 @@ class PayPeriodLifecycleService
   attr_reader :pay_period, :actor, :ip_address
 
   def validate_annual_fica_context!
-    items = pay_period.payroll_items.not_voided.includes(:employee).reject { |item| item.employment_type == "contractor" }
+    items = pay_period.payroll_items.financially_reportable.includes(:employee).reject { |item| item.employment_type == "contractor" }
     contexts = EmployeeYearFicaContext.batch(company: pay_period.company, employees: items.map(&:employee),
       year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
     items.each do |item|
