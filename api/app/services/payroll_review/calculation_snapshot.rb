@@ -43,6 +43,8 @@ module PayrollReview
         :time_tracking_entry_allocations
       ).order(:employee_id, :id).map do |item|
         stable_attributes(item).merge(
+          "annual_fica_context" => EmployeeYearFicaContext.new(employee: item.employee,
+            year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot,
           "employee" => item.employee.attributes.slice("id", "first_name", "last_name"),
           "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row) },
           "payroll_item_field_entries" => item.payroll_item_field_entries.sort_by(&:id).map { |row| stable_attributes(row) },

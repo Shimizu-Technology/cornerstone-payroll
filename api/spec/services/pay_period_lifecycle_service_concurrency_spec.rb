@@ -125,6 +125,15 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     )
 
     described_class.new(pay_period: pay_period, actor: actor).commit!
+    expect {
+      described_class.new(pay_period: second_period, actor: actor).commit!
+    }.to raise_error(described_class::InvalidTransitionError, /Recalculate/)
+    # A fresh calculation/review is required after the first commit.
+    second_period.payroll_items.each do |item|
+      item.update!(tax_rule_snapshot: item.tax_rule_snapshot.merge("annual_fica_context" =>
+        EmployeeYearFicaContext.new(employee: item.employee, year: second_period.pay_date.year,
+          excluding_pay_period_id: second_period.id).snapshot))
+    end
     described_class.new(pay_period: second_period, actor: actor).commit!
 
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(2_000)

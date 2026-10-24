@@ -26,6 +26,7 @@ class PayPeriodLifecycleService
       validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
+      validate_annual_fica_context!
       validate_client_approval!
       validate_payment_delivery!
       validate_source_earnings!
@@ -75,6 +76,7 @@ class PayPeriodLifecycleService
       validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
+      validate_annual_fica_context!
       validate_client_approval!
       validate_payment_delivery!
       validate_source_earnings!
@@ -116,6 +118,18 @@ class PayPeriodLifecycleService
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def validate_annual_fica_context!
+    pay_period.payroll_items.not_voided.includes(:employee).each do |item|
+      next if item.employment_type == "contractor"
+
+      current = EmployeeYearFicaContext.new(employee: item.employee, year: pay_period.pay_date.year,
+        excluding_pay_period_id: pay_period.id).snapshot
+      next if item.tax_rule_snapshot.to_h["annual_fica_context"] == current
+
+      raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
+    end
+  end
 
   def validate_source_earnings!
     pay_period.payroll_items.not_voided.each do |item|

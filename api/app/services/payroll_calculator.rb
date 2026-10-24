@@ -130,6 +130,14 @@ class PayrollCalculator
     end
 
     taxes = tax_calculator.calculate(**tax_args)
+    unless historical_calculation?
+      taxes.merge!(annual_fica_context.increment(
+        wages_delta: payroll_item.gross_pay, tips_delta: payroll_item.cash_tips_reported,
+        rules: tax_calculator.rule_snapshot
+      ).transform_keys { |key| { social_security_tax: :social_security,
+        employer_social_security_tax: :employer_social_security, medicare_tax: :medicare,
+        employer_medicare_tax: :employer_medicare, additional_medicare_tax: :additional_medicare }.fetch(key, key) })
+    end
 
     calculated_withholding = taxes[:withholding].to_f
     if payroll_item.withholding_tax_override.present?
@@ -156,6 +164,7 @@ class PayrollCalculator
     end
     sync_additional_withholding_from_employee!
     payroll_item.tax_rule_snapshot = rule_snapshot.merge(employee_w4_snapshot)
+    payroll_item.tax_rule_snapshot["annual_fica_context"] = annual_fica_context.snapshot unless historical_calculation?
   end
 
   def capture_payroll_reporting_components!
@@ -528,6 +537,11 @@ class PayrollCalculator
         "legacy_allowances" => employee_value(:allowances)
       }
     }
+  end
+
+  def annual_fica_context
+    @annual_fica_context ||= EmployeeYearFicaContext.new(employee: employee, year: pay_period.pay_date.year,
+      excluding_pay_period_id: pay_period.id)
   end
 
   def ytd_before_totals

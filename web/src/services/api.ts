@@ -1586,7 +1586,7 @@ export const payPeriodsApi = {
   // Preview is read-only - used to drive the modal's delta display.
   correctivePaycheckPreview: (
     id: number,
-    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs }
+    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs; pay_date?: string }
   ) =>
     api.post<CorrectivePaycheckPreview>(
       `/admin/pay_periods/${id}/corrective_paycheck_preview`,

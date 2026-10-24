@@ -10,9 +10,9 @@ require "openssl"
 #
 # 1. We *recompute* what the original payroll item should have been with
 #    the corrected inputs. The recompute uses the original period's pay
-#    date / tax year and the YTD context that existed *just before* the
-#    original was committed, so the tax math matches what would have been
-#    withheld had the corrected inputs been entered originally.
+#    date / tax year and frozen employee/FIT rules. FICA deltas are then
+#    reconciled against the employee's real cumulative committed year,
+#    including later runs and active signed corrections.
 #
 # 2. We compute deltas: corrected_value - already_recorded_value for gross,
 #    FIT, SS, Medicare, employer SS, employer Medicare, retirement,
@@ -127,11 +127,12 @@ class IssueCorrectivePaycheckService
   # @param reason              [String]     mandatory explanation
   # @param actor               [User, nil]  user initiating the correction
   # @param notes               [String, nil] optional supplemental period notes
-  def self.preview(original_pay_period:, employee:, corrected_inputs:)
+  def self.preview(original_pay_period:, employee:, corrected_inputs:, pay_date: nil)
     new(
       original_pay_period: original_pay_period,
       employee:            employee,
-      corrected_inputs:    corrected_inputs
+      corrected_inputs:    corrected_inputs,
+      pay_date: pay_date
     ).preview
   end
 
@@ -192,6 +193,7 @@ class IssueCorrectivePaycheckService
     PayPeriod.transaction do
       # Lock the original to prevent a concurrent void/correction on top
       # of us. We also re-read the latest state under lock.
+      Company.lock.find(@original_pay_period.company_id)
       locked_original = PayPeriod.lock("FOR UPDATE").find(@original_pay_period.id)
 
       # Re-read the payroll item under a row-level lock so
@@ -220,6 +222,7 @@ class IssueCorrectivePaycheckService
       original_item.correction_payroll_items.order(:id).lock("FOR UPDATE").load
       # Force corrected_item to be rebuilt against the freshly-locked
       # original (its inputs are derived from `original_item.*`).
+      @annual_fica_context = nil
       @corrected_item = nil
       @recalculated_original_item = nil
       @active_correctives = nil
@@ -257,6 +260,7 @@ class IssueCorrectivePaycheckService
     pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
     raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
+    validate_same_tax_year!
 
     if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
@@ -273,6 +277,14 @@ class IssueCorrectivePaycheckService
       raise MissingHistoricalContextError,
             "This payroll item predates immutable calculation snapshots and cannot be safely recomputed automatically"
     end
+  end
+
+  def validate_same_tax_year!
+    date = parsed_pay_date_for_validation
+    return unless date && date.year != @original_pay_period.pay_date.year
+
+    raise InvalidStateError,
+      "Prior-year corrections require a separately reviewed prior-year process; this paycheck cannot move wages between tax years."
   end
 
   def validate_for_issue!
@@ -370,7 +382,31 @@ class IssueCorrectivePaycheckService
   # original was processed.
   # ---------------------------------------------------------------------
   def corrected_item
-    @corrected_item ||= build_and_calculate_item(effective_inputs.merge(@corrected_inputs))
+    @corrected_item ||= begin
+      item = build_and_calculate_item(effective_inputs.merge(@corrected_inputs))
+      reconcile_annual_fica!(item)
+      item
+    end
+  end
+
+  def annual_fica_context
+    @annual_fica_context ||= EmployeeYearFicaContext.new(employee: @employee, year: @original_pay_period.pay_date.year)
+  end
+
+  def reconcile_annual_fica!(item)
+    increments = annual_fica_context.increment(
+      wages_delta: item.medicare_taxable_wages.to_d - recorded_value(:medicare_taxable_wages),
+      tips_delta: item.cash_tips_reported.to_d - recorded_value(:cash_tips_reported),
+      rules: original_item.tax_rule_snapshot
+    )
+    old_employee_tax = item.social_security_tax.to_d + item.medicare_tax.to_d
+    increments.each { |field, amount| item.public_send("#{field}=", recorded_value(field) + amount) }
+    tax_change = item.social_security_tax.to_d + item.medicare_tax.to_d - old_employee_tax
+    item.total_deductions = (item.total_deductions.to_d + tax_change).round(2)
+    item.net_pay = (item.net_pay.to_d - tax_change).round(2)
+    item.tax_rule_snapshot = item.tax_rule_snapshot.merge("annual_fica_context" => annual_fica_context.snapshot)
+  rescue EmployeeYearFicaContext::UnreconciledLedgerError => e
+    raise MissingHistoricalContextError, e.message
   end
 
   def recalculated_original_item
@@ -518,7 +554,8 @@ class IssueCorrectivePaycheckService
       %w[id company_id employee_id pay_period_id updated_at voided voided_at calculation_context_snapshot tax_rule_snapshot retirement_rule_snapshot]
     period_fields = %w[id company_id pay_date status correction_status committed_at voided_at updated_at]
     state = {
-      version: 1,
+      version: 2,
+      annual_fica_context: annual_fica_context.snapshot,
       original_period: @original_pay_period.attributes.slice(*period_fields),
       original_item: original_item.attributes.slice(*item_fields),
       original_earnings: original_item.payroll_item_earnings.order(:id).map { |earning| earning.attributes.slice("id", "category", "label", "rate", "hours", "amount", "updated_at") },
@@ -762,7 +799,7 @@ class IssueCorrectivePaycheckService
 
   # No meaningful change → nothing to do.
   def zero_change?
-    delta_hash.slice(*DELTA_OUTPUT_FIELDS).values.all? { |v| v.abs < 0.005 }
+    delta_hash.slice(*(DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS)).values.all? { |v| v.abs < 0.005 }
   end
 
   # ---------------------------------------------------------------------

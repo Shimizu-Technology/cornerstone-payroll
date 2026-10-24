@@ -215,17 +215,14 @@ RSpec.describe IssueCorrectivePaycheckService do
       end
     end
 
-    it "uses the frozen historical tax basis while posting only the remaining delta in the correction pay year" do
-      _, first = issue_target({ hours_worked: 80 }, pay_date: Date.new(2025, 1, 5))
-      employee.update!(filing_status: "married", allowances: 5, pay_rate: 100)
-      preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 65 })
-      _, second = issue_target({ hours_worked: 65 }, pay_date: Date.new(2025, 1, 12))
-      expect(second.gross_pay).to eq(-225)
-      expect(employee.ytd_totals_for(2024).reload.gross_pay).to eq(900)
-      expect(employee.ytd_totals_for(2025).reload.gross_pay).to eq(75)
-      expect(original_item.social_security_tax + first.social_security_tax + second.social_security_tax)
-        .to eq(preview[:corrected][:social_security_tax].to_d)
-      expect(preview[:corrected][:pay_rate]).to eq(15)
+    it "holds cross-year posting for a separately reviewed prior-year process" do
+      before = employee.ytd_totals_for(2024).reload.attributes
+      expect {
+        issue_target({ hours_worked: 80 }, pay_date: Date.new(2025, 1, 5))
+      }.to raise_error(described_class::InvalidStateError, /separately reviewed prior-year process/)
+      expect(employee.ytd_totals_for(2024).reload.attributes).to eq(before)
+      expect(EmployeeYtdTotal.exists?(employee: employee, year: 2025)).to be(false)
+      expect(original_period.supplemental_pay_periods.count).to eq(0)
     end
 
     it "rejects multi-rate originals instead of recalculating their categories as a scalar rate" do
