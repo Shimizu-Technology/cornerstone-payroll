@@ -154,6 +154,19 @@ module TimeTracking
       )
     end
 
+    def payroll_cockpit_late_hours(external_pay_period_id:)
+      require_capability!(:payroll_cockpit)
+      uri = source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}/late_hours")
+      require_secure_payroll_transport!(uri)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+    end
+
+    def create_payroll_late_hours(external_pay_period_id:, **payload)
+      require_capability!(:payroll_cockpit)
+      uri = source_uri("/api/v1/payroll/cockpit/periods/#{normalize_external_pay_period_id(external_pay_period_id)}/late_hours")
+      delegated_request_json(uri, body: payload)
+    end
+
     def payroll_cockpit_period(external_pay_period_id:)
       require_capability!(:payroll_cockpit)
       request_json(payroll_cockpit_period_uri(external_pay_period_id), validate_source: false, surface_remote_error: true)
