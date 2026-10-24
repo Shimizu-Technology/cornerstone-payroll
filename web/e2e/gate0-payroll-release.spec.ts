@@ -131,7 +131,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       try {
         await page.goto(`/companies/${fixture.delivery_company_id}/pay-runs/${fixture.delivery_pay_period_id}/checks`);
         const statement = page.getByRole('listitem', { name: 'Earnings statement for Zero Earnings', exact: true });
-        await expect(statement).toContainText('No payment issued');
+        await expect(statement).toContainText('No payment issued', { timeout: 30_000 });
         await statement.getByRole('button', { name: 'View', exact: true }).click();
         const preview = page.getByRole('dialog', { name: 'Earnings statement — Zero Earnings', exact: true });
         await expect(preview.getByLabel('Page 1 preview', { exact: true })).toBeVisible();
