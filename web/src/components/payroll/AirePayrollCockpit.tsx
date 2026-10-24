@@ -1,4 +1,5 @@
 import { lockScheduleCopy } from '@/lib/aire-payroll-calendar';
+import type { ReactNode } from 'react';
 import { PayLateHours } from './PayLateHours';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,6 +22,7 @@ import {
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
 import { AireFinalizedBatchAction } from './AireFinalizedBatchAction';
 import { AireManualHoursReview } from './AireManualHoursReview';
+import { AireSourceCheckpointSummary } from './AireSourceCheckpointSummary';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -49,6 +51,9 @@ import type {
 } from '@/types';
 
 type Props = {
+  presentation?: 'workspace' | 'checkpoint';
+  sourceCoverageRequired?: boolean;
+  sourceCoverageAction?: ReactNode;
   payPeriodId: number;
   payPeriodStatus?: import('@/types').PayPeriodStatus;
   payrollHours?: Record<string, { regular: number; overtime: number }>;
@@ -395,6 +400,9 @@ export function AirePayrollCockpit(props: Props) {
 }
 
 function AirePayrollCockpitWorkspace({
+  presentation = 'workspace',
+  sourceCoverageRequired = false,
+  sourceCoverageAction,
   payPeriodId,
   payPeriodStatus = 'draft',
   payrollHours = {},
@@ -437,6 +445,8 @@ function AirePayrollCockpitWorkspace({
   const [settlementPage, setSettlementPage] = useState(1);
   const requestGeneration = useRef(0);
   const actionGeneration = useRef(0);
+  const sourceDetailsRef = useRef<HTMLDetailsElement>(null);
+  const timecardDetailsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     requestGeneration.current += 1;
@@ -755,9 +765,25 @@ function AirePayrollCockpitWorkspace({
     }
   };
 
+  const openFinalize = () => {
+    const version = overview?.payroll_period.version;
+    if (version != null) {
+      setFinalizeCommand((current) => current?.version === version
+        ? current
+        : { commandId: commandId(), version });
+    }
+    setCommandError(null);
+    setShowFinalize(true);
+  };
+
   const renderedEntries = view === 'exceptions' ? exceptions?.time_exceptions : timeEntries?.time_entries;
   const manualLock = overview?.payroll_period.lock_mode === 'manual';
   const periodCanFinalize = manualLock || overview?.payroll_period.cutoff_state === 'due' || overview?.payroll_period.cutoff_state === 'attention_required';
+  const periodLocked = overview?.payroll_period.status === 'finalized' || Boolean(calendar.finalized_batch);
+  const lockDisabledReason = busy ? 'A source action is processing. Wait for its saved result.'
+    : loading || !overview ? 'Wait for the source review to finish loading.'
+      : !canCommand ? 'Connect your time tracking account and obtain permission to lock this payroll.'
+        : !periodCanFinalize ? `The scheduled cutoff can be locked on ${formatGuamDateTime(overview.payroll_period.cutoff_at)}.` : undefined;
   const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
   const verifiedBatch = calendar.finalized_batch?.verification_status === 'verified'
     ? calendar.finalized_batch
@@ -765,10 +791,71 @@ function AirePayrollCockpitWorkspace({
   const visibleError = commandError || refreshError;
   const correctionCategories = correction?.entry.available_time_categories
     ?? (correction?.entry.category ? [correction.entry.category] : []);
+  const checkpoint = presentation === 'checkpoint';
+  const sourceHoursContent = verifiedBatch ? (
+    <AireFinalizedBatchAction
+      batch={verifiedBatch}
+      payPeriodStatus={payPeriodStatus}
+      aireRecord={aireRecord}
+      onReview={onReviewFinalizedBatch}
+    />
+  ) : supportsCockpit ? (
+    <AireManualHoursReview
+      payPeriodId={payPeriodId}
+      payPeriodStatus={payPeriodStatus}
+      payrollHours={payrollHours}
+      aireRecordLinked={Boolean(aireRecord)}
+      refreshToken={refreshToken}
+    />
+  ) : (
+    <Card>
+      <CardContent className="space-y-2 py-6">
+        <h3 className="font-display text-lg font-bold text-neutral-950">Payroll uses verified time batches</h3>
+        <p className="text-sm leading-6 text-neutral-700">
+          {calendar.source_name} provides cutoff batches. Live timecard review is not available in Cornerstone for this connection. When a verified batch arrives, review and add its hours here.
+        </p>
+      </CardContent>
+    </Card>
+  );
 
   return (
-    <div className="space-y-4">
-      {verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">
+    <div className={checkpoint ? 'rounded-xl border border-neutral-200 bg-white' : 'space-y-4'}>
+      {checkpoint && <AireSourceCheckpointSummary
+        calendar={calendar}
+        overview={overview}
+        aireRecord={aireRecord}
+        payPeriodStatus={payPeriodStatus}
+        sourceCoverageRequired={sourceCoverageRequired}
+        sourceCoverageAction={sourceCoverageAction}
+        canReviewTimecards={Boolean(supportsCockpit && calendar.external_pay_period_id && cockpitPublished)}
+        loading={loading}
+        lockAction={supportsCockpit && calendar.external_pay_period_id && cockpitPublished && !periodLocked ? (
+          <Button type="button" variant="outline" onClick={openFinalize} title={lockDisabledReason}
+            disabled={!canCommand || !periodCanFinalize || busy || loading} className="max-sm:w-full sm:shrink-0">
+            <LockKeyhole className="mr-2 h-4 w-4" aria-hidden="true" />Lock time tracking cutoff
+          </Button>
+        ) : undefined}
+        onReview={onReviewFinalizedBatch}
+        onReviewTimecards={() => {
+          if (timecardDetailsRef.current) {
+            timecardDetailsRef.current.open = true;
+            timecardDetailsRef.current.querySelector('summary')?.focus();
+          }
+          setView(overview && overview.readiness.pending_approvals + overview.readiness.pending_overtime > 0 ? 'exceptions' : 'timecards');
+        }}
+        onReviewSource={() => {
+          if (sourceDetailsRef.current) {
+            sourceDetailsRef.current.open = true;
+            sourceDetailsRef.current.querySelector('summary')?.focus();
+          }
+        }}
+      />}
+      {checkpoint ? <details ref={sourceDetailsRef} className="border-t border-neutral-200">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">Cutoff and connection details</summary>
+        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
+          if (await onRefresh() !== true) await load();
+        }} />
+      </details> : verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">
         <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-primary-800">Verified cutoff · connection details</summary>
       <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
@@ -777,45 +864,28 @@ function AirePayrollCockpitWorkspace({
         if (await onRefresh() !== true) await load();
       }} />      )}
 
-      {verifiedBatch ? (
-        <AireFinalizedBatchAction
-          batch={verifiedBatch}
-          payPeriodStatus={payPeriodStatus}
-          aireRecord={aireRecord}
-          onReview={onReviewFinalizedBatch}
-        />
-      ) : supportsCockpit ? (
-        <AireManualHoursReview
-          payPeriodId={payPeriodId}
-          payPeriodStatus={payPeriodStatus}
-          payrollHours={payrollHours}
-          aireRecordLinked={Boolean(aireRecord)}
-          refreshToken={refreshToken}
-        />
-      ) : (
-        <Card>
-          <CardContent className="space-y-2 py-6">
-            <h3 className="font-display text-lg font-bold text-neutral-950">Payroll uses verified time batches</h3>
-            <p className="text-sm leading-6 text-neutral-700">
-              {calendar.source_name} provides cutoff batches. Live timecard review is not available in Cornerstone for this connection. When a verified batch arrives, review and add its hours here.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      {checkpoint ? <details className="border-t border-neutral-200">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">{verifiedBatch ? 'Batch and payment details' : 'Compare source and payroll hours'}</summary>
+        {verifiedBatch && <dl className="space-y-2 px-4 pb-3 text-xs text-neutral-600 sm:px-5">
+          <div><dt>Batch ID</dt><dd className="break-all">{verifiedBatch.payroll_batch_id}</dd></div>
+          <div><dt>Checksum</dt><dd className="break-all">{verifiedBatch.payroll_batch_checksum}</dd></div>
+        </dl>}
+        {sourceHoursContent}
+      </details> : sourceHoursContent}
 
       {supportsCockpit && calendar.external_pay_period_id && cockpitPublished && (
         <>
         {visibleError && <ActionFeedback tone="error" message={visibleError} />}
-        <details open={!verifiedBatch} className="rounded-2xl border border-neutral-200 bg-white">
+        <details ref={timecardDetailsRef} open={checkpoint ? undefined : !verifiedBatch} className={checkpoint ? 'border-t border-neutral-200' : 'rounded-2xl border border-neutral-200 bg-white'}>
           <summary className="cursor-pointer px-5 py-4 font-semibold text-primary-800">
             Review timecards, held hours and team
             {overview && <span className="ml-3 text-sm font-normal text-neutral-600">{overview.readiness.pending_approvals + overview.readiness.pending_overtime} approvals needed · {heldEntries ?? '—'} held timecards{unmappedCount > 0 ? ` · ${unmappedCount} visible people need mapping` : ''}</span>}
           </summary>
         <Card className="overflow-hidden border-0 shadow-none">
           <CardContent className="p-0">
-            <div className="border-b border-neutral-200 bg-neutral-950 px-5 py-5 text-white sm:px-6">
+            <div className={checkpoint ? 'border-b border-neutral-200 bg-neutral-50 px-4 py-3 text-neutral-950 sm:px-5' : 'border-b border-neutral-200 bg-neutral-950 px-5 py-5 text-white sm:px-6'}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
+                {!checkpoint && <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-display text-lg font-bold">Time tracking payroll workspace</h3>
                     <Badge className="bg-white/10 text-white">Live from time tracking</Badge>
@@ -823,22 +893,13 @@ function AirePayrollCockpitWorkspace({
                   <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-300">
                     Review the exact time tracking timecards, resolve manual entries, lock the cutoff, and follow every hour through payroll without leaving Cornerstone.
                   </p>
-                </div>
+                </div>}
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" variant="secondary" onClick={() => void refreshSource()} disabled={loading || busy}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
-                  {overview?.payroll_period.status !== 'finalized' && (
-                    <Button type="button" size="sm" onClick={() => {
-                      const version = overview?.payroll_period.version;
-                      if (version != null) {
-                        setFinalizeCommand((current) => current?.version === version
-                          ? current
-                          : { commandId: commandId(), version });
-                      }
-                      setCommandError(null);
-                      setShowFinalize(true);
-                    }} aria-describedby="payroll-lock-policy" disabled={!canCommand || !periodCanFinalize || busy || loading}>
+                  {!checkpoint && overview?.payroll_period.status !== 'finalized' && (
+                    <Button type="button" size="sm" onClick={openFinalize} aria-describedby="payroll-lock-policy" disabled={!canCommand || !periodCanFinalize || busy || loading}>
                       <LockKeyhole className="mr-2 h-4 w-4" />
                       Lock time tracking cutoff
                     </Button>

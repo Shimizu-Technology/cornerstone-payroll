@@ -1,0 +1,136 @@
+[
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 1,
+    "id": 2,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 1,
+    "id": 3,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 7,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 8,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 9,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 5,
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "maximum flags contain all labels without Details/menu collision",
+    "width": 1280,
+    "status": "passed",
+    "geometry": {
+      "lines": [
+        {
+          "left": 943.59375,
+          "right": 1082.46875
+        },
+        {
+          "left": 943.59375,
+          "right": 1050.1875
+        },
+        {
+          "left": 943.59375,
+          "right": 1066.640625
+        },
+        {
+          "left": 943.59375,
+          "right": 968.25
+        }
+      ],
+      "flagsLeft": 935.59375,
+      "flagsRight": 1096.140625,
+      "detailsLeft": 1132.796875,
+      "detailsRight": 1174,
+      "menuLeft": 1178
+    }
+  },
+  {
+    "case": "failed commit stays visible and focused in current Commit",
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "failed unapprove stays visible and focused in current Commit",
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 1,
+    "id": 2,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 1,
+    "id": 3,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 7,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 8,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 9,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "one filled header primary; step actions secondary",
+    "company": 2,
+    "id": 5,
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "failed commit stays visible and focused in current Commit",
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "failed unapprove stays visible and focused in current Commit",
+    "width": 390,
+    "status": "passed"
+  }
+]

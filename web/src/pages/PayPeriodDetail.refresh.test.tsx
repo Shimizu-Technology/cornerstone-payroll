@@ -2,8 +2,8 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState, type ComponentProps } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
@@ -16,13 +16,19 @@ function PayPeriodDetail(props: ComponentProps<typeof PayPeriodDetailPage>) {
 }
 
 function payRunButton(name: string | RegExp): HTMLElement {
-  const button = screen.getByRole('button', { name, hidden: true });
+  const buttons = screen.getAllByRole('button', { name, hidden: true });
+  const button = buttons.find(element => element.closest('details[id^="payroll-"]')) || buttons[0];
   const panel = button.closest('section[hidden][aria-label]');
   const tab = ({ 'Checks and payments workspace': 'checks', 'Reports workspace': 'reports', 'Activity workspace': 'activity', 'Payroll workspace': 'work' } as Record<string, string>)[panel?.getAttribute('aria-label') || ''];
   if (tab) fireEvent.click(screen.getByRole('button', { name: `Tab ${tab}` }));
   const disclosure = button.closest('details');
   if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector('summary')!);
-  return screen.getByRole('button', { name });
+  return button;
+}
+
+async function findPayRunButton(name: string): Promise<HTMLElement> {
+  await screen.findAllByRole('button', { name, hidden: true });
+  return payRunButton(name);
 }
 
 const apiMocks = vi.hoisted(() => ({
@@ -32,6 +38,7 @@ const apiMocks = vi.hoisted(() => ({
   employeesList: vi.fn(),
   runPayroll: vi.fn(),
   commit: vi.fn(),
+  unapprove: vi.fn(),
   refreshSetup: vi.fn(),
   comparison: vi.fn(),
   payrollFinalRecord: vi.fn(),
@@ -53,6 +60,7 @@ vi.mock('@/services/api', () => ({
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
     commit: apiMocks.commit,
+    unapprove: apiMocks.unapprove,
     refreshSetup: apiMocks.refreshSetup,
     comparison: apiMocks.comparison,
   },
@@ -106,8 +114,9 @@ vi.mock('@/components/payroll/AireManualPaymentReconciliation', () => ({
   ),
 }));
 vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
-  AirePayrollCockpit: ({ onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => Promise<boolean | void> }) => (
+  AirePayrollCockpit: ({ sourceCoverageAction, onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { sourceCoverageAction?: ReactNode; onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => Promise<boolean | void> }) => (
     <div data-testid="source-cockpit-revision" data-revision={refreshToken}>
+      {sourceCoverageAction}
       <button type="button" onClick={onReviewFinalizedBatch}>Review verified time tracking batch</button>
       <button type="button" onClick={onSourceChanged}>Approve source time</button>
       <button type="button" onClick={() => { void onRefresh().then(componentMocks.calendarRefreshCompleted); }}>Refresh source calendar</button>
@@ -147,7 +156,71 @@ const sourceCalendar: AirePayrollCalendarState = {
     occurred_at: '2026-09-22T07:00:00Z', payroll_batch_id: 'batch-12', payroll_batch_checksum: 'checksum-12' },
 };
 
-afterEach(() => { cleanup(); componentMocks.finalRecordEnabled = false; });
+function RoutedFeedbackPayRun({ period }: { period: PayPeriod }): ReactElement {
+  const { tab } = useParams();
+  const location = useLocation();
+  return <><output aria-label="Current payroll path">{location.pathname}</output>
+    <PayPeriodDetailPage initialPayPeriod={period} activeTab={tab as 'work' | 'checks' | 'reports' | 'activity'}
+      navigation={<nav aria-label="Feedback test tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <Link key={id} to={`/companies/7/pay-runs/12/${id}`}>Go to {id}</Link>)}</nav>} />
+  </>;
+}
+
+it.each(['reports', 'checks', 'activity'] as const)('retains %s navigation after a successful calculation', async (tab): Promise<void> => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0, gross_pay: 64, net_pay: 60 };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  await user.click(payRunButton('Calculate Payroll'));
+  await screen.findByText('Payroll calculated for 1 employee. Review the results before approval.');
+  await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
+  await user.click(screen.getByRole('link', { name: `Go to ${tab}` }));
+  expect(screen.getByLabelText('Current payroll path').textContent).toBe(`/companies/7/pay-runs/12/${tab}`);
+});
+
+it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to Payroll and focuses it', async (action): Promise<void> => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  try {
+    const period = { ...initialPayPeriod, status: 'approved' } as PayPeriod;
+    apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+    apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+    apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+    const apiAction = action === 'commit' ? apiMocks.commit : apiMocks.unapprove;
+    apiAction.mockRejectedValue(new Error(`New ${action} rejected`));
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/reports']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
+    const processing = await screen.findByRole('region', { name: 'Payroll processing actions' });
+    for (const attempt of [1, 2]) {
+      if (attempt === 2) {
+        await user.click(screen.getByRole('link', { name: 'Go to reports' }));
+        expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/reports');
+      }
+      if (action === 'commit') {
+        await user.click(within(processing).getByRole('button', { name: 'Commit' }));
+        await user.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+      } else {
+        await user.click(within(processing).getByLabelText('More payroll actions'));
+        await user.click(within(processing).getByRole('button', { name: 'Roll Back Approval' }));
+      }
+      const feedback = await screen.findByText(`New ${action} rejected`);
+      expect(apiAction).toHaveBeenCalledTimes(attempt);
+      expect(apiAction).toHaveBeenLastCalledWith(12);
+      await waitFor(() => expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/work'));
+      expect(feedback.closest('details')?.id).toBe('payroll-commit');
+      await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
+    }
+  } finally { confirm.mockRestore(); }
+});
+
+afterEach(() => {
+  localStorage.clear(); cleanup(); componentMocks.finalRecordEnabled = false; });
 
 it('lets an accountant explicitly include a fixed salary before calculating a fresh special run', async () => {
   vi.clearAllMocks();
@@ -604,7 +677,7 @@ function approvedCommitView(refreshToken = 0, withAire = false) {
 }
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
   vi.clearAllMocks(); render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(await screen.findByRole('dialog', { name: 'Commit and finalize payroll?' })).toBeTruthy();
   expect(apiMocks.commit).not.toHaveBeenCalled();
   fireEvent.click(payRunButton('Keep reviewing'));
@@ -615,14 +688,16 @@ it('closes before the API completes, blocks duplicate writes and leaves a failed
   let rejectCommit!: (error: Error) => void;
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
   fireEvent.click(confirm); fireEvent.click(confirm);
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((payRunButton('Committing...') as HTMLButtonElement).disabled).toBe(true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
-  expect(await screen.findByText('Commit rejected: stale approval')).toBeTruthy();
+  const feedback = await screen.findByText('Commit rejected: stale approval');
+  expect(feedback.closest('details')?.id).toBe('payroll-commit');
+  await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
   expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -637,11 +712,11 @@ it('drops an open confirmation when navigating to another approved run', async (
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(await screen.findByRole('dialog')).toBeTruthy();
   fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
-  await screen.findByRole('button', { name: 'Commit' });
+  await findPayRunButton('Commit');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 
@@ -653,7 +728,7 @@ it('settles a commit after a same-run sibling refresh and reloads the committed 
   apiMocks.commit.mockReturnValue(new Promise(resolve => { finishCommit = resolve; }));
   apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
@@ -668,7 +743,7 @@ it('preserves a commit rejection after a same-run sibling refresh', async () => 
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
@@ -691,7 +766,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13));
@@ -699,7 +774,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
     if (outcome === 'success') finishCommit({ pay_period: initialPayPeriod });
     else rejectCommit(new Error('Previous run failed'));
   });
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(within(await screen.findByRole('dialog')).getByText('#13')).toBeTruthy();
   expect(screen.queryByText('Previous run failed')).toBeNull();
   expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13);
@@ -865,7 +940,7 @@ it('refreshes committed source receipt and history panels once after the canonic
   apiMocks.commit.mockResolvedValue({ pay_period: committed });
   apiMocks.get.mockResolvedValue({ pay_period: committed });
   render(approvedCommitView(0, true));
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   await waitFor(() => {
     for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
@@ -1050,6 +1125,7 @@ it('submits a single captured wage bucket with updated hours instead of clearing
 
 it('labels the saved loan total as loan deductions while keeping standalone entry distinct', async () => {
   await renderLoanWorksheet('calculated', undefined, 300);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show tax detail' }));
   const header = screen.getByRole('columnheader', { name: 'Loan deductions' });
   expect(header.title).toBe('Calculated total of linked loan repayments and any standalone loan deduction.');
   expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
@@ -1370,12 +1446,12 @@ it('blocks approval when a standalone deduction has replaced the due named repay
 
 it('keeps a missing linked repayment warning after unrelated edits to a saved positive override', async () => {
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40, 0, 300);
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '200' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1389,11 +1465,11 @@ it('saves both named and standalone amounts through worksheet recalculation', as
 
 it('updates the separate-deduction warning for a staged zero skip while requiring recalculation', async () => {
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1401,7 +1477,7 @@ it('accepts a staged positive linked request alongside a separate amount without
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1448,6 +1524,7 @@ it.each([25, 10])('describes retained earning entries accurately when one wage I
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Show tax detail' }));
   const badge = await screen.findByText('Multiple earnings');
   const row = badge.closest('tr')!;
   const mobile = screen.getByRole('region', { name: 'Payroll result for Ana Cruz' });
@@ -1737,7 +1814,7 @@ it('submits initial server roster defaults alongside connected hourly items with
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  await screen.findByRole('button', { name: 'Calculate Payroll' });
+  await findPayRunButton('Calculate Payroll');
   await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids.sort()).toEqual([30, 31]);
@@ -1755,7 +1832,7 @@ it('honors a server default roster on an empty regular draft without expanding t
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Calculate Payroll' }));
+  fireEvent.click(await findPayRunButton('Calculate Payroll'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids).toEqual([30]);
 });
@@ -1791,8 +1868,10 @@ it('requires a reason and acknowledgement for a scheduled connected run before i
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  expect((await screen.findByRole('button', { name: 'Review & add hours' })).className).toContain('bg-primary-700');
-  fireEvent.click(payRunButton('Calculate Payroll'));
+  await findPayRunButton('Review & add hours');
+  expect(within(document.querySelector('section[aria-label="Payroll processing actions"]') as HTMLElement).getByRole('button', { name: 'Review & add hours' }).className).toContain('bg-primary-700');
+  expect((payRunButton('Calculate Payroll') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(payRunButton('Review source coverage'));
   const dialog = await screen.findByRole('dialog');
   const calculate = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
   expect(calculate.disabled).toBe(true);
@@ -1844,7 +1923,7 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   }));
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   expect(await screen.findByText(/Current setup applied to the saved employees/)).toBeTruthy();
-  fireEvent.click(payRunButton('Recalculate'));
+  fireEvent.click(payRunButton('Review source coverage'));
   expect(screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' })).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
@@ -1911,4 +1990,29 @@ it('counts prepared paper checks separately from direct-deposit stubs in the hea
   ] } as unknown as PayPeriod;
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   expect(await screen.findByRole('link', { name: '1 check prepared, not issued' })).toBeTruthy();
+});
+
+
+it('reveals actual withholding and FICA fields in phone tax detail', async () => {
+  await renderLoanWorksheet('calculated');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show tax detail' }));
+  const result = screen.getByRole('region', { name: /^Payroll result for / });
+  for (const label of ['FIT', 'Additional withholding', 'Social Security', 'Employee Medicare', 'Employer Medicare']) expect(within(result).getByText(label, { exact: true })).toBeTruthy();
+  expect(within(result).getByText('Net pay', { exact: true })).toBeTruthy();
+});
+
+it('uses the singular saved employee record count', async () => {
+  await renderLoanWorksheet('calculated');
+  expect(screen.getByText('1 employee record · Review saved pay')).toBeTruthy();
+});
+
+it('opens the completed Hours step from a blocking loan approval reason', async () => {
+  await renderLoanWorksheet('calculated', undefined, 0, undefined, 300, 0);
+  const hours = document.getElementById('payroll-hours') as HTMLDetailsElement;
+  hours.open = false;
+  const results = document.getElementById('payroll-results')!;
+  expect((within(results).getByRole('button', { name: 'Approve', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(results).getByRole('link', { name: 'Review loan inputs', hidden: true }));
+  expect(hours.open).toBe(true);
+  expect(document.activeElement?.id).toBe('payroll-loan-inputs');
 });
