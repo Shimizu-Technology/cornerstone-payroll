@@ -60,7 +60,46 @@ class CorrectivePayrollComponents
   end
 
   def earning_rows
-    rows_for(:payroll_item_earnings, EARNING_ATTRIBUTES, ->(row) { [ row.category, row.label ] }, earnings: true)
+    rows = rows_for(:payroll_item_earnings, EARNING_ATTRIBUTES, ->(row) { [ row.category, row.label ] }, earnings: true)
+    # Old committed gross rounded the unrounded aggregate. Account for its
+    # implicit residual in memory only; the supplemental discloses the change
+    # in that residual, never a rewrite of captured wage amounts or history.
+    residual = historical_earnings_residual(@corrected) - @recorded.sum { |item| historical_earnings_residual(item) }
+    unless residual.zero?
+      row = rows.find { |entry| entry["category"] == "other" && entry["label"] == PayrollEarningsRounding::HISTORICAL_LABEL }
+      if row
+        row["amount"] += residual
+      else
+        rows << { "category" => "other", "label" => PayrollEarningsRounding::HISTORICAL_LABEL, "amount" => residual, "hours" => nil, "rate" => nil }
+      end
+    end
+    rows.reject { |row| row["amount"].zero? && row["hours"].to_d.zero? }
+  end
+
+  def historical_earnings_residual(item)
+    return 0.to_d if item.calculation_context_snapshot["earnings_rounding"] == PayrollEarningsRounding::POLICY
+    return 0.to_d unless item.employment_type.in?(%w[hourly contractor])
+
+    residual = item.gross_pay.to_d - PayrollEarningsRounding.taxable_total(item)
+    return residual if residual.zero?
+
+    taxable = item.payroll_item_earnings.reject { |row| row.category.in?(PayrollEarningsRounding::NON_TAXABLE_CATEGORIES) }
+    unrounded = taxable.sum(0.to_d) do |row|
+      if row.hours.present? && row.rate.present?
+        raw = row.hours.to_d * row.rate.to_d
+        unless raw.to_f.round(2).to_d == row.amount.to_d
+          raise Error, "The historical earning amounts cannot be proven as rounded captured wages"
+        end
+        raw
+      else
+        row.amount.to_d
+      end
+    end
+    expected_gross = item.employment_type == "contractor" ? unrounded.to_f.round(2).to_d : unrounded.round(2)
+    unless expected_gross == item.gross_pay.to_d
+      raise Error, "The historical earning detail cannot be proven against the saved aggregate gross"
+    end
+    residual
   end
 
   def rows_for(association, attributes, identity, earnings: false)
