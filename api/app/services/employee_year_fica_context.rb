@@ -79,7 +79,7 @@ class EmployeeYearFicaContext
 
   def fingerprint
     @fingerprint ||= Digest::SHA256.hexdigest(JSON.generate([
-      2, year, employee.id, rows.map { |row| row.attributes.slice(*FINGERPRINT_FIELDS) },
+      2, year, employee.id, rows.map { |row| fingerprint_row(row) },
       opening_balance&.attributes&.slice(*OPENING_FIELDS)
     ]))
   end
@@ -176,10 +176,11 @@ class EmployeeYearFicaContext
       hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
       prior_rows = rows.take_while { |prior| prior.id < row.id }
       prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
-      stored = row[:recorded_annual_fica_context].to_h
+      stored = row[:recorded_annual_fica_context]
+      stored = {} unless stored.is_a?(Hash)
       proof = if stored["version"] == 2
         prior.fingerprint
-      elsif opening_balance.nil?
+      elsif !stored.key?("version") && opening_balance.nil?
         # v1 fingerprints included the complete opening row; only the
         # no-opening-balance form can be verified from this bounded projection.
         Digest::SHA256.hexdigest(JSON.generate([ year, employee.id, prior_rows.map { |item| item.attributes.slice(*LEDGER_FIELDS) }, nil ]))
@@ -190,6 +191,14 @@ class EmployeeYearFicaContext
       prior.increment(wages_delta: row.medicare_taxable_wages || row.gross_pay,
         tips_delta: row.cash_tips_reported || row.reported_tips, rules: rules)
     end
+  end
+
+  def fingerprint_row(row)
+    attributes = row.attributes.slice(*FINGERPRINT_FIELDS)
+    if row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? || row.additional_medicare_taxable_wages.nil?
+      attributes["legacy_basis_evidence"] = row[:recorded_annual_fica_context]
+    end
+    attributes
   end
 
   def hold_legacy!(row, component)
