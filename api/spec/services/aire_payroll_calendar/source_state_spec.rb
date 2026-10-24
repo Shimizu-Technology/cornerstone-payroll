@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "webmock/rspec"
 
 RSpec.describe AirePayrollCalendar::SourceState do
   let(:source) { create(:time_tracking_source, source_type: "aire_services") }
@@ -14,10 +15,10 @@ RSpec.describe AirePayrollCalendar::SourceState do
   let(:cutoff) { "2026-11-22T17:00:00+10:00" }
   let(:remote) do
     { "external_pay_period_id" => calendar.external_pay_period_id, "publication_id" => publication.publication_id,
-      "schedule_version" => publication.schedule_version, "next_scheduled_cutoff_at" => cutoff }
+      "schedule_version" => publication.schedule_version, "next_scheduled_cutoff_at" => cutoff, "revisions" => [] }
   end
 
-  before { allow(client).to receive(:payroll_calendar_period).and_return("payroll_calendar_period" => remote) }
+  before { allow(client).to receive(:payroll_calendar_period).and_return(remote) }
 
   def present
     AirePayrollCalendar::Presenter.call(calendar.pay_period)
@@ -48,6 +49,29 @@ RSpec.describe AirePayrollCalendar::SourceState do
   it "rejects a source response for a different publication" do
     remote["publication_id"] = SecureRandom.uuid
     expect(service.refresh).to include("status" => "unavailable")
+  end
+
+  it "rejects an unwrapped response for a different external period" do
+    remote["external_pay_period_id"] = SecureRandom.uuid
+    expect(service.refresh).to include("status" => "unavailable")
+  end
+
+  it "rejects an unwrapped response for a different schedule revision" do
+    remote["schedule_version"] += 1
+    expect(service.refresh).to include("status" => "unavailable")
+  end
+
+  it "uses the real authenticated client's unwrapped GET contract" do
+    policy = TimeTracking::DestinationPolicy.new(environment: "test", resolver: ->(*) { [ "8.8.8.8" ] })
+    real_client = TimeTracking::Client.new(source, destination_policy: policy)
+    request = stub_request(:get, "#{source.base_url}/api/v1/payroll/calendar_periods/#{calendar.external_pay_period_id}")
+      .with(headers: { "X-Shared-Secret" => source.shared_secret, "X-Payroll-Shared-Secret" => source.shared_secret })
+      .to_return(status: 200, body: remote.to_json, headers: { "Content-Type" => "application/json" })
+
+    expect(described_class.new(source, client_factory: ->(*) { real_client }).refresh).to include(
+      "status" => "available", "next_scheduled_cutoff_at" => cutoff)
+    expect(request).to have_been_requested.once
+    expect(present[:next_scheduled_cutoff_at]).to eq(cutoff)
   end
 
   it "rejects malformed cutoff values" do

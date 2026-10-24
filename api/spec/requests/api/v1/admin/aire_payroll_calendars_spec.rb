@@ -132,7 +132,7 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
     publication = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar, delivery_status: "delivered")
     state = { "external_pay_period_id" => calendar.external_pay_period_id, "publication_id" => publication.publication_id,
       "schedule_version" => 1, "next_scheduled_cutoff_at" => nil }
-    allow_any_instance_of(TimeTracking::Client).to receive(:payroll_calendar_period).and_return("payroll_calendar_period" => state)
+    allow_any_instance_of(TimeTracking::Client).to receive(:payroll_calendar_period).and_return(state)
 
     post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar/refresh"
     expect(response).to have_http_status(:ok)

@@ -20,8 +20,8 @@ module AirePayrollCalendar
         raise TimeTracking::Client::Error, "No delivered calendar to refresh" unless publication
 
         period = publication.aire_payroll_calendar_period
+        # GET returns the contract itself; only PUT wraps payroll_calendar_period.
         state = @client_factory.call(@source).payroll_calendar_period(external_pay_period_id: period.external_pay_period_id)
-          .fetch("payroll_calendar_period")
         unless state.is_a?(Hash) && state["external_pay_period_id"] == period.external_pay_period_id &&
                state["publication_id"] == publication.publication_id && state["schedule_version"] == publication.schedule_version
           raise TimeTracking::Client::Error, "AIRE returned an unexpected calendar revision"
