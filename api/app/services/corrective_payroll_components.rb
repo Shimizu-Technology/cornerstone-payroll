@@ -135,6 +135,10 @@ class CorrectivePayrollComponents
     [ *item.payroll_item_deductions, *item.payroll_item_field_entries, *item.payroll_item_earnings ].each do |row|
       raise Error, "The corrective component cannot be represented: #{row.errors.full_messages.join(', ')}" unless row.valid?
     end
+    unless item.insurance_payment.to_d == PayrollInsuranceComponents.scalar_amount(item) &&
+        PayrollInsuranceComponents.total(item) == PayrollInsuranceComponents.total(@corrected) - @recorded.sum { |record| PayrollInsuranceComponents.total(record) }
+      raise Error, "Corrective insurance classification does not reconcile with its liability components"
+    end
     data = QuickbooksPayrollReportData.new(item.pay_period)
     earnings = data.earnings_lines_for(item).reject { |line| line.label == "Gross" }.sum { |line| line.amount.to_d }
     deductions = data.employee_tax_total(item).to_d +
