@@ -1,6 +1,6 @@
 # Pay-run redesign — PR B
 
-Owner: `payroll-redesign`. Base `origin/staging-v2` `34c99bb2`, including PR A #383 and late-hours #382. Held for the lead to recheck and merge.
+Owner: `payroll-redesign`. Measurement baseline `34c99bb2` includes PR A #383 and late-hours #382. Current integration base is `a7c43a05` (#381); see the integration receipt below. Held for lead merge after CI.
 
 One header shows period, client, pay date, purpose, run number, status, linked attention, a filled next action and secondary-action overflow. Saved totals use a neutral divided strip. Payroll, Checks & payments, Reports and Activity retain existing guarded tools and dialogs. The processing controller stays mounted to preserve worksheet edits and filters across tabs. Read-only modes retain their summary; writer `overview` URLs redirect without changing return context. Client portal code is unchanged.
 
@@ -24,3 +24,9 @@ No API, schema, dependency, deployment or migration changes. Late-hours source/c
 The lead’s independent review at `d0a3291b` found F1 (P2) and F2 (P3), now addressed with regression and real-browser evidence. The final fix head awaits the lead’s recheck. CodeRabbit’s one requested review was rate-limited; no completed bot approval is claimed. Earlier bounded review is preserved in [code-review.md](code-review.md).
 
 [Verified source](verified-source.json) and [cleanup](lifecycle-final.txt): no active owned resources. Exact owned wrappers/browsers stopped; five recreated private databases dropped and the prior backend-test database remains removed. All assigned ports 48741–48749 are free. Borrowed/protected services were preserved. Worktree/branch are retained for review and C after the lead merges B.
+
+## Integration after #381 merge
+
+The lead accepted F1/F2 and the phone fixes at `cdbce693`. `origin/staging-v2` `a7c43a05` was merged without conflicts as `89cd40ee`; no product integration edits were needed. The requested combined-source web gate passes **126 files / 1,190 tests**, and browser release **45**, refresh **10**, pay-items **24** pass with zero failures/skips. Seven accepted phone/Reports/help/late-hours files are byte-identical to the accepted head. [Integration receipt](integration-381.json) records exact source trees, tests, inherited backend proof and cleanup.
+
+The merged API tree matches #381’s final tested source `0f8e42c5`; its owner reports 5,254 examples, zero failures/pending, RuboCop1,498/0 and passing schema/integrity/security gates. This worker did not rerun that backend suite or the public browser lane in this integration round. Earlier contact sheets/axe/motion and measurement receipts remain explicitly tied to the accepted layout source. All three fresh browser-lane DBs were dropped; lifecycle has no active owned resources and ports48741–49 are free. No PR C work was started. Final hosted CI and merge remain with the lead.
