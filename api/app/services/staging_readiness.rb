@@ -9,6 +9,7 @@ class StagingReadiness
 
   def run(live: Rails.env.production?)
     checks = [ check("staging containment settings") { StagingOutboundPolicy.validate!(env: @env) } ]
+    checks << check("complete Solid Queue schema exists") { StagingCloneContainment.queue_schema_complete? }
     checks << check("Solid Queue is the effective durable job adapter") { ActiveJob::Base.queue_adapter.is_a?(ActiveJob::QueueAdapters::SolidQueueAdapter) }
     checks << check("staging queue execution ownership matches the selected topology") { @env["USE_SOLID_QUEUE"] == "true" && @env["SOLID_QUEUE_IN_PUMA"] != "true" }
     checks << check("staging clone containment manifest exists") { StagingQuarantine.complete? }

@@ -7,7 +7,7 @@ RSpec.describe "staging transport boundaries" do
   around do |example|
     old = ENV.to_h
     ENV["DEPLOYMENT_ENV"] = "staging"
-    ENV["STAGING_TESTER_BINDINGS"] = '{"leon@example.test":"user_leon"}'
+    ENV["STAGING_TESTER_BINDINGS"] = '[{"user_id":1,"email":"leon@example.test","clerk_subject":"user_leon"}]'
     ENV["STAGING_INTEGRATION_HOSTS"] = "aire-staging.example.test"
     ENV["PRODUCTION_INTEGRATION_HOSTS"] = "aire.example.test"
     example.run

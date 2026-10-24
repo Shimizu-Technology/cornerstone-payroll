@@ -5,6 +5,7 @@ require "rails_helper"
 RSpec.describe StagingCloneContainment do
   around do |example|
     old = ENV.to_h
+    StagingDatabasePolicy::ROUTING_ENV.each { |name| ENV.delete(name) }
     ENV["DEPLOYMENT_ENV"] = "staging"
     # CI may supply DATABASE_URL or TEST_DATABASE_URL with a different host.
     database = ActiveRecord::Base.connection_db_config.configuration_hash
@@ -12,7 +13,7 @@ RSpec.describe StagingCloneContainment do
     ENV["DATABASE_URL"] = URI::Generic.build(scheme: "postgresql", host: database.fetch(:host), port: database[:port], path: "/#{database.fetch(:database)}").to_s
     ENV["STAGING_DATABASE_HOSTS"] = database.fetch(:host).downcase
     ENV["PRODUCTION_DATABASE_HOSTS"] = "production-db.example.test"
-    ENV["STAGING_TESTER_BINDINGS"] = '{"leon@example.test":"user_leon","chels@example.test":"user_chels"}'
+    ENV["STAGING_TESTER_BINDINGS"] = '[{"user_id":1,"email":"leon@example.test","clerk_subject":"user_leon"},{"user_id":2,"email":"chels@example.test","clerk_subject":"user_chels"}]'
     ENV["STAGING_INTEGRATION_HOSTS"] = "aire-staging.example.test"
     ENV["PRODUCTION_INTEGRATION_HOSTS"] = "aire.example.test"
     ENV["STAGING_AIRE_FRONTEND_ORIGIN"] = "https://aire-web-staging.example.test"
@@ -41,6 +42,14 @@ RSpec.describe StagingCloneContainment do
     expect { described_class.new.quarantine(apply: true) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /Actual database/)
   end
 
+  it "refuses a partial Solid Queue schema before any containment writes" do
+    connection = ActiveRecord::Base.connection
+    allow(connection).to receive(:data_source_exists?).and_call_original
+    allow(connection).to receive(:data_source_exists?).with("solid_queue_scheduled_executions").and_return(false)
+    expect(connection).not_to receive(:execute)
+    expect { described_class.new.quarantine(apply: true) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /complete Solid Queue schema/)
+  end
+
   it "defaults to a read-only dry run with no DDL or record writes" do
     statements = []
     listener = ->(_name, _start, _finish, _id, payload) { statements << payload[:sql] }
@@ -60,10 +69,26 @@ RSpec.describe StagingCloneContainment do
     expect(StagingQuarantine.suppressed?("solid_queue_jobs", fresh.id)).to eq(false)
   end
 
+  it "makes no tester binding writes when provider identity proof fails" do
+    leon = create(:user, email: "leon@example.test")
+    chels = create(:user, email: "chels@example.test")
+    original = [ leon.clerk_id, chels.clerk_id ]
+    ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: leon.id, email: leon.email, clerk_subject: "user_leon" }, { user_id: chels.id, email: chels.email, clerk_subject: "user_chels" } ].to_json
+    ENV["CLERK_SECRET_KEY"] = "sk_test_synthetic"
+    allow(HTTParty).to receive(:get).and_return(double(success?: true, parsed_response: { "id" => "user_leon", "primary_email_address_id" => "primary", "email_addresses" => [ { "id" => "primary", "email_address" => "outsider@example.test", "verification" => { "status" => "verified" } } ] }))
+    service = described_class.new
+    service.quarantine(apply: true)
+    expect { service.configure(apply: true) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /verified primary/)
+    expect([ leon.reload.clerk_id, chels.reload.clerk_id ]).to eq(original)
+    expect(StagingQuarantine.complete?).to eq(false)
+  end
+
   it "rebinds the two existing tester identities, preserves local IDs, and is repeatable" do
     leon = create(:user, email: "leon@example.test")
     chels = create(:user, email: "chels@example.test")
     original_ids = [ leon.id, chels.id ]
+    ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: leon.id, email: leon.email, clerk_subject: "user_leon" }, { user_id: chels.id, email: chels.email, clerk_subject: "user_chels" } ].to_json
+    allow(StagingTesterIdentity).to receive(:verify!).and_return(StagingOutboundPolicy.tester_records)
     service = described_class.new
     service.quarantine(apply: true)
     service.configure(apply: true)

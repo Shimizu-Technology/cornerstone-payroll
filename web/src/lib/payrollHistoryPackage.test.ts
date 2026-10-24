@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import { buildPayrollHistoryPackage } from './payrollHistoryPackage';
 import type { PayrollHistoryRecord, PayrollRegisterReport } from '@/services/api';
+
+afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 
 describe('buildPayrollHistoryPackage', () => {
   it('packages each run with separate W-2 and 1099 reconciliation totals', async () => {
@@ -33,6 +35,21 @@ describe('buildPayrollHistoryPackage', () => {
       combined_gross: 1_600, w2_net: 249.34, contractor_net: 249, combined_net: 498.34,
     });
     expect(await archive.file('reports/001_native-42_register.xlsx')!.async('string')).toBe('workbook');
+  });
+
+  it('marks the staging ZIP filename, CSV, JSON and README while preserving fetched artifact bytes', async () => {
+    vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging');
+    vi.resetModules();
+    const { buildPayrollHistoryPackage: build } = await import('./payrollHistoryPackage');
+    const run = { key: 'native:42', start_date: '2026-04-01', end_date: '2026-04-15', pay_date: '2026-04-30' } as PayrollHistoryRecord;
+    const report = { meta: { company_name: 'Synthetic' }, source: { label: 'Test' }, pay_period: { ...run, status: 'committed' }, summary: {} } as unknown as PayrollRegisterReport['report'];
+    const result = await build({ runs: [run], format: 'pdf', fetchReport: vi.fn().mockResolvedValue({ report }), fetchFile: vi.fn().mockResolvedValue({ blob: new Blob(['already marked server artifact']), filename: 'STAGING_register.pdf' }) });
+    const zip = await JSZip.loadAsync(new Uint8Array(await result.blob.arrayBuffer()));
+    expect(result.filename).toMatch(/^STAGING_/);
+    expect(await zip.file('manifest.csv')!.async('string')).toMatch(/^STAGING – DO NOT ISSUE OR FILE\nPay run key/);
+    expect(JSON.parse(await zip.file('manifest.json')!.async('string')).environment_warning).toBe('STAGING – DO NOT ISSUE OR FILE');
+    expect(await zip.file('README.txt')!.async('string')).toMatch(/^STAGING – DO NOT ISSUE OR FILE/);
+    expect(await zip.file('reports/001_native-42_STAGING_register.pdf')!.async('string')).toBe('already marked server artifact');
   });
 
   it('rejects an empty payroll history', async () => {

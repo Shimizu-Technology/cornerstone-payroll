@@ -33,6 +33,11 @@ module ClerkAuthenticatable
       return
     end
 
+    if StagingOutboundPolicy.staging? && !@current_user
+      render json: { error: "Staging tester has not been explicitly bound" }, status: :forbidden
+      return
+    end
+
     unless @current_user
       # Auto-provision user from Clerk token data
       @current_user = provision_user_from_clerk(@clerk_token_payload)
@@ -43,7 +48,7 @@ module ClerkAuthenticatable
       return
     end
 
-    unless StagingOutboundPolicy.tester?(email: @current_user.email, id: clerk_id)
+    unless StagingOutboundPolicy.tester?(user_id: @current_user.id, email: @current_user.email, id: clerk_id)
       @current_user = nil
       render json: { error: "Staging tester binding does not match" }, status: :forbidden
       return

@@ -58,7 +58,7 @@ module TimeTracking
       Array(sources).all? do |source|
         policy.validate_configuration!(URI.parse(source.base_url.to_s))
         true
-      rescue Error, URI::InvalidURIError
+      rescue Error, URI::InvalidURIError, StagingOutboundPolicy::Blocked
         false
       end
     end

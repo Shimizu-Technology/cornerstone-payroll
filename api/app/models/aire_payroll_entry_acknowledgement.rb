@@ -174,6 +174,7 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
   end
 
   def retry_financial!
+    return false if StagingQuarantine.suppressed?(self.class.table_name, id)
     with_lock do
       return false unless financial_correction_link_id && last_error.present? && delivered_at.nil?
       AirePayrollEntryStatusSyncJob.perform_later(id)

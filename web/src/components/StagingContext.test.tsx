@@ -51,3 +51,33 @@ it('disables analytics even when production keys and enable flags were copied', 
   expect(screen.getByText('Test content')).not.toBeNull()
   expect(posthog.init).not.toHaveBeenCalled()
 })
+
+for (const eventType of ['click', 'auxclick']) {
+  for (const href of ['mailto:tester@example.test', 'tel:+16715550100', 'sms:+16715550100', 'https://wa.me/16715550100', 'https://api.whatsapp.com/send?phone=16715550100']) {
+    it(`contains ${eventType} on ${href} and removes its listener on unmount`, async () => {
+      vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging')
+      const { StagingContext } = await import('./StagingContext')
+      const { unmount } = render(<><StagingContext /><a href={href}><span>Contact</span></a></>)
+      const link = screen.getByText('Contact')
+      const event = new MouseEvent(eventType, { bubbles: true, cancelable: true, button: eventType === 'auxclick' ? 1 : 0 })
+      link.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(true)
+      unmount()
+      const anchor = document.createElement('a')
+      anchor.href = href
+      document.body.append(anchor)
+      const after = new MouseEvent(eventType, { bubbles: true, cancelable: true })
+      anchor.dispatchEvent(after)
+      expect(after.defaultPrevented).toBe(false)
+      anchor.remove()
+    })
+  }
+  it(`allows ${eventType} on ordinary HTTPS links`, async () => {
+    vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging')
+    const { StagingContext } = await import('./StagingContext')
+    render(<><StagingContext /><a href="https://example.test/help">Help</a></>)
+    const event = new MouseEvent(eventType, { bubbles: true, cancelable: true })
+    screen.getByText('Help').dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+  })
+}

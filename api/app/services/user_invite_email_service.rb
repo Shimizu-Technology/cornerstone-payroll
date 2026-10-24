@@ -24,21 +24,30 @@ class UserInviteEmailService
         }
       )
 
+      if StagingOutboundPolicy.staging? && response["staging_captured"]
+        Rails.logger.info("[InviteEmail] STAGING captured invite user_id=#{user.id}; no email was sent")
+        return :captured
+      end
+
       Rails.logger.info("[InviteEmail] Sent invite to #{user.email} response=#{response.inspect}") unless StagingOutboundPolicy.staging?
       true
     rescue StandardError => e
-      Rails.logger.error("[InviteEmail] Failed for #{user.email}: #{e.class} #{e.message}") unless StagingOutboundPolicy.staging?
+      if StagingOutboundPolicy.staging?
+        Rails.logger.error("[InviteEmail] Failed user_id=#{user.id}: #{e.class}; content redacted")
+      else
+        Rails.logger.error("[InviteEmail] Failed for #{user.email}: #{e.class} #{e.message}")
+      end
       false
     end
 
     def configured?
       if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
-        Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email") unless StagingOutboundPolicy.staging?
+        Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email")
         return false
       end
 
       if from_email.blank?
-        Rails.logger.warn("[InviteEmail] RESEND_FROM_EMAIL not configured; skipping invite email") unless StagingOutboundPolicy.staging?
+        Rails.logger.warn("[InviteEmail] RESEND_FROM_EMAIL not configured; skipping invite email")
         return false
       end
 

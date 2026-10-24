@@ -359,6 +359,7 @@ module Api
             employee_name: timecard.employee_name,
             period_start: timecard.period_start,
             period_end: timecard.period_end,
+            **(StagingOutboundPolicy.staging? ? { staging_artifact_blocked: true } : {}),
             image_url: TimecardOcr::StorageService.presigned_url(timecard.image_url),
             preprocessed_image_url: TimecardOcr::StorageService.presigned_url(timecard.preprocessed_image_url),
             ocr_status: timecard.ocr_status,

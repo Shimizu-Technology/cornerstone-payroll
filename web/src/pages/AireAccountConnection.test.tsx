@@ -30,7 +30,7 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ authorization_url: url, expires_at: '2026-10-04T00:10:00Z' });
   mocks.disconnect.mockResolvedValue({ account_link: { connected: false } });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.resetModules(); });
 
 describe('Personal AIRE connection', () => {
   it('connects an assigned accountant without configuration controls and preserves the work context', async () => {
@@ -181,4 +181,16 @@ describe('Personal AIRE connection', () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(sessionStorage.getItem('aire-own-link-return:4')).toBeNull();
   });
+});
+
+it.each(['https://app.aireservicesguam.com/admin/payroll-link?token=synthetic', 'https://AIRE-STAGING.example.test/admin/payroll-link?token=synthetic', 'https://aire-staging.example.test/admin/payroll-link?token=synthetic'])('checks the staging origin before personal account navigation %s', async destination => {
+  vi.stubEnv('VITE_DEPLOYMENT_ENV', 'staging');
+  vi.stubEnv('VITE_STAGING_AIRE_FRONTEND_ORIGIN', 'https://aire-staging.example.test');
+  const { AireAccountConnection: StagingConnection } = await import('./AireAccountConnection');
+  mocks.create.mockResolvedValue({ authorization_url: destination });
+  const navigate = vi.fn();
+  render(<MemoryRouter initialEntries={['/app/aire-account-connection?source_id=4']}><StagingConnection navigateToAuthorization={navigate} /></MemoryRouter>);
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Connect my time tracking account' }));
+  if (destination.startsWith('https://aire-staging.')) expect(navigate).toHaveBeenCalledWith(destination);
+  else { await screen.findByRole('alert'); expect(navigate).not.toHaveBeenCalled(); expect(sessionStorage.getItem('aire-own-link-return:4')).toBeNull(); }
 });

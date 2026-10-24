@@ -4,6 +4,8 @@ namespace :staging do
   desc "Verify staging containment and local durable dependencies without contacting providers"
   task readiness: :environment do
     abort "Requires DEPLOYMENT_ENV=staging" unless StagingOutboundPolicy.staging?
+    StagingDatabasePolicy.validate_rails!
+    StagingDatabasePolicy.validate_live!(ActiveRecord::Base.connection.raw_connection)
     report = StagingReadiness.new.run(live: true)
     puts JSON.generate(report.as_json)
     abort "Staging readiness failed" unless report.passed?
