@@ -12,7 +12,7 @@ import {
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
-import { cutoffDistance, lockedBatchCopy } from '@/lib/aire-payroll-calendar';
+import { cutoffDistance, lockedBatchCopy, lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import { formatGuamDateTime } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { AirePayrollCalendarState } from '@/types';
@@ -27,6 +27,7 @@ type Props = {
 };
 
 const stateLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
+  manual: 'Manual lock',
   unpublished: 'Not published',
   publishing: 'Publishing',
   publication_failed: 'Sync needs attention',
@@ -58,8 +59,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   const [busy, setBusy] = useState<'publish' | 'retry' | 'refresh' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
-  const distance = cutoffDistance(calendar.cutoff_at, now);
-  const cutoffPassed = calendar.cutoff_at
+  const manualLock = calendar.lock_mode === 'manual';
+  const distance = manualLock ? null : cutoffDistance(calendar.cutoff_at, now);
+  const cutoffPassed = !manualLock && calendar.cutoff_at
     ? new Date(calendar.cutoff_at).getTime() <= now.getTime()
     : false;
   const batch = calendar.finalized_batch;
@@ -111,7 +113,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                {calendar.cutoff_at ? `Cutoff ${formatGuamDateTime(calendar.cutoff_at)}. ` : ''}Time tracking locks approved hours after cutoff; held time stays separate.
+                <span>{lockScheduleCopy(calendar, Boolean(batch) || calendar.cutoff_state === 'finalized')}</span>{manualLock && !batch ? '. Approved hours stay editable until you choose Lock.' : '. Held time stays separate.'}
               </p>
             </div>
           </div>
@@ -136,7 +138,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         </div>
 
-        {['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
+        {!manualLock && ['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
           <p className="font-semibold">Cutoff reached — waiting for time tracking to lock the hours</p>
           {calendar.cutoff_at && <p className="mt-1">Waiting since {formatGuamDateTime(calendar.cutoff_at)} ({Math.max(0, Math.floor((now.getTime() - new Date(calendar.cutoff_at).getTime()) / 60000))} minutes).</p>}
           {calendar.publication?.next_delivery_attempt_at && <p className="mt-1">Next retry: {formatGuamDateTime(calendar.publication.next_delivery_attempt_at)}</p>}
@@ -147,7 +149,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           <div className="px-6 py-4">
             <p className="text-xs font-semibold text-neutral-600">Cutoff</p>
             <p className="mt-2 font-semibold text-neutral-950">
-              {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not available'}
+              {manualLock ? 'Manual Lock' : calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not available'}
             </p>
             {distance && <p className="mt-2 text-xs text-neutral-500">{distance}</p>}
           </div>
@@ -193,9 +195,9 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
         {calendar.eligible && !cutoffPassed && calendar.cutoff_state === 'unpublished' && (
           <div className="flex flex-col gap-4 border-t border-primary-200 bg-primary-50/80 px-6 py-5 sm:flex-row sm:items-center sm:justify-between" role="status">
             <div className="max-w-3xl">
-              <p className="font-semibold text-primary-950">Next: publish this cutoff to time tracking</p>
+              <p className="font-semibold text-primary-950">Next: publish this {manualLock ? 'period' : 'cutoff'} to time tracking</p>
               <p className="mt-1 text-sm leading-6 text-primary-800">
-                This sends the pay-period dates and cutoff to time tracking so it can lock time automatically at {calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}. It does not lock hours now or run payroll.
+                {manualLock ? 'This sends the period to time tracking. You can then choose Lock here when the approved hours are ready.' : `This sends the pay-period dates and cutoff to time tracking so it can lock time automatically at ${calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'the scheduled cutoff'}.`} It does not lock hours now or run payroll.
               </p>
             </div>
             {canManageCalendar && calendar.can_publish ? (

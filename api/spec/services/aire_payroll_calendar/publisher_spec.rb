@@ -12,7 +12,8 @@ RSpec.describe AirePayrollCalendar::Publisher do
 
   let(:company) { create(:company, pay_frequency: "semimonthly") }
   let(:actor) { create(:user, company: company) }
-  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:activation_date) { Date.new(2026, 10, 1) }
+  let(:source) { create(:time_tracking_source, company: company, source_type: "aire_services", cutoff_enforcement_starts_on: activation_date) }
   let!(:schedule) do
     CompanyPaySchedule.create!(
       company: company,
@@ -237,17 +238,37 @@ RSpec.describe AirePayrollCalendar::Publisher do
     end.to raise_error(described_class::ConflictError, /cutoff has passed/)
   end
 
-  it "does not create an undeliverable first publication after cutoff" do
-    expect do
-      described_class.new(
-        pay_period: pay_period,
-        source: source,
-        actor: actor,
-        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
-      ).call
-    end.to raise_error(described_class::ConflictError, /already passed/)
+  context "with the October 16 rollout boundary" do
+    let(:activation_date) { Date.new(2026, 10, 16) }
 
-    expect(AirePayrollCalendarPublication.count).to eq(0)
+    it "publishes October 1–15 after its nominal cutoff with an explicit manual lock mode" do
+      result = described_class.new(pay_period: pay_period, source: source, actor: actor,
+        now: Time.find_zone!("Pacific/Guam").local(2026, 10, 24, 9)).call
+
+      expect(result.publication.payload).to include(
+        "lock_mode" => "manual", "cutoff_enforcement_starts_on" => "2026-10-16",
+        "cutoff_at" => "2026-10-22T17:00:00+10:00")
+      expect(source.reload.cutoff_enforcement_starts_on).to eq(Date.new(2026, 10, 16))
+    end
+
+    it "uses the October 31 regular payday for the first scheduled November 7 lock" do
+      pay_period
+      next_period = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+      result = described_class.new(pay_period: next_period, source: source, actor: actor, now: now).call
+      expect(result.publication.payload).to include("lock_mode" => "scheduled",
+        "previous_regular_pay_date" => "2026-10-31", "cutoff_at" => "2026-11-07T17:00:00+10:00")
+    end
+
+    it "fails clearly without the October 1–15 regular run and never creates a dummy run" do
+      next_period = create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+      expect do
+        described_class.new(pay_period: next_period, source: source, actor: actor, now: now).call
+      end.to raise_error(AirePayrollCalendar::Contract::Error, /adjacent previous regular payroll/)
+      expect(company.pay_periods.count).to eq(2)
+      expect(AirePayrollCalendarPublication.count).to eq(0)
+    end
   end
 
   it "rejects non-semimonthly periods and unrelated sources" do

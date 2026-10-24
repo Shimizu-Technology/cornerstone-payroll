@@ -24,8 +24,9 @@ module AirePayrollCalendar
 
     attr_reader :pay_period
 
-    def initialize(pay_period)
+    def initialize(pay_period, source: nil)
       @pay_period = pay_period
+      @source = source
     end
 
     def payload
@@ -53,7 +54,9 @@ module AirePayrollCalendar
         "pay_date" => pay_period.pay_date.iso8601,
         "cutoff_at" => cutoff_at.iso8601,
         "time_zone" => TIME_ZONE,
-        "overtime_policy" => OVERTIME_POLICY.dup
+        "overtime_policy" => OVERTIME_POLICY.dup,
+        "lock_mode" => lock_mode,
+        "cutoff_enforcement_starts_on" => rollout_source.cutoff_enforcement_starts_on.iso8601
       }
       if legacy_policy
         fields["cutoff_days_before"] = CUTOFF_DAYS_BEFORE
@@ -87,6 +90,9 @@ module AirePayrollCalendar
       unless pay_period.pay_date == pay_schedule.scheduled_pay_date_for(pay_period.end_date)
         fail_contract!("Use the fixed regular scheduled payday before publishing to AIRE.", "pay_date_invalid")
       end
+      unless rollout_source&.cutoff_enforcement_starts_on
+        fail_contract!("Configure the AIRE payroll lock rollout boundary before publishing.", "lock_rollout_required")
+      end
       previous_regular_pay_date if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
       if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday" &&
          previous_regular_pay_date + pay_schedule.time_tracking_cutoff_days >= pay_period.pay_date
@@ -103,6 +109,14 @@ module AirePayrollCalendar
     end
 
     private
+
+    def rollout_source
+      @source ||= pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+    end
+
+    def lock_mode
+      pay_period.start_date < rollout_source.cutoff_enforcement_starts_on ? "manual" : "scheduled"
+    end
 
     def previous_regular_pay_date
       return @previous_regular_pay_date if defined?(@previous_regular_pay_date)

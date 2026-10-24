@@ -1608,3 +1608,24 @@ it('keeps source failures visible outside a collapsed verified timecard disclosu
   expect(alert.closest('details')).toBeNull();
   expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
 });
+
+it('allows a manual Lock before nominal cutoff and explains the as-of-now freeze', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', cutoff_state: 'manual' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual' }} onRefresh={vi.fn()} />);
+  const button = await screen.findByRole('button', { name: /lock time tracking cutoff/i });
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  await user.click(button);
+  expect(within(screen.getByRole('dialog')).getByText(/freezes the approved hours as they are now/)).toBeTruthy();
+});
+
+it('labels the completed manual lock plainly', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', status: 'finalized', cutoff_state: 'finalized' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual' }} onRefresh={vi.fn()} />);
+  expect(await screen.findByText('Locked manually by you')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /lock time tracking cutoff/i })).toBeNull();
+});
