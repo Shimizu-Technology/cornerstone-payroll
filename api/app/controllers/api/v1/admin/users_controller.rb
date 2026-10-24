@@ -5,6 +5,7 @@ module Api
     module Admin
       class UsersController < BaseController
         include Auditable
+        include InvitationDeliveryOutcome
         audit_actions :activate, :deactivate, :resend_invitation, :destroy
         before_action :require_admin!
         before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation ]
@@ -54,18 +55,12 @@ module Api
           end
 
           clerk_result = create_clerk_invitation(user)
-          email_queued = false
-
-          if clerk_result[:success] && clerk_result[:url].present?
-            send_invite_email(user, clerk_result[:url])
-            email_queued = true
-          end
+          invitation_delivery = invitation_delivery_response(user, clerk_result)
 
           user = User.includes(:organization, :invited_by, company_assignments: :company).find(user.id)
           render json: {
             data: user_json(user),
-            invitation_sent: email_queued,
-            invitation_error: clerk_result[:success] ? nil : clerk_result[:error]
+            **invitation_delivery
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -183,13 +178,10 @@ module Api
           end
 
           clerk_result = create_clerk_invitation(@user, ignore_existing: true)
-          email_queued = false
-
           if clerk_result[:success] && clerk_result[:url].present?
             @user.update!(invited_at: Time.current)
-            send_invite_email(@user, clerk_result[:url])
-            email_queued = true
           end
+          invitation_delivery = invitation_delivery_response(@user, clerk_result)
 
           @user.reload
           record_user_audit_after_external_effect(
@@ -197,13 +189,12 @@ module Api
             @user,
             before_values: before_values,
             after_values: user_audit_snapshot(@user),
-            extra_metadata: { invitation_sent: email_queued, invitation_error: clerk_result[:success] ? nil : clerk_result[:error] }
+            extra_metadata: invitation_delivery
           )
 
           render json: {
             data: user_json(@user),
-            invitation_sent: email_queued,
-            invitation_error: clerk_result[:success] ? nil : clerk_result[:error]
+            **invitation_delivery
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -358,10 +349,6 @@ module Api
           end
 
           result
-        end
-
-        def send_invite_email(user, invitation_url)
-          SendUserInviteEmailJob.perform_later(user.id, current_user&.id, invitation_url)
         end
 
         def build_redirect_url

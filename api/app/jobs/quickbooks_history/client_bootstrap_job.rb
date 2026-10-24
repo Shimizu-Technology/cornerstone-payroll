@@ -17,6 +17,7 @@ module QuickbooksHistory
     end
 
     def perform(bootstrap_id, actor_id, apply_started_at)
+      return if StagingQuarantine.suppressed?("historical_client_bootstraps", bootstrap_id)
       bootstrap = HistoricalClientBootstrap.find(bootstrap_id)
       return unless current_attempt?(bootstrap, apply_started_at)
 

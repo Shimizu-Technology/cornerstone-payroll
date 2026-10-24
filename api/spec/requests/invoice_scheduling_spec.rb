@@ -192,6 +192,43 @@ RSpec.describe "Invoice recurrence and scheduled email", type: :request do
     expect { InvoiceScheduledSender.send!(schedule.id) }.not_to change(InvoiceDelivery, :count)
   end
 
+  it "records staging capture without delivery evidence or changing invoice sent state" do
+    source = issued_invoice
+    post "/api/v1/admin/invoice_send_schedules", params: {
+      invoice_id: source.id, recipients: [ "customer@example.com" ], send_at: 1.minute.ago.iso8601
+    }
+    schedule = InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+    allow(StagingOutboundPolicy).to receive(:staging?).and_return(true)
+    allow(StagingOutboundPolicy).to receive(:bindings).and_return({ "leon@example.test" => "user_leon" })
+    allow(InvoiceArtifactStorageService).to receive(:new).and_return(double(download: "synthetic PDF"))
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("INVOICE_MAILER_FROM_EMAIL").and_return("invoices@example.test")
+    expect(Resend::Emails).not_to receive(:send)
+    expect { InvoiceScheduledSender.send!(schedule.id) }.not_to change(InvoiceDelivery, :count)
+    expect(schedule.reload).to have_attributes(status: "cancelled", provider_reference: "staging-captured", sent_at: nil)
+    expect(source.reload.sent_at).to be_nil
+    expect(source.events.where(event_type: "staging_mail_captured").count).to eq(1)
+  end
+
+  it "records optional staging provider acceptance only for submitted tester recipients" do
+    source = issued_invoice
+    post "/api/v1/admin/invoice_send_schedules", params: {
+      invoice_id: source.id, recipients: [ "customer@example.com", "leon@example.test" ], send_at: 1.minute.ago.iso8601
+    }
+    schedule = InvoiceSendSchedule.find(response.parsed_body.dig("invoice_send_schedule", "id"))
+    allow(StagingOutboundPolicy).to receive(:staging?).and_return(true)
+    allow(StagingOutboundPolicy).to receive(:bindings).and_return({ "leon@example.test" => "user_leon" })
+    allow(InvoiceArtifactStorageService).to receive(:new).and_return(double(download: "synthetic PDF"))
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("INVOICE_MAILER_FROM_EMAIL").and_return("invoices@example.test")
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("STAGING_MAIL_ALLOWLIST", "").and_return("leon@example.test")
+    allow(Resend::Emails).to receive(:send).and_return({ id: "synthetic-provider-id" })
+    InvoiceScheduledSender.send!(schedule.id)
+    expect(source.reload.deliveries.pluck(:recipient)).to eq([ "leon@example.test" ])
+    expect(schedule.reload.status).to eq("sent")
+  end
+
   it "queues an immediate invoice email with a durable schedule" do
     source = issued_invoice
     allow(InvoiceSendJob).to receive(:perform_later)

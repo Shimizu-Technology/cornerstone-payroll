@@ -115,6 +115,7 @@ module TimeTracking
     end
 
     def create_payroll_account_link_session(external_actor_id:, external_actor_email:, return_url:)
+      StagingOutboundPolicy.frontend_origin!(return_url)
       require_capability!(:account_linking)
       uri = payroll_account_link_sessions_uri
       require_secure_payroll_transport!(uri)
@@ -605,6 +606,7 @@ module TimeTracking
 
     def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false,
                      historical_manual_issue: false)
+      StagingOutboundPolicy.integration!(uri.to_s)
       request = case method
       when :get then Net::HTTP::Get.new(uri)
       when :post then Net::HTTP::Post.new(uri)
@@ -830,6 +832,8 @@ module TimeTracking
     end
 
     def validate_account_link_authorization_url!(payload)
+      StagingOutboundPolicy.frontend_origin!(payload["authorization_url"])
+      return if StagingOutboundPolicy.staging?
       uri = URI.parse(payload["authorization_url"].to_s)
       allowed_origins = @source.connector.authorization_origins
       allowed_hosts = allowed_origins.map { |origin| URI.parse(origin).host }

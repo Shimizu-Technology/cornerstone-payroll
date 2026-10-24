@@ -1,3 +1,4 @@
+import { stagingNavigationUrl } from '@/lib/staging';
 import { supportsSourceOperation } from '@/lib/time-tracking';
 import { SourceConnectorReview } from '@/components/payroll/SourceConnectorHealth';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -35,7 +36,7 @@ function connectionUrl(value: string): URL {
   }
 }
 function authorizationUrl(value: string, source: TimeTrackingSource): string {
-  const url = connectionUrl(value);
+  const url = connectionUrl(stagingNavigationUrl(value, source.authorization_origin));
   const local = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password ||
       (source.source_type === 'aire_services' && (url.pathname !== '/admin/payroll-link' || !url.searchParams.get('token'))) || url.hash ||

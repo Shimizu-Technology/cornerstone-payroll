@@ -191,6 +191,14 @@ RSpec.describe DatabasePredeploy do
     end
   end
 
+  it "keeps its generated timeouts compatible with staging connection containment" do
+    env = { "RAILS_ENV" => "production", "DEPLOYMENT_ENV" => "staging", "DATABASE_URL" => direct_url,
+      "MIGRATION_DATABASE_URL" => direct_url, "STAGING_DATABASE_HOSTS" => "example.us-east-2.aws.neon.tech",
+      "PRODUCTION_DATABASE_HOSTS" => "production.example.test" }
+    predeploy = described_class.new(env: env)
+    expect(StagingDatabasePolicy.validate_config!(env: env.merge(predeploy.migration_environment))).to eq(true)
+  end
+
   it "requires an explicit migration connection for every production deployment" do
     predeploy = described_class.new(
       env: { "RAILS_ENV" => "production", "DATABASE_URL" => direct_url },

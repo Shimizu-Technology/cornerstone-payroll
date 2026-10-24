@@ -23,7 +23,7 @@ module TimecardOcr
       end
 
       def presigned_url(reference, expires_in: 3600)
-        return nil if reference.blank?
+        return nil if reference.blank? || StagingOutboundPolicy.staging?
 
         key = normalize_key(reference)
         r2.signed_url("timecards/#{key}", expires_in: expires_in)

@@ -5,6 +5,7 @@ class TimeTrackingCorrectionReceiptJob < ApplicationJob
   retry_on TimeTracking::Client::Error, wait: :polynomially_longer, attempts: 8
 
   def perform(receipt_id)
+    return if StagingQuarantine.suppressed?("time_tracking_correction_receipts", receipt_id)
     receipt = TimeTrackingCorrectionReceipt.find(receipt_id)
     receipt.with_lock do
       return if receipt.delivered_at.present?

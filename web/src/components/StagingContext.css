@@ -1,0 +1,54 @@
+.staging-context {
+  position: fixed;
+  z-index: 2147483647;
+  inset: auto 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 3px 14px;
+  padding: 9px 16px calc(9px + env(safe-area-inset-bottom, 0px));
+  background: #422006;
+  color: #fef3c7;
+  border-top: 3px solid #fbbf24;
+  font: 600 12px/1.4 system-ui, sans-serif;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.staging-context strong { color: #ffffff; letter-spacing: .12em; }
+.staging-context-meta, .staging-context-note { font-weight: 400; }
+html[data-staging] body { padding-bottom: var(--staging-context-height, 100px); }
+html[data-staging] [data-testid="app-shell"] {
+  height: calc(100dvh - var(--staging-context-height, 100px));
+}
+@media (max-width: 600px) {
+  .staging-context { gap: 3px 8px; padding-inline: 10px; font-size: 11px; }
+  .staging-context-meta { flex-basis: 100%; text-align: center; }
+  .staging-context-note { display: none; }
+}
+@page staging {
+  margin: 12mm 12mm 24mm;
+  @bottom-center {
+    content: "STAGING – DO NOT ISSUE OR FILE";
+    font: bold 10pt system-ui, sans-serif;
+    color: #000;
+  }
+}
+@media print {
+  html[data-staging] { page: staging; }
+  html[data-staging] body { padding-bottom: 0; margin: 0; }
+  html[data-staging] [data-testid="app-shell"] { height: auto; }
+  /* Margin-box warnings repeat without covering the page content. Keep a
+     normal-flow warning too for print engines without margin-box support. */
+  .staging-context {
+    position: static;
+    break-inside: avoid;
+    margin-top: 4mm;
+    padding: 2mm;
+    color: #000;
+    background: #fff;
+    border: 2px solid #000;
+    font-size: 10pt;
+  }
+  .staging-context-meta, .staging-context-note { display: none; }
+}

@@ -11,6 +11,7 @@ module TimeTracking
     PROTOCOL = "shimizu_time_payroll"
 
     def self.authorization_origin_allowed?(origin, allow_test_loopback: false)
+      StagingOutboundPolicy.frontend_origin!(origin)
       uri = URI.parse(origin.to_s)
       return false unless uri.is_a?(URI::HTTP) && uri.host.present? && uri.userinfo.nil? &&
         uri.query.nil? && uri.fragment.nil? && uri.path.in?([ "", "/" ])
@@ -18,7 +19,7 @@ module TimeTracking
 
       allow_test_loopback && Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" &&
         uri.scheme == "http" && uri.hostname.in?([ "localhost", "127.0.0.1", "::1" ])
-    rescue URI::InvalidURIError
+    rescue URI::InvalidURIError, StagingOutboundPolicy::Blocked
       false
     end
 
@@ -82,6 +83,11 @@ module TimeTracking
     end
 
     def authorization_origins
+      if StagingOutboundPolicy.staging?
+        origin = @source.authorization_origin.presence || ENV.fetch("STAGING_AIRE_FRONTEND_ORIGIN")
+        StagingOutboundPolicy.frontend_origin!(origin)
+        return [ origin ]
+      end
       configured = @source.authorization_origin.presence
       return self.class.authorization_origin_allowed?(configured) ? [ configured ] : [] if configured
       return [] unless aire_policy?

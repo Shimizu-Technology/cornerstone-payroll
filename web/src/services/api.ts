@@ -739,10 +739,14 @@ export const clientDepartmentsApi = {
 };
 
 // Users (Admin API)
-interface UserCreateResponse {
-  data: User;
+export interface InvitationDeliveryResponse {
+  invitation_delivery_status: 'queued' | 'captured' | 'submitted' | 'failed' | 'not_requested';
   invitation_sent: boolean;
   invitation_error?: string | null;
+}
+
+interface UserCreateResponse extends InvitationDeliveryResponse {
+  data: User;
 }
 
 export const usersApi = {
@@ -816,11 +820,9 @@ export interface OrganizationSummary {
   updated_at: string;
 }
 
-export interface OrganizationCreateResponse {
+export interface OrganizationCreateResponse extends InvitationDeliveryResponse {
   data: OrganizationSummary;
   admin_user?: OrganizationAdminSummary | null;
-  invitation_sent: boolean;
-  invitation_error?: string | null;
 }
 
 export interface OrganizationCompanyTransferPreview {
@@ -856,7 +858,7 @@ export const organizationsApi = {
   update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status' | 'client_limit' | 'unlimited_clients'>>) =>
     api.patch<{ data: OrganizationSummary }>(`/admin/organizations/${id}`, { organization: data }),
   createAdminUser: (id: number, data: { email: string; name?: string }) =>
-    api.post<{ data: OrganizationAdminSummary; invitation_sent: boolean; invitation_error?: string | null }>(
+    api.post<InvitationDeliveryResponse & { data: OrganizationAdminSummary }>(
       `/admin/organizations/${id}/admin_users`,
       { user: data }
     ),
