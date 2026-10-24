@@ -277,7 +277,7 @@ class PayrollCalculator
       when "loan"
         aggregate_loan += amount
       when "insurance"
-        aggregate_insurance += amount
+        aggregate_insurance += amount unless dt.employer_contribution?
       end
     end
 

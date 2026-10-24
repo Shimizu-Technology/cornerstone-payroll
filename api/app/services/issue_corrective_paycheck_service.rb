@@ -870,12 +870,16 @@ class IssueCorrectivePaycheckService
   end
 
   def validate_component_ledger!
+    component_ledger # Reject unsupported histories before any component/posting checks.
     annual_retirement_context.validate!(corrected_item)
-    [ original_item, *active_correctives ].each { |item| PayrollInsuranceComponents.verify_postings!(item) }
+    [ original_item, *active_correctives ].each do |item|
+      PayrollInsuranceComponents.verify_postings!(item)
+      PayrollLiabilityPostingService.verify_employer_contributions!(item)
+    end
     supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
       corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
     create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
-  rescue PayrollInsuranceComponents::AmbiguousHistoryError => e
+  rescue PayrollInsuranceComponents::AmbiguousHistoryError, PayrollLiabilityPostingService::InvalidStateError => e
     raise MissingHistoricalContextError, e.message
   end
 
@@ -901,7 +905,8 @@ class IssueCorrectivePaycheckService
       timekeeping_source: "correction_reference",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
       calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
-        "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments }.tap do |context|
+        "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments,
+          "catch_up_ledger_version" => 1, "catch_up_classification_delta" => annual_retirement_context.catch_up_delta(corrected_item).to_s("F") }.tap do |context|
           context["source_accounting_target"] = @source_accounting_target.resolve.fetch(:evidence) if @source_accounting_target
         end
       ),
@@ -974,7 +979,10 @@ class IssueCorrectivePaycheckService
       actor: @actor
     )
 
-    supplemental.payroll_items.each { |item| PayrollInsuranceComponents.verify_postings!(item) }
+    supplemental.payroll_items.each do |item|
+      PayrollInsuranceComponents.verify_postings!(item)
+      PayrollLiabilityPostingService.verify_employer_contributions!(item)
+    end
 
     # Only assign a check number if there's actually money to pay out.
     # Negative net (clawback) supplementals exist as accounting entries

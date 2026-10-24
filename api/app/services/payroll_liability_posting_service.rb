@@ -41,6 +41,18 @@ class PayrollLiabilityPostingService
     new(...).post!
   end
 
+  def self.verify_employer_contributions!(item)
+    return unless item.pay_period.payroll_liability_postings.exists?
+
+    expected = QuickbooksPayrollReportData.new(item.pay_period).employer_contribution_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }
+    known = %w[retirement_employer roth_retirement_employer benefit_employer]
+    posted = PayrollLiabilityEntry.where(payroll_item_id: item.id)
+      .where("category IN (?) OR metadata @> ?::jsonb", known, { employer_contribution: true }.to_json).sum(:amount).to_d
+    return if expected.round(2) == posted.round(2)
+
+    raise InvalidStateError, "Saved employer contribution components do not reconcile to their liability entries; arrange a reviewed benefit-ledger correction"
+  end
+
   def self.reverse!(...)
     new(...).reverse!
   end
@@ -253,12 +265,14 @@ class PayrollLiabilityPostingService
           authority: authority,
           amount: amount,
           rule: snapshot_builder.rule_for(component_key.sub("guam_additional_income_tax_withheld", "guam_income_tax_withheld")),
-          metadata: { "source_field" => field.to_s },
+          metadata: { "source_field" => field.to_s }.tap { |values| values["employer_contribution"] = true if field.in?(%i[employer_retirement_match employer_roth_retirement_match]) },
           now: now
         )
       end
 
-      core + payroll_field_liability_rows(posting, item, now) + itemized_liability_rows(posting, item, now)
+      rows = core + payroll_field_liability_rows(posting, item, now) + itemized_liability_rows(posting, item, now)
+      reconcile_employer_contributions!(item, rows)
+      rows
     end
   end
 
@@ -270,7 +284,7 @@ class PayrollLiabilityPostingService
   # signed because corrective paychecks use negative amounts to reduce an
   # existing liability.
   def core_component_amount(item, component_key, field)
-    amount = item.public_send(field).to_d
+    amount = component_key == "insurance_employee" ? PayrollInsuranceComponents.scalar_amount(item) : item.public_send(field).to_d
     amount -= item.additional_medicare_tax.to_d if component_key == "medicare_employee"
     amount.round(2)
   end
@@ -281,11 +295,11 @@ class PayrollLiabilityPostingService
       next unless field_entry.kind.in?(%w[deduction employer_contribution])
 
       category, default_authority = FIELD_CATEGORY_MAP[field_entry.category]
-      next unless category
-
       if field_entry.employer_contribution?
-        category = category.sub("_employee", "_employer")
+        category = employer_liability_category(field_entry.category)
+        default_authority ||= BENEFIT_PROVIDER
       end
+      next unless category
       definition = field_entry.payroll_field_definition
       authority = definition&.payee_name.presence || default_authority
       component_key = "payroll_field:#{definition&.id || "snapshot"}:#{field_entry.id}"
@@ -304,7 +318,7 @@ class PayrollLiabilityPostingService
           "label" => field_entry.label,
           "tax_treatment" => field_entry.tax_treatment,
           "reporting_group" => field_entry.reporting_group
-        },
+        }.tap { |values| values["employer_contribution"] = true if field_entry.employer_contribution? },
         now: now
       )
     end
@@ -314,18 +328,20 @@ class PayrollLiabilityPostingService
     item.payroll_item_deductions.filter_map do |deduction|
       type = deduction.deduction_type
       sub_category = type&.sub_category
-      next unless sub_category.in?(%w[retirement garnishment child_support benefit])
+      next unless deduction.employer_contribution? || sub_category.in?(%w[retirement garnishment child_support benefit])
       next if PayrollComponentMirrors.field_for(item, deduction)
       next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if deduction.amount.to_d.zero?
 
-      category = case sub_category
-      when "retirement"
-        deduction.employer_contribution? ? "retirement_employer" : "retirement_employee"
-      when "garnishment" then "garnishment"
-      when "child_support" then "child_support"
-      when "benefit"
-        deduction.employer_contribution? ? "benefit_employer" : "benefit_employee"
+      category = if deduction.employer_contribution?
+        employer_liability_category(sub_category)
+      else
+        case sub_category
+        when "retirement" then "retirement_employee"
+        when "garnishment" then "garnishment"
+        when "child_support" then "child_support"
+        when "benefit" then "benefit_employee"
+        end
       end
 
       entry_row(
@@ -342,10 +358,26 @@ class PayrollLiabilityPostingService
           "label" => deduction.label,
           "sub_category" => sub_category,
           "reporting_group" => deduction.reporting_group
-        },
+        }.tap { |values| values["employer_contribution"] = true if deduction.employer_contribution? },
         now: now
       )
     end
+  end
+
+  def employer_liability_category(sub_category)
+    case sub_category
+    when "retirement" then "retirement_employer"
+    when "insurance", "benefit" then "benefit_employer"
+    else "other_payroll_liability"
+    end
+  end
+
+  def reconcile_employer_contributions!(item, rows)
+    expected = QuickbooksPayrollReportData.new(item.pay_period).employer_contribution_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }
+    posted = rows.sum(0.to_d) { |row| row.fetch(:metadata)["employer_contribution"] ? row.fetch(:amount).to_d : 0.to_d }
+    return if expected.round(2) == posted.round(2)
+
+    raise InvalidStateError, "Saved employer contribution components do not reconcile to their liability entries; review the contribution ledger before committing payroll"
   end
 
   def entry_row(posting:, item:, component_key:, category:, authority:, amount:, rule:, metadata:, now:)

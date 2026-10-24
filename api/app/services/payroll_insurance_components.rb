@@ -8,15 +8,18 @@ class PayrollInsuranceComponents
   def self.scalar_amount(item)
     rows = item.payroll_item_deductions.select { |row| row.deduction_type&.sub_category == "insurance" }
     mirrors, direct = rows.partition { |row| PayrollComponentMirrors.field_for(item, row) }
-    if direct.any?(&:employer_contribution?)
-      raise AmbiguousHistoryError, "Employer insurance requires a reviewed benefit-ledger correction"
-    end
+    employer_rows = direct.select(&:employer_contribution?)
+    direct = direct.reject(&:employer_contribution?)
+    mirrors = mirrors.reject(&:employer_contribution?)
 
     scalar = item.insurance_payment.to_d.round(2)
     direct_amount = direct.sum(0.to_d) { |row| row.amount.to_d }.round(2)
     mirror_amount = mirrors.sum(0.to_d) { |row| row.amount.to_d }.round(2)
     if rows.any?
       unless [ direct_amount, direct_amount + mirror_amount ].include?(scalar)
+        if employer_rows.any?
+          raise AmbiguousHistoryError, "Employer insurance aggregate provenance requires a reviewed benefit-ledger correction"
+        end
         raise AmbiguousHistoryError, "Insurance aggregate provenance is ambiguous; review the insurance ledger before correcting this paycheck"
       end
       direct_amount
