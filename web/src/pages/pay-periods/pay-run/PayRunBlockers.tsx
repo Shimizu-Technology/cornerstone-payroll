@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/alert';
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunBlockers({
+  part = 'all',
   adoptingConfirmedWorkweek,
   canImportMosa,
   canImportSpikeIntake,
@@ -19,9 +20,9 @@ export function PayRunBlockers({
   payPeriod,
   setImportModalOpen,
   setPayrollIntakeImportOpen
-}: PayRunSectionProps<'blockers'>) {
+}: PayRunSectionProps<'blockers'> & { part?: 'all' | 'hours' | 'approval' }) {
   return (<>
-{hasPendingCalculationChanges && (
+{part !== 'approval' && hasPendingCalculationChanges && (
           <Alert>
             <p className="font-semibold">Recalculate to include your changes</p>
             <p className="mt-1 text-sm leading-6 text-warning-800">
@@ -29,11 +30,11 @@ export function PayRunBlockers({
             </p>
           </Alert>
         )}
-{payPeriod.client_payroll_approval_required && payPeriod.payroll_review && (
-          <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-warning-200 bg-warning-50/70'}>
+{part !== 'hours' && payPeriod.client_payroll_approval_required && payPeriod.payroll_review && (
+          <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
-                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${payPeriod.payroll_review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-warning-100 text-warning-800'}`}>
+                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${payPeriod.payroll_review.status === 'approved' ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-800'}`}>
                   {payPeriod.payroll_review.status === 'approved' ? <ShieldCheck className="h-5 w-5" /> : <MailCheck className="h-5 w-5" />}
                 </div>
                 <div>
@@ -44,7 +45,7 @@ export function PayRunBlockers({
                     Review ID <span className="font-mono font-semibold">{payPeriod.payroll_review.checksum_short}</span>. This ID changes whenever payroll inputs, source evidence, or calculation results change.
                   </p>
                   {payPeriod.payroll_review.status === 'approved' ? (
-                    <p className="mt-1 text-sm text-emerald-800">
+                    <p className="mt-1 text-sm text-success-800">
                       Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
                     </p>
                   ) : (
@@ -60,7 +61,7 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-{payPeriod.intake_stale_at && (
+{part !== 'approval' && payPeriod.intake_stale_at && (
           <Alert tone="error">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-3">
@@ -84,7 +85,7 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-{payPeriod.compliance_warnings?.map((warning) => (
+{part !== 'approval' && payPeriod.compliance_warnings?.map((warning) => (
           <Alert key={warning}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">

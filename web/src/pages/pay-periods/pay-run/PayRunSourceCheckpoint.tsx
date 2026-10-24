@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { AirePayrollCockpit } from '@/components/payroll/AirePayrollCockpit';
 import { Link } from 'react-router';
 import { payRunPath } from '@/lib/routes';
@@ -6,6 +7,7 @@ import { runPurposeLabels } from './payRunSupport';
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunSourceCheckpoint({
+  onReviewSourceCoverage,
   aireSourceRefreshToken,
   companyId,
   currentAireRecord,
@@ -35,6 +37,7 @@ export function PayRunSourceCheckpoint({
         <AirePayrollCockpit
           key={payPeriod.id}
           presentation="checkpoint"
+          sourceCoverageAction={onReviewSourceCoverage && <Button variant="outline" size="sm" onClick={onReviewSourceCoverage}>Review source coverage</Button>}
           sourceCoverageRequired={needsSourceCoverageAcknowledgement(payPeriod)}
           payPeriodId={payPeriod.id}
           payPeriodStatus={payPeriod.status}

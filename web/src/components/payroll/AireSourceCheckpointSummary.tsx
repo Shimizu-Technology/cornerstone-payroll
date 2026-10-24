@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { formatGuamDateTime } from '@/lib/utils';
 import type { AirePayrollCalendarState, AirePayrollCockpitOverview, AirePayrollRecord, PayPeriodStatus } from '@/types';
@@ -8,6 +9,7 @@ type Props = {
   aireRecord: AirePayrollRecord | null;
   payPeriodStatus: PayPeriodStatus;
   sourceCoverageRequired: boolean;
+  sourceCoverageAction?: ReactNode;
   canReviewTimecards: boolean;
   loading: boolean;
   onReview: () => void;
@@ -34,7 +36,7 @@ const cutoffLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
 const hours = (value: unknown) => value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';
 
 export function AireSourceCheckpointSummary({
-  calendar, overview, aireRecord, payPeriodStatus, sourceCoverageRequired,
+  calendar, overview, aireRecord, payPeriodStatus, sourceCoverageRequired, sourceCoverageAction,
   canReviewTimecards, loading, onReview, onReviewTimecards, onReviewSource,
 }: Props) {
   const batch = calendar.finalized_batch?.verification_status === 'verified' ? calendar.finalized_batch : null;
@@ -72,7 +74,7 @@ export function AireSourceCheckpointSummary({
           </p>
         </div>
         {batch && !aireRecord ? (
-          <Button type="button" onClick={onReview} className="max-sm:w-full sm:shrink-0">
+          <Button type="button" variant="outline" onClick={onReview} className="max-sm:w-full sm:shrink-0">
             {committed ? 'Review and link time tracking record' : corrections ? 'Review time tracking corrections' : 'Review and add time tracking hours'}
           </Button>
         ) : canReviewTimecards ? (
@@ -100,7 +102,7 @@ export function AireSourceCheckpointSummary({
           <p className="mt-1 text-xs leading-5 text-neutral-600">{heldReasons || (Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
         </div>
       </div>
-      {sourceCoverageRequired && <p className="text-xs leading-5 text-neutral-600">Source hours have not been linked to this payroll. Calculating without linked source hours requires an acknowledgement and reason.</p>}
+      {sourceCoverageRequired && <div className="space-y-2"><p className="text-xs leading-5 text-neutral-600">Source hours have not been linked to this payroll. Calculating without linked source hours requires an acknowledgement and reason.</p>{sourceCoverageAction}</div>}
       {aireRecord && <p className={`text-sm ${attention || paymentPending ? 'text-warning-900' : 'text-neutral-700'}`}>
         {attention ? 'Time tracking payment needs attention. Review the payment history.'
           : allPaid ? 'Time tracking hours are paid; delivery or settlement is recorded.'

@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState, type ComponentProps } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
@@ -106,8 +106,9 @@ vi.mock('@/components/payroll/AireManualPaymentReconciliation', () => ({
   ),
 }));
 vi.mock('@/components/payroll/AirePayrollCockpit', () => ({
-  AirePayrollCockpit: ({ onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => Promise<boolean | void> }) => (
+  AirePayrollCockpit: ({ sourceCoverageAction, onReviewFinalizedBatch, refreshToken, onSourceChanged, onRefresh }: { sourceCoverageAction?: ReactNode; onReviewFinalizedBatch?: () => void; refreshToken: number; onSourceChanged: () => void; onRefresh: () => Promise<boolean | void> }) => (
     <div data-testid="source-cockpit-revision" data-revision={refreshToken}>
+      {sourceCoverageAction}
       <button type="button" onClick={onReviewFinalizedBatch}>Review verified time tracking batch</button>
       <button type="button" onClick={onSourceChanged}>Approve source time</button>
       <button type="button" onClick={() => { void onRefresh().then(componentMocks.calendarRefreshCompleted); }}>Refresh source calendar</button>
@@ -147,7 +148,8 @@ const sourceCalendar: AirePayrollCalendarState = {
     occurred_at: '2026-09-22T07:00:00Z', payroll_batch_id: 'batch-12', payroll_batch_checksum: 'checksum-12' },
 };
 
-afterEach(() => { cleanup(); componentMocks.finalRecordEnabled = false; });
+afterEach(() => {
+  localStorage.clear(); cleanup(); componentMocks.finalRecordEnabled = false; });
 
 it('lets an accountant explicitly include a fixed salary before calculating a fresh special run', async () => {
   vi.clearAllMocks();
@@ -1050,6 +1052,7 @@ it('submits a single captured wage bucket with updated hours instead of clearing
 
 it('labels the saved loan total as loan deductions while keeping standalone entry distinct', async () => {
   await renderLoanWorksheet('calculated', undefined, 300);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show tax detail' }));
   const header = screen.getByRole('columnheader', { name: 'Loan deductions' });
   expect(header.title).toBe('Calculated total of linked loan repayments and any standalone loan deduction.');
   expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
@@ -1448,6 +1451,7 @@ it.each([25, 10])('describes retained earning entries accurately when one wage I
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Show tax detail' }));
   const badge = await screen.findByText('Multiple earnings');
   const row = badge.closest('tr')!;
   const mobile = screen.getByRole('region', { name: 'Payroll result for Ana Cruz' });
@@ -1792,7 +1796,8 @@ it('requires a reason and acknowledgement for a scheduled connected run before i
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   expect((await screen.findByRole('button', { name: 'Review & add hours' })).className).toContain('bg-primary-700');
-  fireEvent.click(payRunButton('Calculate Payroll'));
+  expect((payRunButton('Calculate Payroll') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(payRunButton('Review source coverage'));
   const dialog = await screen.findByRole('dialog');
   const calculate = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
   expect(calculate.disabled).toBe(true);
@@ -1844,7 +1849,7 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   }));
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   expect(await screen.findByText(/Current setup applied to the saved employees/)).toBeTruthy();
-  fireEvent.click(payRunButton('Recalculate'));
+  fireEvent.click(payRunButton('Review source coverage'));
   expect(screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' })).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
