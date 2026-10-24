@@ -5,6 +5,8 @@ require "timeout"
 
 RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service do
   self.use_transactional_tests = false
+  let!(:verification_tables) { ensure_verified_test_tax_years(2024, 2025, 2026) }
+  after { verification_tables.each(&:destroy!) }
 
   let!(:organization) { Organization.create!(name: "Lifecycle Concurrency #{SecureRandom.hex(4)}") }
   let!(:company) { create(:company, organization: organization, auto_create_fit_check: false) }

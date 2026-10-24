@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe PayrollGoLiveGate do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   let(:organization) { create(:organization) }
   let(:company) { create(:company, organization:) }
   let(:source_company) { create(:company, organization:) }

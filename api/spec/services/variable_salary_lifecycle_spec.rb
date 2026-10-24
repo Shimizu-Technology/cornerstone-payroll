@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Variable salary finalization safety" do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, employment_type: "salary", salary_type: "variable", pay_rate: 100_000) }
   let(:period) { create(:pay_period, :calculated, company: company) }

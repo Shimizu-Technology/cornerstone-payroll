@@ -611,7 +611,7 @@ module Api
         def approve
           lifecycle_service.approve!
           render json: { pay_period: pay_period_json(@pay_period) }
-        rescue PayPeriodLifecycleService::Error => e
+        rescue ActiveRecord::RecordInvalid, PayPeriodLifecycleService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
