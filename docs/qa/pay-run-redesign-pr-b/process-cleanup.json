@@ -1,34 +1,44 @@
 {
-  "phase": "final visual verification",
-  "parent": {
-    "pid": 46932,
-    "command": "/opt/homebrew/Cellar/python@3.14/3.14.3/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /Users/leonshimizu/Desktop/ShimizuTechnology/output/payroll-aire-review-2026-10-24/impl/payroll-redesign/kit/start.py"
-  },
-  "children": [
+  "phase": "F1/F2 final browser QA",
+  "validated_exact_parents": [
     {
-      "name": "aire-api",
-      "pid": 47031
+      "kind": "fixture launcher",
+      "parent": 47493,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.3/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python kit/start.py",
+      "children": [
+        {
+          "name": "aire-api",
+          "pid": 47500
+        },
+        {
+          "name": "payroll-api",
+          "pid": 47505
+        },
+        {
+          "name": "aire-dispatcher",
+          "pid": 47510
+        },
+        {
+          "name": "payroll-dispatcher",
+          "pid": 47515
+        },
+        {
+          "name": "accountant-web",
+          "pid": 47520
+        },
+        {
+          "name": "admin-web",
+          "pid": 47529
+        }
+      ]
     },
     {
-      "name": "payroll-api",
-      "pid": 47106
-    },
-    {
-      "name": "aire-dispatcher",
-      "pid": 47173
-    },
-    {
-      "name": "payroll-dispatcher",
-      "pid": 47204
-    },
-    {
-      "name": "accountant-web",
-      "pid": 47219
-    },
-    {
-      "name": "admin-web",
-      "pid": 47249
+      "kind": "baseline wrapper",
+      "parent": 47528,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.3/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python pr-b/review-f1/start-base.py",
+      "child": 47551
     }
   ],
-  "prior_phase": "cleanup-phase-one/process-cleanup.json"
+  "prior_receipt": "review-f1/prior-process-cleanup.json",
+  "termination": "SIGTERM to validated owned wrappers; their finally blocks stop exact child process groups and release claims"
 }

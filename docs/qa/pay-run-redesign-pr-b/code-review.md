@@ -61,4 +61,9 @@ No claim of a complete independent review or acceptance gate: this is the reques
 
 ## Owner follow-up after bounded review
 
-The retained delivery-method dialog now reloads with retainInputs=true. A new regression failed before because staged hours reset and passes after; 127 focused tests and the full 1,182-test web gate pass. The release lane also reproduced a draft retaining payroll records that previously depended on writer Overview. Saved payroll records keeps those review buttons reachable on Payroll; the phone release journey opens the existing dialog. These later changes await the lead's final review and are not claimed as independently reviewed by the read-only agent.
+The retained delivery-method dialog now reloads with retainInputs=true. A new regression failed before because staged hours reset and passes after; 31 review-regression tests and the full 1,189-test web gate pass. The release lane also reproduced a draft retaining payroll records that previously depended on writer Overview. Saved payroll records keeps those review buttons reachable on Payroll; the phone release journey opens the existing dialog. These later changes await the lead's final review and are not claimed as independently reviewed by the read-only agent.
+
+
+## Lead independent review of d0a3291b and owner response
+
+Lead review found no P0/P1, F1 P2 (read-only Reports exposed save-capable writers) and F2 P3 (parallel explanation dropped). Both are fixed in 3e394380; the phone fixes are in 0452f035. Seven red-before/green-after regressions, twelve real-permission browser cases and all four browser lanes support the fixes. The final full web gate passes 126 files / 1,189 tests; thirty axe scans clear the required families. See FINDINGS-RESPONSE.md for exact coverage and readiness repairs. These are owner verification results; final independent recheck by the lead is pending. CodeRabbit was rate-limited, with no completed approval.

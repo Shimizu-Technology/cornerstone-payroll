@@ -3,42 +3,43 @@
     "database": "payroll_redesign_fixture_20261024",
     "asserted": "payroll_redesign_fixture_20261024",
     "dropExit": 0,
-    "stderr": "",
-    "phase": "final"
+    "phase": "F1/F2 final QA",
+    "stderr": ""
   },
   {
     "database": "aire_redesign_fixture_20261024",
     "asserted": "aire_redesign_fixture_20261024",
     "dropExit": 0,
-    "stderr": "",
-    "phase": "final"
+    "phase": "F1/F2 final QA",
+    "stderr": ""
   },
   {
     "database": "payroll_redesign_test_20261024",
     "asserted": "payroll_redesign_test_20261024",
     "dropExit": 0,
     "stderr": "",
-    "alreadyRemovedPriorPhase": true
+    "alreadyRemovedPriorPhase": true,
+    "prior_receipt": "review-f1/prior-db-cleanup.json"
   },
   {
     "database": "payroll_redesign_release_20261024",
     "asserted": "payroll_redesign_release_20261024",
     "dropExit": 0,
-    "stderr": "",
-    "phase": "final"
+    "phase": "F1/F2 final QA",
+    "stderr": ""
   },
   {
     "database": "payroll_redesign_refresh_20261024",
     "asserted": "payroll_redesign_refresh_20261024",
     "dropExit": 0,
-    "stderr": "",
-    "phase": "final"
+    "phase": "F1/F2 final QA",
+    "stderr": ""
   },
   {
     "database": "payroll_redesign_pay_items_20261024",
     "asserted": "payroll_redesign_pay_items_20261024",
     "dropExit": 0,
-    "stderr": "",
-    "phase": "final"
+    "phase": "F1/F2 final QA",
+    "stderr": ""
   }
 ]

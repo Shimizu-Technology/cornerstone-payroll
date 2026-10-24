@@ -37,9 +37,10 @@
   {
     "file": "web/src/components/reports/ReportsDownloadPanel.tsx",
     "before": "03b406d18d5d36d9d5b6d0abb96fc13557406d49559e501e8193eca326534d7c",
-    "after": "03b406d18d5d36d9d5b6d0abb96fc13557406d49559e501e8193eca326534d7c",
-    "identical": true,
-    "destination": "Reports"
+    "after": "78adc54de17ac64ce5c762064e2e06fd1ff15064a9367336e777a884a3bc7d36",
+    "identical": false,
+    "destination": "Reports",
+    "change": "Explicit read-only presentation: six permitted GET artifacts; writer default preserved"
   },
   {
     "file": "web/src/components/payroll/PayrollFinalRecordPanel.tsx",

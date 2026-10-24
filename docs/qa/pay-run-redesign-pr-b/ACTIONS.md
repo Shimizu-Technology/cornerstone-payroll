@@ -1,8 +1,8 @@
 # Action inventory diff
 
-Automated DOM inventories: 56 before pages (7 states × 2 widths × 4 original tabs), 16 after state/viewport records (7 states plus saved late-hours navigation fixture). After inventory includes mounted hidden tab panels and closed disclosures, with their actual workspace location recorded. Underlying guarded dialogs are covered by the source inventory and 14 unchanged action-component hashes.
+Automated DOM inventories: 64 before pages (7 original states plus parallel approval × 2 widths × 4 tabs), 18 after state/viewport records (7 states plus saved late-hours navigation and parallel fixtures). After inventory includes mounted hidden tab panels and closed disclosures, with their actual workspace location recorded. Underlying guarded dialogs are covered by the source inventory and 13 unchanged action-component hashes and the explicit read-only ReportsDownloadPanel change.
 
-525 normalized state/viewport/action rows; 0 unexplained removals. Duplicate entry points and navigation labels are normalized explicitly in actions-location-diff.json; this is not a claim of raw label equality.
+567 normalized state/viewport/action rows; 0 unexplained removals. Duplicate entry points and navigation labels are normalized explicitly in actions-location-diff.json; this is not a claim of raw label equality.
 
 | Original action | State / width | New location | Classification |
 | --- | --- | --- | --- |
@@ -330,7 +330,7 @@ Automated DOM inventories: 56 before pages (7 states × 2 widths × 4 original t
 | Run notes and processing history | fresh-approved / 390 | Activity workspace → Run notes and processing history | retained |
 | Open record | fresh-approved / 390 | Checks and payments workspace | retained |
 | Open | fresh-approved / 390 | Checks and payments workspace | retained |
-| 2 access records | fresh-approved / 390 | Activity workspace → 2 access records | retained |
+| 2 access records | fresh-approved / 390 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
 | Technical evidence | fresh-approved / 390 | Activity workspace → Technical evidence | retained |
 | Activity | fresh-approved / 1280 | Pay-run workspace sections | retained |
 | Back | fresh-approved / 1280 | Header / shared dialog | retained |
@@ -350,7 +350,7 @@ Automated DOM inventories: 56 before pages (7 states × 2 widths × 4 original t
 | Run notes and processing history | fresh-approved / 1280 | Activity workspace → Run notes and processing history | retained |
 | Open record | fresh-approved / 1280 | Checks and payments workspace | retained |
 | Open | fresh-approved / 1280 | Checks and payments workspace | retained |
-| 2 access records | fresh-approved / 1280 | Activity workspace → 2 access records | retained |
+| 2 access records | fresh-approved / 1280 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
 | Technical evidence | fresh-approved / 1280 | Activity workspace → Technical evidence | retained |
 | Activity | fresh-calculated / 390 | Pay-run workspace sections | retained |
 | Back | fresh-calculated / 390 | Header / shared dialog | retained |
@@ -375,7 +375,7 @@ Automated DOM inventories: 56 before pages (7 states × 2 widths × 4 original t
 | Run notes and processing history | fresh-calculated / 390 | Activity workspace → Run notes and processing history | retained |
 | Open record | fresh-calculated / 390 | Checks and payments workspace | retained |
 | Open | fresh-calculated / 390 | Checks and payments workspace | retained |
-| 2 access records | fresh-calculated / 390 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
+| 2 access records | fresh-calculated / 390 | Activity workspace → 2 access records | retained |
 | Technical evidence | fresh-calculated / 390 | Activity workspace → Technical evidence | retained |
 | Activity | fresh-calculated / 1280 | Pay-run workspace sections | retained |
 | Back | fresh-calculated / 1280 | Header / shared dialog | retained |
@@ -531,11 +531,55 @@ Automated DOM inventories: 56 before pages (7 states × 2 widths × 4 original t
 | 2 access records | manual-committed / 1280 | Activity workspace → 2 access records | retained |
 | Technical evidence | manual-committed / 1280 | Activity workspace → Technical evidence | retained |
 | What happened | manual-committed / 1280 | Activity → Load older activity → What happened (unchanged activity/audit components; first-page event window changed) | retained in paginated activity |
+| Activity | parallel-approved / 390 | Pay-run workspace sections | retained |
+| Back | parallel-approved / 390 | Header / shared dialog | retained |
+| Checks & direct deposit 1 | parallel-approved / 390 | Pay-run workspace sections | retained |
+| Open processing / Overview / Process payroll | parallel-approved / 390 | Pay-run workspace sections | retained |
+| Report Fixture | parallel-approved / 390 | Checks and payments workspace; Payroll workspace | retained |
+| About parallel comparison | parallel-approved / 390 | Header → status | retained |
+| Open payroll item / Open payroll item for Report Fixture / View details | parallel-approved / 390 | Payroll workspace | retained |
+| Fixture | parallel-approved / 390 | Payroll workspace | retained |
+| Review settings | parallel-approved / 390 | Payroll workspace | retained |
+| Change payment method for Report Fixture | parallel-approved / 390 | Checks and payments workspace | retained |
+| Download | parallel-approved / 390 | Reports workspace | retained |
+| Export PDF document (.pdf) | parallel-approved / 390 | Reports workspace | retained |
+| Export | parallel-approved / 390 | Reports workspace | retained |
+| Refresh current setup | parallel-approved / 390 | Header / shared dialog | retained |
+| Roll Back Approval | parallel-approved / 390 | Header / shared dialog | retained |
+| View | parallel-approved / 390 | Reports workspace | retained |
+| Run notes and processing history | parallel-approved / 390 | Activity workspace → Run notes and processing history | retained |
+| Open record | parallel-approved / 390 | Checks and payments workspace | retained |
+| Open | parallel-approved / 390 | Checks and payments workspace | retained |
+| 2 access records | parallel-approved / 390 | Activity workspace → 2 access records | retained |
+| Technical evidence | parallel-approved / 390 | Activity workspace → Technical evidence | retained |
+| Activity | parallel-approved / 1280 | Pay-run workspace sections | retained |
+| Back | parallel-approved / 1280 | Header / shared dialog | retained |
+| Checks & direct deposit 1 | parallel-approved / 1280 | Pay-run workspace sections | retained |
+| Open processing / Overview / Process payroll | parallel-approved / 1280 | Pay-run workspace sections | retained |
+| Report Fixture | parallel-approved / 1280 | Checks and payments workspace; Payroll workspace | retained |
+| About parallel comparison | parallel-approved / 1280 | Header → status | retained |
+| Open payroll item / Open payroll item for Report Fixture / View details | parallel-approved / 1280 | Payroll workspace | retained |
+| Fixture | parallel-approved / 1280 | Payroll workspace | retained |
+| Review settings | parallel-approved / 1280 | Payroll workspace | retained |
+| Change payment method for Report Fixture | parallel-approved / 1280 | Checks and payments workspace | retained |
+| Download | parallel-approved / 1280 | Reports workspace | retained |
+| Export PDF document (.pdf) | parallel-approved / 1280 | Reports workspace | retained |
+| Export | parallel-approved / 1280 | Reports workspace | retained |
+| Refresh current setup | parallel-approved / 1280 | Header / shared dialog | retained |
+| Roll Back Approval | parallel-approved / 1280 | Header / shared dialog | retained |
+| View | parallel-approved / 1280 | Reports workspace | retained |
+| Run notes and processing history | parallel-approved / 1280 | Activity workspace → Run notes and processing history | retained |
+| Open record | parallel-approved / 1280 | Checks and payments workspace | retained |
+| Open | parallel-approved / 1280 | Checks and payments workspace | retained |
+| 2 access records | parallel-approved / 1280 | Activity workspace → 2 access records; Activity workspace → 3 access records | retained |
+| Technical evidence | parallel-approved / 1280 | Activity workspace → Technical evidence | retained |
 
 The removed writer Overview review entry points now open the same employee review dialog from Payroll results. Drafts retaining records have a Saved payroll records disclosure. Read-only modes retain the original summary. “Open processing” is the Payroll tab and persistent header action; `overview` remains a redirect alias. “Commit & Finalize” is now “Commit.”
 
 Payroll Corrections is reached through header More payroll actions → Payroll corrections → Activity. Existing guarded Void, Reopen and Create correction dialogs remain there. Checks and non-employee/FIT/Form 500, holds and manual reconciliation are in Checks & payments. Reports, final record, sign-off and liabilities are in Reports. Notes, timeline, complete activity and timecard history are in Activity.
 
-“What happened” and “N access records” are supplied by unchanged activity widgets; the captured manual-run first-page activity window moved as local fixture audit events accumulated. It remains under Activity → Load older activity. No history was removed.
+“What happened” and the dynamic “N access records” audit group are supplied by the unchanged AuditEventDetails component; the captured manual-run first-page activity window moved as local fixture audit events accumulated. It remains under Activity → Load older activity. No history was removed.
 
 Late-hours entries added by merged #382 remain in Payroll → Hours → Held time → Pay late hours, with the same effective permission guard. Return to original payroll remains in the Hours banner for an adjustment. Desktop/phone runtime receipts are in late-hours-actions-*.json. Financial execution of late hours was not rerun for this layout PR.
+
+Parallel approval adds eight baseline pages and two final inventories: **About parallel comparison** moves from the overview/status area to Header → status on every tab. The original explanation is preserved. Read-only Reports permits six GET artifact types; save-capable writer actions are intentionally excluded under F1, with their writer locations unchanged. Real read-only permission/browser receipts are in FINDINGS-RESPONSE.md.

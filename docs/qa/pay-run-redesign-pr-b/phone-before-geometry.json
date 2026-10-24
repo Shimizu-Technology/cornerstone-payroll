@@ -1,0 +1,95 @@
+{
+  "positions": [
+    {
+      "label": "Employees",
+      "x": 16,
+      "valueX": 16,
+      "y": 360,
+      "width": 179
+    },
+    {
+      "label": "Gross pay",
+      "x": 207,
+      "valueX": 207,
+      "y": 360,
+      "width": 179
+    },
+    {
+      "label": "Total deductions",
+      "x": 28,
+      "valueX": 28,
+      "y": 424,
+      "width": 179
+    },
+    {
+      "label": "Net pay",
+      "x": 28,
+      "valueX": 28,
+      "y": 488,
+      "width": 358
+    },
+    {
+      "label": "DRT deposit",
+      "x": 207,
+      "valueX": 207,
+      "y": 424,
+      "width": 179
+    }
+  ],
+  "tabs": [
+    {
+      "text": "Payroll",
+      "left": 16,
+      "right": 115.78125
+    },
+    {
+      "text": "Checks & payments\n4",
+      "left": 123.78125,
+      "right": 331.75
+    },
+    {
+      "text": "Reports",
+      "left": 339.75,
+      "right": 444.234375
+    },
+    {
+      "text": "Activity",
+      "left": 452.234375,
+      "right": 555.734375
+    }
+  ],
+  "checks": [
+    {
+      "name": "left column label and figures align",
+      "passed": false
+    },
+    {
+      "name": "right column label and figures align",
+      "passed": true
+    },
+    {
+      "name": "Net is last and spans both columns",
+      "passed": true
+    },
+    {
+      "name": "all four phone tabs fit",
+      "passed": false
+    },
+    {
+      "name": "reports active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "activity active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "checks active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "no page horizontal overflow",
+      "passed": true
+    }
+  ]
+}
