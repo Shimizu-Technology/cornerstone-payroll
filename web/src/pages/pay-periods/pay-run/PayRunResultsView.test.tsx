@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
+import type { PayrollItem } from '@/types';
 import { PayRunResultsView } from './PayRunResultsView';
 
 const review = vi.fn();
@@ -39,8 +40,8 @@ it('reveals full tax columns using the keyboard and persists the preference', as
   expect(screen.getByRole('columnheader', { name: 'FIT' })).toBeTruthy();
 });
 it('retains every combined flag and the contractor correction guards', () => {
-  const item = { ...props.sortPayrollItems[0], voided: true, correction_pay_basis_hold: true, withholding_tax_override: 0, employment_type: 'contractor', wage_rate_hours: [{ hours: 1 }, { hours: 2 }] };
-  render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item] as typeof props.sortPayrollItems} /></MemoryRouter>);
+  const item: PayrollItem = { ...props.sortPayrollItems[0], voided: true, correction_pay_basis_hold: { reason: 'Fixture source hold' }, withholding_tax_override: 0, employment_type: 'contractor', wage_rate_hours: [{ employee_wage_rate_id: 1, label: 'Base', rate: 25, regular_hours: 1, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }, { employee_wage_rate_id: 2, label: 'Other', rate: 30, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] };
+  render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} /></MemoryRouter>);
   const row = screen.getByRole('row', { name: /Maya Manual/ });
   for (const label of ['Voided', 'Pay setup held', 'FIT override', '1099', 'Multiple rates']) expect(row.textContent).toContain(label);
   expect(within(row).queryByText('Correct', { exact: true })).toBeNull();
