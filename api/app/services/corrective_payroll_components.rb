@@ -127,9 +127,6 @@ class CorrectivePayrollComponents
   end
 
   def validate_loans!(item)
-    if item.payroll_item_deductions.any? { |row| row.employer_contribution? && row.deduction_type&.sub_category == "insurance" && !PayrollComponentMirrors.field_for(item, row) }
-      raise Error, "Flexible employer insurance changes require a reviewed benefit-ledger correction; the benefit-ledger transition needs separate review"
-    end
     changed = item.loan_payment.to_d.nonzero? || item.payroll_item_deductions.any? { |row| row.deduction_type&.loan? } ||
       item.payroll_item_field_entries.any? { |row| row.category == "loan" }
     return unless changed

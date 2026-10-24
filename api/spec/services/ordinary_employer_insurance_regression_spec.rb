@@ -102,6 +102,32 @@ RSpec.describe "PR381 ordinary insurance obligation probe" do
     end
   end
 
+  [ false, true ].product([ :first, :second ]).each do |capped, voided|
+    it "reconciles direct employer insurance capped=#{capped} through repeat, void #{voided} and repair" do
+      type = add_deduction(category: "employer_contribution", sub_category: "insurance", percentage: 3)
+      original = original!(bonus: 20, custom_deductions: capped ? [ { "label" => "Big deduction", "amount" => 1000 } ] : [])
+      frozen = freeze_history(original)
+      first = issue(hours_worked: 65)
+      second = issue(hours_worked: 55)
+      expect([ original, first, second ].map { |item| item.payroll_item_deductions.find_by!(deduction_type: type).amount }).to eq([ 27.6, 2.25, -4.5 ])
+      stale = preview(hours_worked: 60).dig(:meta, :review_digest)
+      removed, retained = voided == :first ? [ first, second ] : [ second, first ]
+      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse employer insurance delta")
+      expect { issue({ hours_worked: 60 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
+      repair = issue(hours_worked: 60)
+      expect([ original, retained, repair ].sum { |item| item.payroll_item_deductions.find_by!(deduction_type: type).amount }).to eq(27.6)
+      expect(company.payroll_liability_entries.where(category: "benefit_employer").sum(:amount)).to eq(27.6)
+      expect(company.payroll_liability_entries.where(category: "insurance_employee")).to be_empty
+      [ original, retained, repair ].each do |item|
+        expect(item.insurance_payment).to eq(0)
+        PayrollLiabilityPostingService.verify_employer_contributions!(item)
+        assert_cash(item)
+      end
+      expect { issue(hours_worked: 60) }.to raise_error(IssueCorrectivePaycheckService::InvalidStateError, /already recorded/)
+      expect(freeze_history(original.reload)).to eq(frozen)
+    end
+  end
+
   it "rolls back a new ordinary posting if an employer component is omitted" do
     add_deduction(category: "employer_contribution", sub_category: "benefit", percentage: 3)
     allow_any_instance_of(PayrollLiabilityPostingService).to receive(:itemized_liability_rows).and_return([])

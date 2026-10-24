@@ -327,9 +327,10 @@ RSpec.describe "Corrective component ledger" do
     assert_cash(correction)
   end
 
-  it "holds changed flexible employer insurance until its benefit ledger is reviewed" do
+  it "holds historical employer insurance folded into an employee aggregate" do
     add_deduction(category: "employer_contribution", sub_category: "insurance")
-    original!
+    original = original!
+    original.update_columns(insurance_payment: 45)
     expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /employer insurance.*review/i)
     expect { issue(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError)
     expect(period.supplemental_pay_periods).to be_empty
