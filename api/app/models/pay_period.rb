@@ -141,11 +141,22 @@ class PayPeriod < ApplicationRecord
     end
     return if pay_date.year <= 2026
 
-    verification = AnnualTaxConfig.current(pay_date.year)&.verified_at&.utc&.iso8601(6)
+    config = AnnualTaxConfig.current(pay_date.year)
+    verification = config&.verified_at&.utc&.iso8601(6)
+    signatures = {}
     # Historical corrective entries retain the original committed rule snapshot.
-    # New ordinary runs must prove which verified version produced their money.
+    # New ordinary runs must prove which verified rules produced their money.
     stale = payroll_items.not_voided.any? do |item|
-      !item.correction_entry? && (verification.nil? || item.tax_rule_snapshot["tax_year_verification_at"] != verification)
+      next false if item.correction_entry?
+
+      snapshot = item.tax_rule_snapshot
+      status = case snapshot["engine"]
+      when "annual_tax_config_v2" then snapshot["filing_status"].presence
+      when "contractor_no_withholding" then :contractor
+      end
+      signature = signatures[status] ||= config.rules_digest(status == :contractor ? nil : status) if status
+      verification.nil? || snapshot["tax_year_verification_at"] != verification ||
+        signature.nil? || snapshot["tax_year_rules_digest"] != signature
     end
     if stale
       errors.add(:base, "#{pay_date.year} tax tables were verified or changed after this payroll was calculated. Recalculate payroll before approval or commitment.")

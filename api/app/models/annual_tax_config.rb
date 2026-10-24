@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 # Stores tax configuration for a specific tax year.
 # Each year has one config with SS wage base, rates, and filing status configs.
 class AnnualTaxConfig < ApplicationRecord
@@ -137,6 +139,24 @@ class AnnualTaxConfig < ApplicationRecord
     return false unless brackets.all? { |bracket| bracket.max_income.nil? || bracket.max_income > bracket.min_income }
 
     brackets.each_cons(2).all? { |left, right| left.max_income == right.min_income }
+  end
+
+  # Include rule contents as well as the verification time: a frozen or adjusted
+  # clock must not allow old calculated amounts to pass a later verification.
+  def rules_digest(filing_status = nil)
+    values = RULE_ATTRIBUTES.map do |attribute|
+      attribute == "tax_year" ? tax_year : public_send(attribute).to_d.to_s("F")
+    end
+    if filing_status
+      filing = config_for(filing_status)
+      return nil unless filing
+
+      values << filing.filing_status << filing.standard_deduction.to_d.to_s("F")
+      values << filing.tax_brackets.order(:bracket_order).map do |bracket|
+        [ bracket.min_income.to_d.to_s("F"), bracket.max_income&.to_d&.to_s("F"), bracket.rate.to_d.to_s("F") ]
+      end
+    end
+    Digest::SHA256.hexdigest(values.to_json)
   end
 
   def invalidate_changed_rules
