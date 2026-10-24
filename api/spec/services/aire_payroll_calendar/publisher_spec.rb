@@ -219,6 +219,9 @@ RSpec.describe AirePayrollCalendar::Publisher do
     expect(revised.publication.schedule_version).to eq(2)
     expect(revised.publication.payload["cutoff_at"]).to eq("2026-11-22T17:00:00+10:00")
     expect(first.calendar_period.publications.order(:schedule_version).pluck(:schedule_version)).to eq([ 1, 2 ])
+    retry_result = described_class.new(pay_period: pay_period, source: source, actor: actor, now: now).call
+    expect(retry_result.created).to be(false)
+    expect(retry_result.publication).to eq(revised.publication)
   end
 
   it "refuses to rewrite a delivered calendar after its cutoff" do
