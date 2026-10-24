@@ -1887,3 +1887,28 @@ it('includes automatic hidden taxable fields in the estimate without adding work
   expect(screen.queryByText('Hidden allowance')).toBeNull();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
+
+
+it('keeps staged worksheet values when a delivery-method save refreshes the moved Checks tab', async () => {
+  const { field, regular, bonus } = await editPayrollDrafts();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', notes: 'Delivery method saved', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
+  const callback = componentMocks.paymentMethodSaved.mock.calls.at(-1)![0] as () => Promise<void>;
+  await act(async () => callback());
+  expect(regular.value).toBe('19');
+  expect(bonus.value).toBe('77.00');
+  expect(field.value).toBe('888.00');
+});
+
+
+it('counts prepared paper checks separately from direct-deposit stubs in the header', async () => {
+  vi.clearAllMocks();
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  const period = { ...initialPayPeriod, payroll_items: [
+    { id: 1, employee_id: 30, employee_name: 'Paper Check', employment_type: 'hourly', gross_pay: 100, net_pay: 90, check_status: 'prepared', effective_payment_delivery_method: 'paper_check' },
+    { id: 2, employee_id: 31, employee_name: 'Deposit Stub', employment_type: 'hourly', gross_pay: 100, net_pay: 90, check_status: 'prepared', effective_payment_delivery_method: 'direct_deposit' },
+  ] } as unknown as PayPeriod;
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  expect(await screen.findByRole('link', { name: '1 check prepared, not issued' })).toBeTruthy();
+});
