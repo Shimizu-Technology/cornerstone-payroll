@@ -4,7 +4,9 @@ class EncryptedDataReadiness
   TARGETS = {
     Employee => %i[ssn_encrypted bank_routing_number_encrypted bank_account_number_encrypted],
     TimeTrackingSource => %i[shared_secret],
-    EmployeeChangeRequest => %i[sensitive_payload_encrypted]
+    EmployeeChangeRequest => %i[sensitive_payload_encrypted],
+    HistoricalWorker => %i[private_snapshot],
+    TimeTrackingDelegation => %i[token]
   }.freeze
 
   def self.verify!

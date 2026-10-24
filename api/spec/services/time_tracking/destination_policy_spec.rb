@@ -92,45 +92,15 @@ RSpec.describe TimeTracking::DestinationPolicy do
     expect(policy.resolve_public_addresses!(uri("http://localhost:3001/api"))).to eq([ "127.0.0.1" ])
   end
 
-  it "allows only an explicitly named private Docker service in staging" do
-    env = {
-      "DEPLOYMENT_ENV" => "staging",
-      "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
-      "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
-    }
-    policy = described_class.new(
-      environment: "production",
-      env: env,
-      resolver: ->(_host) { [ "172.24.0.8" ] }
-    )
-
-    target = uri("http://aire-api:3000/api/v1/payroll/cockpit/periods/1")
-    expect(policy.validate_configuration!(target)).to eq(target)
-    expect(policy.resolve_public_addresses!(target)).to eq([ "172.24.0.8" ])
+  it "refuses legacy private Docker HTTP even when its old staging switch is set" do
+    env = { "DEPLOYMENT_ENV" => "staging", "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true", "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api" }
+    policy = described_class.new(environment: "production", env: env, resolver: ->(*) { [ "172.24.0.8" ] })
+    expect { policy.validate_configuration!(uri("http://aire-api:3000/api")) }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING_INTEGRATION_HOSTS/)
   end
 
-  it "rejects public, loopback, wrong-port, and wrong-host staging HTTP destinations" do
-    env = {
-      "DEPLOYMENT_ENV" => "staging",
-      "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
-      "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
-    }
-
-    expect do
-      described_class.new(environment: "production", env: env)
-        .validate_configuration!(uri("http://other-api:3000"))
-    end.to raise_error(described_class::Error, /HTTPS/)
-    expect do
-      described_class.new(environment: "production", env: env)
-        .validate_configuration!(uri("http://aire-api:3001"))
-    end.to raise_error(described_class::Error, /HTTPS/)
-    expect do
-      described_class.new(environment: "production", env: env, resolver: ->(*) { [ "127.0.0.1" ] })
-        .resolve_public_addresses!(uri("http://aire-api:3000"))
-    end.to raise_error(described_class::Error, /private container address/)
-    expect do
-      described_class.new(environment: "production", env: env, resolver: ->(*) { [ "8.8.8.8" ] })
-        .resolve_public_addresses!(uri("http://aire-api:3000"))
-    end.to raise_error(described_class::Error, /private container address/)
+  it "requires the staging allowlist as well as the ordinary destination allowlist" do
+    env = { "DEPLOYMENT_ENV" => "staging", "TIME_TRACKING_ALLOWED_HOSTS" => "aire.example.test", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test" }
+    policy = described_class.new(environment: "production", env: env)
+    expect { policy.validate_configuration!(uri("https://aire.example.test/api")) }.to raise_error(StagingOutboundPolicy::Blocked)
   end
 end

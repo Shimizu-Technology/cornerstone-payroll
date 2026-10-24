@@ -70,6 +70,7 @@ module TimeTracking
     end
 
     def validate_configuration!(uri, allow_query: false, enforce_production: production?)
+      StagingOutboundPolicy.integration!(uri.to_s, env: @env)
       unless uri.is_a?(URI::HTTP) && uri.host.present? && uri.userinfo.blank?
         raise Error, "must be an HTTP or HTTPS URL with a host and no embedded credentials"
       end

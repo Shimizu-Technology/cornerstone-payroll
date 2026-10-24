@@ -35,6 +35,7 @@ class R2StorageService
   STAGING_STORAGE_ROOT = Rails.root.join("storage", "local_r2_storage")
 
   def initialize
+    StagingOutboundPolicy.validate_storage!
     validate_configuration!
   end
 

@@ -11,6 +11,10 @@ namespace :production do
 
     abort "Production readiness failed (#{report.failures.length} control(s))." unless report.passed?
 
-    puts "Production configuration and live dependency probes passed. Complete the manual evidence checklist before release."
+    if StagingOutboundPolicy.staging?
+      puts "Staging containment and durable dependency profile passed; production provider probes were not run."
+    else
+      puts "Production configuration and live dependency probes passed. Complete the manual evidence checklist before release."
+    end
   end
 end

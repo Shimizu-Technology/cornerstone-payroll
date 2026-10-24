@@ -22,6 +22,7 @@ module TimecardOcr
     end
 
     def call
+      StagingOutboundPolicy.block!("AI/OCR")
       images, preprocessed_key = prepare_images
 
       raw = extract_raw(images)
