@@ -25,12 +25,13 @@ class AirePayrollAcknowledgement < ApplicationRecord
   end
 
   def self.dispatch_pending!(ids: nil)
-    scope = due_for_dispatch
+    scope = StagingQuarantine.excluding(due_for_dispatch)
     scope = scope.where(id: ids) if ids.present?
     scope.find_each(&:dispatch!)
   end
 
   def dispatch!
+    return false if StagingQuarantine.suppressed?(self.class.table_name, id)
     with_lock do
       return false if delivered_at.present?
       return false if enqueued_at.present? && enqueued_at >= REDISPATCH_AFTER.ago

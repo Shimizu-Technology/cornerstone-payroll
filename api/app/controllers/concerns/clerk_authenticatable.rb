@@ -28,6 +28,16 @@ module ClerkAuthenticatable
     clerk_id = @clerk_token_payload["sub"]
     @current_user = User.find_by(clerk_id: clerk_id)
 
+    if StagingOutboundPolicy.staging? && !StagingOutboundPolicy.bindings.value?(clerk_id)
+      render json: { error: "Staging access is restricted to named testers" }, status: :forbidden
+      return
+    end
+
+    if StagingOutboundPolicy.staging? && !@current_user
+      render json: { error: "Staging tester has not been explicitly bound" }, status: :forbidden
+      return
+    end
+
     unless @current_user
       # Auto-provision user from Clerk token data
       @current_user = provision_user_from_clerk(@clerk_token_payload)
@@ -35,6 +45,12 @@ module ClerkAuthenticatable
 
     unless @current_user
       render json: { error: "User not found" }, status: :unauthorized
+      return
+    end
+
+    unless StagingOutboundPolicy.tester?(user_id: @current_user.id, email: @current_user.email, id: clerk_id)
+      @current_user = nil
+      render json: { error: "Staging tester binding does not match" }, status: :forbidden
       return
     end
 

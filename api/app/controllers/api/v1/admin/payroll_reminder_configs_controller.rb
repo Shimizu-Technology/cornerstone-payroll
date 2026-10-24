@@ -34,7 +34,7 @@ module Api
             return render json: { error: "Reminders must be enabled with at least one recipient" }, status: :unprocessable_entity
           end
 
-          unless ENV["RESEND_API_KEY"].present?
+          unless StagingOutboundPolicy.staging? || ENV["RESEND_API_KEY"].present?
             return render json: { error: "Email service not configured" }, status: :unprocessable_entity
           end
 
@@ -44,6 +44,8 @@ module Api
           end
 
           failures = []
+          captured = 0
+          sent = 0
           config.recipients.each do |email|
             payload = {
               from: from_email,
@@ -57,10 +59,26 @@ module Api
               revalidate_current_company_write_access!(capability: :manage_client_configuration)
             end
             begin
-              Resend::Emails.send(payload)
+              result = StagingMailTransport.deliver(payload)
+              StagingOutboundPolicy.staging? && result["staging_captured"] ? captured += 1 : sent += 1
             rescue StandardError => e
-              failures << { email: email, error: e.message }
+              if StagingOutboundPolicy.staging?
+                Rails.logger.error("[PayrollReminderTest] Failed company=#{current_company.id}: #{e.class}; content redacted")
+                failures << { error: "#{e.class}; content redacted" }
+              else
+                failures << { email: email, error: e.message }
+              end
             end
+          end
+
+          if StagingOutboundPolicy.staging?
+            message = if sent.zero? && failures.empty?
+              "#{captured} recipient(s) captured in staging; no email was sent."
+            else
+              "Test email sent to #{sent} recipient(s); #{captured} captured in staging; #{failures.size} failed."
+            end
+            return render json: { message: message, sent: sent, captured: captured, failed: failures.size },
+                          status: failures.size == config.recipients.size ? :unprocessable_entity : :ok
           end
 
           if failures.size == config.recipients.size

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "uri"
+require_relative "database_connection_timeouts"
 
 class DatabasePredeploy
   class ConfigurationError < StandardError; end
@@ -62,8 +63,7 @@ class DatabasePredeploy
     end
 
     overrides["PGCONNECT_TIMEOUT"] = "10"
-    overrides["PGOPTIONS"] =
-      "-c lock_timeout=10s -c statement_timeout=15min -c idle_in_transaction_session_timeout=5min"
+    overrides["PGOPTIONS"] = DatabaseConnectionTimeouts::PG_OPTIONS
     overrides
   end
 

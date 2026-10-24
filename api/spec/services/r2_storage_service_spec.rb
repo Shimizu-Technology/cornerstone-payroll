@@ -40,26 +40,12 @@ RSpec.describe R2StorageService do
     end.to raise_error(R2StorageService::DownloadError, /exceeds 4 byte download limit/)
   end
 
-  it "uses the shared persistent volume for explicit staging local storage" do
-    root = Pathname(Dir.mktmpdir("staging-r2-storage-"))
-    stub_const("R2StorageService::STAGING_STORAGE_ROOT", root)
-    allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+  it "refuses legacy staging local storage without explicit bucket containment assertions" do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("DEPLOYMENT_ENV").and_return("staging")
     allow(ENV).to receive(:[]).with("R2_STORAGE_BACKEND").and_return("local")
     allow(ENV).to receive(:[]).with("ACTIVE_STORAGE_SERVICE").and_return("local")
-    allow(ENV).to receive(:[]).with("R2_ACCOUNT_ID").and_return(nil)
-    allow(ENV).to receive(:[]).with("R2_ACCESS_KEY_ID").and_return(nil)
-    allow(ENV).to receive(:[]).with("R2_SECRET_ACCESS_KEY").and_return(nil)
-
-    begin
-      first = described_class.new
-      first.upload("check-print-runs/test.pdf", "%PDF-1.4\n", content_type: "application/pdf")
-      expect(root.join("check-print-runs/test.pdf")).to exist
-      expect(described_class.new.download("check-print-runs/test.pdf")).to eq("%PDF-1.4\n")
-    ensure
-      FileUtils.remove_entry(root)
-    end
+    expect { described_class.new }.to raise_error(StagingOutboundPolicy::ConfigurationError, /STAGING_STORAGE_BUCKET/)
   end
 
   it "still requires R2 in production even if local storage is requested" do
@@ -74,7 +60,7 @@ RSpec.describe R2StorageService do
     expect { described_class.new }.to raise_error(R2StorageService::ConfigurationError, /R2 not configured/)
   end
 
-  it "requires explicit Active Storage selection for staging local storage" do
+  it "refuses incomplete staging storage even when a local backend is requested" do
     allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("DEPLOYMENT_ENV").and_return("staging")
@@ -84,6 +70,6 @@ RSpec.describe R2StorageService do
     allow(ENV).to receive(:[]).with("R2_ACCESS_KEY_ID").and_return(nil)
     allow(ENV).to receive(:[]).with("R2_SECRET_ACCESS_KEY").and_return(nil)
 
-    expect { described_class.new }.to raise_error(R2StorageService::ConfigurationError, /R2 not configured/)
+    expect { described_class.new }.to raise_error(StagingOutboundPolicy::ConfigurationError, /STAGING_STORAGE_BUCKET/)
   end
 end

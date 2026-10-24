@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 class ApplicationController < ActionController::API
+  rescue_from StagingOutboundPolicy::Blocked do |error|
+    render json: { error: error.message, staging: true }, status: :service_unavailable
+  end
   E2E_USER_EMAIL_HEADER = "X-E2E-User-Email"
 
   include ClerkAuthenticatable
