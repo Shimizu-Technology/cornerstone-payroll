@@ -161,6 +161,22 @@ RSpec.describe "Tax-year verification" do
     end
   end
 
+  it "checks stale annual rules for retired checks whose payroll remains financially included" do
+    config = complete_config(2027)
+    admin = create(:user, role: "admin")
+    config.verify!(actor: admin, source_note: "Synthetic original review", reviewed_digest: config.review_digest)
+    period = create(:pay_period, :calculated, start_date: Date.new(2027, 1, 1), end_date: Date.new(2027, 1, 14), pay_date: Date.new(2027, 1, 15))
+    item = create(:payroll_item, employee: create(:employee, company: period.company), pay_period: period)
+    PayrollCalculator.for(item.employee, item).calculate
+    item.save!
+    period.reload.update!(status: "approved")
+    item.update!(voided: true, void_reason: "Synthetic retired payment instrument")
+    expect(period.payroll_items.financially_reportable).to include(item)
+    config.update!(ss_wage_base: 192_300)
+    config.verify!(actor: admin, source_note: "Synthetic revised review", reviewed_digest: config.review_digest)
+    expect { period.reload.update!(status: "committed") }.to raise_error(ActiveRecord::RecordInvalid, /Recalculate payroll/)
+  end
+
   it "blocks approval and commit with a draft without changing the saved state" do
     complete_config(2026)
     AnnualTaxConfig.create_from_previous(2027, source_year: 2026)
