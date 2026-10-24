@@ -46,6 +46,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
     %w[prepared printed delivered].each do |state|
       it "returns authoritative fresh #{state} check status without changing saved evidence" do
+        ensure_verified_test_tax_years(2024, 2026)
         pay_period.update!(status: "committed")
         payroll_item.update!(payment_delivery_method: "paper_check", check_number: "8101", gross_pay: 1200, net_pay: 960)
         payroll_item.mark_package_prepared!(user: admin_user)
@@ -62,6 +63,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "returns persisted bank confirmation evidence on the exact scoped detail without mutating payment history" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65)
       confirmation = DirectDepositPaymentConfirmation.create!(payroll_item: payroll_item, user: admin_user,
@@ -82,6 +84,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "returns no confirmation for an eligible direct-deposit item without a persisted confirmation" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "direct_deposit", check_number: nil, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65)
       get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
@@ -91,6 +94,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "does not return another item bank confirmation through the requested item" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       other_employee = create(:employee, company: company)
       other = create(:payroll_item, company: company, pay_period: pay_period, employee: other_employee,
@@ -255,6 +259,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "saves this run and its future default in one request" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: Time.current)
       patch path, params: { payment_delivery_method: "direct_deposit", update_employee_default: true }
       expect(response).to have_http_status(:ok)
@@ -264,6 +269,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "requires an explicit retirement mode and cancellation evidence for a prepared check" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
       payroll_item.mark_package_prepared!(user: admin_user)
@@ -285,6 +291,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "retains explicit JSON null as an optimistic expectation of no assigned check" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
       patch path, params: {
@@ -297,6 +304,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
 
     it "rejects a committed switch without a no-payment attestation" do
+      ensure_verified_test_tax_years(2024, 2026)
       pay_period.update!(status: "committed")
       payroll_item.update!(payment_delivery_method: "paper_check", check_number: "2000")
 

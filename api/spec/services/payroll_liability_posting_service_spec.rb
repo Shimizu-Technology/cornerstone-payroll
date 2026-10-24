@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe PayrollLiabilityPostingService do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   let(:company) { create(:company) }
   let(:actor) { create(:user, company: company, organization: company.organization) }
   let(:department) { create(:department, company: company) }

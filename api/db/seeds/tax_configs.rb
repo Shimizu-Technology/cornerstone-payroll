@@ -40,3 +40,11 @@ end
 TaxConfigAuditLog.log_created(config_2026, user_id: nil, ip_address: "system")
 
 puts "✅ 2026 Tax Configuration seeded successfully!"
+
+# Seeding known 2026 rules is an explicit historical source attestation. This
+# runs after nested bracket writes, which invalidate any previous verification.
+config_2026.update!(verification_status: "verified", verified_by: "seed:official-2026",
+                    verified_at: Time.current,
+                    source_references: "https://www.irs.gov/publications/p15 https://www.irs.gov/publications/p15t")
+
+load Rails.root.join("db/seeds/tax_config_2027_draft.rb")
