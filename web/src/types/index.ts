@@ -726,6 +726,7 @@ export interface AirePayableLineStatusBucket {
 }
 
 export type AirePayrollCutoffState =
+  | 'manual'
   | 'unpublished'
   | 'publishing'
   | 'publication_failed'
@@ -759,6 +760,9 @@ export interface AirePayrollCalendarState {
     | null;
   external_pay_period_id?: string | null;
   cutoff_at?: string | null;
+  lock_mode?: 'manual' | 'scheduled';
+  cutoff_enforcement_starts_on?: string | null;
+  next_scheduled_cutoff_at?: string | null;
   cutoff_state: AirePayrollCutoffState;
   needs_revision: boolean;
   can_publish: boolean;
@@ -837,7 +841,10 @@ export interface AirePayrollCockpitPeriod {
   schedule_version: number;
   publication_id: string;
   status: 'scheduled' | 'failed' | 'finalized';
-  cutoff_state: 'upcoming' | 'due' | 'attention_required' | 'finalized';
+  lock_mode?: 'manual' | 'scheduled';
+  cutoff_enforcement_starts_on?: string;
+  next_scheduled_cutoff_at?: string | null;
+  cutoff_state: 'manual' | 'upcoming' | 'due' | 'attention_required' | 'finalized';
   payroll_batch_id?: string;
   finalized_at?: string;
   finalization_attempts?: number;

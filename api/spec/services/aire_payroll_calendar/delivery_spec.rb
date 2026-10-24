@@ -189,4 +189,31 @@ RSpec.describe AirePayrollCalendar::Delivery do
     expect(result[:status]).to eq("delivered")
     expect(client).not_to have_received(:publish_payroll_calendar_period)
   end
+  context "with a published manual lock period" do
+    let(:now) { Time.find_zone!("Pacific/Guam").local(2026, 10, 24, 9) }
+    let(:publication) do
+      record = build(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now)
+      record.payload = record.payload.merge("lock_mode" => "manual", "cutoff_enforcement_starts_on" => "2026-10-16")
+      record.payload_checksum = TimeTracking::CanonicalPayload.checksum(record.payload)
+      record.save!
+      record
+    end
+
+    it "keeps retrying a manual publication after its nominal cutoff" do
+      client = instance_double(TimeTracking::Client)
+      allow(client).to receive(:publish_payroll_calendar_period).and_raise(TimeTracking::Client::Error, "Connection unavailable")
+      result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+      expect(result[:status]).to eq("failed")
+      expect(publication.reload.next_delivery_attempt_at).to eq(now + 1.minute)
+    end
+
+    it "rejects a producer that silently adopted a scheduled lock instead" do
+      client = instance_double(TimeTracking::Client)
+      allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => source_state.merge(
+        "lock_mode" => "scheduled", "cutoff_enforcement_starts_on" => "2026-10-16"))
+      result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+      expect(result[:status]).to eq("failed")
+      expect(publication.reload.last_error).to include("does not match")
+    end
+  end
 end
