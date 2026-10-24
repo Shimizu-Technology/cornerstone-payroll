@@ -196,11 +196,12 @@ export function PayRunWorkspace(): ReactElement {
   if (readOnlyMode) return <div>
     <PayRunRecordHeader payRun={payRun} client={activeCompany?.name} returnTo={returnTo} totals={<PayRunReadOnlyTotals items={reportableItems} />} attention={<span className="inline-flex items-center gap-2"><LockKeyhole className="h-4 w-4" aria-hidden="true" />{readOnlyMode === 'training_baseline' ? 'Locked reference history' : readOnlyMode === 'backup_snapshot' ? 'Read-only snapshot' : 'Read-only workspace'}<HelpTip label="read-only workspace">{isTrainingBaseline ? 'This copied payroll is view-only and preserves the year-to-date starting point for safe testing.' : companyReadOnlyMessage(activeCompany)}</HelpTip></span>} />
     {navigation}
+    <h2 className="sr-only">{activeTab === 'reports' ? 'Reports' : activeTab === 'activity' ? 'Activity' : activeTab === 'checks' ? 'Checks and payments' : 'Payroll'}</h2>
     <div className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
       {activeTab === 'work' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
       {activeTab === 'checks' && checks}
       {activeTab === 'activity' && activity}
-      {activeTab === 'reports' && (payRun.status !== 'draft' && reportableItems.length ? <ReportsDownloadPanel payPeriodId={payRun.id} payPeriodStatus={payRun.status} payDate={payRun.pay_date} /> : <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>)}
+      {activeTab === 'reports' && (payRun.status !== 'draft' && reportableItems.length ? <ReportsDownloadPanel readOnly payPeriodId={payRun.id} payPeriodStatus={payRun.status} payDate={payRun.pay_date} /> : <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>)}
     </div>
   </div>;
 
