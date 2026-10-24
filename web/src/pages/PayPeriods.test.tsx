@@ -29,6 +29,7 @@ vi.mock('@/contexts/CompanyContext', () => ({
 
 vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error {},
+  taxYearReadinessApi: { get: () => Promise.resolve({ verified_years: [2026], warnings: [] }) },
   companiesApi: { get: apiMocks.companyGet },
   payrollHistoryApi: { list: apiMocks.payrollHistoryList },
   payScheduleSettingsApi: { get: apiMocks.payScheduleGet },

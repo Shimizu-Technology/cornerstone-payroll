@@ -130,6 +130,15 @@ class PayPeriod < ApplicationRecord
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
+  validate :verified_tax_year_for_finalization
+
+  def verified_tax_year_for_finalization
+    return unless persisted? && will_save_change_to_status? && %w[approved committed].include?(status)
+    return if pay_date.blank? || AnnualTaxConfig.verified_for_year?(pay_date.year)
+
+    errors.add(:base, AnnualTaxConfig.unverified_message(pay_date.year))
+  end
+
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
   validate :fixed_semimonthly_schedule_dates,

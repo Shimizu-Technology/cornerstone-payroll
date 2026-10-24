@@ -950,6 +950,15 @@ export interface TaxConfigFilingStatus {
   brackets?: TaxConfigBracket[];
 }
 
+export interface TaxYearReadiness {
+  verified_years: number[];
+  warnings: { tax_year: number; message: string }[];
+}
+
+export const taxYearReadinessApi = {
+  get: () => api.get<TaxYearReadiness>('/admin/tax_year_readiness'),
+};
+
 export interface TaxConfig {
   id: number;
   tax_year: number;
@@ -962,6 +971,10 @@ export interface TaxConfig {
   created_at: string;
   updated_at: string;
   filing_statuses: TaxConfigFilingStatus[];
+  verification_status: 'draft' | 'verified';
+  verified_by: string | null;
+  verified_at: string | null;
+  source_references: string | null;
 }
 
 export interface TaxConfigAuditLog {
@@ -987,11 +1000,15 @@ export const taxConfigsApi = {
   list: () =>
     api.get<{ tax_configs: TaxConfig[] }>('/admin/tax_configs'),
   get: (id: number) =>
-    api.get<{ tax_config: TaxConfig }>(`/admin/tax_configs/${id}`),
+    api.get<{ tax_config: TaxConfig; previous_year: TaxConfig | null }>(`/admin/tax_configs/${id}`),
   auditLogs: (id: number) =>
     api.get<{ audit_logs: TaxConfigAuditLog[] }>(`/admin/tax_configs/${id}/audit_logs`),
   create: (data: { tax_year: number; copy_from_year?: number | null }) =>
     api.post<{ tax_config: TaxConfig; message: string }>('/admin/tax_configs', data),
+  verify: (id: number, source_note: string) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/verify`, { source_note }),
+  replaceWithholding: (id: number, filing_statuses: unknown) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/replace_withholding`, { filing_statuses }),
   activate: (id: number) =>
     api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/activate`),
   update: (id: number, data: Partial<Pick<TaxConfig, "ss_wage_base" | "ss_rate" | "medicare_rate" | "additional_medicare_rate" | "additional_medicare_threshold">>) =>

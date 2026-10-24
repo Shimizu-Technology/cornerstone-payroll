@@ -7,7 +7,7 @@ module Api
         include Auditable
         audit_actions :activate, :update_filing_status, :update_brackets
         before_action :require_admin!
-        before_action :set_tax_config, only: [ :show, :update, :destroy, :activate, :audit_logs ]
+        before_action :set_tax_config, only: [ :show, :update, :destroy, :activate, :audit_logs, :verify, :replace_withholding ]
 
         # GET /api/v1/admin/tax_configs
         def index
@@ -23,7 +23,8 @@ module Api
         # GET /api/v1/admin/tax_configs/:id
         def show
           render json: {
-            tax_config: serialize_config(@config, include_brackets: true)
+            tax_config: serialize_config(@config, include_brackets: true),
+            previous_year: AnnualTaxConfig.for_year(@config.tax_year - 1)&.then { |previous| serialize_config(previous, include_brackets: true) }
           }
         end
 
@@ -47,6 +48,47 @@ module Api
             message: "Tax configuration for #{@config.tax_year} created successfully"
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/tax_configs/:id/verify
+        def verify
+          @config.with_lock do
+            @config.verify!(actor: current_user, source_note: params[:source_note])
+            TaxConfigAuditLog.log_updated(
+              @config, field_name: "verification_status", old_value: "draft", new_value: "verified: #{params[:source_note]}",
+              user_id: current_user_id, ip_address: request.remote_ip
+            )
+          end
+          render json: { tax_config: serialize_config(@config, include_brackets: true), message: "#{@config.tax_year} tax tables verified" }
+        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # Explicit replacement supports years seeded without unpublished tables.
+        def replace_withholding
+          tables = params.require(:filing_statuses)
+          unless tables.is_a?(Array) && tables.size == 3 && tables.map { |table| table[:filing_status] }.sort == FilingStatusConfig::FILING_STATUSES.sort
+            raise ArgumentError, "Provide withholding tables for single, married and head_of_household"
+          end
+          @config.with_lock do
+            tables.each do |table|
+              filing = @config.filing_status_configs.find_or_initialize_by(filing_status: table[:filing_status])
+              filing.update!(standard_deduction: table[:standard_deduction])
+              brackets = table[:brackets]
+              raise ArgumentError, "Each filing status requires 1–100 brackets" unless brackets.is_a?(Array) && brackets.size.between?(1, 100)
+
+              filing.tax_brackets.destroy_all
+              brackets.each_with_index do |bracket, index|
+                filing.tax_brackets.create!(bracket_order: index + 1, min_income: bracket[:min_income], max_income: bracket[:max_income], rate: bracket[:rate])
+              end
+              raise ArgumentError, "Withholding brackets must cover all income without gaps" unless @config.complete_withholding?(filing)
+            end
+            TaxConfigAuditLog.log_updated(@config, field_name: "withholding_tables", old_value: "previous tables", new_value: "draft replacement",
+                                         user_id: current_user_id, ip_address: request.remote_ip)
+          end
+          render json: { tax_config: serialize_config(@config.reload, include_brackets: true), message: "Draft withholding tables saved; review and verify before payroll" }
+        rescue ActionController::ParameterMissing, ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -206,6 +248,10 @@ module Api
             additional_medicare_rate: config.additional_medicare_rate.to_f,
             additional_medicare_threshold: config.additional_medicare_threshold.to_f,
             is_active: config.is_active,
+            verification_status: config.verification_status,
+            verified_by: config.verified_by,
+            verified_at: config.verified_at,
+            source_references: config.source_references,
             created_at: config.created_at,
             updated_at: config.updated_at,
             filing_statuses: config.filing_status_configs.map { |fsc| serialize_filing_status(fsc, include_brackets: include_brackets) }

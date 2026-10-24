@@ -31,7 +31,7 @@ class GuamTaxCalculatorV2
       build_config_from_snapshot!
     else
       @annual_config = AnnualTaxConfig.current(tax_year) ||
-                       raise(ArgumentError, "No tax configuration found for year #{tax_year}")
+                       raise(ArgumentError, AnnualTaxConfig.unverified_message(tax_year))
       normalized_filing_status = FilingStatusConfig.normalize(filing_status)
       @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
                               raise(ArgumentError, "No filing status config found for #{filing_status}")

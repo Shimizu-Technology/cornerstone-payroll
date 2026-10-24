@@ -10,10 +10,16 @@ FactoryBot.define do
     additional_medicare_rate { 0.009 }
     additional_medicare_threshold { 200_000 }
     is_active { false }
+    verification_status { "verified" }
+    verified_by { "synthetic-fixture" }
+    verified_at { Time.current }
+    source_references { "Synthetic fixture, not for live payroll" }
   end
 
   factory :filing_status_config do
     association :annual_tax_config
+    # Nested factory rows intentionally form a verified synthetic fixture.
+    after(:create) { |row| row.annual_tax_config.update_columns(verification_status: "verified") }
     filing_status { "single" }
     standard_deduction { 14_600 }
 
@@ -35,6 +41,7 @@ FactoryBot.define do
 
   factory :tax_bracket do
     association :filing_status_config
+    after(:create) { |row| row.filing_status_config.annual_tax_config.update_columns(verification_status: "verified") }
     sequence(:bracket_order) { |n| n }
     min_income { 0 }
     max_income { 11_600 }

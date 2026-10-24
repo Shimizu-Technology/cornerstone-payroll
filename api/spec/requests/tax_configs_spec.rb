@@ -28,6 +28,78 @@ RSpec.describe "Tax Configs Admin API", type: :request do
     allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(admin_user.id)
   end
 
+  describe "POST /api/v1/admin/tax_configs/:id/verify" do
+    let!(:config) { create(:annual_tax_config, tax_year: 2027, verification_status: "draft") }
+
+    it "rejects accountants even with source evidence" do
+      allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/tax_configs/#{config.id}/verify", params: { source_note: "Synthetic source" }
+      expect(response).to have_http_status(:forbidden)
+      expect(config.reload.verification_status).to eq("draft")
+    end
+
+    it "requires a source note" do
+      post "/api/v1/admin/tax_configs/#{config.id}/verify", params: { source_note: " " }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("source note")
+    end
+
+    it "verifies an organization admin's reviewed draft and audits the source" do
+      admin_user.update!(role: "org_admin")
+      FilingStatusConfig::FILING_STATUSES.each do |status|
+        filing = create(:filing_status_config, annual_tax_config: config, filing_status: status)
+        create(:tax_bracket, filing_status_config: filing, bracket_order: 1, max_income: nil)
+      end
+      config.update_columns(verification_status: "draft")
+      post "/api/v1/admin/tax_configs/#{config.id}/verify", params: { source_note: "Synthetic January rehearsal: https://www.ssa.gov/oact/COLA/cbb.html" }
+      expect(response).to have_http_status(:ok)
+      expect(config.reload.verified_by).to eq(admin_user.id.to_s)
+      expect(config.audit_logs.last.new_value).to include("Synthetic January rehearsal")
+    end
+
+    it "does not accept verification through the ordinary update endpoint" do
+      patch "/api/v1/admin/tax_configs/#{config.id}", params: { verification_status: "verified", verified_by: admin_user.id }
+      expect(response).to have_http_status(:ok)
+      expect(config.reload).not_to be_verified
+    end
+
+    it "returns prior-year values for admin comparison" do
+      previous = create(:annual_tax_config, tax_year: 2026)
+      get "/api/v1/admin/tax_configs/#{config.id}"
+      expect(response.parsed_body.dig("previous_year", "id")).to eq(previous.id)
+      expect(response.parsed_body.dig("tax_config", "verification_status")).to eq("draft")
+    end
+  end
+
+  describe "POST /api/v1/admin/tax_configs/:id/replace_withholding" do
+    let!(:config) { create(:annual_tax_config, tax_year: 2027, verification_status: "draft") }
+    let(:tables) do
+      FilingStatusConfig::FILING_STATUSES.map do |status|
+        { filing_status: status, standard_deduction: 100, brackets: [ { min_income: 0, max_income: nil, rate: 0.10 } ] }
+      end
+    end
+
+    it "saves complete tables as draft without verification" do
+      post "/api/v1/admin/tax_configs/#{config.id}/replace_withholding", params: { filing_statuses: tables }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(config.reload).not_to be_verified
+      expect(config.tax_brackets.count).to eq(3)
+    end
+
+    it "rolls back the entire replacement for invalid brackets" do
+      tables.last[:brackets] = [ { min_income: 100, max_income: 50, rate: 0.10 } ]
+      post "/api/v1/admin/tax_configs/#{config.id}/replace_withholding", params: { filing_statuses: tables }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(config.filing_status_configs.count).to eq(0)
+    end
+
+    it "does not permit accountants to replace tables" do
+      allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(accountant_user)
+      post "/api/v1/admin/tax_configs/#{config.id}/replace_withholding", params: { filing_statuses: tables }, as: :json
+      expect(response).to have_http_status(:forbidden)
+    end
+  end
+
   describe "GET /api/v1/admin/tax_configs" do
     it "returns all tax configs" do
       create(:annual_tax_config, tax_year: 2500)
