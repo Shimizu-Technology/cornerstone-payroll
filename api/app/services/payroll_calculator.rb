@@ -18,24 +18,25 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil, annual_fica_context: nil)
     TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
-      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "salary"
-      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "contractor"
-      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     else
       raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
-  def initialize(employee, payroll_item, calculation_context: nil)
+  def initialize(employee, payroll_item, calculation_context: nil, annual_fica_context: nil)
     @employee = employee
     @payroll_item = payroll_item
     @calculation_context = calculation_context&.deep_stringify_keys
+    @annual_fica_context = annual_fica_context
   end
 
   def calculate

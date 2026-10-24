@@ -120,12 +120,13 @@ class PayPeriodLifecycleService
   attr_reader :pay_period, :actor, :ip_address
 
   def validate_annual_fica_context!
-    pay_period.payroll_items.not_voided.includes(:employee).each do |item|
-      next if item.employment_type == "contractor"
-
-      current = EmployeeYearFicaContext.new(employee: item.employee, year: pay_period.pay_date.year,
-        excluding_pay_period_id: pay_period.id).snapshot
-      next if item.tax_rule_snapshot.to_h["annual_fica_context"] == current
+    items = pay_period.payroll_items.not_voided.includes(:employee).reject { |item| item.employment_type == "contractor" }
+    contexts = EmployeeYearFicaContext.batch(company: pay_period.company, employees: items.map(&:employee),
+      year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
+    items.each do |item|
+      stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
+      raise InvalidTransitionError, EmployeeYearFicaContext::MISSING_MESSAGE unless stored
+      next if stored == contexts.fetch(item.employee_id).snapshot
 
       raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
     end

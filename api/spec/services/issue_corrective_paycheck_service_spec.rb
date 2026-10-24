@@ -676,7 +676,7 @@ RSpec.describe IssueCorrectivePaycheckService do
         social_security_taxable_tips: nil,
         medicare_taxable_wages: nil,
         additional_medicare_taxable_wages: nil,
-        additional_medicare_tax: nil,
+        # Retain the recorded zero tax so annual-context replay can verify it.
         cash_tips_reported: nil
       )
 
