@@ -1361,7 +1361,7 @@ export function PayPeriodDetail({
     : linkedAireRecords[0] || null;
 
   // Summaries
-  const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const reportablePayrollItems = payrollItems.filter(i => i.payroll_included !== false);
   // Committed history may predate captured earning evidence. Only explicit
   // server holds apply there; worksheet fallbacks still protect editable runs.
   const hasCorrectionPayBasisHold = reportablePayrollItems.some((item): boolean => isCommitted

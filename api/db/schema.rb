@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_24_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2893,6 +2893,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
     t.decimal "total_deductions", precision: 12, scale: 2, default: "0.0"
     t.datetime "updated_at", null: false
     t.string "void_reason"
+    t.text "payroll_reversal_reason"
+    t.datetime "payroll_reversed_at"
+    t.bigint "payroll_reversed_by_id"
     t.boolean "voided", default: false, null: false
     t.datetime "voided_at"
     t.bigint "voided_by_user_id"
@@ -2913,6 +2916,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
     t.index [ "correction_for_payroll_item_id" ], name: "index_payroll_items_on_correction_for_payroll_item_id"
     t.index [ "employee_id" ], name: "index_payroll_items_on_employee_id"
     t.index [ "pay_period_id", "employee_id" ], name: "index_payroll_items_on_pay_period_id_and_employee_id", unique: true
+    t.index [ "payroll_reversed_by_id" ], name: "index_payroll_items_on_payroll_reversed_by_id"
     t.index [ "pay_period_id" ], name: "index_payroll_items_on_pay_period_id"
     t.index [ "replaced_check_number" ], name: "index_payroll_items_on_replaced_check_number", where: "(replaced_check_number IS NOT NULL)"
     t.index [ "reprint_of_check_number" ], name: "index_payroll_items_on_reprint_of_check_number"
@@ -2927,6 +2931,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
     t.check_constraint "jsonb_typeof(named_loan_payments) = 'object'::text", name: "payroll_items_named_loan_payments_object"
     t.bigint "financial_correction_origin_item_id"
     t.index [ "financial_correction_origin_item_id" ], name: "index_payroll_items_on_financial_correction_origin_item_id"
+    t.check_constraint "payroll_reversed_at IS NULL AND payroll_reversed_by_id IS NULL AND payroll_reversal_reason IS NULL OR payroll_reversed_at IS NOT NULL AND payroll_reversed_by_id IS NOT NULL AND payroll_reversal_reason IS NOT NULL", name: "check_payroll_item_reversal_fields"
   end
 
   create_table "payroll_liability_check_allocations", force: :cascade do |t|
@@ -4234,6 +4239,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_18_010000) do
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "payroll_items", column: "correction_for_payroll_item_id"
+  add_foreign_key "payroll_items", "users", column: "payroll_reversed_by_id"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
   add_foreign_key "payroll_liability_check_allocations", "companies", on_delete: :restrict
   add_foreign_key "payroll_liability_check_allocations", "non_employee_checks", on_delete: :restrict

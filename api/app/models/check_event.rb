@@ -114,6 +114,8 @@ class CheckEvent < ApplicationRecord
     event_type == "voided" && details["payment_delivery_change"] == true && details["original_check_cancelled"] == true
   end
 
+  public :payment_cancellation?
+
   def aire_entry_lifecycle_status
     return "payment_prepared" if %w[prepared printed].include?(event_type)
     return "payment_issued" if event_type == "delivered"
@@ -122,6 +124,7 @@ class CheckEvent < ApplicationRecord
       # committed-payroll acknowledgement remain valid and payable.
       return "payment_cancelled"
     end
+    return nil if event_type == "voided" && details["payroll_obligation_retained"] == true
     return "payment_voided" if event_type == "voided" && payroll_item.voided?
     return "payment_issued" if event_type == "voided" && payroll_item.check_status == "delivered"
     "payment_prepared" if event_type == "voided" && %w[prepared printed].include?(payroll_item.check_status)

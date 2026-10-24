@@ -517,12 +517,12 @@ class PayStubGenerator
         pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
           pay_date: pay_date, period_id: pay_period.id)
-      items = employee.payroll_items.not_voided.where(company_id: company.id, pay_period_id: prior_periods.select(:id))
+      items = employee.payroll_items.financially_reportable.where(company_id: company.id, pay_period_id: prior_periods.select(:id))
         .includes({ pay_period: :company }, { payroll_item_field_entries: :payroll_field_definition },
                   payroll_item_deductions: :deduction_type).to_a
       # A draft/current check is absent from the prior committed scope. Include
-      # its components once; voided/superseded checks contribute no YTD money.
-      items << payroll_item if !payroll_item.voided? && pay_period.correction_status.in?([ nil, "correction" ])
+      # its components once; financially reversed payroll contributes no YTD money.
+      items << payroll_item if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ])
       items
     end
   end

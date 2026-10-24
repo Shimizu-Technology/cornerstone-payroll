@@ -176,8 +176,8 @@ RSpec.describe Form941GuAggregator do
         expect(lines[:line6_total_taxes_before_adj]).to eq(lines[:line5e_total_ss_medicare])
       end
 
-      it "excludes voided payroll items from quarterly totals" do
-        create(:payroll_item, :voided,
+      it "excludes financially reversed payroll items from quarterly totals" do
+        create(:payroll_item, :voided, **payroll_reversal_fixture,
           pay_period: pp_may,
           employee: employee2,
           gross_pay: 10_000.00,
@@ -187,12 +187,16 @@ RSpec.describe Form941GuAggregator do
           medicare_tax: 145.00,
           employer_medicare_tax: 145.00,
           reported_tips: 500.00)
+        create(:payroll_item, :voided, pay_period: create(:pay_period, :committed, company: company, pay_date: pp_may.pay_date), employee: employee2,
+          gross_pay: 500, withholding_tax: 25, social_security_tax: 31, employer_social_security_tax: 31,
+          medicare_tax: 7.25, employer_medicare_tax: 7.25, reported_tips: 0)
 
         expect(lines[:line2_wages_tips_other]).to be_nil
         expect(lines[:line3_fit_withheld]).to be_nil
-        expect(lines[:line5c_medicare_combined_tax]).to eq(159.5)
-        expect(report[:tax_detail][:guam_withholding_for_w1]).to eq(275.0)
-        expect(report[:tax_detail][:total_employee_taxes]).to eq(420.75)
+        expect(lines[:line5a_ss_wages]).to eq(5925.0)
+        expect(lines[:line5c_medicare_combined_tax]).to eq(174.0)
+        expect(report[:tax_detail][:guam_withholding_for_w1]).to eq(300.0)
+        expect(report[:tax_detail][:total_employee_taxes]).to eq(459.0)
       end
 
       it "placeholder lines are nil" do

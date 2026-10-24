@@ -175,9 +175,9 @@ module Api
                 pay_date: period.pay_date,
                 status: period.status,
                 parallel_run: period.parallel_run,
-                employee_count: period.payroll_items.reject(&:voided?).size,
-                gross_pay: period.payroll_items.reject(&:voided?).sum { |item| item.gross_pay.to_d }.round(2),
-                net_pay: period.payroll_items.reject(&:voided?).sum { |item| item.net_pay.to_d }.round(2)
+                employee_count: period.payroll_items.select(&:payroll_included?).size,
+                gross_pay: period.payroll_items.select(&:payroll_included?).sum { |item| item.gross_pay.to_d }.round(2),
+                net_pay: period.payroll_items.select(&:payroll_included?).sum { |item| item.net_pay.to_d }.round(2)
               }
             end
         end

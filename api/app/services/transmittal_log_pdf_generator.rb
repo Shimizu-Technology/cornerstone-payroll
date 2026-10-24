@@ -19,7 +19,7 @@ class TransmittalLogPdfGenerator
   ].freeze
 
   def self.default_notes(pay_period, include_additional: true)
-    items = pay_period.payroll_items.not_voided.reportable
+    items = pay_period.payroll_items.financially_reportable.reportable
     fit = include_additional ? items.sum { |item| item.total_income_tax_withheld } : items.sum(:withholding_tax)
     fica = items.sum(:social_security_tax) + items.sum(:employer_social_security_tax) +
       items.sum(:medicare_tax) + items.sum(:employer_medicare_tax)
@@ -215,7 +215,7 @@ class TransmittalLogPdfGenerator
   end
 
   def render_tax_obligations(pdf)
-    items = pay_period.payroll_items.not_voided.reportable
+    items = pay_period.payroll_items.financially_reportable.reportable
     total_fit  = items.sum { |item| item.total_income_tax_withheld }
     emp_ss     = items.sum(:social_security_tax)
     er_ss      = items.sum(:employer_social_security_tax)

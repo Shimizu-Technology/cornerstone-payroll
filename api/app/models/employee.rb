@@ -452,7 +452,7 @@ class Employee < ApplicationRecord
 
     live_total = payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: {
         id: PayPeriod.reportable_for_company(company)
           .where(pay_date: pay_date_range_for_year(year))
@@ -476,7 +476,7 @@ class Employee < ApplicationRecord
 
     live_total = payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: {
         id: PayPeriod.reportable_for_company(company)
           .where(pay_date: pay_date_range_for_year(year))
@@ -718,7 +718,7 @@ class Employee < ApplicationRecord
   def ytd_aggregate_totals(year:, pay_date:, pay_period_id:, include_current_period:)
     scope = payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: {
         id: PayPeriod.reportable_for_company(company)
           .where(pay_date: pay_date_range_for_year(year))
