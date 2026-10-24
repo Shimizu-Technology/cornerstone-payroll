@@ -1258,7 +1258,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1290,7 +1290,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1335,7 +1335,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1365,7 +1365,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1440,7 +1440,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1455,7 +1455,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1470,7 +1470,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1485,7 +1485,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1500,7 +1500,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1871,7 +1871,7 @@
         "Header / shared dialog",
         "Pay-run workspace sections",
         "Payroll workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1887,7 +1887,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -1951,7 +1951,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace \u2192 Review payment methods and amounts",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -2086,7 +2086,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -2131,7 +2131,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -2356,7 +2356,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -2372,7 +2372,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -2511,7 +2511,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3437,7 +3437,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3543,7 +3543,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3573,7 +3573,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3648,7 +3648,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3693,7 +3693,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3740,7 +3740,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3756,7 +3756,7 @@
       ],
       "after_locations": [
         "Header / shared dialog",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3846,7 +3846,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3862,7 +3862,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3877,7 +3877,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3937,7 +3937,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -3955,8 +3955,8 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs",
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4001,7 +4001,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4153,7 +4153,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4337,7 +4337,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4354,7 +4354,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4399,7 +4399,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4551,7 +4551,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4717,7 +4717,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4762,7 +4762,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4839,7 +4839,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4946,7 +4946,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -4961,7 +4961,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -5067,7 +5067,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -5097,7 +5097,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6515,7 +6515,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6547,7 +6547,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6592,7 +6592,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6622,7 +6622,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6697,7 +6697,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6712,7 +6712,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6727,7 +6727,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6742,7 +6742,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -6757,7 +6757,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursReview source hours and any held entries before calculating."
+        "payroll-loan-inputs \u2192 1HoursReview source hours and any held entries before calculating."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7128,7 +7128,7 @@
         "Header / shared dialog",
         "Pay-run workspace sections",
         "Payroll workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7144,7 +7144,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7208,7 +7208,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace \u2192 Review payment methods and amounts",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7343,7 +7343,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7388,7 +7388,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7613,7 +7613,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7629,7 +7629,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -7768,7 +7768,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8694,7 +8694,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8800,7 +8800,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8830,7 +8830,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8905,7 +8905,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursEnter hours and pay, then calculate payroll."
+        "payroll-loan-inputs \u2192 1HoursEnter hours and pay, then calculate payroll."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8950,7 +8950,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -8967,10 +8967,9 @@
         "Activity workspace \u2192 3 access records"
       ],
       "after_locations": [
-        "Activity workspace \u2192 2 access records",
-        "Activity workspace \u2192 3 access records"
+        "Activity workspace \u2192 2 access records"
       ],
-      "classification": "retained"
+      "classification": "moved or disclosure renamed"
     },
     {
       "state": "fresh-calculated",
@@ -8998,7 +8997,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9014,7 +9013,7 @@
       ],
       "after_locations": [
         "Header / shared dialog",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9104,7 +9103,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9120,7 +9119,7 @@
       ],
       "after_locations": [
         "payroll-results",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9135,7 +9134,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9195,7 +9194,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9213,8 +9212,8 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-hours \u2192 1Hours42.00 h saved \u00b7 View source and inputs",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-loan-inputs \u2192 1Hours42.00 h saved \u00b7 View source and inputs",
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9259,7 +9258,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9411,7 +9410,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9593,7 +9592,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9610,7 +9609,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9655,7 +9654,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9807,7 +9806,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -9988,7 +9987,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10033,7 +10032,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10110,7 +10109,7 @@
       ],
       "after_locations": [
         "Checks and payments workspace",
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10217,7 +10216,7 @@
         "payroll-results"
       ],
       "after_locations": [
-        "payroll-results \u2192 2Results1 employee records \u00b7 Review saved pay"
+        "payroll-results \u2192 2Results1 employee record \u00b7 Review saved pay"
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10232,7 +10231,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10338,7 +10337,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },
@@ -10368,7 +10367,7 @@
         "Payroll workspace"
       ],
       "after_locations": [
-        "payroll-hours \u2192 1HoursSelected late hours only; the original payroll is unchanged."
+        "payroll-loan-inputs \u2192 1HoursSelected late hours only; the original payroll is unchanged."
       ],
       "classification": "moved or disclosure renamed"
     },

@@ -547,10 +547,23 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 89,
+    "line": 93,
+    "tag": "Link",
+    "label": "Review loan inputs",
+    "attributes": [
+      "className=\"ml-1 font-semibold text-primary-700 underline\"",
+      "to={`${payRunPath(props.companyId, payPeriod.id, 'work', { returnTo: props.returnTo })}#payroll-loan-inputs`}",
+      "onClick={() => { const target = document.getElementById('payroll-loan-inputs'); for (let parent = target?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; target?.scrollIntoView?.({ block: 'start' }); target?.focus({ preventScroll: true }); }}"
+    ],
+    "destination": "Header primary / More payroll actions; Hours → Calculate or Recalculate; Results → Approve; Approve & commit → Commit"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 99,
     "tag": "Button",
     "label": "Review &amp; add hours",
     "attributes": [
+      "variant={variant}",
       "onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }}",
       "disabled={processing || savedImportReloadRequired}"
     ],
@@ -558,24 +571,25 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 90,
+    "line": 100,
     "tag": "Button",
     "label": "{processing ? 'Calculating...' : isDraft ? 'Calculate Payroll' : 'Recalculate'}",
     "attributes": [
-      "variant={needsHours ? 'outline' : 'primary'}",
+      "variant={header && !needsHours ? 'primary' : 'outline'}",
       "onClick={() => void handleRunPayroll()}",
       "disabled={processing || financialActionsHeld || missingInputs}",
-      "title={missingInputs ? 'Add source hours or enter manual hours before calculating' : undefined}",
-      "aria-describedby={!header && missingInputs ? 'hours-required-reason' : undefined}"
+      "title={hoursReason}",
+      "aria-describedby={!header && hoursReason ? 'hours-required-reason' : undefined}"
     ],
     "destination": "Header primary / More payroll actions; Hours → Calculate or Recalculate; Results → Approve; Approve & commit → Commit"
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 92,
+    "line": 102,
     "tag": "Button",
     "label": "Approve",
     "attributes": [
+      "variant={variant}",
       "onClick={handleApprove}",
       "disabled={processing || financialActionsHeld || !!standaloneLoanConflicts.length || !!reason}",
       "title={reason}",
@@ -585,18 +599,18 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 92,
+    "line": 102,
     "tag": "Link",
     "label": "Checks &amp; payments",
     "attributes": [
-      "className=\"inline-flex min-h-11 items-center justify-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white\"",
+      "className={`inline-flex min-h-11 items-center justify-center rounded-full px-4 text-sm font-semibold ${header ? 'bg-primary-700 text-white' : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50'}`}",
       "to={payRunPath(props.companyId, payPeriod.id, 'checks', { returnTo: props.returnTo })}"
     ],
     "destination": "Header primary / More payroll actions; Hours → Calculate or Recalculate; Results → Approve; Approve & commit → Commit"
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 92,
+    "line": 102,
     "tag": "Button",
     "label": "Review results",
     "attributes": [
@@ -608,14 +622,15 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
-    "line": 93,
+    "line": 103,
     "tag": "Button",
     "label": "{processing ? 'Committing...' : 'Commit'}",
     "attributes": [
+      "variant={variant}",
       "onClick={() => setCommitPeriodId(payPeriod.id)}",
       "disabled={!isApproved || processing || financialActionsHeld || payPeriod.parallel_run || props.isVoided}",
-      "title={payPeriod.parallel_run ? 'Parallel comparison · cannot commit' : undefined}",
-      "aria-describedby={!header && (!isApproved || payPeriod.parallel_run) ? 'commit-required-reason' : undefined}"
+      "title={commitReason}",
+      "aria-describedby={!header && commitReason ? 'commit-required-reason' : undefined}"
     ],
     "destination": "Header primary / More payroll actions; Hours → Calculate or Recalculate; Results → Approve; Approve & commit → Commit"
   },
@@ -703,7 +718,7 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
-    "line": 27,
+    "line": 28,
     "tag": "Link",
     "label": "Return to original payroll",
     "attributes": [
@@ -714,13 +729,14 @@
   },
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
-    "line": 40,
+    "line": 41,
     "tag": "Button",
     "label": "Review source coverage",
     "attributes": [
       "variant=\"outline\"",
       "size=\"sm\"",
-      "onClick={onReviewSourceCoverage}"
+      "disabled={sourceCoverageProcessing}",
+      "onClick={() => { if (!sourceCoverageProcessing) onReviewSourceCoverage(); }}"
     ],
     "destination": "Payroll → Hours → source checkpoint and disclosures"
   },
@@ -1026,7 +1042,7 @@
   },
   {
     "file": "web/src/pages/PayPeriodDetail.tsx",
-    "line": 65,
+    "line": 92,
     "tag": "Link",
     "label": "{item.text}",
     "attributes": [
@@ -1037,7 +1053,7 @@
   },
   {
     "file": "web/src/pages/PayPeriodDetail.tsx",
-    "line": 65,
+    "line": 92,
     "tag": "Link",
     "label": "{needsSourceCoverageAcknowledgement(payPeriod) ? 'Time tracking hours have not been added' : payPeriod.status === 'draft' ? 'Enter or review pay, then calculate' : 'Review employee pay before the next step'}",
     "attributes": [
@@ -1048,7 +1064,7 @@
   },
   {
     "file": "web/src/pages/PayPeriodDetail.tsx",
-    "line": 72,
+    "line": 99,
     "tag": "Link",
     "label": "Checks &amp; payments",
     "attributes": [
@@ -1059,7 +1075,7 @@
   },
   {
     "file": "web/src/pages/PayPeriodDetail.tsx",
-    "line": 73,
+    "line": 100,
     "tag": "Link",
     "label": "Reports",
     "attributes": [
@@ -1070,7 +1086,7 @@
   },
   {
     "file": "web/src/pages/PayPeriodDetail.tsx",
-    "line": 74,
+    "line": 101,
     "tag": "Link",
     "label": "Activity",
     "attributes": [
@@ -1835,7 +1851,7 @@
     "attributes": [
       "type=\"button\"",
       "aria-label=\"Details: open payroll item\"",
-      "className=\"min-h-11 text-sm font-semibold text-primary-700 underline\"",
+      "className=\"min-h-11 shrink-0 text-sm font-semibold text-primary-700 underline\"",
       "onClick={() => setReviewingItem(item)}"
     ],
     "destination": "Payroll → Results → table / tax detail / row actions"

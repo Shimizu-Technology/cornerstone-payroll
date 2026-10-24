@@ -86,7 +86,7 @@
   {
     "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
     "before": "48af6af1b76839df0bfb48f7e2633dfe3d7824e18474b9c44ddba211ff288cdd",
-    "after": "4a410749196219c5665b8976c979f68682474ab50b51babb00bfbf8d94d78336",
+    "after": "0d7403992149e86189c40690325dbbad62464aff0accb1f8048fef9217ac8407",
     "identical": false,
     "destination": "Payroll → Hours → source checkpoint and disclosures",
     "change": "One Hours checkpoint; existing coverage callback and late-hours banner retained"

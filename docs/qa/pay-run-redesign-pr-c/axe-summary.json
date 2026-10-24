@@ -341,5 +341,25 @@
         "nodes": 1
       }
     ]
+  },
+  {
+    "file": "review-1/worst-flags-1280-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "review-1/worst-flags-390-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
   }
 ]

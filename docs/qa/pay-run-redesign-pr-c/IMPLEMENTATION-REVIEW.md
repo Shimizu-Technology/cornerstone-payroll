@@ -1,9 +1,9 @@
 # Implementation review
 
-Application source: e4640d1d, including staging-v2 ce12d1da. Owner: payroll-redesign. Lead owns independent review and merge.
+Application source: 36b291d1, including staging-v2 ce12d1da. Owner: payroll-redesign. Lead owns independent review and merge.
 
 - Saved period.status determines progress. Opening a disclosure never advances it; recalculation stays on saved Results until the response arrives. Committed Results remain open for review, while Hours and commitment collapse.
-- Table amounts use saved item.gross_pay, total_deductions and net_pay. The footer sums saved fields through the existing registerTotals reducer; the header sums the same reportable records. No gross calculation or rounding is introduced in the presentation. Filtered footer totals explicitly say Filtered totals.
+- Table amounts use saved item.gross_pay, total_deductions and net_pay. The footer sums saved fields through the existing registerTotals reducer; the header sums the same reportable records. No gross calculation or rounding is introduced in the presentation. Review-round refinements and recovery validation are documented in REVIEW-1.md. Filtered footer totals explicitly say Filtered totals.
 - Calculate, approve and commit call the existing controller handlers. Existing financial-action, source coverage, pending-change, correction setup, client approval, parallel-run and permission guards remain. Missing source hours disable the default Calculate action; Review source coverage retains the explicit acknowledged manual/salary path.
 - Full tax detail preserves legacy columns, custom pay, loan, source and payment controls. Compact rows invoke the same employee dialog. Correct/Replace remain guarded per item. Phone tax detail now includes actual withholding and FICA fields.
 - Read-only workspace routing bypasses editable steps and preserves the accepted Reports presentation. No client-portal changes. All four tabs and overview query redirects remain.

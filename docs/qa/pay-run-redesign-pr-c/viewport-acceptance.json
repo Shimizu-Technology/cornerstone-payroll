@@ -8,7 +8,7 @@
     "primaryBounds": {
       "x": 499.71875,
       "y": 460,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -23,7 +23,7 @@
         "net": "$849.40",
         "top": 622,
         "bottom": 690.5,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       },
@@ -32,7 +32,7 @@
         "net": "$480.22",
         "top": 690.5,
         "bottom": 759.5,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       }
@@ -47,8 +47,8 @@
     "primaryBounds": {
       "x": 337,
       "y": 389,
-      "width": 147.703125,
-      "height": 40
+      "width": 149.703125,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -67,7 +67,7 @@
     "primaryBounds": {
       "x": 499.71875,
       "y": 460,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -82,7 +82,7 @@
         "net": "$92.35",
         "top": 622,
         "bottom": 690,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       }
@@ -97,7 +97,7 @@
     "primaryBounds": {
       "x": 499.71875,
       "y": 460,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -112,7 +112,7 @@
         "net": "$461.75",
         "top": 622,
         "bottom": 690.5,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       },
@@ -121,7 +121,7 @@
         "net": "$1,697.83",
         "top": 690.5,
         "bottom": 759,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       }
@@ -136,8 +136,8 @@
     "primaryBounds": {
       "x": 337,
       "y": 389,
-      "width": 130.59375,
-      "height": 40
+      "width": 132.59375,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -155,9 +155,9 @@
     "primary": "Approve",
     "primaryBounds": {
       "x": 499.71875,
-      "y": 462,
-      "width": 81.265625,
-      "height": 40
+      "y": 461,
+      "width": 83.265625,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -171,7 +171,7 @@
         "net": "$952.34",
         "top": 622,
         "bottom": 690,
-        "netRight": 980.203125,
+        "netRight": 935.59375,
         "flagsFit": true,
         "flagsWrap": "normal"
       }
@@ -186,8 +186,8 @@
     "primaryBounds": {
       "x": 337,
       "y": 513,
-      "width": 79.234375,
-      "height": 40
+      "width": 81.234375,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -206,8 +206,8 @@
     "primaryBounds": {
       "x": 337,
       "y": 517,
-      "width": 79.234375,
-      "height": 40
+      "width": 81.234375,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -226,8 +226,8 @@
     "primaryBounds": {
       "x": 337,
       "y": 389,
-      "width": 130.59375,
-      "height": 40
+      "width": 132.59375,
+      "height": 42
     },
     "horizontal": {
       "document": 1280,
@@ -246,7 +246,7 @@
     "primaryBounds": {
       "x": 187.71875,
       "y": 759,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -266,7 +266,7 @@
     "primaryBounds": {
       "x": 29,
       "y": 644,
-      "width": 147.703125,
+      "width": 149.671875,
       "height": 44
     },
     "horizontal": {
@@ -286,7 +286,7 @@
     "primaryBounds": {
       "x": 187.71875,
       "y": 715,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -306,7 +306,7 @@
     "primaryBounds": {
       "x": 187.71875,
       "y": 695,
-      "width": 148.890625,
+      "width": 150.890625,
       "height": 44
     },
     "horizontal": {
@@ -326,7 +326,7 @@
     "primaryBounds": {
       "x": 29,
       "y": 624,
-      "width": 130.59375,
+      "width": 132.59375,
       "height": 44
     },
     "horizontal": {
@@ -346,7 +346,7 @@
     "primaryBounds": {
       "x": 187.71875,
       "y": 695,
-      "width": 81.265625,
+      "width": 83.265625,
       "height": 44
     },
     "horizontal": {
@@ -366,7 +366,7 @@
     "primaryBounds": {
       "x": 29,
       "y": 748,
-      "width": 79.234375,
+      "width": 81.234375,
       "height": 44
     },
     "horizontal": {
@@ -386,7 +386,7 @@
     "primaryBounds": {
       "x": 29,
       "y": 772,
-      "width": 79.234375,
+      "width": 81.234375,
       "height": 44
     },
     "horizontal": {
@@ -406,7 +406,7 @@
     "primaryBounds": {
       "x": 29,
       "y": 644,
-      "width": 130.59375,
+      "width": 132.59375,
       "height": 44
     },
     "horizontal": {
