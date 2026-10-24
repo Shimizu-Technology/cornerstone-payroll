@@ -142,7 +142,18 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     preview = service.preview
     postings = PayrollLiabilityPosting.order(:id).map(&:attributes)
     current.update_columns(bonus: 1)
-    expect { confirm(preview) }.to raise_error(ArgumentError, /history changed/)
+    expect { confirm(preview) }.to raise_error(ArgumentError, /component detail does not reconcile/)
+    expect(PayrollLiabilityPosting.order(:id).map(&:attributes)).to eq(postings)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
+
+  it "rejects stale current-item proof without changing component-reconciliation inputs" do
+    _period, current = paid_successor
+    preview = service.preview
+    postings = PayrollLiabilityPosting.order(:id).map(&:attributes)
+    current.update_columns(correction_reason: "Synthetic proof annotation")
+    expect(service.preview[:deltas]).to eq(preview[:deltas])
+    expect { confirm(preview) }.to raise_error(ArgumentError, /Source or payroll history changed/)
     expect(PayrollLiabilityPosting.order(:id).map(&:attributes)).to eq(postings)
     expect(TimeTrackingCorrectionDisposition.count).to eq(0)
   end

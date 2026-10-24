@@ -446,6 +446,26 @@ export function CorrectivePaycheckModal({
               </p>
             )}
 
+            {!!preview?.meta.legacy_unposted_employer_component?.length && (
+              <div role="note" className="space-y-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-gray-900">
+                <p className="font-semibold">Reviewed legacy employer omissions</p>
+                <p>These employer amounts were saved on the original paycheck but omitted by the old liability rules. This correction posts only the change; the historical omission remains recorded for reconciliation.</p>
+                <ul className="list-disc space-y-1 pl-5">
+                  {preview.meta.legacy_unposted_employer_component.map((component) => (
+                    <li key={`${component.payroll_item_id}:${component.component_key}`}>
+                      <span className="tabular-nums">{component.label}: {formatCurrency(Number(component.amount))}</span>
+                      <span className="block text-xs">{component.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {preview?.meta.legacy_employer_posting_compatibility?.filter((evidence) => Number(evidence.legacy_insurance_classification) !== 0).map((evidence) => (
+              <p key={evidence.payroll_item_id} role="note" className="text-sm text-gray-900">
+                The old insurance aggregate included <span className="tabular-nums">{formatCurrency(Number(evidence.legacy_insurance_classification))}</span> of employer contributions. Its historical posting is retained in the correction audit for reconciliation.
+              </p>
+            ))}
+
             {preview && !preview.meta.is_zero_change && deltas && recorded && corrected && (
               <div className="space-y-2 text-sm">
                 <p className="text-xs text-gray-600">Recorded amounts include the frozen original and {preview.meta.active_corrective_count ?? 0} active corrections. Arrows show recorded → corrected target.</p>

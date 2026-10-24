@@ -653,7 +653,7 @@ class PayrollRetirementCalculation
   def prior_catch_up
     return historical_evidence.dig(:annual_additions, :prior_catch_up).to_d if historical_mode
 
-    saved = prior_payroll_items.sum { |item| item.retirement_rule_snapshot.dig("annual_additions", "current_catch_up").to_d }
+    saved = prior_payroll_items.sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) }
     inferred = [ local_employee_deferral_before - regular_deferral_limit, 0.to_d ].max
     if inferred.positive? && !catch_up_available?
       raise ArgumentError, "Year-to-date deferrals exceed the regular retirement limit without verified catch-up eligibility. Reconcile the historical contributions with the plan administrator before processing more retirement contributions."
