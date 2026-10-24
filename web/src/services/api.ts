@@ -1506,7 +1506,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; named_loan_payments?: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
+  runPayroll: (id: number, data?: { source_coverage_reason?: string; employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; named_loan_payments?: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   refreshSetup: (id: number, data: { includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/refresh_setup`, data),
@@ -2188,10 +2188,15 @@ export interface DashboardResponse {
       period_description: string;
       pay_date: string;
       status: string;
+      run_purpose?: string;
+      next_action?: string;
+      blocker?: string | null;
       employee_count: number;
       total_gross: number;
       total_net: number;
     } | null;
+    last_regular_payroll?: DashboardResponse['stats']['recent_payrolls'][number] | null;
+    last_adjustment_payroll?: DashboardResponse['stats']['recent_payrolls'][number] | null;
     ytd_totals: {
       year: number;
       gross_pay: number;
@@ -2207,6 +2212,7 @@ export interface DashboardResponse {
     recent_payrolls: {
       key?: string;
       record_type?: 'native' | 'imported';
+      run_purpose?: string;
       id: number;
       period_description: string;
       pay_date: string;

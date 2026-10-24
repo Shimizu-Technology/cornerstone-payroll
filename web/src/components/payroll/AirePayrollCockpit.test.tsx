@@ -304,7 +304,7 @@ describe('AirePayrollCockpit', () => {
 
     expect(screen.getByText('Payroll uses verified time batches')).toBeTruthy();
     expect(screen.getByText(/Neutral Weekly Time provides cutoff batches/)).toBeTruthy();
-    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    expect(screen.queryByText('Hours ready for payroll')).toBeNull();
     expect(screen.queryByText('Time tracking payroll workspace')).toBeNull();
     await act(async () => { await Promise.resolve(); });
     for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
@@ -347,7 +347,7 @@ describe('AirePayrollCockpit', () => {
     );
 
     expect(await screen.findByText('Time tracking hours are ready to add')).toBeTruthy();
-    expect(screen.queryByText('Live time tracking readiness')).toBeNull();
+    expect(screen.queryByText('Hours ready for payroll')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Review and add time tracking hours' }));
     expect(onReviewFinalizedBatch).toHaveBeenCalledOnce();
     expect(apiMocks.manualReview).not.toHaveBeenCalled();

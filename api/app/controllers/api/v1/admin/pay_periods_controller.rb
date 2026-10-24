@@ -1040,6 +1040,9 @@ module Api
           end
 
           metadata = { business_summary: summary }
+          if action_name == "run_payroll" && params[:source_coverage_reason].present?
+            metadata[:source_coverage_reason] = params[:source_coverage_reason].to_s.strip.truncate(1000)
+          end
           if action_name == "run_payroll" && defined?(@payroll_review_package) && @payroll_review_package
             metadata[:review_revision] = {
               id: @payroll_review_package.id,

@@ -1,3 +1,4 @@
+import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { paymentMethodLabel } from '@/lib/employee-payment-delivery';
 import { NamedLoanInputs, type NamedLoanDraft } from '@/components/payroll/NamedLoanInputs';
@@ -391,6 +392,10 @@ export function PayPeriodDetail({
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [sourceCoverageOpen, setSourceCoverageOpen] = useState(false);
+  const [sourceCoverageReason, setSourceCoverageReason] = useState('');
+  const [sourceCoverageAcknowledged, setSourceCoverageAcknowledged] = useState(false);
+  const sourceCoverageReasonRef = useRef<string | null>(null);
   const [savedImportReloadRequired, setSavedImportReloadRequired] = useState(false);
   const savedImportReloadRequiredRef = useRef(false);
   const [commitPeriodId, setCommitPeriodId] = useState<number | null>(null);
@@ -842,6 +847,12 @@ export function PayPeriodDetail({
 
   const handleRunPayroll = async () => {
     if (savedImportReloadRequiredRef.current || !payPeriod) return;
+    if (needsSourceCoverageAcknowledgement(payPeriod) && !sourceCoverageReasonRef.current) {
+      setSourceCoverageReason('');
+      setSourceCoverageAcknowledged(false);
+      setSourceCoverageOpen(true);
+      return;
+    }
     try {
       setProcessing(true);
       setError(null);
@@ -987,6 +998,7 @@ export function PayPeriodDetail({
       const selectedRecords = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([employeeId]) => selectedEmployeeIds.has(Number(employeeId))));
 
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
+        ...(sourceCoverageReasonRef.current ? { source_coverage_reason: sourceCoverageReasonRef.current } : {}),
         hours,
         ...(Object.keys(bonusEdits).length > 0 ? { bonuses: selectedRecords(bonusEdits) } : {}),
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides: selectedRecords(salary_overrides) } : {}),
@@ -1031,6 +1043,7 @@ export function PayPeriodDetail({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
+      sourceCoverageReasonRef.current = null;
       setProcessing(false);
     }
   };
@@ -1783,7 +1796,7 @@ export function PayPeriodDetail({
               setTimeTrackingAutoPreview(false);
               setTimeTrackingImportOpen(true);
             }}>
-              Import Time Tracking
+              {needsSourceCoverageAcknowledgement(payPeriod) ? 'Review & add hours' : 'Import time tracking'}
             </Button>
           )}
         </>
@@ -1805,9 +1818,10 @@ export function PayPeriodDetail({
           {hasStagedWorksheetChanges && <p className="mt-1 text-xs text-neutral-600">Calculate your worksheet edits first, then refresh current setup.</p>}
         </div>
       )}
+      {isDraft && needsSourceCoverageAcknowledgement(payPeriod) && <p role="status" className="max-w-lg rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">Time tracking hours have not been added. Review &amp; add hours first. Calculating now requires a reason and acknowledgement of missing hourly pay.</p>}
       {isDraft && (
         <>
-          <Button onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
+          <Button variant={needsSourceCoverageAcknowledgement(payPeriod) ? 'outline' : 'primary'} onClick={handleRunPayroll} disabled={processing || financialActionsHeld}>
             {processing ? 'Calculating...' : 'Calculate Payroll'}
           </Button>
         </>
@@ -1934,6 +1948,25 @@ export function PayPeriodDetail({
 
   return (
     <div>
+      <Dialog open={sourceCoverageOpen} onOpenChange={setSourceCoverageOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Calculate without time tracking hours?</DialogTitle>
+            <DialogDescription>Hourly employees from time tracking will be missing unless their hours were entered manually. Review &amp; add hours first, or explain why this is a manual or salary-only run.</DialogDescription>
+          </DialogHeader>
+          <label className="block text-sm font-semibold text-neutral-700" htmlFor="source-coverage-reason">Reason for calculating without imported hours</label>
+          <Textarea id="source-coverage-reason" maxLength={1000} value={sourceCoverageReason} onChange={event => setSourceCoverageReason(event.target.value)} />
+          <label className="flex items-start gap-3 text-sm text-neutral-700"><input type="checkbox" checked={sourceCoverageAcknowledged} onChange={event => setSourceCoverageAcknowledged(event.target.checked)} className="mt-1" />I understand that hourly employees from time tracking will be missing unless entered manually.</label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSourceCoverageOpen(false)}>Cancel</Button>
+            <Button disabled={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() || processing} title={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() ? 'Enter a reason and acknowledge the missing hours.' : undefined} onClick={() => {
+              sourceCoverageReasonRef.current = sourceCoverageReason.trim();
+              setSourceCoverageOpen(false);
+              void handleRunPayroll();
+            }}>Calculate without imported hours</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PaymentMethodDialog payPeriod={payPeriod} item={paymentMethodItem} onClose={() => setPaymentMethodItem(null)} onSaved={async () => {
         const result = await loadPayPeriod(payPeriod.id, true);
         if (result === 'failed') throw new Error('Saved payment method could not refresh.');

@@ -120,6 +120,28 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    it "selects the current regular workflow before a later empty draft or adjustment" do
+      current = create(:pay_period, company: company, start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-10-31")
+      create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-15", pay_date: "2026-11-30")
+      create(:pay_period, company: company, start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-11-01", run_purpose: "adjustment")
+      get "/api/v1/admin/reports/dashboard"
+      expect(response.parsed_body.dig("stats", "current_pay_period")).to include(
+        "id" => current.id, "run_purpose" => "regular", "next_action" => "Enter hours and pay"
+      )
+    end
+
+    it "labels the latest regular and adjustment distinctly even after many adjustments" do
+      6.times do |index|
+        create(:pay_period, :committed, company: company, start_date: "2026-09-01", end_date: "2026-09-14",
+          pay_date: Date.new(2026, 9, 19) + index, run_purpose: "adjustment")
+      end
+      get "/api/v1/admin/reports/dashboard"
+      stats = response.parsed_body.fetch("stats")
+      expect(stats.fetch("last_regular_payroll")).to include("id" => native_period.id, "run_purpose" => "regular", "pay_date" => "2026-09-18")
+      expect(stats.fetch("last_adjustment_payroll")).to include("run_purpose" => "adjustment", "pay_date" => "2026-09-24")
+      expect(stats.fetch("recent_payrolls").first).to include("run_purpose" => "adjustment")
+    end
+
     it "includes additional withholding once in the company summary" do
       item = native_period.payroll_items.first
       item.update_columns(withholding_tax: 0, additional_withholding: 5)
