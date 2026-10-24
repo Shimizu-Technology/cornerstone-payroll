@@ -124,8 +124,6 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
   for (const width of [390, 1440]) {
     test(`prints zero-net statements and safely changes a printed check at ${width}px`, async ({ browser }): Promise<void> => {
-      // This journey cold-starts the PDF worker, downloads two statements and verifies saved payment changes.
-      test.slow();
       const context = await browser.newContext({ viewport: { width, height: 900 }, extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email, 'X-Company-Id': String(fixture.delivery_company_id),
       } });
@@ -136,8 +134,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         await expect(statement).toContainText('No payment issued', { timeout: 30_000 });
         await statement.getByRole('button', { name: 'View', exact: true }).click();
         const preview = page.getByRole('dialog', { name: 'Earnings statement — Zero Earnings', exact: true });
-        // A cold Vite PDF worker can take longer than the default five-second assertion window.
-        await expect(preview.getByLabel('Page 1 preview', { exact: true })).toBeVisible({ timeout: 30_000 });
+        await expect(preview.getByLabel('Page 1 preview', { exact: true })).toBeVisible();
         await expect(preview).toContainText('Page 1 of 1');
         const downloadPromise = page.waitForEvent('download');
         await preview.getByRole('button', { name: 'Download', exact: true }).click();
