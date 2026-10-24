@@ -1,3 +1,4 @@
+import { PayLateHours } from './PayLateHours';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
@@ -995,6 +996,7 @@ function AirePayrollCockpitWorkspace({
                         )}
                       </div>
                     </div>
+                    <div className="border-b border-neutral-200 px-4 py-3 sm:px-6"><PayLateHours payPeriodId={payPeriodId} canPay={canCommand} /></div>
                     {settlementCases?.settlement_cases.length ? (
                       <div className="divide-y divide-neutral-100">
                         {settlementCases.settlement_cases.map((settlementCase) => {

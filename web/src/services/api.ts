@@ -1392,6 +1392,11 @@ export const payPeriodsApi = {
   retryAirePaymentResolution: (id: number, allocationId: number) =>
     api.post<{ payment_resolution: import('@/types').ReportedPaymentResolution }>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_resolutions/${allocationId}/retry`),
+  lateHours: (id: number) => api.get<import('@/components/payroll/PayLateHours').LateHoursReview>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours`),
+  payLateHours: (id: number, data: { command_id: string; expected_version: number; pay_date: string; cases: { id: string; version: number }[] }) =>
+    api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours`, data),
+  retryLateHours: (id: number, runId: number) => api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours/${runId}/retry`, {}),
+  cancelLateHours: (id: number, runId: number, reason: string) => api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours/${runId}/cancel`, { reason }),
   airePayrollManualReview: (id: number) =>
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`

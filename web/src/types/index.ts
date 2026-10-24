@@ -1228,6 +1228,7 @@ export interface PayPeriod {
   promoted_payment_prepared_by_id?: number | null;
   training_baseline_locked?: boolean;
   run_purpose: PayRunPurpose;
+  late_hours_origin_pay_period_id?: number | null;
   includes_base_salary: boolean;
   includes_recurring_items: boolean;
   run_purpose_source?: 'operator_selected' | 'system_correction' | 'production_migration' | 'legacy_system_default';

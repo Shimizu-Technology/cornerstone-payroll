@@ -1311,6 +1311,7 @@ module Api
             status: pay_period.status,
             notes: pay_period.notes,
             run_purpose: pay_period.run_purpose,
+            late_hours_origin_pay_period_id: pay_period.late_hours_run&.origin_pay_period_id,
             includes_base_salary: pay_period.includes_base_salary,
             includes_recurring_items: pay_period.includes_recurring_items,
             run_purpose_source: pay_period.run_purpose_source,
