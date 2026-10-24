@@ -69,12 +69,12 @@ class PayrollComponentMirrors
   end
   private_class_method :matching?
 
-  def self.historical_identity?(_item, _entry, deduction)
+  def self.historical_identity?(item, entry, deduction)
     return true if !deduction.employer_contribution? && deduction.deduction_type&.name.to_s.match?(/\APayroll Field(?:\s|:)/)
 
     # An old field-assignment snapshot proves the field, not which employer
     # deduction it generated. A lone matching row may be an independent source.
-    false
+    PayrollLegacyEmployerComponents.field_mirror?(item, entry, deduction)
   end
   private_class_method :historical_identity?
 

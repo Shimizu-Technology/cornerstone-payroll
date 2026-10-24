@@ -39,6 +39,15 @@ beforeEach(() => {
 });
 
 describe('CorrectivePaycheckModal recorded baseline', () => {
+  it('discloses retained legacy employer omissions in the correction review', async () => {
+    api.preview.mockResolvedValue({ ...preview(85), meta: { ...preview(85).meta,
+      legacy_unposted_employer_component: [{ payroll_item_id: 31, component_key: 'payroll_field:7:9', label: 'Historical employer source', amount: '45.0', reason: 'Employer field category was not posted by the legacy rules', source_posting_ids: [4] }] } });
+    setup();
+    expect(await screen.findByText('Reviewed legacy employer omissions')).toBeTruthy();
+    expect(screen.getByText(/Historical employer source.*\$45.00/)).toBeTruthy();
+    expect(screen.getByText(/This correction posts only the change/)).toBeTruthy();
+  });
+
   function mockSignedBaseline() {
     api.preview.mockImplementation((_period, request) => {
       const hours = request.corrected_inputs.hours_worked;
