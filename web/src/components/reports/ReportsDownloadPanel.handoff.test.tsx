@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -48,7 +48,7 @@ it('returns focus when a generating preview is cancelled and ignores its late PD
  const pdf=await screen.findByRole('dialog',{name:'Full Print Package'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
  await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
- finish({blob:new Blob(['late pdf']),filename:'late.pdf'});await waitFor(()=>expect(URL.createObjectURL).not.toHaveBeenCalled());
+ await act(async (): Promise<void> => { finish({blob:new Blob(['late pdf']),filename:'late.pdf'}); });expect(URL.createObjectURL).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).toBeNull();
 });
 
 it('names the sign-off editor, contains focus, and returns to its opener on close or Escape', async (): Promise<void> => {
@@ -73,5 +73,5 @@ it('hands sign-off generation to its preview after exit and ignores a cancelled 
  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Edit Check Sign-Off Sheet'})).toBeNull());
  const pdf=await screen.findByRole('dialog',{name:'Check Sign-Off Sheet'});await waitFor(()=>expect(pdf.contains(document.activeElement)).toBe(true));
  await user.keyboard('{Escape}');await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect((trigger as HTMLButtonElement).disabled).toBe(false);expect(document.activeElement).toBe(trigger);
- finish({blob:new Blob(['late signoff']),filename:'signoff.pdf'});await waitFor(()=>expect(URL.createObjectURL).not.toHaveBeenCalled());
+ await act(async (): Promise<void> => { finish({blob:new Blob(['late signoff']),filename:'signoff.pdf'}); });expect(URL.createObjectURL).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).toBeNull();
 });
