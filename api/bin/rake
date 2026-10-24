@@ -1,4 +1,6 @@
 #!/usr/bin/env ruby
 require_relative "../config/boot"
 require "rake"
+require_relative "../lib/fica_legacy_rake_options"
+FicaLegacyRakeOptions.configure!(ARGV)
 Rake.application.run

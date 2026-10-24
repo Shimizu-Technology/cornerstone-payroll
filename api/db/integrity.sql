@@ -609,3 +609,18 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS source_earning_capture_immutable ON time_tracking_entry_allocations;
 CREATE TRIGGER source_earning_capture_immutable BEFORE UPDATE OR DELETE ON time_tracking_entry_allocations
   FOR EACH ROW EXECUTE FUNCTION protect_source_earning_capture();
+
+-- 20261024100000_create_payroll_item_fica_basis_proofs.rb
+CREATE OR REPLACE FUNCTION prevent_fica_basis_proof_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'payroll_item_fica_basis_proofs are append-only';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS fica_basis_proofs_append_only ON payroll_item_fica_basis_proofs;
+CREATE TRIGGER fica_basis_proofs_append_only
+BEFORE UPDATE OR DELETE ON payroll_item_fica_basis_proofs
+FOR EACH ROW EXECUTE FUNCTION prevent_fica_basis_proof_mutation();
+DROP TRIGGER IF EXISTS fica_basis_proofs_no_truncate ON payroll_item_fica_basis_proofs;
+CREATE TRIGGER fica_basis_proofs_no_truncate BEFORE TRUNCATE ON payroll_item_fica_basis_proofs
+FOR EACH STATEMENT EXECUTE FUNCTION prevent_fica_basis_proof_mutation();

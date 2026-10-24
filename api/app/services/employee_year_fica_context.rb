@@ -8,9 +8,10 @@ require "digest"
 class EmployeeYearFicaContext
   class UnreconciledLedgerError < ArgumentError; end
 
-  STALE_MESSAGE = "Recalculate — another payroll for this employee changed their year-to-date".freeze
-  MISSING_MESSAGE = "Recalculate — this payroll lacks annual context verification. If approved, unapprove it, then recalculate, review and approve again.".freeze
+  STALE_MESSAGE = "Recalculate — another payroll for this employee changed their year-to-date. If approved, select Roll Back Approval, then recalculate, review and approve again.".freeze
+  MISSING_MESSAGE = "Recalculate — this payroll lacks annual context verification. If approved, select Roll Back Approval, then recalculate, review and approve again.".freeze
   UNLOADED = Object.new.freeze
+  VERSION = 3
   LEDGER_FIELDS = %w[
     id pay_period_id gross_pay cash_tips_reported reported_tips medicare_taxable_wages
     social_security_taxable_wages social_security_taxable_tips social_security_tax
@@ -25,8 +26,14 @@ class EmployeeYearFicaContext
   ].freeze
 
   FINGERPRINT_FIELDS = (LEDGER_FIELDS + %w[correction_for_payroll_item_id]).freeze
-  ROW_FIELDS = (FINGERPRINT_FIELDS + [ "employee_id",
-    Arel.sql("tax_rule_snapshot -> 'annual_fica_context' AS recorded_annual_fica_context") ]).freeze
+  ROW_FIELDS = ((FINGERPRINT_FIELDS + %w[employee_id company_id]).map { |field| "payroll_items.#{field}" } + [
+    Arel.sql("jsonb_strip_nulls(jsonb_build_object(#{(%w[tax_year] + FicaBasisEvidence::RULE_FIELDS).map { |field| "'#{field}', payroll_items.tax_rule_snapshot -> '#{field}'" }.join(', ')})) AS recorded_fica_rules"),
+    Arel.sql("payroll_items.tax_rule_snapshot -> 'annual_fica_context' AS recorded_annual_fica_context"),
+    Arel.sql("payroll_item_fica_basis_proofs.evidence AS recorded_legacy_fica_proof") ]).freeze
+
+  def self.ledger_rows(scope)
+    scope.left_joins(:fica_basis_proof).select(*ROW_FIELDS)
+  end
 
   # Retired instruments retain earned payroll; only financial reversals remove
   # rows. Share the same inclusion policy as reports and corrective baselines.
@@ -35,7 +42,7 @@ class EmployeeYearFicaContext
     employee_ids ||= [ employee.id ]
     periods = PayPeriod.reportable_for_company(company).for_year(year)
     periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-    PayrollItem.financially_reportable.where(company_id: company.id, employee_id: employee_ids, pay_period_id: periods.select(:id))
+    PayrollItem.financially_reportable.reportable.where(company_id: company.id, employee_id: employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor")
   end
 
@@ -54,8 +61,8 @@ class EmployeeYearFicaContext
     return {} if employees.empty?
 
     ids = employees.map(&:id)
-    rows = reportable_items(company: company, employee_ids: ids, year: year,
-      excluding_pay_period_id: excluding_pay_period_id).select(*ROW_FIELDS)
+    rows = ledger_rows(reportable_items(company: company, employee_ids: ids, year: year,
+      excluding_pay_period_id: excluding_pay_period_id))
       .order(:employee_id, :id).to_a.group_by(&:employee_id)
     balances = opening_balances(employee_ids: ids, year: year, company: company).to_a.group_by(&:employee_id)
     employees.to_h do |employee|
@@ -74,12 +81,16 @@ class EmployeeYearFicaContext
   end
 
   def snapshot
-    { "version" => 2, "year" => year, "employee_id" => employee.id, "fingerprint" => fingerprint }
+    { "version" => VERSION, "year" => year, "employee_id" => employee.id, "fingerprint" => fingerprint }
   end
 
   def fingerprint
-    @fingerprint ||= Digest::SHA256.hexdigest(JSON.generate([
-      2, year, employee.id, rows.map { |row| fingerprint_row(row) },
+    @fingerprint ||= fingerprint_for(VERSION)
+  end
+
+  def fingerprint_for(version)
+    Digest::SHA256.hexdigest(JSON.generate([
+      version, year, employee.id, rows.map { |row| fingerprint_row(row, include_recovery: version >= 3) },
       opening_balance&.attributes&.slice(*OPENING_FIELDS)
     ]))
   end
@@ -96,6 +107,21 @@ class EmployeeYearFicaContext
     after = cumulative_wages + delta
     ss_total = capped(after, cap) - prior_ss.fetch(:total)
     ss_wages, ss_tips = split_ss_delta(ss_total, delta - tips_delta, tips_delta, correcting_bases)
+    if correcting_bases
+      actual_tips = rows.sum(0.to_d) { |row| (row.cash_tips_reported || row.reported_tips).to_d } + opening_balance&.reported_tips.to_d + tips_delta
+      excess_tips = [ prior_ss.fetch(:tips) + ss_tips - actual_tips, 0.to_d ].max
+      if excess_tips.positive?
+        # A reviewed tip reduction may release taxed tips into later, already
+        # earned non-tip wages. Prove both the target and annual wage capacity.
+        annual_wages = after - actual_tips
+        unless excess_tips <= [ -tips_delta, 0.to_d ].max && excess_tips <= correcting_bases.fetch(:tips).to_d &&
+            prior_ss.fetch(:wages) + ss_wages + excess_tips <= annual_wages && actual_tips >= 0
+          raise UnreconciledLedgerError, "Social Security tip allocation needs an explicit reviewed reconciliation."
+        end
+        ss_wages += excess_tips
+        ss_tips -= excess_tips
+      end
+    end
     additional_base = excess(after, 200_000.to_d) - recorded_additional_base(rules)
     ss_tax = money(ss_total * rules.fetch("social_security_rate").to_d)
     base_medicare = money(delta * rules.fetch("medicare_rate").to_d)
@@ -123,8 +149,8 @@ class EmployeeYearFicaContext
   attr_reader :employee, :year, :excluding_pay_period_id, :company
 
   def rows
-    @rows ||= self.class.reportable_items(employee: employee, company: company, year: year,
-      excluding_pay_period_id: excluding_pay_period_id).select(*ROW_FIELDS).order(:id).to_a
+    @rows ||= self.class.ledger_rows(self.class.reportable_items(employee: employee, company: company, year: year,
+      excluding_pay_period_id: excluding_pay_period_id)).order(:id).to_a
   end
 
   def opening_balance
@@ -163,7 +189,9 @@ class EmployeeYearFicaContext
       next row.additional_medicare_taxable_wages if row.additional_medicare_taxable_wages.present?
 
       recovered = recovered_bases(row, rules)
-      hold_legacy!(row, "Additional Medicare") unless row.additional_medicare_tax == recovered.fetch(:additional_medicare_tax)
+      supported = row.additional_medicare_tax == recovered.fetch(:additional_medicare_tax) ||
+        (row.additional_medicare_tax.nil? && row[:recorded_legacy_fica_proof].present?)
+      hold_legacy!(row, "Additional Medicare") unless supported
       recovered.fetch(:additional_medicare_taxable_wages)
     end + excess(opening_balance&.medicare_taxable_wages.to_d, 200_000.to_d)
   end
@@ -171,6 +199,12 @@ class EmployeeYearFicaContext
   def recovered_bases(row, rules)
     @recovered_bases ||= {}
     @recovered_bases[row.id] ||= begin
+      if row[:recorded_legacy_fica_proof].present?
+        recovered = FicaBasisEvidence.verified_bases(row[:recorded_legacy_fica_proof], row: row,
+          year: year, employee_id: employee.id)
+        hold_legacy!(row, "reviewed legacy FICA") unless recovered
+        return @recovered_bases[row.id] = recovered
+      end
       # Signed corrections need their reviewed target's allocations; missing
       # correction bases cannot safely be replayed as an ordinary paycheck.
       hold_legacy!(row, "FICA") if row.correction_for_payroll_item_id.present? || row.gross_pay.negative?
@@ -178,8 +212,8 @@ class EmployeeYearFicaContext
       prior = self.class.new(employee: employee, company: company, year: year, rows: prior_rows, opening_balance: opening_balance)
       stored = row[:recorded_annual_fica_context]
       stored = {} unless stored.is_a?(Hash)
-      proof = if stored["version"] == 2
-        prior.fingerprint
+      proof = if [ 2, VERSION ].include?(stored["version"])
+        prior.fingerprint_for(stored["version"])
       elsif !stored.key?("version") && opening_balance.nil?
         # v1 fingerprints included the complete opening row; only the
         # no-opening-balance form can be verified from this bounded projection.
@@ -193,10 +227,14 @@ class EmployeeYearFicaContext
     end
   end
 
-  def fingerprint_row(row)
+  def fingerprint_row(row, include_recovery: true)
     attributes = row.attributes.slice(*FINGERPRINT_FIELDS)
     if row.social_security_taxable_wages.nil? || row.social_security_taxable_tips.nil? || row.additional_medicare_taxable_wages.nil?
       attributes["legacy_basis_evidence"] = row[:recorded_annual_fica_context]
+      attributes["captured_fica_rules"] = FicaBasisEvidence.rule_evidence(row) if include_recovery
+      if include_recovery && row[:recorded_legacy_fica_proof].present?
+        attributes["reviewed_legacy_basis_evidence"] = row[:recorded_legacy_fica_proof]
+      end
     end
     attributes
   end

@@ -9,6 +9,7 @@ class PayrollItem < ApplicationRecord
   MANUAL_ADJUSTMENTS_SOURCE = "manual"
 
   belongs_to :pay_period
+  has_one :fica_basis_proof, class_name: "PayrollItemFicaBasisProof", dependent: :restrict_with_exception
   belongs_to :employee
   belongs_to :company
   belongs_to :annual_tax_config, optional: true
