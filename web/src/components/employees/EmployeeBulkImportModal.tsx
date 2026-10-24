@@ -263,7 +263,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
             </p>
           </div>
           {step !== 'importing' && (
-            <button onClick={handleClose} className="text-neutral-600 hover:text-neutral-600 p-1">
+            <button onClick={handleClose} aria-label="Close employee bulk import" className="text-neutral-600 hover:text-neutral-900 p-1">
               <X className="w-5 h-5" />
             </button>
           )}

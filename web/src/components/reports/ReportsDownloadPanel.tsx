@@ -58,11 +58,15 @@ function SignoffEditorModal({
   onClose,
   onGenerate,
   payPeriodId,
+  onAfterClose,
+  returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
   onGenerate: (entries: { name: string; check_number: string }[], notes: string[]) => void;
   payPeriodId: number;
+  onAfterClose?: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const [entries, setEntries] = useState<{ name: string; check_number: string; included: boolean }[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
@@ -79,10 +83,7 @@ function SignoffEditorModal({
       return () => window.clearTimeout(resetTimer);
     }
 
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || initialized) return;
@@ -138,8 +139,6 @@ function SignoffEditorModal({
     };
   }, [open, payPeriodId, initialized]);
 
-  if (!open) return null;
-
   const includedCount = entries.filter(e => e.included).length;
 
   const handleGenerate = () => {
@@ -153,12 +152,11 @@ function SignoffEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-50 min-w-0 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} onAfterClose={onAfterClose} returnFocusRef={returnFocusRef}>
+      <DialogContent className="dialog-wide max-w-3xl p-0 sm:p-0">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
-          <h3 className="text-lg font-semibold text-neutral-900">Edit Check Sign-Off Sheet</h3>
-          <button onClick={onClose} className="text-neutral-600 hover:text-neutral-600 p-1">
+          <DialogTitle className="text-lg font-semibold text-neutral-900">Edit Check Sign-Off Sheet</DialogTitle>
+          <button onClick={onClose} aria-label="Close check sign-off editor" className="text-neutral-600 hover:text-neutral-900 p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -222,19 +220,20 @@ function SignoffEditorModal({
                 <table className="w-full text-sm">
                   <thead className="sticky top-0">
                     <tr className="bg-neutral-50 border-b">
-                      <th className="px-3 py-2 w-10"></th>
+                      <th className="px-3 py-2 w-10"><span className="sr-only">Selection or actions</span></th>
                       <th className="text-left px-3 py-2 font-medium text-neutral-600 w-8">#</th>
                       <th className="text-left px-3 py-2 font-medium text-neutral-600">Employee Name</th>
                       <th className="text-left px-3 py-2 font-medium text-neutral-600 w-36">Check No.</th>
-                      <th className="px-3 py-2 w-10"></th>
+                      <th className="px-3 py-2 w-10"><span className="sr-only">Selection or actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {entries.map((entry, i) => (
-                      <tr key={i} className={`border-b last:border-b-0 ${entry.included ? 'bg-white' : 'bg-neutral-50 opacity-60'}`}>
+                      <tr key={i} className={`border-b last:border-b-0 ${entry.included ? 'bg-white' : 'bg-neutral-50'}`}>
                         <td className="px-3 py-1.5 text-center">
                           <input
                             type="checkbox"
+                            aria-label={`Include employee ${i + 1}: ${entry.name || 'Unnamed'}`}
                             checked={entry.included}
                             onChange={() => {
                               const updated = [...entries];
@@ -248,6 +247,7 @@ function SignoffEditorModal({
                         <td className="px-3 py-1.5">
                           <input
                             type="text"
+                            aria-label={`Employee ${i + 1} name`}
                             value={entry.name}
                             onChange={e => {
                               const updated = [...entries];
@@ -261,6 +261,7 @@ function SignoffEditorModal({
                         <td className="px-3 py-1.5">
                           <input
                             type="text"
+                            aria-label={`Employee ${i + 1} check number`}
                             value={entry.check_number}
                             onChange={e => {
                               const updated = [...entries];
@@ -274,7 +275,7 @@ function SignoffEditorModal({
                         <td className="px-3 py-1.5 text-center">
                           <button
                             onClick={() => setEntries(entries.filter((_, idx) => idx !== i))}
-                            className="text-red-400 hover:text-red-600 p-0.5"
+                            className="text-danger-700 hover:text-danger-900 p-0.5"
                             title="Remove"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -307,6 +308,7 @@ function SignoffEditorModal({
               {notes.map((note, i) => (
                 <div key={i} className="flex items-start gap-2 mb-2">
                   <textarea
+                    aria-label={`Sign-off note ${i + 1}`}
                     value={note}
                     onChange={e => {
                       const updated = [...notes];
@@ -318,13 +320,14 @@ function SignoffEditorModal({
                   />
                   <button
                     onClick={() => setNotes(notes.filter((_, idx) => idx !== i))}
-                    className="text-red-500 hover:text-red-700 text-xs mt-1"
+                    className="text-danger-700 hover:text-danger-900 text-xs mt-1"
                   >Remove</button>
                 </div>
               ))}
               <div className="flex gap-2">
                 <input
                   type="text"
+                  aria-label="New sign-off note"
                   placeholder="Add a note..."
                   value={newNote}
                   onChange={e => setNewNote(e.target.value)}
@@ -354,8 +357,8 @@ function SignoffEditorModal({
             </Button>
           </div>
         </>)}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1158,6 +1161,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     blobData: BlobDownload | null;
   }>({ open: false, pdfUrl: null, blobData: null });
   const [signoffLoading, setSignoffLoading] = useState(false);
+  const signoffTriggerRef = useRef<HTMLButtonElement>(null);
+  const pendingSignoffGeneration = useRef<(() => void) | null>(null);
+  const signoffRequest = useRef(0);
+  useEffect(() => () => {
+    signoffRequest.current += 1;
+    pendingSignoffGeneration.current = null;
+  }, [payPeriodId]);
 
   const isReady = payPeriodStatus !== 'draft';
   const loadingKey = (reportKey: ReportKey, action: ReportAction) => `${reportKey}:${action}`;
@@ -1363,7 +1373,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
   const handleSignoffGenerate = async (entries: { name: string; check_number: string }[], notes: string[]) => {
     const { mode } = signoffEditor;
-    setSignoffEditor({ open: false, mode: 'view' });
+    const request = ++signoffRequest.current;
 
     setSignoffLoading(true);
     setError(null);
@@ -1372,18 +1382,21 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       if (mode === 'view') {
         setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
         const blobData = await reportsApi.checkSignoffPdf(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        if (request !== signoffRequest.current) return;
         const url = URL.createObjectURL(blobData.blob);
         setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
       } else {
         const blobData = await reportsApi.checkSignoffSheet(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        if (request !== signoffRequest.current) return;
         downloadBlob(blobData, 'check_signoff_sheet.xlsx');
       }
       setSignoffSavedAt(new Date().toISOString());
     } catch (err) {
+      if (request !== signoffRequest.current) return;
       setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off sheet');
     } finally {
-      setSignoffLoading(false);
+      if (request === signoffRequest.current) setSignoffLoading(false);
     }
   };
 
@@ -1392,18 +1405,21 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       setSignoffEditor({ open: true, mode: 'view' });
       return;
     }
+    const request = ++signoffRequest.current;
     setSignoffLoading(true);
     setError(null);
     setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
     try {
       const blobData = await reportsApi.checkSignoffPdf(payPeriodId);
+      if (request !== signoffRequest.current) return;
       const url = URL.createObjectURL(blobData.blob);
       setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
     } catch (err) {
+      if (request !== signoffRequest.current) return;
       setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off PDF');
     } finally {
-      setSignoffLoading(false);
+      if (request === signoffRequest.current) setSignoffLoading(false);
     }
   };
 
@@ -1425,10 +1441,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const cleanupSignoffPreview = useCallback(() => {
+    signoffRequest.current += 1;
+    setSignoffLoading(false);
     if (signoffPdfPreview.pdfUrl) {
       URL.revokeObjectURL(signoffPdfPreview.pdfUrl);
     }
-    setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
+    setSignoffPdfPreview((previous) => ({ ...previous, open: false }));
   }, [signoffPdfPreview.pdfUrl]);
 
   if (!isReady) return null;
@@ -1556,7 +1574,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setSignoffEditor({ open: true, mode: 'view' })}
+                onClick={(event) => { signoffTriggerRef.current = event.currentTarget; setSignoffEditor({ open: true, mode: 'view' }); }}
                 className="text-xs"
               >
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1568,7 +1586,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleSignoffView}
+              onClick={(event) => { signoffTriggerRef.current = event.currentTarget; void handleSignoffView(); }}
               disabled={signoffLoading}
               className="text-xs"
             >
@@ -1585,7 +1603,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
             <Button
               variant="outline"
               size="sm"
-              onClick={handleSignoffDownload}
+              onClick={(event) => { signoffTriggerRef.current = event.currentTarget; void handleSignoffDownload(); }}
               disabled={signoffLoading}
               className="text-xs"
             >
@@ -1657,7 +1675,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       <SignoffEditorModal
         open={signoffEditor.open}
         onClose={() => setSignoffEditor({ open: false, mode: 'view' })}
-        onGenerate={handleSignoffGenerate}
+        returnFocusRef={signoffTriggerRef}
+        onGenerate={(entries, notes) => {
+          pendingSignoffGeneration.current = () => { void handleSignoffGenerate(entries, notes); };
+          setSignoffEditor((previous) => ({ ...previous, open: false }));
+        }}
+        onAfterClose={() => {
+          const next = pendingSignoffGeneration.current;
+          pendingSignoffGeneration.current = null;
+          next?.();
+        }}
         payPeriodId={payPeriodId}
       />
 
@@ -1665,6 +1692,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       <PdfPreviewModal
         open={signoffPdfPreview.open}
+        returnFocusRef={signoffTriggerRef}
         onClose={cleanupSignoffPreview}
         pdfUrl={signoffPdfPreview.pdfUrl}
         title="Check Sign-Off Sheet"
