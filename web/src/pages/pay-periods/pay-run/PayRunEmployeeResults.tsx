@@ -1,12 +1,12 @@
 
 
-import { Fragment } from 'react';
+import { Fragment, type ReactNode } from 'react';
 
 import { Link } from 'react-router';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { PayRunResultsView } from './PayRunResultsView';
 
 import { Select } from '@/components/ui/select';
 
@@ -22,6 +22,7 @@ import { TABLE_STICKY_TOP_CLASS, adjustmentTreatmentLabels, toNumber, effectiveL
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunEmployeeResults({
+  action,
   companyId,
   currentPath,
   departmentFilter,
@@ -54,7 +55,7 @@ export function PayRunEmployeeResults({
   setSearchTerm,
   sortPayrollItems,
   visiblePayrollFields
-}: PayRunSectionProps<'results'>) {
+}: PayRunSectionProps<'results'> & { action?: ReactNode }) {
   return (<>
 {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
@@ -66,17 +67,8 @@ export function PayRunEmployeeResults({
           const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + visiblePayrollFields.length + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 12 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
-          <Card className="overflow-hidden">
-            <div className="border-b p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-neutral-900">Employee payroll</h3>
-                  <p className="mt-1 text-sm text-neutral-600">
-                    W-2 employees are listed alphabetically, with 1099 contractors grouped separately.
-                  </p>
-                </div>
-                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:shrink-0 lg:grid-cols-none lg:flex lg:flex-wrap lg:items-center">
-                  <Select
+          <PayRunResultsView primaryAction={action} companyId={companyId} currentPath={currentPath} isCalculated={isCalculated} isCommitted={isCommitted} payPeriod={payPeriod} payrollItems={payrollItems} sortPayrollItems={sortPayrollItems} registerTotals={registerTotals} payrollItemDisplayedHours={payrollItemDisplayedHours} setReviewingItem={setReviewingItem} setEditingItem={setEditingItem} setCorrectingItem={setCorrectingItem} setReplacingItem={setReplacingItem}
+            filters={<div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">                  <Select
                     aria-label="Employee type"
                     value={employeeTypeFilter}
                     onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
@@ -133,11 +125,8 @@ export function PayRunEmployeeResults({
                     <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-3 p-3 sm:hidden" aria-label="Employee payroll results">
+                  </div></div>}
+            fullDetail={<>            <div className="space-y-3 p-3 sm:hidden" aria-label="Employee payroll results">
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                 <div><p className="text-xs text-neutral-600">Gross total</p><p className="font-semibold tabular-nums">{formatCurrency(registerTotals.gross)}</p></div>
                 <div><p className="text-xs text-neutral-600">Net total</p><p className="font-bold tabular-nums text-neutral-950">{formatCurrency(registerTotals.net)}</p></div>
@@ -168,7 +157,7 @@ export function PayRunEmployeeResults({
               {sortPayrollItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-600">No employees match these filters.</p>}
             </div>
             <div className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
-              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1900px] text-neutral-950 tabular-nums">
+              <Table stickyHeader containerClassName="h-[min(28rem,50vh)]" className="min-w-[1900px] text-neutral-950 tabular-nums">
                 <TableHeader>
                   <TableRow>
                     <TableHead stickyLeft className={`w-[170px] min-w-[170px] bg-neutral-50 ${TABLE_STICKY_TOP_CLASS}`}>Last name</TableHead>
@@ -204,7 +193,7 @@ export function PayRunEmployeeResults({
                     </TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Net pay</TableHead>
-                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-neutral-50 text-center"></TableHead>}
+                    {(isCalculated || isCommitted) && <TableHead className="sticky right-0 z-30 w-20 border-l border-neutral-200 bg-neutral-50 text-center"><span className="sr-only">Details</span></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -639,8 +628,8 @@ export function PayRunEmployeeResults({
                   })()}
                 </TableFooter>
               </Table>
-            </div>
-          </Card>
+            </div></>}
+          />
           );
         })()}
   </>);

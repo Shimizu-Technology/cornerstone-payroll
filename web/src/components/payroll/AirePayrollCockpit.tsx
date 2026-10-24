@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { PayLateHours } from './PayLateHours';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -51,6 +52,7 @@ import type {
 type Props = {
   presentation?: 'workspace' | 'checkpoint';
   sourceCoverageRequired?: boolean;
+  sourceCoverageAction?: ReactNode;
   payPeriodId: number;
   payPeriodStatus?: import('@/types').PayPeriodStatus;
   payrollHours?: Record<string, { regular: number; overtime: number }>;
@@ -399,6 +401,7 @@ export function AirePayrollCockpit(props: Props) {
 function AirePayrollCockpitWorkspace({
   presentation = 'workspace',
   sourceCoverageRequired = false,
+  sourceCoverageAction,
   payPeriodId,
   payPeriodStatus = 'draft',
   payrollHours = {},
@@ -805,6 +808,7 @@ function AirePayrollCockpitWorkspace({
         aireRecord={aireRecord}
         payPeriodStatus={payPeriodStatus}
         sourceCoverageRequired={sourceCoverageRequired}
+        sourceCoverageAction={sourceCoverageAction}
         canReviewTimecards={Boolean(supportsCockpit && calendar.external_pay_period_id && cockpitPublished)}
         loading={loading}
         onReview={onReviewFinalizedBatch}

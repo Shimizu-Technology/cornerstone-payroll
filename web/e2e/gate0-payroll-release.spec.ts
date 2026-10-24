@@ -1,4 +1,4 @@
-import { openPayrollActions, showPayrollTab } from './helpers/pay-run-actions';
+import { openPayrollActions, openPayrollStep, showPayrollTab } from './helpers/pay-run-actions';
 import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type Page, type Route } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -1105,6 +1105,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await calculation).ok()).toBeTruthy();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
+    await page.getByRole('checkbox', { name: 'Show tax detail', exact: true }).check();
     const payrollTable = page.getByRole('table').filter({
       has: page.getByRole('columnheader', { name: 'Last name' }),
     });
@@ -2083,6 +2084,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       const initial = baselineBody.pay_period.payroll_items.find((item: { employee_id: number }) => item.employee_id === fixture.employee_id);
       const grossWithoutBonus = Number(initial.gross_pay) - Number(initial.bonus || 0);
       await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      await openPayrollStep(page, 'hours');
       const bonus = page.getByRole('textbox', { name: 'Bonus this payroll for Avery Example', exact: true });
       await expect(bonus).toBeVisible();
       await bonus.fill('321.09');
@@ -2111,6 +2113,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await expect(bonus).toHaveValue('321.09');
       await expect(page.locator('#payroll-blockers').getByText('Recalculate to include your changes', { exact: true })).toHaveCount(0);
       await page.reload();
+      await openPayrollStep(page, 'hours');
       await expect(bonus).toHaveValue('321.09');
       await bonus.fill('0');
       await bonus.press('Tab');
@@ -2145,6 +2148,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     try {
       const page = await context.newPage();
       await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.bonus_sync_pay_period_id}/work`);
+      await openPayrollStep(page, 'hours');
       const loan = page.getByRole('textbox', { name: 'Loan deduction this payroll for Avery Example', exact: true });
       if (!await loan.isVisible()) await page.getByRole('button', { name: '+ Tips & Deductions', exact: true }).click();
       const regularHours = page.getByRole('row').filter({ has: loan }).getByRole('textbox').first();

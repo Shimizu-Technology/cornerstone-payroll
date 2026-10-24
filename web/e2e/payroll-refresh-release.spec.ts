@@ -1,4 +1,4 @@
-import { openPayrollActions, showPayrollTab } from './helpers/pay-run-actions';
+import { openPayrollActions, openPayrollStep, showPayrollTab } from './helpers/pay-run-actions';
 import { expect, request, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -50,6 +50,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   async function open(page: Page, id: number): Promise<void> {
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${id}/work`);
     await expect(page.getByText('Synthetic Payroll Refresh QA', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+    await openPayrollStep(page, 'hours');
   }
   async function chooseLoan(page: Page, name: string): Promise<void> {
     await page.getByRole('combobox', { name: `${name} repayment choice`, exact: true }).filter({ visible: true }).selectOption('override');

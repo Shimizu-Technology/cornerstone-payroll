@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeft } from 'lucide-react';
 import { HelpTip } from '@/components/ui/help-tip';
@@ -10,9 +10,17 @@ const purposes: Record<string, string> = { regular: 'Regular', off_cycle_tips: '
 export function PayRunRecordHeader({ payRun, client, returnTo, attention, actions, totals }: {
   payRun: PayPeriod; client?: string; returnTo: string; attention: ReactNode; actions?: ReactNode; totals?: ReactNode;
 }) {
+  const header = useRef<HTMLElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const main = header.current?.closest('main');
+    const update = () => setCollapsed((main?.scrollTop || 0) > 80);
+    update(); main?.addEventListener('scroll', update, { passive: true });
+    return () => main?.removeEventListener('scroll', update);
+  }, [payRun.id]);
   const voided = payRun.correction_status === 'voided';
   const status = voided ? 'Voided' : payPeriodStatusConfig[payRun.status]?.label || payRun.status;
-  return <header className="border-b border-neutral-200 bg-white px-4 pt-4 sm:px-6 lg:px-8" aria-label="Pay run identity">
+  return <><div className="pointer-events-none sticky top-0 z-30 h-0 sm:hidden" aria-hidden={!collapsed}><div className={`border-b border-neutral-200 bg-white px-4 py-3 text-sm font-semibold text-neutral-950 transition-opacity duration-150 ease-out ${collapsed ? 'opacity-100' : 'invisible opacity-0'}`}>{formatDateRange(payRun.start_date, payRun.end_date)} · {status}</div></div><header ref={header} className="border-b border-neutral-200 bg-white px-4 pt-4 sm:px-6 lg:px-8" aria-label="Pay run identity">
     <Link to={returnTo} className="mb-2 inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-neutral-600 hover:text-primary-800"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back</Link>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
       <div className="min-w-0">
@@ -26,5 +34,5 @@ export function PayRunRecordHeader({ payRun, client, returnTo, attention, action
       {actions && <div className="flex w-full items-start gap-2 sm:col-start-2 sm:row-start-1 sm:w-auto">{actions}</div>}
     </div>
     <div className="mt-4">{totals}</div>
-  </header>;
+  </header></>;
 }
