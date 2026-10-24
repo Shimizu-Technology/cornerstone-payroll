@@ -67,6 +67,7 @@ class ProductionReadiness
     encryption_credentials: Rails.application.credentials,
     encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
     tax_configuration_valid: -> { AnnualTaxConfig.official_2026_configuration? },
+    tax_year_readiness: -> { TaxYearReadiness.new.as_json },
     http_get: nil
   )
     @env = env
@@ -85,6 +86,7 @@ class ProductionReadiness
     @encryption_credentials = encryption_credentials
     @encrypted_data_probe = encrypted_data_probe
     @tax_configuration_valid = tax_configuration_valid
+    @tax_year_readiness = tax_year_readiness
     @http_get = http_get || method(:default_http_get)
   end
 
@@ -128,7 +130,9 @@ class ProductionReadiness
         )
       end,
       check("official 2026 payroll tax and withholding configuration is loaded") { tax_configuration_valid.call }
-    ]
+    ] + @tax_year_readiness.call.fetch(:warnings).map do |warning|
+      Check.new(name: "#{warning.fetch(:tax_year)} payroll tax tables are verified", passed: false, detail: warning.fetch(:message))
+    end
   end
 
   def live_dependency_checks

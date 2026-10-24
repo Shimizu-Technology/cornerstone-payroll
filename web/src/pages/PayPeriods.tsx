@@ -1,3 +1,4 @@
+import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
@@ -740,6 +741,7 @@ export function PayPeriods() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        <TaxYearWarning companyId={activeCompanyId} />
         {trainingReplayWorkspace && (
           <div className="mb-4">
             <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
@@ -1200,6 +1202,7 @@ export function PayPeriods() {
                 </div>
               </div>
               <div className="space-y-2">
+                <TaxYearWarning companyId={activeCompanyId} payDate={formData.pay_date} />
                 <Label htmlFor="pay_date">Pay Date</Label>
                 <Input
                   id="pay_date"
@@ -1332,6 +1335,7 @@ export function PayPeriods() {
                 </div>
               </div>
               <div className="space-y-2">
+                <TaxYearWarning companyId={activeCompanyId} payDate={editFormData.pay_date} />
                 <Label htmlFor="edit_pay_date">Pay Date</Label>
                 <Input
                   id="edit_pay_date"
