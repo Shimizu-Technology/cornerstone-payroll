@@ -156,9 +156,9 @@ interface MetricProps {
 function Metric({ label, value, note }: MetricProps): ReactElement {
   return (
     <div className="border-l-2 border-primary-200 pl-4">
-      <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-neutral-500">{label}</p>
+      <p className="text-xs font-bold text-neutral-600">{label}</p>
       <p className="mt-1 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p>
-      {note && <p className="mt-1 text-xs text-neutral-500">{note}</p>}
+      {note && <p className="mt-1 text-xs text-neutral-600">{note}</p>}
     </div>
   );
 }
@@ -205,7 +205,7 @@ function Breakdown({ title, lines, unit = 'currency' }: BreakdownProps): ReactEl
   if (lines.length === 0) return null;
   return (
     <section>
-      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">{title}</h3>
+      <h3 className="text-xs font-bold text-neutral-600">{title}</h3>
       <div className="mt-2 divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-neutral-50/70 px-3">
         {lines.map((line, index) => (
           <div key={`${line.label}-${index}`} className="flex items-center justify-between gap-4 py-2 text-sm">
@@ -228,9 +228,9 @@ function PaycheckDetail({ paycheck }: { paycheck: HistoricalPaycheck }): ReactEl
   return (
     <div className="space-y-6">
       <div className="grid gap-4 rounded-2xl bg-neutral-950 p-6 text-white sm:grid-cols-3">
-        <div><p className="text-xs text-neutral-400">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div>
-        <div><p className="text-xs text-neutral-400">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(taxesAndDeductions)}</p></div>
-        <div><p className="text-xs text-neutral-400">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div>
+        <div><p className="text-xs text-neutral-300">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div>
+        <div><p className="text-xs text-neutral-300">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(taxesAndDeductions)}</p></div>
+        <div><p className="text-xs text-neutral-300">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div>
       </div>
       <div className="grid gap-6 md:grid-cols-2">
         <Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" />
@@ -1210,7 +1210,8 @@ export function HistoricalPayroll(): ReactElement {
         actions={<Button variant="outline" onClick={() => void refresh()} disabled={loading || batchListLoading}><RefreshCw className={`mr-2 h-4 w-4 ${batchListLoading ? 'animate-spin' : ''}`} />Refresh</Button>}
       />
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+        <h2 className="sr-only">Historical payroll workspace</h2>
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {error && Object.keys(validationErrors).length > 0 && (
           <div role="region" aria-label="Import validation details" className="flex items-start gap-3 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">
@@ -1241,7 +1242,7 @@ export function HistoricalPayroll(): ReactElement {
                 { href: '#migration-history', eyebrow: '4 · History', label: selectedBatch.status === 'locked' ? 'Available in payroll' : 'Preview imported values' },
               ].map((item) => (
                 <a key={item.href} href={item.href} className="rounded-xl px-4 py-3 transition hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
-                  <span className="block text-[11px] font-bold uppercase tracking-[0.12em] text-primary-700">{item.eyebrow}</span>
+                  <span className="block text-xs font-bold text-primary-700">{item.eyebrow}</span>
                   <span className="mt-1 block text-sm font-semibold text-neutral-900">{item.label}</span>
                 </a>
               ))}
@@ -1254,7 +1255,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="bg-[linear-gradient(135deg,rgba(239,246,255,0.94),rgba(255,255,255,0.98)_55%,rgba(240,253,250,0.82))]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><ArchiveRestore className="h-4 w-4" />Archive ledger</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><ArchiveRestore className="h-4 w-4" />Archive ledger</div>
                   <CardTitle className="mt-3 text-2xl">{detailLoading && selectedBatchId ? 'Loading selected source history…' : selectedBatch?.source_label || 'No payroll history staged yet'}</CardTitle>
                   <CardDescription className="mt-2 max-w-2xl">The archive stores the final values recorded by {selectedBatchProvider?.label || 'the selected payroll source'}. It does not calculate checks, post taxes, issue payments, or update live YTD tables.</CardDescription>
                 </div>
@@ -1300,7 +1301,7 @@ export function HistoricalPayroll(): ReactElement {
               {canMutate ? (
                 <>
                   <div className="space-y-2">
-                    <label htmlFor="historical-import-provider" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Import source</label>
+                    <label htmlFor="historical-import-provider" className="text-xs font-bold text-neutral-600">Import source</label>
                     <select
                       id="historical-import-provider"
                       value={selectedImportProviderKey}
@@ -1324,7 +1325,7 @@ export function HistoricalPayroll(): ReactElement {
                   <label className="group flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-300 bg-primary-50/50 px-6 py-6 text-center transition hover:border-primary-500 hover:bg-primary-50 focus-within:ring-2 focus-within:ring-primary-300">
                     <UploadCloud className="h-7 w-7 text-primary-700" />
                     <span className="mt-3 text-sm font-semibold text-neutral-900">Select exported files</span>
-                    <span className="mt-1 text-xs text-neutral-500">{acceptedImportLabel} · up to {selectedImportProvider?.max_files || 0} files</span>
+                    <span className="mt-1 text-xs text-neutral-600">{acceptedImportLabel} · up to {selectedImportProvider?.max_files || 0} files</span>
                     <input ref={fileInputRef} type="file" multiple accept={acceptedImportExtensions} disabled={!selectedImportProvider} className="sr-only" onChange={(event) => handleFileSelection(event.target.files)} />
                   </label>
                   <div className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0 truncate text-neutral-600">{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'No files selected'}</span><Button onClick={() => void handlePreview()} disabled={!files.length || action !== null}>{action === 'preview' ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}Build preview</Button></div>
@@ -1335,12 +1336,12 @@ export function HistoricalPayroll(): ReactElement {
 
               {batches.length > 0 && (
                 <div className="space-y-2">
-                  <label htmlFor="historical-batch" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Review batch</label>
+                  <label htmlFor="historical-batch" className="text-xs font-bold text-neutral-600">Review batch</label>
                   <select id="historical-batch" value={selectedBatchId || ''} onChange={(event) => selectBatch(Number(event.target.value))} disabled={Boolean(batchListLoading || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)} className="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 disabled:cursor-not-allowed disabled:bg-neutral-100">
                     {batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.source_label} · {batch.status}</option>)}
                   </select>
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-neutral-500">Batch page {batchPage} of {Math.max(batchMeta.total_pages, 1)} · {batchMeta.total_count.toLocaleString()} total</p>
+                    <p className="text-xs text-neutral-600">Batch page {batchPage} of {Math.max(batchMeta.total_pages, 1)} · {batchMeta.total_count.toLocaleString()} total</p>
                     <div className="flex gap-2">
                       <Button type="button" size="sm" variant="outline" aria-label="Previous batch page" onClick={() => void changeBatchPage(batchPage - 1)} disabled={Boolean(batchListLoading || batchPage <= 1 || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)}><ChevronLeft className="h-4 w-4" /></Button>
                       <Button type="button" size="sm" variant="outline" aria-label="Next batch page" onClick={() => void changeBatchPage(batchPage + 1)} disabled={Boolean(batchListLoading || batchPage >= batchMeta.total_pages || action || mappingWorkerId || confirmation || archiveWorkersConfirmation || bootstrapApplyOpen || ytdApplyOpen)}><ChevronRight className="h-4 w-4" /></Button>
@@ -1364,17 +1365,17 @@ export function HistoricalPayroll(): ReactElement {
               ) : selectedBatch ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Payroll rows</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.payroll_detail_rows?.toLocaleString() || 0}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">History matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_native_rows?.toLocaleString() || 0}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Summary matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_summary_rows?.toLocaleString() || 0}</p></div>
-                    <div className={`rounded-xl p-4 ${workersReviewed ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Workers to review</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.worker_review_summary.needs_review.toLocaleString()}</p></div>
-                    <div className={`rounded-xl p-4 ${sourcesReady ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Source evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.source_retention_summary.verified_file_count}/{selectedBatch.source_retention_summary.expected_file_count}</p><p className="mt-1 text-xs text-neutral-500">files verified</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Payroll rows</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.payroll_detail_rows?.toLocaleString() || 0}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">History matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_native_rows?.toLocaleString() || 0}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Summary matches</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.reconciliation_summary.matched_summary_rows?.toLocaleString() || 0}</p></div>
+                    <div className={`rounded-xl p-4 ${workersReviewed ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-600">Workers to review</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.worker_review_summary.needs_review.toLocaleString()}</p></div>
+                    <div className={`rounded-xl p-4 ${sourcesReady ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-600">Source evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{selectedBatch.source_retention_summary.verified_file_count}/{selectedBatch.source_retention_summary.expected_file_count}</p><p className="mt-1 text-xs text-neutral-600">files verified</p></div>
                   </div>
                   {selectedBatch.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4"><p className="text-sm font-semibold text-danger-800">Resolve before applying</p><ul className="mt-2 space-y-1 text-sm text-danger-700">{selectedBatch.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {selectedBatch.warnings.length > 0 && <div className="rounded-xl border border-warning-200 bg-warning-50 p-4"><p className="text-sm font-semibold text-warning-800">Known source limitations</p><ul className="mt-2 space-y-1 text-sm leading-6 text-warning-700">{selectedBatch.warnings.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   {canMutate && (
                     <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="max-w-xl text-xs leading-5 text-neutral-500">Apply is available only after the source exports, reconciliation, and worker review all pass. Lock seals the accepted archive.</p>
+                      <p className="max-w-xl text-xs leading-5 text-neutral-600">Apply is available only after the source exports, reconciliation, and worker review all pass. Lock seals the accepted archive.</p>
                       <div className="flex gap-2">
                         {selectedBatch.status === 'previewed' && <Button onClick={() => setConfirmation({ action: 'apply', batchId: selectedBatch.id })} disabled={!readyToApply || action !== null}>Apply history</Button>}
                         {selectedBatch.status === 'applied' && <Button onClick={() => setConfirmation({ action: 'lock', batchId: selectedBatch.id })} disabled={!cutoverApproved || action !== null}><LockKeyhole className="mr-2 h-4 w-4" />{cutoverApproved ? 'Lock batch' : 'Complete cutover review'}</Button>}
@@ -1393,7 +1394,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.8),rgba(255,255,255,0.98)_58%,rgba(239,246,255,0.8))]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><UsersRound className="h-4 w-4" />Current payroll setup</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><UsersRound className="h-4 w-4" />Current payroll setup</div>
                   <CardTitle className="mt-2">Prepare this clean client for its next payroll</CardTitle>
                   <CardDescription className="mt-2">Create one live employee for every {selectedBatchProvider.label} worker, carry over supported pay rates and active recurring setup, and link the archive automatically. This is available only while the client has no live payroll data.</CardDescription>
                 </div>
@@ -1422,12 +1423,12 @@ export function HistoricalPayroll(): ReactElement {
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.worker_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-500">Active</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.active_employee_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Inactive</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.inactive_employee_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Hourly rates</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.wage_rate_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Recurring fields</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.payroll_field_assignment_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-warning-50 p-4"><p className="text-xs text-neutral-500">Need review</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.employees_needing_review_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.worker_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-600">Active</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.active_employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Inactive</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.inactive_employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Hourly rates</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.wage_rate_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Recurring fields</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.payroll_field_assignment_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-warning-50 p-4"><p className="text-xs text-neutral-600">Need review</p><p className="mt-1 text-xl font-bold text-neutral-950">{clientBootstrap.preview_summary.employees_needing_review_count.toLocaleString()}</p></div>
                   </div>
 
                   {clientBootstrap.errors.length > 0 && (
@@ -1459,7 +1460,7 @@ export function HistoricalPayroll(): ReactElement {
                   )}
 
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-600">This step creates employee profiles and current recurring setup only. It does not apply history, create a pay period, calculate payroll, assign checks, or update YTD.</p>
                     <div className="flex flex-wrap gap-2">
                       {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
                       {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyBatchId(selectedBatch.id); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
@@ -1480,7 +1481,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(255,247,237,0.72),rgba(255,255,255,0.98)_55%,rgba(240,253,250,0.72))]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><ShieldCheck className="h-4 w-4" />Final cutover gate</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><ShieldCheck className="h-4 w-4" />Final cutover gate</div>
                   <CardTitle className="mt-2">Prove the archive works without {selectedBatchProvider.label}</CardTitle>
                   <CardDescription className="mt-2">Re-open the retained originals, parse them again, compare every worker, period, paycheck, component, count, and money total, document known limitations, and confirm the recovery plan before locking this batch.</CardDescription>
                 </div>
@@ -1494,7 +1495,7 @@ export function HistoricalPayroll(): ReactElement {
                         : cutoverReview?.status === 'pending'
                           ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Verification running</Badge>
                           : <Badge variant="default">Not verified</Badge>}
-                  {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-500">by {cutoverReview.approved_by_name} on {shortDate(cutoverReview.approved_at?.slice(0, 10))}</p>}
+                  {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-600">by {cutoverReview.approved_by_name} on {shortDate(cutoverReview.approved_at?.slice(0, 10))}</p>}
                 </div>
               </div>
             </CardHeader>
@@ -1516,9 +1517,9 @@ export function HistoricalPayroll(): ReactElement {
                 <>
                   {cutoverReview.verification_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{cutoverReview.verification_error}</div>}
                   <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverChecks.filter((check) => check.passed).length}/{cutoverChecks.length}</p><p className="mt-1 text-xs text-neutral-500">fresh source comparisons passed</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverYears.length}</p><p className="mt-1 text-xs text-neutral-500">each reconciled independently</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-500">{cutoverEvidencePassed ? 'verified' : 'checked'} {shortDate(cutoverEvidenceDate?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Automated checks</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverChecks.filter((check) => check.passed).length}/{cutoverChecks.length}</p><p className="mt-1 text-xs text-neutral-600">fresh source comparisons passed</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Source pay years</p><p className="mt-1 text-xl font-bold text-neutral-950">{cutoverYears.length}</p><p className="mt-1 text-xs text-neutral-600">each reconciled independently</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Evidence fingerprint</p><p className="mt-1 truncate font-mono text-xs font-semibold text-neutral-950" title={cutoverReview.evidence_digest || ''}>{cutoverReview.evidence_digest || '—'}</p><p className="mt-1 text-xs text-neutral-600">{cutoverEvidencePassed ? 'verified' : 'checked'} {shortDate(cutoverEvidenceDate?.slice(0, 10))}{cutoverReview.verified_by_name ? ` by ${cutoverReview.verified_by_name}` : ''}</p></div>
                   </div>
 
                   <div className="grid gap-2 md:grid-cols-2">
@@ -1538,7 +1539,7 @@ export function HistoricalPayroll(): ReactElement {
                         {cutoverExceptions.map((exception) => (
                           <div key={exception.key} className="rounded-xl border border-warning-200 bg-warning-50/60 p-4">
                             <p className="text-sm leading-6 text-warning-900">{exception.message}</p>
-                            <label htmlFor={`cutover-exception-${exception.key}`} className="mt-3 block text-xs font-bold uppercase tracking-[0.12em] text-warning-800">Reviewed decision</label>
+                            <label htmlFor={`cutover-exception-${exception.key}`} className="mt-3 block text-xs font-bold text-warning-800">Reviewed decision</label>
                             <Textarea id={`cutover-exception-${exception.key}`} value={cutoverDispositions[exception.key] || ''} onChange={(event) => setCutoverDispositions((current) => ({ ...current, [exception.key]: event.target.value }))} placeholder="Explain why this is acceptable or name the follow-up owner." className="mt-2 bg-white" disabled={!canMutate || cutoverApproved} maxLength={1000} />
                           </div>
                         ))}
@@ -1551,7 +1552,7 @@ export function HistoricalPayroll(): ReactElement {
                     <p className="mt-1 text-sm leading-6 text-neutral-600">These are operational facts the application cannot safely assume. Confirm them only after someone performs each step.</p>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {Object.entries(cutoverReview.attestation_labels).map(([key, label]) => (
-                        <label key={key} className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm leading-6 text-neutral-700">
+                        <label key={key} className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-xs leading-6 text-neutral-600">
                           <input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-700 focus:ring-primary-300" checked={Boolean(cutoverAttestations[key])} onChange={(event) => setCutoverAttestations((current) => ({ ...current, [key]: event.target.checked }))} disabled={!canMutate || cutoverApproved} />
                           <span>{label}</span>
                         </label>
@@ -1560,12 +1561,12 @@ export function HistoricalPayroll(): ReactElement {
                   </section>
 
                   <div>
-                    <label htmlFor="cutover-approval-notes" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Final review notes</label>
+                    <label htmlFor="cutover-approval-notes" className="text-xs font-bold text-neutral-600">Final review notes</label>
                     <Textarea id="cutover-approval-notes" value={cutoverNotes} onChange={(event) => setCutoverNotes(event.target.value)} placeholder="Name any remaining limitation or write “None.”" className="mt-2" disabled={!canMutate || cutoverApproved} maxLength={2000} />
                   </div>
 
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel {selectedBatchProvider.label} only after this approval and the business owner’s separate cancellation decision.</p>
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-600">Rollback means disabling this isolated archive while retaining its evidence; it never means deleting or rewriting payroll history. Cancel {selectedBatchProvider.label} only after this approval and the business owner’s separate cancellation decision.</p>
                     <div className="flex flex-wrap gap-2">
                       {canDownloadCutoverEvidence && <Button variant="outline" onClick={() => void downloadCutoverEvidence()} disabled={!cutoverEvidencePassed || action !== null}><Download className="mr-2 h-4 w-4" />Evidence workbook</Button>}
                       {canMutate && !cutoverApproved && <Button variant="outline" onClick={() => void verifyCutover()} disabled={action !== null}>{action === 'cutover_verify' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Re-run verification</Button>}
@@ -1584,7 +1585,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.9),rgba(255,255,255,0.98)_55%,rgba(239,246,255,0.8))]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge{ytdBridge ? ` · Revision ${ytdBridge.revision || 1}` : ''}</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><CheckCircle2 className="h-4 w-4" />Historical YTD bridge{ytdBridge ? ` · Revision ${ytdBridge.revision || 1}` : ''}</div>
                   <CardTitle className="mt-2">Carry verified history into the next payroll</CardTitle>
                   <CardDescription className="mt-2">This creates immutable opening balances from the linked {selectedBatchProvider.label} paychecks. Future payroll uses them for pay-stub YTD totals, Social Security caps, and Medicare thresholds without turning imported history into live payroll.</CardDescription>
                 </div>
@@ -1610,10 +1611,10 @@ export function HistoricalPayroll(): ReactElement {
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.employee_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Employee-year balances</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.balance_count.toLocaleString()}</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Historical gross</p><p className="mt-1 text-xl font-bold text-neutral-950">{dollars(ytdBridge.preview_summary.gross_pay)}</p></div>
-                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-500">Paid through</p><p className="mt-1 text-lg font-bold text-neutral-950">{shortDate(ytdBridge.preview_summary.through_pay_date)}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Employees</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.employee_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Employee-year balances</p><p className="mt-1 text-xl font-bold text-neutral-950">{ytdBridge.preview_summary.balance_count.toLocaleString()}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Historical gross</p><p className="mt-1 text-xl font-bold text-neutral-950">{dollars(ytdBridge.preview_summary.gross_pay)}</p></div>
+                    <div className="rounded-xl bg-success-50 p-4"><p className="text-xs text-neutral-600">Paid through</p><p className="mt-1 text-lg font-bold text-neutral-950">{shortDate(ytdBridge.preview_summary.through_pay_date)}</p></div>
                   </div>
                   <div className={`rounded-xl border p-4 ${ytdBridge.reconciliation_summary.passed ? 'border-success-200 bg-success-50 text-success-800' : 'border-danger-200 bg-danger-50 text-danger-800'}`}>
                     <p className="text-sm font-semibold">{ytdBridge.reconciliation_summary.passed ? 'Every tax and wage total matches to the cent' : 'The opening balances do not reconcile'}</p>
@@ -1638,7 +1639,7 @@ export function HistoricalPayroll(): ReactElement {
                   )}
                   {ytdBridge.errors.length > 0 && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800"><ul className="space-y-1">{ytdBridge.errors.map((message) => <li key={message}>• {message}</li>)}</ul></div>}
                   <div className="flex flex-col gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-xs leading-5 text-neutral-500">After activation, the application blocks any pay period that overlaps imported history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
+                    <p className="max-w-2xl text-xs leading-5 text-neutral-600">After activation, the application blocks any pay period that overlaps imported history. These opening balances remain separate from live committed payroll and cannot be edited or deleted.</p>
                     <div className="flex flex-wrap gap-2">
                       {canMutate && ytdBridge.status === 'previewed' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
                       {canMutate && ytdBridge.status === 'applied' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Check for YTD revision</Button>}
@@ -1665,7 +1666,7 @@ export function HistoricalPayroll(): ReactElement {
               {canMutate && detail.status === 'previewed' && (
                 <div className="mt-4 max-w-sm">
                   <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search live employees for worker linking" value={employeeSearchDraft} onChange={(event) => setEmployeeSearchDraft(event.target.value)} placeholder="Search live employees to link" className="pl-9" /></div>
-                  {employeeHasMore && <p className="mt-1.5 text-xs text-neutral-500">Showing the first 200 matches. Search by name to narrow the list.</p>}
+                  {employeeHasMore && <p className="mt-1.5 text-xs text-neutral-600">Showing the first 200 matches. Search by name to narrow the list.</p>}
                 </div>
               )}
             </CardHeader>
@@ -1676,12 +1677,12 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words font-semibold text-neutral-950">{worker.source_name}</p>
-                        <p className="mt-1 text-xs text-neutral-500">Hired {shortDate(worker.hire_date)}</p>
+                        <p className="mt-1 text-xs text-neutral-600">Hired {shortDate(worker.hire_date)}</p>
                       </div>
                       <Badge variant={worker.source_status === 'active' ? 'success' : 'default'}>{worker.source_status}</Badge>
                     </div>
                     <div className="mt-4">
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Disposition</p>
+                      <p className="mb-1 text-xs font-semibold text-neutral-600">Disposition</p>
                       {canMutate && detail.status === 'previewed' ? (
                         <select
                           aria-label={`Disposition for ${worker.source_name}`}
@@ -1708,7 +1709,7 @@ export function HistoricalPayroll(): ReactElement {
                   <TableBody>
                     {detail.workers.map((worker) => (
                       <TableRow key={worker.id}>
-                        <TableCell><p className="font-semibold text-neutral-950">{worker.source_name}</p><p className="mt-0.5 text-xs text-neutral-500">Hired {shortDate(worker.hire_date)}</p></TableCell>
+                        <TableCell><p className="font-semibold text-neutral-950">{worker.source_name}</p><p className="mt-0.5 text-xs text-neutral-600">Hired {shortDate(worker.hire_date)}</p></TableCell>
                         <TableCell><Badge variant={worker.source_status === 'active' ? 'success' : 'default'}>{worker.source_status}</Badge></TableCell>
                         <TableCell className="min-w-[280px]">
                           {canMutate && detail.status === 'previewed' ? (
@@ -1730,7 +1731,7 @@ export function HistoricalPayroll(): ReactElement {
                               </select>
                             </div>
                           ) : (
-                            <div><p className="text-sm font-medium text-neutral-900">{worker.employee_name || 'Archive-only'}</p><p className="text-xs text-neutral-500">{worker.mapping_status.replaceAll('_', ' ')}</p></div>
+                            <div><p className="text-sm font-medium text-neutral-900">{worker.employee_name || 'Archive-only'}</p><p className="text-xs text-neutral-600">{worker.mapping_status.replaceAll('_', ' ')}</p></div>
                           )}
                         </TableCell>
                       </TableRow>
@@ -1738,7 +1739,7 @@ export function HistoricalPayroll(): ReactElement {
                   </TableBody>
                 </Table>
               </div>
-              <div className="px-4 py-4 text-xs leading-5 text-neutral-500 sm:px-6">Reviewing a worker does not create, edit, activate, terminate, or change pay settings on any live employee.</div>
+              <div className="px-4 py-4 text-xs leading-5 text-neutral-600 sm:px-6">Reviewing a worker does not create, edit, activate, terminate, or change pay settings on any live employee.</div>
             </CardContent>
           </Card>
         )}
@@ -1748,7 +1749,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(240,253,250,0.7),rgba(255,255,255,0.96)_55%,rgba(239,246,255,0.7))]">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><FileSpreadsheet className="h-4 w-4" />Accepted history</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><FileSpreadsheet className="h-4 w-4" />Accepted history</div>
                   <CardTitle className="mt-2">Historical reports</CardTitle>
                   <CardDescription className="mt-2">Browse and export final values recorded by the accepted payroll sources. These reports never recalculate payroll and never mix preview batches into official history.</CardDescription>
                 </div>
@@ -1763,20 +1764,20 @@ export function HistoricalPayroll(): ReactElement {
             <CardContent className="space-y-6 p-4 sm:p-6">
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                  <label htmlFor="historical-report-type" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Report</label>
+                  <label htmlFor="historical-report-type" className="text-xs font-bold text-neutral-600">Report</label>
                   <select id="historical-report-type" value={reportType} onChange={(event) => { setReportType(event.target.value as HistoricalReportType); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
                     {HISTORICAL_REPORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="historical-report-year" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Source pay year</label>
+                  <label htmlFor="historical-report-year" className="text-xs font-bold text-neutral-600">Source pay year</label>
                   <select id="historical-report-year" value={reportYear || ''} onChange={(event) => { setReportYear(event.target.value ? Number(event.target.value) : undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
                     <option value="">All years</option>
                     {report?.available_years.map((yearOption) => <option key={yearOption} value={yearOption}>{yearOption}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="historical-report-worker" className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Worker</label>
+                  <label htmlFor="historical-report-worker" className="text-xs font-bold text-neutral-600">Worker</label>
                   <select id="historical-report-worker" value={reportWorker || ''} onChange={(event) => { setReportWorker(event.target.value || undefined); setReportPage(1); }} className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200">
                     <option value="">All workers</option>
                     {report?.available_workers.map((worker) => <option key={worker.key} value={worker.key}>{worker.name}</option>)}
@@ -1856,8 +1857,8 @@ export function HistoricalPayroll(): ReactElement {
 
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs text-neutral-500">Showing page {reportMeta.current_page} of {Math.max(reportMeta.total_pages, 1)} · {reportMeta.total_count.toLocaleString()} rows</p>
-                      <p className="mt-2 text-xs text-neutral-500">Evidence: {report.provenance.length} accepted source batch{report.provenance.length === 1 ? '' : 'es'} · {report.provenance.reduce((total, source) => total + source.verified_file_count, 0)} verified original files</p>
+                      <p className="text-xs text-neutral-600">Showing page {reportMeta.current_page} of {Math.max(reportMeta.total_pages, 1)} · {reportMeta.total_count.toLocaleString()} rows</p>
+                      <p className="mt-2 text-xs text-neutral-600">Evidence: {report.provenance.length} accepted source batch{report.provenance.length === 1 ? '' : 'es'} · {report.provenance.reduce((total, source) => total + source.verified_file_count, 0)} verified original files</p>
                     </div>
                     <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setReportPage((value) => Math.max(1, value - 1))} disabled={reportLoading || reportPage <= 1}><ChevronLeft className="mr-1 h-4 w-4" />Previous</Button><Button size="sm" variant="outline" onClick={() => setReportPage((value) => value + 1)} disabled={reportLoading || reportPage >= reportMeta.total_pages}>Next<ChevronRight className="ml-1 h-4 w-4" /></Button></div>
                   </div>
@@ -1885,7 +1886,7 @@ export function HistoricalPayroll(): ReactElement {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words font-semibold text-neutral-950">{row.source_employee_name}</p>
-                        <p className="mt-1 text-xs text-neutral-500">{row.period_type === 'opening_summary' ? 'Opening summary · ' : ''}{shortDate(row.pay_date)} · Check {row.check_number || 'not provided'}</p>
+                        <p className="mt-1 text-xs text-neutral-600">{row.period_type === 'opening_summary' ? 'Opening summary · ' : ''}{shortDate(row.pay_date)} · Check {row.check_number || 'not provided'}</p>
                       </div>
                       <p className="shrink-0 font-mono text-sm font-bold tabular-nums text-neutral-950">{dollars(row.net_pay)}</p>
                     </div>
@@ -1905,7 +1906,7 @@ export function HistoricalPayroll(): ReactElement {
                     {detail.paychecks.map((row) => (
                       <TableRow key={row.id}>
                         <TableCell className="whitespace-nowrap text-sm">{shortDate(row.pay_date)}</TableCell>
-                        <TableCell><p className="font-semibold text-neutral-950">{row.source_employee_name}</p><p className="mt-0.5 text-xs text-neutral-500">{row.period_type === 'opening_summary' ? 'Opening summary' : formatDateRange(row.period_start, row.period_end)}</p></TableCell>
+                        <TableCell><p className="font-semibold text-neutral-950">{row.source_employee_name}</p><p className="mt-0.5 text-xs text-neutral-600">{row.period_type === 'opening_summary' ? 'Opening summary' : formatDateRange(row.period_start, row.period_end)}</p></TableCell>
                         <TableCell className="text-right font-mono tabular-nums">{dollars(row.gross_pay)}</TableCell>
                         <TableCell className="text-right font-mono tabular-nums">{dollars(row.federal_income_tax)}</TableCell>
                         <TableCell className="text-right font-mono tabular-nums">{dollars(Number(row.social_security_tax) + Number(row.medicare_tax))}</TableCell>
@@ -1920,7 +1921,7 @@ export function HistoricalPayroll(): ReactElement {
                 </Table>
               </div>
               <div className="flex flex-col gap-3 border-t border-neutral-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <p className="text-xs text-neutral-500">Showing page {meta.current_page} of {Math.max(meta.total_pages, 1)} · {meta.total_count.toLocaleString()} paychecks</p>
+                <p className="text-xs text-neutral-600">Showing page {meta.current_page} of {Math.max(meta.total_pages, 1)} · {meta.total_count.toLocaleString()} paychecks</p>
                 <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1}><ChevronLeft className="mr-1 h-4 w-4" />Previous</Button><Button size="sm" variant="outline" onClick={() => setPage((value) => value + 1)} disabled={page >= meta.total_pages}>Next<ChevronRight className="ml-1 h-4 w-4" /></Button></div>
               </div>
             </CardContent>
@@ -1932,7 +1933,7 @@ export function HistoricalPayroll(): ReactElement {
             <CardHeader className="border-b border-neutral-200 bg-[linear-gradient(135deg,rgba(239,246,255,0.82),rgba(255,255,255,0.98)_60%,rgba(240,253,250,0.7))]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="max-w-3xl">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-primary-700"><FileArchive className="h-4 w-4" />Auditable source trail</div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-primary-700"><FileArchive className="h-4 w-4" />Auditable source trail</div>
                   <CardTitle className="mt-2">Evidence inventory</CardTitle>
                   <CardDescription className="mt-2">See what each QuickBooks report proves, its date coverage, required headers, and retained-file fingerprint. Original files stay private and every download is audited.</CardDescription>
                 </div>
@@ -1949,10 +1950,10 @@ export function HistoricalPayroll(): ReactElement {
               {evidenceManifest ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Required reports</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.required_present_count}/{evidenceManifest.summary.required_report_count}</p><p className="mt-1 text-xs text-neutral-500">report types present</p></div>
-                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.source_retention_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Retained sources</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.verified_file_count}/{evidenceManifest.summary.file_count}</p><p className="mt-1 text-xs text-neutral-500">fingerprints verified</p></div>
-                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-500">Detailed pay dates</p><p className="mt-1 text-sm font-bold text-neutral-950">{shortDate(evidenceManifest.summary.first_detailed_pay_date)} – {shortDate(evidenceManifest.summary.last_detailed_pay_date)}</p><p className="mt-1 text-xs text-neutral-500">authoritative paycheck coverage</p></div>
-                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.ytd_evidence_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-500">Tax & wage evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.tax_wage_report_count}</p><p className="mt-1 text-xs text-neutral-500">{evidenceManifest.summary.tax_wage_years.join(', ') || 'No years validated'}</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Required reports</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.required_present_count}/{evidenceManifest.summary.required_report_count}</p><p className="mt-1 text-xs text-neutral-600">report types present</p></div>
+                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.source_retention_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-600">Retained sources</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.verified_file_count}/{evidenceManifest.summary.file_count}</p><p className="mt-1 text-xs text-neutral-600">fingerprints verified</p></div>
+                    <div className="rounded-xl bg-neutral-50 p-4"><p className="text-xs text-neutral-600">Detailed pay dates</p><p className="mt-1 text-sm font-bold text-neutral-950">{shortDate(evidenceManifest.summary.first_detailed_pay_date)} – {shortDate(evidenceManifest.summary.last_detailed_pay_date)}</p><p className="mt-1 text-xs text-neutral-600">authoritative paycheck coverage</p></div>
+                    <div className={`rounded-xl p-4 ${evidenceManifest.summary.ytd_evidence_ready ? 'bg-success-50' : 'bg-warning-50'}`}><p className="text-xs text-neutral-600">Tax & wage evidence</p><p className="mt-1 text-xl font-bold text-neutral-950">{evidenceManifest.summary.tax_wage_report_count}</p><p className="mt-1 text-xs text-neutral-600">{evidenceManifest.summary.tax_wage_years.join(', ') || 'No years validated'}</p></div>
                   </div>
 
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -1973,10 +1974,10 @@ export function HistoricalPayroll(): ReactElement {
                       const retained = selectedBatch.source_files?.find((source) => source.position === row.position - 1);
                       return <div key={`${row.position}-${row.sha256}`} className="min-w-0 rounded-xl border border-neutral-200 p-4">
                         <p className="break-words font-semibold text-neutral-950">{row.report_label}</p>
-                        <p className="mt-1 break-all text-xs text-neutral-500">{row.filename}</p>
+                        <p className="mt-1 break-all text-xs text-neutral-600">{row.filename}</p>
                         <p className="mt-3 text-sm text-neutral-700">{row.evidence_role}</p>
                         <div className="mt-3 flex flex-wrap gap-2"><Badge variant={row.retention_status === 'verified' ? 'success' : row.retention_status === 'missing' ? 'warning' : 'danger'}>{humanizeToken(row.retention_status)}</Badge><Badge variant={row.header_validation === 'validated' ? 'success' : row.header_validation === 'failed' ? 'danger' : 'default'}>Headers: {humanizeToken(row.header_validation)}</Badge>{row.required && <Badge variant="info">Required</Badge>}</div>
-                        <p className="mt-3 text-xs text-neutral-500">Coverage: {row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}</p>
+                        <p className="mt-3 text-xs text-neutral-600">Coverage: {row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}</p>
                         <details className="mt-3 border-t border-neutral-100 pt-3 text-xs"><summary className="cursor-pointer font-semibold text-primary-700">File details</summary><p className="mt-2 break-all font-mono text-neutral-600">SHA-256 {row.sha256}</p><p className="mt-1 text-neutral-600">{fileSize(row.byte_size)} · {row.row_count ?? 0} rows</p><p className="mt-1 text-neutral-600">{row.description}</p></details>
                         {canMutate && retained && <Button className="mt-4 w-full" size="sm" variant="outline" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}
                       </div>;
@@ -1991,11 +1992,11 @@ export function HistoricalPayroll(): ReactElement {
                           const verified = row.retention_status === 'verified';
                           return (
                             <TableRow key={`${row.position}-${row.sha256}`}>
-                              <TableCell className="min-w-[230px]"><p className="font-semibold text-neutral-950">{row.report_label}</p><p className="mt-1 max-w-[260px] truncate text-xs text-neutral-500" title={row.filename}>Source {row.position} · {row.filename}</p>{row.required && <Badge variant="info" className="mt-2">Required</Badge>}</TableCell>
-                              <TableCell className="min-w-[260px]"><p className="text-sm font-medium text-neutral-900">{row.evidence_role}</p><p className="mt-1 text-xs leading-5 text-neutral-500">{row.description}</p></TableCell>
-                              <TableCell className="min-w-[210px]"><Badge variant={row.header_validation === 'validated' ? 'success' : row.header_validation === 'failed' ? 'danger' : 'default'}>{humanizeToken(row.header_validation)}</Badge>{row.required_headers.length > 0 && <p className="mt-2 text-xs leading-5 text-neutral-500">{row.required_headers.join(' · ')}</p>}</TableCell>
-                              <TableCell className="whitespace-nowrap text-sm text-neutral-700">{row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}{row.row_count != null && <p className="mt-1 text-xs text-neutral-500">{row.row_count.toLocaleString()} rows</p>}</TableCell>
-                              <TableCell className="min-w-[180px]"><Badge variant={verified ? 'success' : row.retention_status === 'missing' ? 'warning' : 'danger'}>{humanizeToken(row.retention_status)}</Badge><p className="mt-2 max-w-[180px] truncate font-mono text-[10px] text-neutral-400" title={row.sha256}>SHA-256 {row.sha256}</p><p className="mt-1 text-xs text-neutral-500">{fileSize(row.byte_size)}</p></TableCell>
+                              <TableCell className="min-w-[230px]"><p className="font-semibold text-neutral-950">{row.report_label}</p><p className="mt-1 max-w-[260px] truncate text-xs text-neutral-600" title={row.filename}>Source {row.position} · {row.filename}</p>{row.required && <Badge variant="info" className="mt-2">Required</Badge>}</TableCell>
+                              <TableCell className="min-w-[260px]"><p className="text-sm font-medium text-neutral-900">{row.evidence_role}</p><p className="mt-1 text-xs leading-5 text-neutral-600">{row.description}</p></TableCell>
+                              <TableCell className="min-w-[210px]"><Badge variant={row.header_validation === 'validated' ? 'success' : row.header_validation === 'failed' ? 'danger' : 'default'}>{humanizeToken(row.header_validation)}</Badge>{row.required_headers.length > 0 && <p className="mt-2 text-xs leading-5 text-neutral-600">{row.required_headers.join(' · ')}</p>}</TableCell>
+                              <TableCell className="whitespace-nowrap text-sm text-neutral-700">{row.coverage_start || row.coverage_end ? `${shortDate(row.coverage_start)} – ${shortDate(row.coverage_end)}` : row.coverage_scope || 'Reference only'}{row.row_count != null && <p className="mt-1 text-xs text-neutral-600">{row.row_count.toLocaleString()} rows</p>}</TableCell>
+                              <TableCell className="min-w-[180px]"><Badge variant={verified ? 'success' : row.retention_status === 'missing' ? 'warning' : 'danger'}>{humanizeToken(row.retention_status)}</Badge><p className="mt-2 max-w-[180px] truncate font-mono text-xs text-neutral-600" title={row.sha256}>SHA-256 {row.sha256}</p><p className="mt-1 text-xs text-neutral-600">{fileSize(row.byte_size)}</p></TableCell>
                               <TableCell>{canMutate && retained && <Button size="sm" variant="ghost" onClick={() => void downloadSourceFile(retained.id, retained.original_filename)} disabled={action !== null}><Download className="mr-1.5 h-3.5 w-3.5" />Download original</Button>}</TableCell>
                             </TableRow>
                           );
@@ -2019,8 +2020,8 @@ export function HistoricalPayroll(): ReactElement {
           </Card>
         )}
 
-        {archive && archive.applied_batch_count > 0 && <p className="pb-2 text-center text-xs text-neutral-500">Archive coverage: {archive.paycheck_count.toLocaleString()} paychecks · {archive.worker_count.toLocaleString()} workers · {shortDate(archive.first_pay_date)} through {shortDate(archive.last_pay_date)}</p>}
-      </main>
+        {archive && archive.applied_batch_count > 0 && <p className="pb-2 text-center text-xs text-neutral-600">Archive coverage: {archive.paycheck_count.toLocaleString()} paychecks · {archive.worker_count.toLocaleString()} workers · {shortDate(archive.first_pay_date)} through {shortDate(archive.last_pay_date)}</p>}
+      </div>
 
       <Dialog open={Boolean(paycheck)} onOpenChange={(open) => !open && setPaycheck(null)}>
         <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
@@ -2048,7 +2049,7 @@ export function HistoricalPayroll(): ReactElement {
             <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">Incorrect Nevada addresses, unverified hire dates, legacy W-4 allowances, unknown obligation balances, and time-off policy are not guessed. They remain clearly flagged for review.</div>
             {bootstrapApplyError && <ActionFeedback retryKey={bootstrapApplyErrorFeedbackAttempt} tone="error" message={bootstrapApplyError} />}
             <div>
-              <label htmlFor="bootstrap-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
+              <label htmlFor="bootstrap-acknowledgement" className="text-xs font-semibold text-neutral-600">Type the confirmation exactly</label>
               <p className="mt-1 font-mono text-xs text-neutral-600">{clientBootstrap?.acknowledgement}</p>
               <Input id="bootstrap-acknowledgement" className="mt-2" value={bootstrapAcknowledgement} onChange={(event) => setBootstrapAcknowledgement(event.target.value)} autoComplete="off" />
             </div>
@@ -2070,7 +2071,7 @@ export function HistoricalPayroll(): ReactElement {
             <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900">This does not create historical payroll runs or recalculate QuickBooks checks. Future payroll and pay stubs will include these source-backed balances.</div>
             {ytdApplyError && <ActionFeedback retryKey={ytdApplyErrorFeedbackAttempt} tone="error" message={ytdApplyError} />}
             <div>
-              <label htmlFor="ytd-acknowledgement" className="text-sm font-semibold text-neutral-900">Type the confirmation exactly</label>
+              <label htmlFor="ytd-acknowledgement" className="text-xs font-semibold text-neutral-600">Type the confirmation exactly</label>
               <p className="mt-1 font-mono text-xs text-neutral-600">{ytdBridge?.acknowledgement}</p>
               <Input id="ytd-acknowledgement" className="mt-2" value={ytdAcknowledgement} onChange={(event) => setYtdAcknowledgement(event.target.value)} autoComplete="off" />
             </div>

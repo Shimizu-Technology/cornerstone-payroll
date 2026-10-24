@@ -66,7 +66,7 @@ export function CompanySwitcher() {
     return (
       <div className="border-b border-neutral-200/70 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Payroll client</p>
+          <p className="text-xs font-semibold text-neutral-600">Payroll client</p>
         </div>
         <p className={`mt-0.5 text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
           {activeLabel || 'Loading...'}
@@ -81,8 +81,8 @@ export function CompanySwitcher() {
   return (
     <div className="relative border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Payroll client</p>
-        <span className="rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">
+        <p className="text-xs font-semibold text-neutral-600">Payroll client</p>
+        <span className="rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600">
           {platformShortcut('Option K')}
         </span>
       </div>
@@ -102,7 +102,7 @@ export function CompanySwitcher() {
           {activeCompany && isTestWorkspace(activeCompany) && (
             <p className="text-xs font-semibold text-amber-700">{activeCompany.test_workspace_purpose_label || 'Test workspace'}{!canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
           )}
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-neutral-600">
             {activeCompany?.active_employees || 0} employees
           </p>
         </div>
@@ -128,7 +128,7 @@ export function CompanySwitcher() {
             { label: 'Test workspaces', items: testWorkspaces },
           ].filter(group => group.items.length > 0).map(group => (
             <div key={group.label}>
-              <div className="sticky top-0 z-10 border-y border-neutral-100 bg-neutral-50/95 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500 first:border-t-0">
+              <div className="sticky top-0 z-10 border-y border-neutral-100 bg-neutral-50/95 px-4 py-2 text-xs font-bold text-neutral-600 first:border-t-0">
                 {group.label}
               </div>
               {group.items.map(company => {
@@ -152,7 +152,7 @@ export function CompanySwitcher() {
                       {isTestWorkspace(company) && (
                         <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}{!canWriteCompany(company) ? ' · Read-only' : ''}</p>
                       )}
-                      <p className="text-xs text-neutral-500">
+                      <p className="text-xs text-neutral-600">
                         {company.active_employees} active employees &middot; {company.pay_frequency}
                       </p>
                     </div>

@@ -29,7 +29,7 @@ export function AuditEventDetails({ group }: AuditEventDetailsProps): ReactEleme
             <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-neutral-200 bg-neutral-200 sm:grid-cols-3">
               {facts.map((fact) => (
                 <div className="bg-neutral-50 px-3 py-3" key={fact.label}>
-                  <dt className="text-[11px] font-bold uppercase tracking-wide text-neutral-400">{fact.label}</dt>
+                  <dt className="text-xs font-bold text-neutral-600">{fact.label}</dt>
                   <dd className="mt-1 text-sm font-semibold text-neutral-900">{fact.value}</dd>
                 </div>
               ))}
@@ -39,7 +39,7 @@ export function AuditEventDetails({ group }: AuditEventDetailsProps): ReactEleme
             <div className="mt-3 space-y-2">
               {changes.map((change) => (
                 <div className="overflow-hidden rounded-xl border border-neutral-200" key={change.field}>
-                  <p className="bg-neutral-50 px-3 py-2 text-xs font-extrabold uppercase tracking-[0.1em] text-neutral-500">
+                  <p className="bg-neutral-50 px-3 py-2 text-xs font-extrabold text-neutral-600">
                     {humanizeAuditKey(change.field)}
                   </p>
                   {change.redacted ? (
@@ -69,7 +69,7 @@ export function AuditEventDetails({ group }: AuditEventDetailsProps): ReactEleme
                   <span className="font-medium text-neutral-800">Access {index + 1}</span>
                   <time className="text-right text-neutral-500" dateTime={entry.created_at}>{formatGuamDateTime(entry.created_at)}</time>
                 </div>
-                {entry.request_id && <p className="mt-1 break-all text-xs text-neutral-400">Request {entry.request_id}</p>}
+                {entry.request_id && <p className="mt-1 break-all text-xs text-neutral-600">Request {entry.request_id}</p>}
               </li>
             ))}
           </ol>
@@ -110,7 +110,7 @@ function Disclosure({ label, children }: { label: string; children: ReactNode })
 function ValueCell({ label, value, className = '' }: { label: string; value: unknown; className?: string }): ReactElement {
   return (
     <div className={`px-3 py-3 ${className}`}>
-      <dt className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</dt>
+      <dt className="text-xs font-bold text-neutral-600">{label}</dt>
       <dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-neutral-800">{formatAuditValue(value)}</dd>
     </div>
   );
@@ -120,7 +120,7 @@ function TechnicalDetail({ label, value, className = '' }: { label: string; valu
   if (!value) return null;
   return (
     <div className={className}>
-      <dt className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</dt>
+      <dt className="text-xs font-bold text-neutral-600">{label}</dt>
       <dd className="mt-1 break-all text-neutral-700">{value}</dd>
     </div>
   );

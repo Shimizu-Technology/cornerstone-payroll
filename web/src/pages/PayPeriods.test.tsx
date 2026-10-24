@@ -191,7 +191,7 @@ describe('PayPeriods test workspaces', () => {
     fireEvent.change(await screen.findByLabelText('Notes (optional)'), { target: { value: 'Retained operator draft' } });
     apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: false };
     view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(apiMocks.payPeriodCreate).not.toHaveBeenCalled();
     apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: true };
     view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);

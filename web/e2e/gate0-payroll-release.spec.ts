@@ -1094,13 +1094,18 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/pay-periods/${fixture.bonus_sync_pay_period_id}`);
     await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();
 
+    const calculation = page.waitForResponse((response): boolean =>
+      response.request().method() === 'POST' &&
+      response.url().includes(`/pay_periods/${fixture.bonus_sync_pay_period_id}/run_payroll`)
+    );
     await page.getByRole('button', { name: 'Calculate Payroll' }).click();
+    expect((await calculation).ok()).toBeTruthy();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
     const payrollTable = page.getByRole('table').filter({
-      has: page.getByRole('columnheader', { name: 'Last Name' }),
+      has: page.getByRole('columnheader', { name: 'Last name' }),
     });
-    await expect(payrollTable.getByRole('columnheader', { name: 'First Name' })).toBeVisible();
+    await expect(payrollTable.getByRole('columnheader', { name: 'First name' })).toBeVisible();
     await expect(payrollTable.getByRole('columnheader', { name: /^Employee Medicare/ })).toBeVisible();
     await expect(payrollTable.getByRole('columnheader', { name: /^Employer Medicare/ })).toBeVisible();
 
@@ -1151,7 +1156,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       historicalContractorRow.getByRole('cell').nth(headerLabels.indexOf('Hours')),
     ).toHaveText('4');
 
-    const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
+    const registerSearch = page.getByPlaceholder('Search employees and checks...', { exact: true });
     await registerSearch.fill('Alpha');
     await expect(totalsRow).toContainText('Totals (1 employee)');
     expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80.00');
