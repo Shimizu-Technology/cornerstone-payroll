@@ -40,6 +40,16 @@ RSpec.describe "Saved payroll earnings rounding" do
     assert_totals(calculate_buckets(Array.new(101, "0.01")), gross: "11.11")
   end
 
+  it "recalculates uncommitted pre-deploy amounts using the saved-line policy" do
+    item = calculate_buckets([ "0.01", "0.01" ])
+    item.update_columns(gross_pay: "0.21", net_pay: "0.20",
+      calculation_context_snapshot: item.calculation_context_snapshot.except("earnings_rounding"))
+    period.update!(status: "calculated")
+    item.reload.calculate!
+    assert_totals(item.reload, gross: "0.22")
+    expect(item.calculation_context_snapshot["earnings_rounding"]).to eq("saved_lines_v1")
+  end
+
   it "preserves current, carryover and signed reversal hours and rounded amounts" do
     item = calculate_buckets([ "1.01", "0.01", "-0.01" ])
     assert_totals(item, gross: "10.61")
