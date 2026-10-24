@@ -1366,6 +1366,10 @@ export const payPeriodsApi = {
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState; created: boolean }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/publish`
     ),
+  refreshAireCalendar: (id: number) =>
+    api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
+      `/admin/pay_periods/${id}/aire_payroll_calendar/refresh`
+    ),
   retryAireCalendarDelivery: (id: number) =>
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/retry_delivery`

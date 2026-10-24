@@ -566,6 +566,21 @@ function AirePayrollCockpitWorkspace({
     if (onSourceChanged?.() !== true) await load();
   };
 
+  const refreshCalendarAndSource = async () => {
+    const current = ++actionGeneration.current;
+    setLoading(true);
+    setRefreshError(null);
+    try {
+      await payPeriodsApi.refreshAireCalendar(payPeriodId);
+      if (current !== actionGeneration.current) return;
+      if (await onRefresh() !== true) await refreshSource();
+    } catch (caught) {
+      if (current !== actionGeneration.current) return;
+      setRefreshError(caught instanceof Error ? caught.message : 'Could not refresh the time tracking calendar');
+      setLoading(false);
+    }
+  };
+
   const startEmployeeMapping = (employee: import('@/types').AirePayrollCockpitEmployee) => {
     setEmployeeMapping({
       employee,
@@ -895,7 +910,7 @@ function AirePayrollCockpitWorkspace({
                   </p>
                 </div>}
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => void refreshSource()} disabled={loading || busy}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void refreshCalendarAndSource()} disabled={loading || busy}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
                   {!checkpoint && overview?.payroll_period.status !== 'finalized' && (
@@ -976,7 +991,7 @@ function AirePayrollCockpitWorkspace({
                 {overview.payroll_period.status === 'finalized' && (
                   <div className="flex items-start gap-3 border-b border-success-200 bg-success-50 px-5 py-4 text-sm text-success-800 sm:px-6">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p><span className="font-semibold">{manualLock ? 'Locked manually by you' : 'Time tracking cutoff locked.'}</span> The locked hours are ready to review. Held hours remain visible below for the next available payroll.</p>
+                    <p><span className="font-semibold">{manualLock ? 'Locked manually' : 'Time tracking cutoff locked.'}</span> The locked hours are ready to review. Held hours remain visible below for the next available payroll.</p>
                   </div>
                 )}
 

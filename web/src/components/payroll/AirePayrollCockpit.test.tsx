@@ -30,6 +30,7 @@ const apiMocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   publish: vi.fn(),
   retry: vi.fn(),
+  refreshCalendar: vi.fn(),
   confirmEmployeeMapping: vi.fn(),
 }));
 
@@ -73,6 +74,7 @@ vi.mock('@/services/api', () => ({
     finalizeAirePayrollPeriod: apiMocks.finalize,
     publishAireCalendar: apiMocks.publish,
     retryAireCalendarDelivery: apiMocks.retry,
+    refreshAireCalendar: apiMocks.refreshCalendar,
     confirmAireEmployeeMapping: apiMocks.confirmEmployeeMapping,
   },
 }));
@@ -275,6 +277,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   routerMocks.locationState = null;
   mockLoads();
+  apiMocks.refreshCalendar.mockResolvedValue({ aire_payroll_calendar: calendar });
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
   apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
@@ -1626,7 +1629,7 @@ it('labels the completed manual lock plainly', async () => {
   data.overview.payroll_period = { ...period, lock_mode: 'manual', status: 'finalized', cutoff_state: 'finalized' };
   apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
   render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual' }} onRefresh={vi.fn()} />);
-  expect(await screen.findByText('Locked manually by you')).toBeTruthy();
+  expect(await screen.findByText('Locked manually')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /lock time tracking cutoff/i })).toBeNull();
 });
 
@@ -1748,6 +1751,35 @@ it('shows a completed manual Lock in the Hours checkpoint even before calendar v
   apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
   render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'manual' }} onRefresh={vi.fn()} />);
   const checkpoint = screen.getByRole('region', { name: 'Source checkpoint' });
-  expect(await within(checkpoint).findByText('Locked manually by you')).toBeTruthy();
+  expect(await within(checkpoint).findByText('Locked manually')).toBeTruthy();
   expect(within(checkpoint).queryByRole('button', { name: 'Lock time tracking cutoff' })).toBeNull();
+});
+
+
+it('reconciles the shared calendar before explicitly refreshing time tracking', async () => {
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  let finish!: () => void;
+  apiMocks.refreshCalendar.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  expect(apiMocks.refreshCalendar).toHaveBeenCalledExactlyOnceWith(17);
+  expect(apiMocks.overview).toHaveBeenCalledOnce();
+  expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(true);
+  await act(async () => finish());
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+});
+
+it('keeps commands fenced when explicit calendar refresh fails', async () => {
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  apiMocks.refreshCalendar.mockRejectedValueOnce(new Error('Calendar refresh failed'));
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  expect(await screen.findByText('Calendar refresh failed')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(true);
+  expect(apiMocks.overview).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  expect(screen.queryByText('Calendar refresh failed')).toBeNull();
 });

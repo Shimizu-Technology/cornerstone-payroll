@@ -80,6 +80,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
     setError(null);
     try {
       if (action === 'publish') await payPeriodsApi.publishAireCalendar(payPeriodId);
+      if (action === 'refresh') await payPeriodsApi.refreshAireCalendar(payPeriodId);
       if (action === 'retry') await payPeriodsApi.retryAireCalendarDelivery(payPeriodId);
       await onRefresh();
     } catch (caught) {

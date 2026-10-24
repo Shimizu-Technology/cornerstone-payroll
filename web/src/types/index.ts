@@ -763,6 +763,8 @@ export interface AirePayrollCalendarState {
   lock_mode?: 'manual' | 'scheduled';
   cutoff_enforcement_starts_on?: string | null;
   next_scheduled_cutoff_at?: string | null;
+  next_scheduled_cutoff_status?: 'available' | 'unavailable';
+  next_scheduled_cutoff_refreshed_at?: string | null;
   cutoff_state: AirePayrollCutoffState;
   needs_revision: boolean;
   can_publish: boolean;

@@ -5,12 +5,12 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
 import type { AirePayrollCalendarState } from '@/types';
-const actions = vi.hoisted(() => ({ manage: false, publish: vi.fn() }));
+const actions = vi.hoisted(() => ({ manage: false, publish: vi.fn(), refresh: vi.fn() }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => actions.manage }));
-vi.mock('@/services/api', () => ({ payPeriodsApi: { publishAireCalendar: actions.publish } }));
+vi.mock('@/services/api', () => ({ payPeriodsApi: { publishAireCalendar: actions.publish, refreshAireCalendar: actions.refresh } }));
 vi.mock('@/contexts/CompanyContext', (): { useCompany: () => { activeCompanyId: number; activeCompany: { id: number } } } => ({ useCompany: (): { activeCompanyId: number; activeCompany: { id: number } } => ({ activeCompanyId: 1, activeCompany: { id: 1 } }) }));
 const calendar = { enabled: true, source_id: 1, source_name: 'Synthetic time tracking', eligible: true, cutoff_at: '2026-10-22T07:00:00Z', cutoff_state: 'cutoff_due', needs_revision: false, can_publish: false, can_retry: false } as AirePayrollCalendarState;
-afterEach((): void => { cleanup(); vi.useRealTimers(); actions.manage = false; actions.publish.mockReset(); });
+afterEach((): void => { cleanup(); vi.useRealTimers(); actions.manage = false; actions.publish.mockReset(); actions.refresh.mockReset(); });
 it.each([['2026-10-22T07:00:00Z', 0], ['2026-10-22T07:00:01Z', 0], ['2026-10-22T09:00:00Z', 120]] as const)('shows pending lock and age at %s without claiming finalization', (now, minutes): void => {
   vi.useFakeTimers(); vi.setSystemTime(new Date(now));
   render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
@@ -50,4 +50,28 @@ it('publishes a manual period through its enabled action after nominal cutoff', 
   await user.click(screen.getByRole('button', { name: 'Publish cutoff to time tracking' }));
   await waitFor(() => expect(actions.publish).toHaveBeenCalledExactlyOnceWith(17));
   expect(refresh).toHaveBeenCalledOnce();
+});
+
+
+it('reconciles the source calendar before refreshing the page', async () => {
+  const user = userEvent.setup();
+  const onRefresh = vi.fn();
+  let finish!: () => void;
+  actions.refresh.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={17} calendar={calendar} onRefresh={onRefresh} /></MemoryRouter>);
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  expect(actions.refresh).toHaveBeenCalledExactlyOnceWith(17);
+  expect(onRefresh).not.toHaveBeenCalled();
+  finish();
+  await waitFor(() => expect(onRefresh).toHaveBeenCalledOnce());
+});
+
+it('shows a reconciliation failure without presenting an old page as refreshed', async () => {
+  const user = userEvent.setup();
+  const onRefresh = vi.fn();
+  actions.refresh.mockRejectedValue(new Error('Calendar refresh failed'));
+  render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={17} calendar={calendar} onRefresh={onRefresh} /></MemoryRouter>);
+  await user.click(screen.getByRole('button', { name: 'Refresh' }));
+  expect(await screen.findByText('Calendar refresh failed')).toBeTruthy();
+  expect(onRefresh).not.toHaveBeenCalled();
 });
