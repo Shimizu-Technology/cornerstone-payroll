@@ -1,7 +1,7 @@
 {
   "baseline": "origin/staging-v2 34c99bb2 (includes #383 and #382)",
-  "runtime_before_pages": 56,
-  "runtime_after_state_viewports": 16,
+  "runtime_before_pages": 64,
+  "runtime_after_state_viewports": 18,
   "normalizations": {
     "Overview": "Payroll",
     "Process payroll": "Payroll",
@@ -5236,7 +5236,8 @@
         "activity \u2192 Header"
       ],
       "after_locations": [
-        "Activity workspace \u2192 2 access records"
+        "Activity workspace \u2192 2 access records",
+        "Activity workspace \u2192 3 access records"
       ],
       "classification": "retained"
     },
@@ -5561,7 +5562,8 @@
         "activity \u2192 Header"
       ],
       "after_locations": [
-        "Activity workspace \u2192 2 access records"
+        "Activity workspace \u2192 2 access records",
+        "Activity workspace \u2192 3 access records"
       ],
       "classification": "retained"
     },
@@ -5963,8 +5965,7 @@
         "activity \u2192 Header"
       ],
       "after_locations": [
-        "Activity workspace \u2192 2 access records",
-        "Activity workspace \u2192 3 access records"
+        "Activity workspace \u2192 2 access records"
       ],
       "classification": "retained"
     },
@@ -8494,6 +8495,691 @@
         "Activity \u2192 Load older activity \u2192 What happened (unchanged activity/audit components; first-page event window changed)"
       ],
       "classification": "retained in paginated activity"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Activity"
+      ],
+      "canonical_action": "Activity",
+      "before_locations": [
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Back"
+      ],
+      "canonical_action": "Back",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog",
+        "checks \u2192 Header / shared dialog",
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Checks & direct deposit 1"
+      ],
+      "canonical_action": "Checks & payments",
+      "before_locations": [
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Open processing",
+        "Overview",
+        "Process payroll"
+      ],
+      "canonical_action": "Payroll",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog",
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Header / shared dialog",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Header / shared dialog",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Report Fixture"
+      ],
+      "canonical_action": "Report Fixture",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog",
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace",
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "About parallel comparison"
+      ],
+      "canonical_action": "About parallel comparison",
+      "before_locations": [
+        "activity \u2192 Header \u2192 status",
+        "checks \u2192 Header \u2192 status",
+        "overview \u2192 Header \u2192 status",
+        "work \u2192 Header \u2192 status"
+      ],
+      "after_locations": [
+        "Header \u2192 status"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Open payroll item",
+        "Open payroll item for Report Fixture",
+        "View details"
+      ],
+      "canonical_action": "Open payroll item",
+      "before_locations": [
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Fixture"
+      ],
+      "canonical_action": "Fixture",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Review settings"
+      ],
+      "canonical_action": "Review settings",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Change payment method for Report Fixture"
+      ],
+      "canonical_action": "Change payment method for Report Fixture",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Download"
+      ],
+      "canonical_action": "Download",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Export PDF document (.pdf)"
+      ],
+      "canonical_action": "Export PDF document (.pdf)",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Export"
+      ],
+      "canonical_action": "Export",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Refresh current setup"
+      ],
+      "canonical_action": "Refresh current setup",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Roll Back Approval"
+      ],
+      "canonical_action": "Roll Back Approval",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "View"
+      ],
+      "canonical_action": "View",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Run notes and processing history"
+      ],
+      "canonical_action": "Run notes and processing history",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 Run notes and processing history"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Open record"
+      ],
+      "canonical_action": "Open record",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Open"
+      ],
+      "canonical_action": "Open",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "2 access records"
+      ],
+      "canonical_action": "Access records (dynamic audit group count)",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 2 access records"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 390,
+      "original_labels": [
+        "Technical evidence"
+      ],
+      "canonical_action": "Technical evidence",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 Technical evidence"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Activity"
+      ],
+      "canonical_action": "Activity",
+      "before_locations": [
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Back"
+      ],
+      "canonical_action": "Back",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog",
+        "checks \u2192 Header / shared dialog",
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Checks & direct deposit 1"
+      ],
+      "canonical_action": "Checks & payments",
+      "before_locations": [
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Open processing",
+        "Overview",
+        "Process payroll"
+      ],
+      "canonical_action": "Payroll",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog",
+        "activity \u2192 Pay-run workspace sections",
+        "checks \u2192 Header / shared dialog",
+        "checks \u2192 Pay-run workspace sections",
+        "overview \u2192 Header / shared dialog",
+        "overview \u2192 Pay-run workspace sections",
+        "work \u2192 Pay-run workspace sections"
+      ],
+      "after_locations": [
+        "Pay-run workspace sections"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Report Fixture"
+      ],
+      "canonical_action": "Report Fixture",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog",
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace",
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "About parallel comparison"
+      ],
+      "canonical_action": "About parallel comparison",
+      "before_locations": [
+        "activity \u2192 Header \u2192 status",
+        "checks \u2192 Header \u2192 status",
+        "overview \u2192 Header \u2192 status",
+        "work \u2192 Header \u2192 status"
+      ],
+      "after_locations": [
+        "Header \u2192 status"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Open payroll item",
+        "Open payroll item for Report Fixture",
+        "View details"
+      ],
+      "canonical_action": "Open payroll item",
+      "before_locations": [
+        "overview \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Fixture"
+      ],
+      "canonical_action": "Fixture",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Review settings"
+      ],
+      "canonical_action": "Review settings",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Payroll workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Change payment method for Report Fixture"
+      ],
+      "canonical_action": "Change payment method for Report Fixture",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog",
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Download"
+      ],
+      "canonical_action": "Download",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Export PDF document (.pdf)"
+      ],
+      "canonical_action": "Export PDF document (.pdf)",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Export"
+      ],
+      "canonical_action": "Export",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Refresh current setup"
+      ],
+      "canonical_action": "Refresh current setup",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Roll Back Approval"
+      ],
+      "canonical_action": "Roll Back Approval",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Header / shared dialog"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "View"
+      ],
+      "canonical_action": "View",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Reports workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Run notes and processing history"
+      ],
+      "canonical_action": "Run notes and processing history",
+      "before_locations": [
+        "work \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 Run notes and processing history"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Open record"
+      ],
+      "canonical_action": "Open record",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Open"
+      ],
+      "canonical_action": "Open",
+      "before_locations": [
+        "checks \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Checks and payments workspace"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "2 access records"
+      ],
+      "canonical_action": "Access records (dynamic audit group count)",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 2 access records",
+        "Activity workspace \u2192 3 access records"
+      ],
+      "classification": "retained"
+    },
+    {
+      "state": "parallel-approved",
+      "width": 1280,
+      "original_labels": [
+        "Technical evidence"
+      ],
+      "canonical_action": "Technical evidence",
+      "before_locations": [
+        "activity \u2192 Header / shared dialog"
+      ],
+      "after_locations": [
+        "Activity workspace \u2192 Technical evidence"
+      ],
+      "classification": "retained"
     }
   ],
   "unexplained": []

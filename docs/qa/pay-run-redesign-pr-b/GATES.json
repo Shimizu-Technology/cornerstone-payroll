@@ -11,40 +11,40 @@
     "offenses": 0
   },
   "web": {
-    "files": 125,
-    "tests": 1182,
+    "files": 126,
+    "tests": 1189,
     "npm_ci": 0,
     "npm_audit_moderate": 0,
     "gate": 0
   },
   "browsers": {
     "public": {
-      "startTime": "2026-10-24T08:50:49.092Z",
-      "duration": 382412.50100000005,
+      "startTime": "2026-10-24T10:25:57.359Z",
+      "duration": 260385.578,
       "expected": 131,
       "skipped": 0,
       "unexpected": 0,
       "flaky": 0
     },
     "release": {
-      "startTime": "2026-10-24T09:01:16.874Z",
-      "duration": 146745.565,
+      "startTime": "2026-10-24T10:38:37.188Z",
+      "duration": 127125.28600000001,
       "expected": 45,
       "skipped": 0,
       "unexpected": 0,
       "flaky": 0
     },
     "refresh": {
-      "startTime": "2026-10-24T09:03:55.556Z",
-      "duration": 75982.32100000001,
+      "startTime": "2026-10-24T10:40:57.452Z",
+      "duration": 37222.346,
       "expected": 10,
       "skipped": 0,
       "unexpected": 0,
       "flaky": 0
     },
     "pay-items": {
-      "startTime": "2026-10-24T09:11:20.346Z",
-      "duration": 118518.884,
+      "startTime": "2026-10-24T10:41:44.816Z",
+      "duration": 74914.473,
       "expected": 24,
       "skipped": 0,
       "unexpected": 0,
@@ -52,7 +52,7 @@
     }
   },
   "axe": {
-    "captures": 13,
+    "captures": 30,
     "required_family_violations": 0,
     "details": "axe-summary.json"
   },
@@ -215,7 +215,7 @@
       "apiWrites": 0
     }
   ],
-  "runtime_action_rows": 525,
+  "runtime_action_rows": 567,
   "unexplained_removals": 0,
   "pending_C": [
     "First-screen name/net without horizontal scrolling on connected run 2",
@@ -225,5 +225,560 @@
     "Physical devices/printer, real payments/filing/email/providers",
     "Separate two-application connected certification lane (outside four required browser lanes); navigation selectors maintained",
     "Late-hours financial execution (owned by merged #382); B verifies guards, admin entry and saved return link"
-  ]
+  ],
+  "review_followup": {
+    "reviewed_starting_head": "d0a3291b",
+    "tested_source_commit": "7999d583494148785f624e43918c26ed5e5f4a90",
+    "F1": {
+      "status": "fixed; lead recheck pending",
+      "regressions": 6,
+      "real_permission_browser_cases": [
+        {
+          "mode": "workspace_access",
+          "width": 1280,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 5,
+          "period_id": 11,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": false,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "payroll_summary_by_employee_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "deductions_contributions_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "paycheck_history_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "retirement_plans_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "installment_loans_pdf",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "workspace_access",
+          "width": 1280,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 5,
+          "period_id": 11,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": false,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "backup_snapshot",
+          "width": 1280,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 6,
+          "period_id": 12,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": true,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "payroll_summary_by_employee_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "deductions_contributions_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "paycheck_history_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "retirement_plans_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "installment_loans_pdf",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "backup_snapshot",
+          "width": 1280,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 6,
+          "period_id": 12,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": true,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "training_baseline",
+          "width": 1280,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 7,
+          "period_id": 13,
+          "realPermissions": {
+            "workspace_can_write": true,
+            "test_workspace_read_only": false,
+            "test_workspace_role": "baseline"
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "payroll_summary_by_employee_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "deductions_contributions_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "paycheck_history_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "retirement_plans_pdf",
+              "status": 200,
+              "method": "GET"
+            },
+            {
+              "endpoint": "installment_loans_pdf",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "training_baseline",
+          "width": 1280,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 7,
+          "period_id": 13,
+          "realPermissions": {
+            "workspace_can_write": true,
+            "test_workspace_read_only": false,
+            "test_workspace_role": "baseline"
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "workspace_access",
+          "width": 390,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 5,
+          "period_id": 11,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": false,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "workspace_access",
+          "width": 390,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 5,
+          "period_id": 11,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": false,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": true
+        },
+        {
+          "mode": "backup_snapshot",
+          "width": 390,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 6,
+          "period_id": 12,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": true,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "backup_snapshot",
+          "width": 390,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 6,
+          "period_id": 12,
+          "realPermissions": {
+            "workspace_can_write": false,
+            "test_workspace_read_only": true,
+            "test_workspace_role": null
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": true
+        },
+        {
+          "mode": "training_baseline",
+          "width": 390,
+          "entry": "reports",
+          "status": "passed",
+          "company_id": 7,
+          "period_id": 13,
+          "realPermissions": {
+            "workspace_can_write": true,
+            "test_workspace_read_only": false,
+            "test_workspace_role": "baseline"
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": false
+        },
+        {
+          "mode": "training_baseline",
+          "width": 390,
+          "entry": "work",
+          "status": "passed",
+          "company_id": 7,
+          "period_id": 13,
+          "realPermissions": {
+            "workspace_can_write": true,
+            "test_workspace_read_only": false,
+            "test_workspace_role": "baseline"
+          },
+          "writerControls": 0,
+          "postAttempts": [],
+          "forbiddenResponses": [],
+          "readRequests": [
+            {
+              "endpoint": "payroll_register",
+              "status": 200,
+              "method": "GET"
+            }
+          ],
+          "downloadPDFVerified": true
+        }
+      ],
+      "preview_GETs": 27,
+      "verified_PDF_downloads": 3,
+      "POST_attempts": 0,
+      "HTTP_403s": 0,
+      "saved_state": {
+        "unchanged": true,
+        "counts": {
+          "periods": 4,
+          "items": 4,
+          "transmittals": 0,
+          "signoffs": 0,
+          "form500s": 0,
+          "tax_checks": 0
+        },
+        "scope": "Pay periods, payroll items, transmittals, sign-off sheets, Form 500 filings and tax checks. Audit/user activity writes are outside this snapshot."
+      }
+    },
+    "F2": {
+      "status": "fixed; lead recheck pending",
+      "regressions": 1,
+      "baseline_pages": 8,
+      "final_pages": 8,
+      "location": "Header \u2192 status \u2192 About parallel comparison"
+    },
+    "phone_geometry": {
+      "positions": [
+        {
+          "label": "Employees",
+          "x": 16,
+          "valueX": 16,
+          "y": 360,
+          "width": 179
+        },
+        {
+          "label": "Gross pay",
+          "x": 195,
+          "valueX": 195,
+          "y": 360,
+          "width": 179
+        },
+        {
+          "label": "Total deductions",
+          "x": 16,
+          "valueX": 16,
+          "y": 424,
+          "width": 179
+        },
+        {
+          "label": "Net pay",
+          "x": 16,
+          "valueX": 16,
+          "y": 488,
+          "width": 358
+        },
+        {
+          "label": "DRT deposit",
+          "x": 195,
+          "valueX": 195,
+          "y": 424,
+          "width": 179
+        }
+      ],
+      "tabs": [
+        {
+          "text": "Payroll",
+          "left": 16,
+          "right": 75.78125
+        },
+        {
+          "text": "Checks\n4",
+          "left": 83.78125,
+          "right": 175.59375
+        },
+        {
+          "text": "Reports",
+          "left": 183.59375,
+          "right": 248.078125
+        },
+        {
+          "text": "Activity",
+          "left": 256.078125,
+          "right": 319.578125
+        }
+      ],
+      "checks": [
+        {
+          "name": "left column label and figures align",
+          "passed": true
+        },
+        {
+          "name": "right column label and figures align",
+          "passed": true
+        },
+        {
+          "name": "Net is last and spans both columns",
+          "passed": true
+        },
+        {
+          "name": "all four phone tabs fit",
+          "passed": true
+        },
+        {
+          "name": "reports active tab visible on direct load",
+          "passed": true
+        },
+        {
+          "name": "activity active tab visible on direct load",
+          "passed": true
+        },
+        {
+          "name": "checks active tab visible on direct load",
+          "passed": true
+        },
+        {
+          "name": "no page horizontal overflow",
+          "passed": true
+        }
+      ]
+    },
+    "tab_captures": 56,
+    "phone_contact_states": 7,
+    "motion": [
+      {
+        "case": "final-dialog-motion",
+        "width": 1280,
+        "reducedMotion": "no-preference",
+        "status": "passed",
+        "focusContained": true,
+        "focusReturned": true,
+        "scrollPreserved": true
+      },
+      {
+        "case": "final-dialog-motion",
+        "width": 1280,
+        "reducedMotion": "reduce",
+        "status": "passed",
+        "focusContained": true,
+        "focusReturned": true,
+        "scrollPreserved": true
+      },
+      {
+        "case": "final-dialog-motion",
+        "width": 390,
+        "reducedMotion": "no-preference",
+        "status": "passed",
+        "focusContained": true,
+        "focusReturned": true,
+        "scrollPreserved": true
+      },
+      {
+        "case": "final-dialog-motion",
+        "width": 390,
+        "reducedMotion": "reduce",
+        "status": "passed",
+        "focusContained": true,
+        "focusReturned": true,
+        "scrollPreserved": true
+      },
+      {
+        "case": "final-totals-motion-save-reload",
+        "width": 1280,
+        "reducedMotion": "no-preference",
+        "status": "passed",
+        "hours": 40,
+        "gross": 3000
+      },
+      {
+        "case": "final-totals-motion-save-reload",
+        "width": 390,
+        "reducedMotion": "reduce",
+        "status": "passed",
+        "hours": 41,
+        "gross": 3025
+      }
+    ],
+    "test_readiness_fixes": [
+      "Drain pending dashboard request handlers before context teardown",
+      "Await actual calculate/approve/commit responses before saved-state polls",
+      "Await recurring deduction Pause/Resume/Stop saves",
+      "Wait for navigation initial focus before testing notification-dismiss focus"
+    ],
+    "independent_final_review": "Pending lead recheck; original d0 review found F1 P2 and F2 P3",
+    "CodeRabbit": "One requested review rate-limited; no completed bot approval"
+  }
 }

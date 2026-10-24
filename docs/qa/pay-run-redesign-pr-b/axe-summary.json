@@ -9,7 +9,7 @@
       },
       {
         "id": "label-content-name-mismatch",
-        "nodes": 4
+        "nodes": 5
       },
       {
         "id": "scrollable-region-focusable",
@@ -27,7 +27,7 @@
       },
       {
         "id": "label-content-name-mismatch",
-        "nodes": 4
+        "nodes": 5
       }
     ]
   },
@@ -61,7 +61,7 @@
     "advisory_violations": [
       {
         "id": "label-content-name-mismatch",
-        "nodes": 4
+        "nodes": 5
       },
       {
         "id": "scrollable-region-focusable",
@@ -79,7 +79,7 @@
       },
       {
         "id": "label-content-name-mismatch",
-        "nodes": 4
+        "nodes": 5
       },
       {
         "id": "nested-interactive",
@@ -115,7 +115,31 @@
       },
       {
         "id": "label-content-name-mismatch",
-        "nodes": 4
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "capture": "parallel-approved-1280-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "capture": "parallel-approved-390-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
       }
     ]
   },
@@ -123,6 +147,10 @@
     "capture": "phone-_companies_1_pay-runs_2_work-axe.json",
     "required_violations": [],
     "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
       {
         "id": "region",
         "nodes": 1
@@ -148,6 +176,10 @@
     "required_violations": [],
     "advisory_violations": [
       {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
         "id": "region",
         "nodes": 1
       },
@@ -162,8 +194,66 @@
     "required_violations": [],
     "advisory_violations": [
       {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
         "id": "region",
         "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "phone-_companies_2_pay-runs_7_work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "phone-_companies_2_pay-runs_8_work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      },
+      {
+        "id": "scrollable-region-focusable",
+        "nodes": 2
+      }
+    ]
+  },
+  {
+    "capture": "phone-_companies_2_pay-runs_9_work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      },
+      {
+        "id": "scrollable-region-focusable",
+        "nodes": 2
       }
     ]
   },
@@ -171,6 +261,134 @@
     "capture": "phone-_dashboard-axe.json",
     "required_violations": [],
     "advisory_violations": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-backup_snapshot-1280-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "capture": "readonly-backup_snapshot-1280-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "capture": "readonly-backup_snapshot-390-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-backup_snapshot-390-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-training_baseline-1280-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "capture": "readonly-training_baseline-1280-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "capture": "readonly-training_baseline-390-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-training_baseline-390-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-workspace_access-1280-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "capture": "readonly-workspace_access-1280-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "capture": "readonly-workspace_access-390-reports-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "capture": "readonly-workspace_access-390-work-axe.json",
+    "required_violations": [],
+    "advisory_violations": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
       {
         "id": "region",
         "nodes": 1
