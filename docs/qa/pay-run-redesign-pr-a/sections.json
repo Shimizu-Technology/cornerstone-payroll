@@ -1,0 +1,822 @@
+[
+  {
+    "key": "coverage",
+    "name": "SourceCoverageDialog",
+    "oldRanges": [
+      [
+        1930,
+        1955
+      ]
+    ],
+    "props": [
+      "commitRouteGenerationRef",
+      "companyId",
+      "handleRefreshSetup",
+      "handleRunPayroll",
+      "payRunId",
+      "pendingCoverageActionRef",
+      "processing",
+      "setSourceCoverageAcknowledged",
+      "setSourceCoverageOpen",
+      "setSourceCoverageReason",
+      "sourceCoverageAcknowledged",
+      "sourceCoverageOpen",
+      "sourceCoverageReason"
+    ]
+  },
+  {
+    "key": "reviewDialogs",
+    "name": "PayRunReviewDialogs",
+    "oldRanges": [
+      [
+        1956,
+        1959
+      ],
+      [
+        1960,
+        1960
+      ]
+    ],
+    "props": [
+      "companyId",
+      "currentPath",
+      "loadPayPeriod",
+      "payPeriod",
+      "payRunId",
+      "paymentMethodItem",
+      "reviewingItem",
+      "setPaymentMethodItem",
+      "setReviewingItem"
+    ]
+  },
+  {
+    "key": "summary",
+    "name": "PayRunSummary",
+    "oldRanges": [
+      [
+        1962,
+        2008
+      ]
+    ],
+    "props": [
+      "contractorItems",
+      "hasCorrectionPayBasisHold",
+      "payrollItems",
+      "totalContractorPay",
+      "totalDRTDeposit",
+      "totalDeductions",
+      "totalGross",
+      "totalNet"
+    ]
+  },
+  {
+    "key": "processing",
+    "name": "PayRunProcessingActions",
+    "oldRanges": [
+      [
+        2009,
+        2015
+      ]
+    ],
+    "props": [
+      "calculationFailures",
+      "canEditPayPeriod",
+      "canImportMosa",
+      "canImportSpikeIntake",
+      "canImportTimeTracking",
+      "canLinkAireRecord",
+      "companyId",
+      "correctionCalculationHeld",
+      "financialActionsHeld",
+      "handleApprove",
+      "handleRunPayroll",
+      "handleUnapprove",
+      "hasLinkedAireRecord",
+      "hasPendingCalculationChanges",
+      "hasStagedWorksheetChanges",
+      "isApproved",
+      "isCalculated",
+      "isCommitted",
+      "isDraft",
+      "isVoided",
+      "openPayDateCorrection",
+      "payPeriod",
+      "payRunId",
+      "payrollItems",
+      "processing",
+      "returnTo",
+      "savedImportReloadRequired",
+      "setAireRecordsOpen",
+      "setCommitPeriodId",
+      "setImportModalOpen",
+      "setPayrollIntakeImportOpen",
+      "setRefreshBaseSalary",
+      "setRefreshRecurring",
+      "setRefreshSetupOpen",
+      "setTimeTrackingAutoPreview",
+      "setTimeTrackingImportOpen",
+      "standaloneLoanConflicts"
+    ]
+  },
+  {
+    "key": "feedback",
+    "name": "PayRunFeedback",
+    "oldRanges": [
+      [
+        2017,
+        2024
+      ],
+      [
+        2025,
+        2025
+      ],
+      [
+        2026,
+        2029
+      ],
+      [
+        2030,
+        2030
+      ],
+      [
+        2031,
+        2031
+      ],
+      [
+        2032,
+        2035
+      ]
+    ],
+    "props": [
+      "calculationFailures",
+      "calculationNotice",
+      "calendarRefreshError",
+      "companyId",
+      "currentPath",
+      "employees",
+      "error",
+      "errorFeedbackAttempt",
+      "payPeriod",
+      "payrollItems",
+      "processing",
+      "reloadSavedSourceImport",
+      "savedImportReloadRequired",
+      "timeTrackingImportOpen",
+      "worksheetRefreshWarning"
+    ]
+  },
+  {
+    "key": "blockers",
+    "name": "PayRunBlockers",
+    "oldRanges": [
+      [
+        2040,
+        2047
+      ],
+      [
+        2049,
+        2079
+      ],
+      [
+        2081,
+        2104
+      ],
+      [
+        2106,
+        2144
+      ]
+    ],
+    "props": [
+      "adoptingConfirmedWorkweek",
+      "canImportMosa",
+      "canImportSpikeIntake",
+      "clientApprovalLoading",
+      "handleAdoptConfirmedWorkweek",
+      "hasPendingCalculationChanges",
+      "openClientApproval",
+      "payPeriod",
+      "setImportModalOpen",
+      "setPayrollIntakeImportOpen"
+    ]
+  },
+  {
+    "key": "source",
+    "name": "PayRunSourceCheckpoint",
+    "oldRanges": [
+      [
+        2146,
+        2175
+      ]
+    ],
+    "props": [
+      "aireSourceRefreshToken",
+      "currentAireRecord",
+      "hoursMap",
+      "invalidateAireSource",
+      "loadPayPeriod",
+      "payPeriod",
+      "setTimeTrackingAutoPreview",
+      "setTimeTrackingImportOpen"
+    ]
+  },
+  {
+    "key": "metadata",
+    "name": "PayRunMetadata",
+    "oldRanges": [
+      [
+        2178,
+        2233
+      ],
+      [
+        2235,
+        2267
+      ]
+    ],
+    "props": [
+      "MAX_SYNC_ATTEMPTS",
+      "canRetrySyncTax",
+      "formatCorrectionPayDate",
+      "handleRetryTaxSync",
+      "isApproved",
+      "isCalculated",
+      "isCommitted",
+      "isCorrection",
+      "isVoided",
+      "payDateCorrections",
+      "payPeriod",
+      "processedBy",
+      "retryingSyncTax",
+      "statusConfig",
+      "syncConfig",
+      "syncStatus"
+    ]
+  },
+  {
+    "key": "refreshDialog",
+    "name": "RefreshSetupDialog",
+    "oldRanges": [
+      [
+        2269,
+        2301
+      ]
+    ],
+    "props": [
+      "error",
+      "handleRefreshSetup",
+      "processing",
+      "refreshBaseSalary",
+      "refreshRecurring",
+      "refreshSetupOpen",
+      "setRefreshBaseSalary",
+      "setRefreshRecurring",
+      "setRefreshSetupOpen",
+      "sourceCoverageOpen"
+    ]
+  },
+  {
+    "key": "loans",
+    "name": "PayRunLoanInputs",
+    "oldRanges": [
+      [
+        2303,
+        2311
+      ],
+      [
+        2312,
+        2334
+      ]
+    ],
+    "props": [
+      "additionalEmployeeIds",
+      "canEditPayPeriod",
+      "employees",
+      "isCalculated",
+      "isDraft",
+      "namedLoanDrafts",
+      "namedLoanOptions",
+      "payPeriod",
+      "payrollItems",
+      "setNamedLoanDrafts",
+      "standaloneLoanConflicts"
+    ]
+  },
+  {
+    "key": "comparison",
+    "name": "PayRunComparison",
+    "oldRanges": [
+      [
+        2337,
+        2455
+      ]
+    ],
+    "props": [
+      "comparison",
+      "comparisonError",
+      "comparisonFlagTone",
+      "comparisonHiddenRows",
+      "comparisonHighlights",
+      "comparisonLoading",
+      "comparisonRows",
+      "comparisonTotalRows",
+      "isApproved",
+      "isCalculated",
+      "isCommitted",
+      "loadComparison",
+      "payPeriod",
+      "payrollItems"
+    ]
+  },
+  {
+    "key": "roster",
+    "name": "PayRunRoster",
+    "oldRanges": [
+      [
+        2459,
+        2517
+      ]
+    ],
+    "props": [
+      "additionalEmployeeIds",
+      "employees",
+      "financialActionsHeld",
+      "handleRunPayroll",
+      "isCalculated",
+      "isDraft",
+      "payPeriod",
+      "payrollItems",
+      "processing",
+      "setAdditionalEmployeeIds",
+      "setBonusEdits",
+      "setBonusMap",
+      "setHoursMap",
+      "setLoansMap",
+      "setNamedLoanDrafts",
+      "setPayrollFieldDrafts",
+      "setSalaryOverrideMap",
+      "setTipsMap",
+      "setTipsPaidOutMap"
+    ]
+  },
+  {
+    "key": "hours",
+    "name": "PayRunHoursWorksheet",
+    "oldRanges": [
+      [
+        2520,
+        2528
+      ],
+      [
+        2529,
+        3086
+      ]
+    ],
+    "props": [
+      "additionalEmployeeIds",
+      "bonusEdits",
+      "bonusMap",
+      "companyId",
+      "currentPath",
+      "departmentFilter",
+      "departmentOptions",
+      "displayEmployeesForHours",
+      "employeeTypeFilter",
+      "employees",
+      "employmentGroupKey",
+      "employmentGroupLabel",
+      "employmentGroupTone",
+      "estimateWorksheetGross",
+      "hoursMap",
+      "hoursSortBy",
+      "hoursSortDirection",
+      "hoursTableOpen",
+      "isCalculated",
+      "isDraft",
+      "loansMap",
+      "namedLoanDrafts",
+      "namedLoanOptions",
+      "payPeriod",
+      "payrollFieldAssignmentLookup",
+      "payrollFieldDrafts",
+      "payrollItemByEmployeeId",
+      "payrollItems",
+      "resetPayrollFieldDraft",
+      "retainedRetirementEntries",
+      "salaryOverrideMap",
+      "searchTerm",
+      "setBonusEdits",
+      "setBonusMap",
+      "setDepartmentFilter",
+      "setEmployeeTypeFilter",
+      "setHoursSortBy",
+      "setHoursSortDirection",
+      "setHoursTableOpen",
+      "setNamedLoanDrafts",
+      "setSearchTerm",
+      "setShowPayrollFields",
+      "setShowTipsLoans",
+      "showPayrollFields",
+      "showTipsLoans",
+      "tipsLoansVisibilityModeRef",
+      "tipsMap",
+      "tipsPaidOutMap",
+      "updateHours",
+      "updateLoan",
+      "updatePayrollFieldDraft",
+      "updateSalaryOverride",
+      "updateTip",
+      "updateTipsPaidOut",
+      "updateWageRateHours",
+      "worksheetPayrollFields"
+    ]
+  },
+  {
+    "key": "results",
+    "name": "PayRunEmployeeResults",
+    "oldRanges": [
+      [
+        3089,
+        3675
+      ]
+    ],
+    "props": [
+      "companyId",
+      "currentPath",
+      "departmentFilter",
+      "departmentOptions",
+      "employeeLookup",
+      "employeeTypeFilter",
+      "employmentGroupKey",
+      "employmentGroupLabel",
+      "employmentGroupTone",
+      "isCalculated",
+      "isCommitted",
+      "isDraft",
+      "payPeriod",
+      "payrollItemDisplayedHours",
+      "payrollItemNameParts",
+      "payrollItems",
+      "registerPayrollFieldTotals",
+      "registerTotals",
+      "resultsSortBy",
+      "resultsSortDirection",
+      "searchTerm",
+      "setCorrectingItem",
+      "setDepartmentFilter",
+      "setEditingItem",
+      "setEmployeeTypeFilter",
+      "setReplacingItem",
+      "setResultsSortBy",
+      "setResultsSortDirection",
+      "setReviewingItem",
+      "setSearchTerm",
+      "sortPayrollItems",
+      "visiblePayrollFields"
+    ]
+  },
+  {
+    "key": "employerTaxes",
+    "name": "PayRunEmployerTaxes",
+    "oldRanges": [
+      [
+        3678,
+        3765
+      ]
+    ],
+    "props": [
+      "fitDivergence",
+      "isDraft",
+      "payrollItems",
+      "totalDRTDeposit",
+      "totalEmployerMedicare",
+      "totalEmployerSS",
+      "totalMedicare",
+      "totalSS",
+      "totalWithholding"
+    ]
+  },
+  {
+    "key": "liabilities",
+    "name": "PayRunLiabilities",
+    "oldRanges": [
+      [
+        3767,
+        3773
+      ]
+    ],
+    "props": [
+      "isCommitted",
+      "liabilityError",
+      "liabilityLoading",
+      "liabilityReconciliation"
+    ]
+  },
+  {
+    "key": "empty",
+    "name": "PayRunEmptyState",
+    "oldRanges": [
+      [
+        3776,
+        3788
+      ]
+    ],
+    "props": [
+      "companyId",
+      "currentPath",
+      "employees",
+      "isDraft",
+      "payrollItems"
+    ]
+  },
+  {
+    "key": "linkedCorrections",
+    "name": "PayRunLinkedCorrections",
+    "oldRanges": [
+      [
+        3792,
+        3849
+      ],
+      [
+        3852,
+        3869
+      ]
+    ],
+    "props": [
+      "companyId",
+      "currentPath",
+      "isCommitted",
+      "payPeriod",
+      "supplementals",
+      "supplementalsLoading"
+    ]
+  },
+  {
+    "key": "checks",
+    "name": "PayRunChecks",
+    "oldRanges": [
+      [
+        3872,
+        3888
+      ]
+    ],
+    "props": [
+      "checkPrintRefreshToken",
+      "companyId",
+      "isCommitted",
+      "loadPayPeriod",
+      "nonEmployeeChecks",
+      "paperCheckCount",
+      "payPeriod",
+      "returnTo",
+      "searchTerm",
+      "setCheckPrintOpen"
+    ]
+  },
+  {
+    "key": "supporting",
+    "name": "PayRunSupportingDetails",
+    "oldRanges": [
+      [
+        3890,
+        3972
+      ]
+    ],
+    "props": [
+      "aireSourceRefreshToken",
+      "directDepositCount",
+      "invalidateAireSource",
+      "isCommitted",
+      "isVoided",
+      "lifecycleItems",
+      "loadPayPeriod",
+      "paperCheckCount",
+      "payPeriod",
+      "payableItems",
+      "payrollItems",
+      "setPaymentMethodItem"
+    ]
+  },
+  {
+    "key": "ocr",
+    "name": "PayRunTimecardOcr",
+    "oldRanges": [
+      [
+        3975,
+        3980
+      ]
+    ],
+    "props": [
+      "handlePayrollItemApplied",
+      "isDraft",
+      "payPeriod"
+    ]
+  },
+  {
+    "key": "nonEmployeeChecks",
+    "name": "PayRunNonEmployeeChecks",
+    "oldRanges": [
+      [
+        3983,
+        3994
+      ]
+    ],
+    "props": [
+      "checkPrintRefreshToken",
+      "handleNonEmployeeChecksChanged",
+      "handleNonEmployeeChecksLoaded",
+      "isCommitted",
+      "isVoided",
+      "payPeriod"
+    ]
+  },
+  {
+    "key": "printDialog",
+    "name": "PayRunCheckPrintDialog",
+    "oldRanges": [
+      [
+        3996,
+        4006
+      ]
+    ],
+    "props": [
+      "checkPrintOpen",
+      "isCommitted",
+      "loadPayPeriod",
+      "payPeriod",
+      "setCheckPrintOpen",
+      "setCheckPrintRefreshToken"
+    ]
+  },
+  {
+    "key": "reports",
+    "name": "PayRunReports",
+    "oldRanges": [
+      [
+        4008,
+        4008
+      ],
+      [
+        4011,
+        4017
+      ]
+    ],
+    "props": [
+      "companyId",
+      "finalRecordRefreshToken",
+      "isCommitted",
+      "isDraft",
+      "payPeriod",
+      "payRunId",
+      "payrollItems"
+    ]
+  },
+  {
+    "key": "timecardHistory",
+    "name": "PayRunTimecardHistory",
+    "oldRanges": [
+      [
+        4020,
+        4022
+      ]
+    ],
+    "props": [
+      "isDraft",
+      "payPeriod"
+    ]
+  },
+  {
+    "key": "corrections",
+    "name": "PayRunCorrections",
+    "oldRanges": [
+      [
+        4025,
+        4050
+      ]
+    ],
+    "props": [
+      "commitRouteGenerationRef",
+      "correctionRouteGeneration",
+      "isCommitted",
+      "isCorrection",
+      "isVoided",
+      "loadPayPeriod",
+      "payPeriod",
+      "payRunId",
+      "returnTo",
+      "setCheckPrintRefreshToken",
+      "setPayPeriod",
+      "setPayrollItems"
+    ]
+  },
+  {
+    "key": "dialogs",
+    "name": "PayRunDialogs",
+    "oldRanges": [
+      [
+        4055,
+        4061
+      ],
+      [
+        4063,
+        4071
+      ],
+      [
+        4073,
+        4091
+      ],
+      [
+        4093,
+        4097
+      ],
+      [
+        4101,
+        4116
+      ],
+      [
+        4122,
+        4133
+      ],
+      [
+        4136,
+        4167
+      ],
+      [
+        4169,
+        4219
+      ],
+      [
+        4221,
+        4224
+      ],
+      [
+        4226,
+        4284
+      ]
+    ],
+    "props": [
+      "activeCompany",
+      "aireRecordsOpen",
+      "clientApprovalConfirmed",
+      "clientApprovalEvidence",
+      "clientApprovalLoading",
+      "clientApprovalNotes",
+      "clientApprovalOpen",
+      "clientApproverId",
+      "clientApprovers",
+      "commitPeriodId",
+      "companyId",
+      "correctingItem",
+      "editingItem",
+      "employeeLookup",
+      "employees",
+      "handleCommit",
+      "handleCorrectPayDate",
+      "handleImportComplete",
+      "handlePayrollItemSaved",
+      "importModalOpen",
+      "invalidateAireSource",
+      "isApproved",
+      "isVoided",
+      "linkedAireRecords",
+      "loadPayPeriod",
+      "loadSupplementals",
+      "payDateCorrectionDate",
+      "payDateCorrectionOpen",
+      "payDateCorrectionReason",
+      "payDateCorrectionSubmitting",
+      "payPeriod",
+      "payRunId",
+      "payrollIntakeImportOpen",
+      "payrollItems",
+      "processing",
+      "recordClientApproval",
+      "reloadSavedSourceImport",
+      "replacingItem",
+      "reportablePayrollItems",
+      "setAdditionalEmployeeIds",
+      "setAireRecordsOpen",
+      "setClientApprovalConfirmed",
+      "setClientApprovalEvidence",
+      "setClientApprovalNotes",
+      "setClientApprovalOpen",
+      "setClientApproverId",
+      "setCommitPeriodId",
+      "setCorrectingItem",
+      "setEditingItem",
+      "setEmployees",
+      "setHoursMap",
+      "setImportModalOpen",
+      "setPayDateCorrectionDate",
+      "setPayDateCorrectionOpen",
+      "setPayDateCorrectionReason",
+      "setPayPeriod",
+      "setPayrollIntakeImportOpen",
+      "setPayrollItems",
+      "setReplacingItem",
+      "setTimeTrackingAutoPreview",
+      "setTimeTrackingImportOpen",
+      "timeTrackingAutoPreview",
+      "timeTrackingImportOpen",
+      "totalNet"
+    ]
+  }
+]
