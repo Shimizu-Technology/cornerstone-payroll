@@ -16,13 +16,19 @@ function PayPeriodDetail(props: ComponentProps<typeof PayPeriodDetailPage>) {
 }
 
 function payRunButton(name: string | RegExp): HTMLElement {
-  const button = screen.getByRole('button', { name, hidden: true });
+  const buttons = screen.getAllByRole('button', { name, hidden: true });
+  const button = buttons.find(element => element.closest('details[id^="payroll-"]')) || buttons[0];
   const panel = button.closest('section[hidden][aria-label]');
   const tab = ({ 'Checks and payments workspace': 'checks', 'Reports workspace': 'reports', 'Activity workspace': 'activity', 'Payroll workspace': 'work' } as Record<string, string>)[panel?.getAttribute('aria-label') || ''];
   if (tab) fireEvent.click(screen.getByRole('button', { name: `Tab ${tab}` }));
   const disclosure = button.closest('details');
   if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector('summary')!);
-  return screen.getByRole('button', { name });
+  return button;
+}
+
+async function findPayRunButton(name: string): Promise<HTMLElement> {
+  await screen.findAllByRole('button', { name, hidden: true });
+  return payRunButton(name);
 }
 
 const apiMocks = vi.hoisted(() => ({
@@ -606,7 +612,7 @@ function approvedCommitView(refreshToken = 0, withAire = false) {
 }
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
   vi.clearAllMocks(); render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(await screen.findByRole('dialog', { name: 'Commit and finalize payroll?' })).toBeTruthy();
   expect(apiMocks.commit).not.toHaveBeenCalled();
   fireEvent.click(payRunButton('Keep reviewing'));
@@ -617,7 +623,7 @@ it('closes before the API completes, blocks duplicate writes and leaves a failed
   let rejectCommit!: (error: Error) => void;
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
   fireEvent.click(confirm); fireEvent.click(confirm);
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
@@ -639,11 +645,11 @@ it('drops an open confirmation when navigating to another approved run', async (
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(await screen.findByRole('dialog')).toBeTruthy();
   fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
-  await screen.findByRole('button', { name: 'Commit' });
+  await findPayRunButton('Commit');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 
@@ -655,7 +661,7 @@ it('settles a commit after a same-run sibling refresh and reloads the committed 
   apiMocks.commit.mockReturnValue(new Promise(resolve => { finishCommit = resolve; }));
   apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
@@ -670,7 +676,7 @@ it('preserves a commit rejection after a same-run sibling refresh', async () => 
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
@@ -693,7 +699,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13));
@@ -701,7 +707,7 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
     if (outcome === 'success') finishCommit({ pay_period: initialPayPeriod });
     else rejectCommit(new Error('Previous run failed'));
   });
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   expect(within(await screen.findByRole('dialog')).getByText('#13')).toBeTruthy();
   expect(screen.queryByText('Previous run failed')).toBeNull();
   expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13);
@@ -867,7 +873,7 @@ it('refreshes committed source receipt and history panels once after the canonic
   apiMocks.commit.mockResolvedValue({ pay_period: committed });
   apiMocks.get.mockResolvedValue({ pay_period: committed });
   render(approvedCommitView(0, true));
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
+  fireEvent.click(await findPayRunButton('Commit'));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   await waitFor(() => {
     for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
@@ -1741,7 +1747,7 @@ it('submits initial server roster defaults alongside connected hourly items with
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  await screen.findByRole('button', { name: 'Calculate Payroll' });
+  await findPayRunButton('Calculate Payroll');
   await calculateWithCoverage();
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids.sort()).toEqual([30, 31]);
@@ -1759,7 +1765,7 @@ it('honors a server default roster on an empty regular draft without expanding t
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Calculate Payroll' }));
+  fireEvent.click(await findPayRunButton('Calculate Payroll'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids).toEqual([30]);
 });
@@ -1795,7 +1801,7 @@ it('requires a reason and acknowledgement for a scheduled connected run before i
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  expect((await screen.findByRole('button', { name: 'Review & add hours' })).className).toContain('bg-primary-700');
+  expect((await findPayRunButton('Review & add hours')).className).toContain('bg-primary-700');
   expect((payRunButton('Calculate Payroll') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(payRunButton('Review source coverage'));
   const dialog = await screen.findByRole('dialog');

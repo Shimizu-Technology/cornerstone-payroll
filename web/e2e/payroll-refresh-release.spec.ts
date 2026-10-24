@@ -59,8 +59,8 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await expect(page.getByRole('button', { name: 'Refresh current setup', exact: true })).toBeDisabled();
   }
   async function calculate(page: Page, id: number): Promise<void> {
-    if (await page.getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
-    await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).filter({ visible: true }).click();
+    if (await page.locator('#payroll-hours').getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
+    await page.locator('#payroll-hours').getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(id);
     expect(saved.payroll_items).toHaveLength(1);
@@ -73,9 +73,9 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     expect(saved.payroll_items[0].employee_id).not.toBe(fixture.unselected_employee_id);
   }
   async function finalize(page: Page, id: number, loanId: number): Promise<void> {
-    await page.getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
+    await page.locator('#payroll-results').getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('approved');
-    await page.getByRole('button', { name: 'Commit', exact: true }).filter({ visible: true }).click();
+    await page.locator('#payroll-commit').getByRole('button', { name: 'Commit', exact: true }).filter({ visible: true }).click();
     const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?', exact: true });
     await expect(commitDialog).toBeVisible();
     await expect(commitDialog.getByText('Synthetic Payroll Refresh QA', { exact: true })).toBeVisible();
@@ -119,7 +119,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
       }
       await expect(page.getByText(/Clear the standalone one-time deduction/)).toHaveCount(0);
       const calculation = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/pay_periods/${scenario.period_id}/run_payroll`), { timeout: 60_000 });
-      await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
+      await page.locator('#payroll-hours').getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
       const calculationResponse = await calculation;
       expect(calculationResponse.ok(), await calculationResponse.text()).toBeTruthy();
       expect((await calculationResponse.json()).results.errors).toHaveLength(0);
@@ -129,11 +129,11 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
       expect(Number(saved.payroll_items[0].loan_payment)).toBe(phone ? 40 : 340);
       expect(Number(saved.payroll_items[0].net_pay)).toBe(phone ? 1353.15 : 1053.15);
       const approval = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/pay_periods/${scenario.period_id}/approve`), { timeout: 60_000 });
-      await page.getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
+      await page.locator('#payroll-results').getByRole('button', { name: 'Approve', exact: true }).filter({ visible: true }).click();
       const approvalResponse = await approval;
       expect(approvalResponse.ok(), await approvalResponse.text()).toBeTruthy();
       await expect.poll(async () => (await period(scenario.period_id)).status, { timeout: 30_000 }).toBe('approved');
-      await page.getByRole('button', { name: 'Commit', exact: true }).filter({ visible: true }).click();
+      await page.locator('#payroll-commit').getByRole('button', { name: 'Commit', exact: true }).filter({ visible: true }).click();
       const commitment = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/pay_periods/${scenario.period_id}/commit`), { timeout: 60_000 });
       await page.getByRole('dialog', { name: 'Commit and finalize payroll?', exact: true }).getByRole('button', { name: 'Confirm commit', exact: true }).click();
       const commitResponse = await commitment;
@@ -223,7 +223,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await expect(page).not.toHaveURL(new RegExp(`/pay-runs/${fixture.multirate.period_id}/`));
     const id = Number(page.url().match(/\/pay-runs\/(\d+)\//)![1]);
     await chooseLoan(page, 'QA Multi Rate Loan');
-    await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
+    await page.locator('#payroll-hours').getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(id);
     expect(saved.payroll_items).toHaveLength(1);
@@ -232,7 +232,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     expect(Number(saved.payroll_items[0].hours_worked)).toBe(80);
     expect(Number(saved.payroll_items[0].overtime_hours)).toBe(0);
     await openPayrollActions(page);
-    await page.getByRole('button', { name: 'Recalculate', exact: true }).filter({ visible: true }).click();
+    await page.locator('#payroll-hours').getByRole('button', { name: 'Recalculate', exact: true }).filter({ visible: true }).click();
     await expect.poll(async () => Number((await period(id)).payroll_items[0].gross_pay), { timeout: 30_000 }).toBe(1280);
   });
 
@@ -244,7 +244,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
     await choice.selectOption('default');
     await openPayrollActions(page);
     await expect(page.getByRole('button', { name: 'Refresh current setup', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
+    await page.locator('#payroll-hours').getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(fixture.unavailable.period_id)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(fixture.unavailable.period_id);
     expect(saved.payroll_items).toHaveLength(1);
