@@ -24,8 +24,9 @@ class PayrollEmployerContributions
         if PayrollRetirementTotals.built_in_employer_match_deduction?(item, row)
           identity = item.calculation_context_snapshot.to_h["built_in_employer_match_mirrors"].to_h
           field = PayrollRetirementTotals::BUILT_IN_EMPLOYER_MATCHES.fetch(row.label).first.to_s
-          unless (identity["version"] == 1 && identity.to_h.fetch("sources", {})[field] == row.deduction_type_id) ||
-              PayrollLegacyEmployerComponents.built_in_mirror?(item, row, field)
+          unless row.deduction_type&.company_id == item.company_id &&
+              ((identity["version"] == 1 && identity.to_h.fetch("sources", {})[field] == row.deduction_type_id) ||
+                PayrollLegacyEmployerComponents.built_in_mirror?(item, row, field))
             raise PayrollComponentMirrors::AmbiguousHistoryError, "Saved built-in employer match identity is ambiguous; arrange a reviewed component reconciliation before posting or issuing a correction"
           end
           next

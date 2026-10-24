@@ -46,7 +46,7 @@ class PayrollComponentMirrors
           ambiguous!
         end
         candidates.select! { |row| row.deduction_type_id == identity["deduction_type_id"].to_i }
-        ambiguous! unless candidates.one?
+        ambiguous! unless candidates.one? && candidates.first.deduction_type&.company_id == item.company_id
       else
         candidates.reject! { |row| independent.include?(row.deduction_type_id) }
         next if candidates.empty?
@@ -70,6 +70,7 @@ class PayrollComponentMirrors
   private_class_method :matching?
 
   def self.historical_identity?(item, entry, deduction)
+    return false unless deduction.deduction_type&.company_id == item.company_id
     return true if !deduction.employer_contribution? && deduction.deduction_type&.name.to_s.match?(/\APayroll Field(?:\s|:)/)
 
     # An old field-assignment snapshot proves the field, not which employer

@@ -118,4 +118,50 @@ RSpec.describe "Reviewed pre-deploy employer postings" do
       authority: "Unknown employer source", amount: 45, metadata: {})
     expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::MissingHistoricalContextError, /retained legacy posting rules/)
   end
+
+  [ false, true ].each do |legacy|
+    it "holds a foreign-company field mirror, legacy=#{legacy}" do
+      definition = create(:payroll_field_definition, company: company, name: "Owned employer source", kind: "employer_contribution",
+        tax_treatment: "employer_contribution", category: "insurance", amount_type: "percentage", default_percentage: 5)
+      employee.employee_payroll_fields.create!(payroll_field_definition: definition)
+      item = original!(post_liabilities: false)
+      row = item.payroll_item_deductions.sole
+      foreign = DeductionType.create!(company: create(:company), name: row.deduction_type.name, category: row.category,
+        sub_category: "insurance", reporting_group: row.reporting_group)
+      row.update!(deduction_type: foreign)
+      field = item.payroll_item_field_entries.sole
+      if legacy
+        foreign.update!(name: field.label)
+        field.update_columns(metadata: field.metadata.except("deduction_mirror"))
+        item.update_columns(calculation_context_snapshot: item.calculation_context_snapshot.except("built_in_employer_match_mirrors"))
+        old_posting!(item.reload, field_category: "insurance")
+      else
+        PayrollComponentMirrors.record!(field, row)
+        field.save!
+      end
+      frozen = freeze_history(item.reload)
+      expect { PayrollEmployerContributions.total(item) }.to raise_error(PayrollComponentMirrors::AmbiguousHistoryError, /mirror identity.*review/)
+      expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::MissingHistoricalContextError, /mirror identity.*review/)
+      expect(period.supplemental_pay_periods).to be_empty
+      expect(freeze_history(item.reload)).to eq(frozen)
+    end
+  end
+
+  [ false, true ].each do |legacy|
+    it "holds an impossible foreign-company built-in match mirror, legacy=#{legacy}" do
+      item = original!(post_liabilities: false, track_ytd: false)
+      type = DeductionType.create!(company: create(:company), name: "401(k) Employer Match", category: "employer_contribution",
+        sub_category: "retirement", reporting_group: "401k_pre_tax")
+      item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: type.category, amount: 45, reporting_group: type.reporting_group)
+      context = item.calculation_context_snapshot.deep_dup
+      if legacy
+        context.delete("built_in_employer_match_mirrors")
+      else
+        context["built_in_employer_match_mirrors"] = { "version" => 1, "sources" => { "employer_retirement_match" => type.id } }
+      end
+      item.update_columns(employer_retirement_match: 45, calculation_context_snapshot: context)
+      old_posting!(item.reload) if legacy
+      expect { PayrollEmployerContributions.total(item) }.to raise_error(PayrollComponentMirrors::AmbiguousHistoryError, /built-in.*review/)
+    end
+  end
 end
