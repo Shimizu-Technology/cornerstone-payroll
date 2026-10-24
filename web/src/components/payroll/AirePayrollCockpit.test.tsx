@@ -294,7 +294,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('AirePayrollCockpit', () => {
   it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
@@ -1613,6 +1613,9 @@ it('keeps source failures visible outside a collapsed verified timecard disclosu
 });
 
 it('allows a manual Lock before nominal cutoff and explains the as-of-now freeze', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-18T16:00:00+10:00'));
+  expect(Date.now()).toBeLessThan(new Date(period.cutoff_at).getTime());
   const data = fixtures();
   data.overview.payroll_period = { ...period, lock_mode: 'manual', cutoff_state: 'manual' };
   apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
