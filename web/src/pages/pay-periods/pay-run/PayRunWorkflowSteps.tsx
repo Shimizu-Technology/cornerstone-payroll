@@ -48,8 +48,8 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
       {hasFeedback && state.current !== 'hours' && <div id="payroll-feedback" tabIndex={-1}><PayRunFeedback {...sections.feedback} /></div>}
       {sections.results.payrollItems.length === 0 && <PayRunStepAction {...sections.processing} step="results" />}
       <PayRunEmployeeResults {...sections.results} action={<PayRunStepAction {...sections.processing} step="results" />} />
-      <details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Prior-period comparison</summary><div className="pt-3"><PayRunComparison {...sections.comparison} /></div></details>
-      <details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Employer taxes and DRT deposit</summary><div className="pt-3"><PayRunEmployerTaxes {...sections.employerTaxes} /></div></details>
+      {payPeriod.status !== 'draft' && <><details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Prior-period comparison</summary><div className="pt-3"><PayRunComparison {...sections.comparison} /></div></details>
+      <details className="rounded-lg border border-neutral-200 p-3"><summary className="cursor-pointer text-sm font-semibold text-neutral-700">Employer taxes and DRT deposit</summary><div className="pt-3"><PayRunEmployerTaxes {...sections.employerTaxes} /></div></details></>}
     </Step>
     <Step id="payroll-commit" title="Approve & commit" number={3} current={state.current === 'commit'} summary={committedSummary} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
       {!state.committed && <PayRunStepAction {...sections.processing} step="commit" />}
