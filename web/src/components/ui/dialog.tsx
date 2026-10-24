@@ -137,7 +137,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
     return () => setTitleId((current) => current === resolvedId ? generatedTitleId : current);
   }, [generatedTitleId]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!active || typeof document === 'undefined') return undefined;
 
     const portal = portalRef.current;
