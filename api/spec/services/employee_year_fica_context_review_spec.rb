@@ -136,13 +136,13 @@ RSpec.describe "PR376 independent review edges" do
       .to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /already exceeds/)
   end
 
-  it "tells an operator with a pre-release approved run to unapprove and recalculate" do
+  it "tells an operator with a pre-release approved run to roll back approval, recalculate, review and approve" do
     pending = period("2024-02-02", status: "calculated")
     item = calc(pending, 75)
     service = PayPeriodLifecycleService.new(pay_period: pending, actor: actor)
     service.approve!
     item.update_columns(tax_rule_snapshot: item.tax_rule_snapshot.except("annual_fica_context"))
-    expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /unapprove.*recalculate/)
+    expect { service.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Roll Back Approval.*recalculate.*review and approve/)
     expect(pending.reload.status).to eq("approved")
   end
 
