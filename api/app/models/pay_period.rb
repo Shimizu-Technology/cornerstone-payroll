@@ -47,6 +47,8 @@ class PayPeriod < ApplicationRecord
            inverse_of: :promotion_source_pay_period,
            dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
+  has_one :late_hours_run, class_name: "TimeTrackingLateHoursRun", foreign_key: :adjustment_pay_period_id, dependent: :restrict_with_error
+  has_many :origin_late_hours_runs, class_name: "TimeTrackingLateHoursRun", foreign_key: :origin_pay_period_id, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
@@ -130,7 +132,16 @@ class PayPeriod < ApplicationRecord
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
+  validate :late_hours_import_complete
   validate :verified_tax_year_for_finalization
+
+  def late_hours_import_complete
+    return unless will_save_change_to_status? && status.in?(%w[calculated approved committed])
+    run = TimeTrackingLateHoursRun.find_by(adjustment_pay_period_id: id) if persisted? && run_purpose == "adjustment"
+    return unless run && run.applied_at.blank?
+
+    errors.add(:base, "Finish importing the reserved late hours before calculating or finalizing this adjustment")
+  end
 
   def verified_tax_year_for_finalization
     return unless persisted? && will_save_change_to_status? && %w[approved committed].include?(status)
