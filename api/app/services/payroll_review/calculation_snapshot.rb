@@ -36,13 +36,17 @@ module PayrollReview
     attr_reader :pay_period
 
     def payroll_item_snapshots
-      pay_period.payroll_items.includes(
+      items = pay_period.payroll_items.includes(
         :employee,
         :payroll_item_deductions,
         :payroll_item_field_entries,
         :time_tracking_entry_allocations
-      ).order(:employee_id, :id).map do |item|
+      ).order(:employee_id, :id).to_a
+      contexts = EmployeeYearFicaContext.batch(company: pay_period.company, employees: items.map(&:employee),
+        year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
+      items.map do |item|
         stable_attributes(item).merge(
+          "annual_fica_context" => contexts.fetch(item.employee_id).snapshot,
           "employee" => item.employee.attributes.slice("id", "first_name", "last_name"),
           "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row) },
           "payroll_item_field_entries" => item.payroll_item_field_entries.sort_by(&:id).map { |row| stable_attributes(row) },

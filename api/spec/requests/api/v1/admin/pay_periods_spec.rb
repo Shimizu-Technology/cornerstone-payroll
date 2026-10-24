@@ -1766,8 +1766,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         gross_pay: 150.00,
         net_pay: 120.00,
         withholding_tax: 10.00,
-        social_security_tax: 9.30,
-        medicare_tax: 2.18
+        social_security_tax: 9.30, employer_social_security_tax: 9.30,
+        medicare_tax: 2.18, employer_medicare_tax: 2.18, additional_medicare_tax: 0,
+        social_security_taxable_wages: 150, social_security_taxable_tips: 0,
+        medicare_taxable_wages: 150, additional_medicare_taxable_wages: 0
       )
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
@@ -1896,6 +1898,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       company.update!(client_payroll_approval_required: true)
       payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
       pay_period.update!(status: "calculated", calculated_at: Time.current)
+      payroll_item.update!(tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(
+        employee: employee, year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot })
       review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
@@ -1986,7 +1990,9 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         withholding_tax: 100.00,
         social_security_tax: 74.40,
         medicare_tax: 17.40,
-        net_pay: 1008.20
+        net_pay: 1008.20,
+        tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+          year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot }
       )
     end
 
@@ -2219,6 +2225,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         pay_period: prior_period,
         employee: employee,
         check_number: "1000")
+      # This fixture is prepared after its prior committed check exists.
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      item.update!(tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+        year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot })
       second_employee = create(:employee, company: company, department: department)
       create(:payroll_item,
         pay_period: pay_period,

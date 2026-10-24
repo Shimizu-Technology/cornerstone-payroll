@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_24_093000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2787,6 +2787,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_093000) do
     t.index [ "payroll_item_id" ], name: "index_payroll_item_earnings_on_payroll_item_id"
   end
 
+  create_table "payroll_item_fica_basis_proofs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.jsonb "evidence", null: false
+    t.bigint "payroll_item_id", null: false
+    t.string "plan_digest", null: false
+    t.string "review_reference", null: false
+    t.integer "tax_year", null: false
+    t.index ["company_id"], name: "index_payroll_item_fica_basis_proofs_on_company_id"
+    t.index ["created_by_id"], name: "index_payroll_item_fica_basis_proofs_on_created_by_id"
+    t.index ["payroll_item_id"], name: "index_payroll_item_fica_basis_proofs_on_payroll_item_id", unique: true
+  end
+
   create_table "payroll_item_field_entries", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.decimal "amount", precision: 10, scale: 2, default: "0.0", null: false
@@ -4236,6 +4250,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_093000) do
   add_foreign_key "payroll_item_deductions", "employee_loans"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
+  add_foreign_key "payroll_item_fica_basis_proofs", "companies", on_delete: :restrict
+  add_foreign_key "payroll_item_fica_basis_proofs", "payroll_items", on_delete: :restrict
+  add_foreign_key "payroll_item_fica_basis_proofs", "users", column: "created_by_id", on_delete: :restrict
   add_foreign_key "payroll_item_field_entries", "payroll_field_definitions"
   add_foreign_key "payroll_item_field_entries", "payroll_items"
   add_foreign_key "payroll_item_legacy_dispositions", "companies", on_delete: :restrict
