@@ -311,13 +311,11 @@ class PayrollLiabilityPostingService
   end
 
   def itemized_liability_rows(posting, item, now)
-    payroll_field_labels = item.payroll_item_field_entries.map(&:label).to_set
-
     item.payroll_item_deductions.filter_map do |deduction|
       type = deduction.deduction_type
       sub_category = type&.sub_category
       next unless sub_category.in?(%w[retirement garnishment child_support benefit])
-      next if payroll_field_labels.include?(deduction.label)
+      next if PayrollComponentMirrors.field_for(item, deduction)
       next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
       next if deduction.amount.to_d.zero?
 

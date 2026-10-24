@@ -85,6 +85,7 @@ class IssueCorrectivePaycheckService
     qualified_overtime_compensation
   ].freeze
   NUMERIC_INPUT_FIELDS = (CORRECTABLE_INPUT_FIELDS - %i[tip_pool custom_earnings custom_deductions custom_columns_data]).freeze
+  ZERO_BASELINE_INPUT_FIELDS = %i[service_charge_wages qualified_overtime_compensation].freeze
   SINGLE_RATE_HOUR_FIELDS = { "regular_hours" => :hours_worked, "overtime_hours" => :overtime_hours,
     "holiday_hours" => :holiday_hours, "pto_hours" => :pto_hours }.freeze
 
@@ -93,6 +94,10 @@ class IssueCorrectivePaycheckService
   # the YTD/W-2/report aggregates land on the corrected totals.
   DELTA_OUTPUT_FIELDS = %i[
     gross_pay
+    bonus
+    non_taxable_pay
+    insurance_payment
+    loan_payment
     withholding_tax
     social_security_tax
     medicare_tax
@@ -170,6 +175,7 @@ class IssueCorrectivePaycheckService
   def preview
     validate_for_preview!
     assert_source_accounting_negative! if @source_accounting_target
+    validate_component_ledger!
     {
       original:  snapshot(original_item),
       recorded: recorded_snapshot,
@@ -214,7 +220,9 @@ class IssueCorrectivePaycheckService
       end
       @original_item = refreshed
       @original_pay_period = locked_original
-      original_item.payroll_item_earnings.order(:id).lock("FOR UPDATE").load
+      %i[payroll_item_earnings payroll_item_deductions payroll_item_field_entries].each do |association|
+        original_item.public_send(association).order(:id).lock("FOR UPDATE").load
+      end
       # A supplemental void takes its period lock before reversing YTD. Lock
       # those periods before reading the effective ledger or acquiring YTD.
       prior_ids = original_item.correction_payroll_items.distinct.pluck(:pay_period_id)
@@ -230,6 +238,7 @@ class IssueCorrectivePaycheckService
 
       assert_correctable!(locked_original)
       validate_for_issue!
+      validate_component_ledger!
       validate_review_digest!
       raise InvalidStateError, "The corrected target is already recorded; inputs do not change the remaining financial balance" if zero_change?
 
@@ -273,6 +282,9 @@ class IssueCorrectivePaycheckService
       raise UnsupportedEmployeeError, "Categorized or multi-rate payroll corrections require a category-level review; this corrective paycheck cannot safely recompute them"
     end
     verified_single_rate_row if original_item.wage_rate_hours.present?
+    if @corrected_inputs.key?(:custom_columns_data) && @corrected_inputs[:custom_columns_data] != effective_inputs[:custom_columns_data]
+      raise UnsupportedEmployeeError, "Custom column changes require a component-level review before issuing a corrective paycheck"
+    end
 
     unless PayrollCalculationContext.valid_for_correction?(original_item.calculation_context_snapshot)
       raise MissingHistoricalContextError,
@@ -507,7 +519,7 @@ class IssueCorrectivePaycheckService
           unless NUMERIC_INPUT_FIELDS.include?(field) && operation["value"].is_a?(String)
             raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
           end
-          raise MissingHistoricalContextError, "A prior correction's input baseline is no longer available; review its voided correction history" if inputs[field].nil?
+          raise MissingHistoricalContextError, "A prior correction's input baseline is no longer available; review its voided correction history" if inputs[field].nil? && !ZERO_BASELINE_INPUT_FIELDS.include?(field)
           inputs[field].to_d + BigDecimal(operation.fetch("value"))
         when "set"
           operation.fetch("value").deep_dup
@@ -536,7 +548,7 @@ class IssueCorrectivePaycheckService
       after = corrected_item.public_send(field)
       next if before == after
 
-      adjustments[field.to_s] = if before.is_a?(Numeric) && after.is_a?(Numeric)
+      adjustments[field.to_s] = if (before.is_a?(Numeric) || (before.nil? && ZERO_BASELINE_INPUT_FIELDS.include?(field))) && after.is_a?(Numeric)
         { "mode" => "delta", "value" => (after.to_d - before.to_d).to_s("F") }
       else
         { "mode" => "set", "value" => after.as_json }
@@ -567,6 +579,7 @@ class IssueCorrectivePaycheckService
       annual_fica_context: annual_fica_context.snapshot,
       original_period: @original_pay_period.attributes.slice(*period_fields),
       original_item: original_item.attributes.slice(*item_fields),
+      component_deltas: component_ledger.snapshot,
       original_earnings: original_item.payroll_item_earnings.order(:id).map { |earning| earning.attributes.slice("id", "category", "label", "rate", "hours", "amount", "updated_at") },
       active_correctives: active_correctives.map do |item|
         { item: item.attributes.slice(*item_fields), period: item.pay_period.attributes.slice(*period_fields) }
@@ -808,7 +821,8 @@ class IssueCorrectivePaycheckService
 
   # No meaningful change → nothing to do.
   def zero_change?
-    delta_hash.slice(*(DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS)).values.all? { |v| v.abs < 0.005 }
+    delta_hash.slice(*(DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS)).values.all? { |v| v.abs < 0.005 } &&
+      component_ledger.snapshot.values.all?(&:empty?)
   end
 
   # ---------------------------------------------------------------------
@@ -837,7 +851,17 @@ class IssueCorrectivePaycheckService
     @notes.present? ? "#{base}\n#{@notes}" : base
   end
 
-  def create_corrective_item!(supplemental:, original_item:)
+  def component_ledger
+    CorrectivePayrollComponents.new(original: original_item, corrected: corrected_item, active: active_correctives)
+  end
+
+  def validate_component_ledger!
+    supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
+      corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
+    create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
+  end
+
+  def create_corrective_item!(supplemental:, original_item:, persist: true)
     deltas = delta_hash
 
     item = supplemental.payroll_items.build(
@@ -859,7 +883,7 @@ class IssueCorrectivePaycheckService
       timekeeping_source: "correction_reference",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
       calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
-        "corrective_paycheck" => { "version" => 1, "input_adjustments" => input_adjustments }.tap do |context|
+        "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments }.tap do |context|
           context["source_accounting_target"] = @source_accounting_target.resolve.fetch(:evidence) if @source_accounting_target
         end
       ),
@@ -875,6 +899,8 @@ class IssueCorrectivePaycheckService
       # pipeline (YTD update / check number assignment) treats them as
       # the supplemental's authoritative values without a recalculate.
       gross_pay:                       deltas[:gross_pay],
+      bonus:                           deltas[:bonus],
+      non_taxable_pay:                 deltas[:non_taxable_pay],
       withholding_tax:                 deltas[:withholding_tax],
       social_security_tax:             deltas[:social_security_tax],
       medicare_tax:                    deltas[:medicare_tax],
@@ -901,13 +927,11 @@ class IssueCorrectivePaycheckService
       tax_rule_snapshot:               corrected_item.tax_rule_snapshot,
       retirement_rule_snapshot:        corrected_item.retirement_rule_snapshot,
 
-      # No deductions on the corrective row — the original period already
-      # captured the period's deductions; the corrective covers only the
-      # missing wages + their associated taxes.
-      loan_payment:                    0.0,
-      insurance_payment:               0.0
+      loan_payment:                    deltas[:loan_payment],
+      insurance_payment:               deltas[:insurance_payment]
     )
-    item.save!
+    component_ledger.apply!(item)
+    item.save! if persist
     item
   end
 

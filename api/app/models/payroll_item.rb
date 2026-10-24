@@ -312,6 +312,16 @@ class PayrollItem < ApplicationRecord
     nil
   end
 
+  # Only a linked, same-owner supplemental written by the correction service
+  # may carry signed JSON/field/earning components. Ordinary payroll retains
+  # its nonnegative input rules.
+  def signed_correction_components?
+    correction_entry? && calculation_context_snapshot.dig("corrective_paycheck", "component_ledger_version") == 1 &&
+      pay_period&.supplemental? && pay_period.run_purpose == "correction" &&
+      correction_for_payroll_item&.company_id == company_id && correction_for_payroll_item.employee_id == employee_id &&
+      pay_period.company_id == company_id && pay_period.corrects_pay_period_id == correction_for_payroll_item.pay_period_id
+  end
+
   def total_hours
     hours_worked.to_f + overtime_hours.to_f + holiday_hours.to_f + pto_hours.to_f
   end
@@ -397,7 +407,7 @@ class PayrollItem < ApplicationRecord
 
     employee_defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
     defaults = pay_period&.recurring_items_enabled? ? employee_defaults : []
-    current = self.class.normalize_payroll_adjustments(payroll_adjustments)
+    current = self.class.normalize_payroll_adjustments(payroll_adjustments, signed: signed_correction_components?)
     return unless new_record? || current.empty? || payroll_adjustments_default_snapshot? || legacy_adjustments_subset_of_defaults?(current, employee_defaults)
 
     self.payroll_adjustments = defaults
@@ -530,12 +540,12 @@ class PayrollItem < ApplicationRecord
     payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
   end
 
-  def self.normalize_custom_deduction_entries(entries)
+  def self.normalize_custom_deduction_entries(entries, signed: false)
     Array(entries).filter_map do |entry|
       data = normalize_json_entry(entry)
       label = data["label"].to_s.strip
       amount = BigDecimal(data["amount"].to_s)
-      next if label.blank? || amount <= 0 || !amount.finite?
+      next if label.blank? || !amount.finite? || (signed ? amount.zero? : amount <= 0)
 
       { "label" => label, "amount" => amount.round(2).to_f }
     rescue ArgumentError, FloatDomainError
@@ -555,6 +565,9 @@ class PayrollItem < ApplicationRecord
   end
 
   def overtime_pay
+    if signed_correction_components?
+      return payroll_item_earnings.select { |earning| earning.category == "overtime" }.sum { |earning| earning.amount.to_d }
+    end
     return salary_overtime_pay if salary?
     return 0 unless hourly?
 
@@ -745,8 +758,8 @@ class PayrollItem < ApplicationRecord
     self.tips_paid_out = round_currency_value(tips_paid_out)
     normalize_reported_tips_for_paid_out! unless correction_entry?
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
-    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
-    self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments)
+    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions, signed: signed_correction_components?)
+    self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments, signed: signed_correction_components?)
 
     return unless custom_columns_data.is_a?(Hash)
 
@@ -801,7 +814,7 @@ class PayrollItem < ApplicationRecord
     end
 
     custom_deductions.each do |deduction|
-      unless deduction.is_a?(Hash) && deduction["label"].present? && deduction["amount"].to_f.positive?
+      unless deduction.is_a?(Hash) && deduction["label"].present? && (signed_correction_components? ? deduction["amount"].to_d.nonzero? : deduction["amount"].to_d.positive?)
         errors.add(:custom_deductions, "must include a label and positive amount")
       end
     end
@@ -816,7 +829,7 @@ class PayrollItem < ApplicationRecord
     end
 
     payroll_adjustments.each do |adjustment|
-      unless adjustment.is_a?(Hash) && adjustment["label"].present? && adjustment["amount"].to_f.positive? && PayrollAdjustable::ADJUSTMENT_TREATMENTS.include?(adjustment["treatment"].to_s)
+      unless adjustment.is_a?(Hash) && adjustment["label"].present? && (signed_correction_components? ? adjustment["amount"].to_d.nonzero? : adjustment["amount"].to_d.positive?) && PayrollAdjustable::ADJUSTMENT_TREATMENTS.include?(adjustment["treatment"].to_s)
         errors.add(:payroll_adjustments, "must include a label, positive amount, and valid tax treatment")
       end
     end

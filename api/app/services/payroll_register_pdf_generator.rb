@@ -634,14 +634,14 @@ class PayrollRegisterPdfGenerator
 
   def custom_earnings_column?
     summary = report[:summary] || {}
-    summary[:total_custom_earnings].to_f.positive? ||
-      payroll_workers.any? { |worker| worker[:custom_earnings_total].to_f.positive? }
+    summary[:total_custom_earnings].to_f.nonzero? ||
+      payroll_workers.any? { |worker| worker[:custom_earnings_total].to_f.nonzero? }
   end
 
   def custom_deductions_column?
     summary = report[:summary] || {}
-    summary[:total_custom_deductions].to_f.positive? ||
-      payroll_workers.any? { |worker| worker[:custom_deductions_total].to_f.positive? }
+    summary[:total_custom_deductions].to_f.nonzero? ||
+      payroll_workers.any? { |worker| worker[:custom_deductions_total].to_f.nonzero? }
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────
