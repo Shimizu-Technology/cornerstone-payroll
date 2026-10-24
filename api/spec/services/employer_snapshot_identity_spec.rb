@@ -153,6 +153,29 @@ RSpec.describe 'R3 independent saved employer identity conservation' do
       end
     end
 
+    %w[benefit insurance].product([ false, true ]).each do |category, capped|
+      it "keeps owner-scoped same-name employer #{category} fields distinct capped=#{capped}" do
+        add_deduction(category: "employer_contribution", sub_category: category)
+        [ nil, employee ].each do |owner|
+          field = create(:payroll_field_definition, company: company, owner_employee: owner, name: "Scoped employer source",
+            kind: "employer_contribution", tax_treatment: "employer_contribution", category: category,
+            amount_type: "percentage", default_percentage: 5)
+          employee.employee_payroll_fields.create!(payroll_field_definition: field)
+        end
+        original = original!(custom_deductions: capped ? [ { "label" => "Cap", "amount" => 1000 } ] : [])
+        expect(original.payroll_item_deductions.map(&:deduction_type_id).uniq.size).to eq(3)
+        expect(PayrollEmployerContributions.sources(original).values).to contain_exactly(45.to_d, 45.to_d, 45.to_d)
+        first = issue(hours_worked: 65)
+        second = issue(hours_worked: 55)
+        expect(PayrollEmployerContributions.sources(first).values).to contain_exactly(3.75.to_d, 3.75.to_d, 3.75.to_d)
+        expect(PayrollEmployerContributions.sources(second).values).to contain_exactly(-7.5.to_d, -7.5.to_d, -7.5.to_d)
+        [ original, first, second ].each do |item|
+          expect { PayrollLiabilityPostingService.verify_employer_contributions!(item) }.not_to raise_error
+        end
+        expect([ original, first, second ].sum { |item| employer_postings(item) }).to eq(123.75)
+      end
+    end
+
     it "holds an unknown same-value built-in match candidate instead of certifying its omission" do
       item = original!(post_liabilities: false, track_ytd: false)
       type = DeductionType.create!(company: company, name: "401(k) Employer Match", category: "employer_contribution",

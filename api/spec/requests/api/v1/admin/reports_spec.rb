@@ -2458,7 +2458,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         category: "insurance"
       )
       [ 45.0, 60.0 ].each_with_index do |amount, index|
-        item.payroll_item_field_entries.create!(
+        field_entry = item.payroll_item_field_entries.create!(
           payroll_field_definition: index.zero? ? field : nil,
           label: "Employer Health",
           kind: "employer_contribution",
@@ -2475,12 +2475,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           category: "employer_contribution",
           sub_category: "insurance"
         )
-        item.payroll_item_deductions.create!(
+        deduction = item.payroll_item_deductions.create!(
           deduction_type: deduction_type,
           label: "Employer Health",
           category: "employer_contribution",
           amount: amount
         )
+        PayrollComponentMirrors.record!(field_entry, deduction)
+        field_entry.save!
       end
 
       get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }

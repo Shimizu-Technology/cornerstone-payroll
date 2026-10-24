@@ -60,6 +60,9 @@ class PayrollComponentMirrors
   end
 
   def self.matching?(entry, deduction)
+    identified = entry.metadata.to_h.dig(IDENTITY_KEY, "deduction_type_id") == deduction.deduction_type_id
+    return false unless deduction.employer_contribution? || identified || deduction.deduction_type&.name.to_s.match?(/\APayroll Field(?:\s|:)/)
+
     entry.tax_treatment == TREATMENTS[deduction.category] && entry.label == deduction.label &&
       (!deduction.employer_contribution? || entry.amount.to_d.round(2) == deduction.amount.to_d.round(2)) &&
       PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
