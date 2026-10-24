@@ -39,14 +39,21 @@ RSpec.describe TimeTracking::LateHoursRunService do
     allow(TimeTracking::Client).to receive(:for_payroll_actor).and_return(client)
     allow(client).to receive(:payroll_cockpit_late_hours).and_return(review)
     allow(client).to receive(:create_payroll_late_hours) do |**request|
-      payload = build_aire_batch_payload(batch_id: "AIRE-LATE-TEST")
-      payload.merge!("purpose" => "supplemental", "target_external_pay_period_id" => request.fetch(:target_external_pay_period_id), "exclusions" => [])
-      payload["employees"].first.merge!("source_user_uuid" => uuid, "adjustments" => [ line ], "total_hours" => 4, "regular_hours" => 4)
-      payload["summary"].merge!("total_hours" => 4, "regular_hours" => 4, "exclusion_count" => 0, "current_count" => 0, "carryover_count" => 1)
-      payload["issues"]["pending_approval_count"] = 0
-      payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
-      { "payroll_batch" => payload }
+      claim_response(request.fetch(:target_external_pay_period_id))
     end
+    allow(client).to receive(:recover_payroll_late_hours) do |**request|
+      claim_response(request.fetch(:target_external_pay_period_id)).merge("status" => "claimed")
+    end
+  end
+
+  def claim_response(target)
+    payload = build_aire_batch_payload(batch_id: "AIRE-LATE-TEST")
+    payload.merge!("purpose" => "supplemental", "target_external_pay_period_id" => target, "exclusions" => [])
+    payload["employees"].first.merge!("source_user_uuid" => uuid, "adjustments" => [ line ], "total_hours" => 4, "regular_hours" => 4)
+    payload["summary"].merge!("total_hours" => 4, "regular_hours" => 4, "exclusion_count" => 0, "current_count" => 0, "carryover_count" => 1)
+    payload["issues"]["pending_approval_count"] = 0
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    { "payroll_batch" => payload }
   end
 
   def create_run
@@ -72,25 +79,14 @@ RSpec.describe TimeTracking::LateHoursRunService do
   end
 
   it "resumes an ambiguous network failure using the same command, destination and captured rate" do
-    first_request = nil
-    response = nil
-    original_stub = client.method(:create_payroll_late_hours)
-    # Build the successful response through the existing stub, then simulate an ambiguous timeout.
-    response = original_stub.call(external_pay_period_id: calendar.external_pay_period_id, target_external_pay_period_id: "1")
-    allow(client).to receive(:create_payroll_late_hours) do |**request|
-      first_request ||= request
-      raise TimeTracking::Client::Error, "Connection timed out" if TimeTrackingLateHoursRun.last.last_error.nil?
-      expect(request).to eq(first_request)
-      payload = response.fetch("payroll_batch").deep_dup
-      payload["target_external_pay_period_id"] = request.fetch(:target_external_pay_period_id)
-      payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
-      { "payroll_batch" => payload }
-    end
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Connection timed out")
     expect { create_run }.to raise_error(TimeTracking::Client::Error, /timed out/)
     rate.update!(rate: 40)
     run = create_run
     expect(run.adjustment_pay_period.payroll_items.first.wage_rate_hours.first.fetch("rate")).to eq(25)
     expect(TimeTrackingLateHoursRun.count).to eq(1)
+    expect(client).to have_received(:recover_payroll_late_hours).with(hash_including(source_command_id: command_id,
+      target_external_pay_period_id: run.adjustment_pay_period_id.to_s))
   end
 
   it "refuses hours no longer eligible, including reserved or already routed source cases" do
@@ -176,5 +172,120 @@ RSpec.describe TimeTracking::LateHoursRunService do
     allow(service).to receive(:verify_selection!)
     expect { service.retry!(saved.id) }.to raise_error(described_class::Error, /pay basis changed/)
     expect(saved.adjustment_pay_period.payroll_items).to be_empty
+  end
+
+  # Ported from the independent paired review's payroll_probes_spec.rb.
+  it "retires an authoritative stale rejection and permits the refreshed selection" do
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error.new("Selected source changed", response_status: 409))
+    allow(client).to receive(:recover_payroll_late_hours).and_return("status" => "no_claim")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error, /changed/)
+    saved = TimeTrackingLateHoursRun.sole
+    expect(saved.reload.state).to eq("rejected")
+    expect(saved.resolved_by_id).to eq(actor.id)
+    review["cases"].sole["version"] = 3
+    expect(service.review.fetch("cases").sole["blocked_reason"]).to be_nil
+    expect { service.retry!(saved.id) }.to raise_error(described_class::Error, /closed/)
+    expect(saved.request_payload.fetch("cases").sole["version"]).to eq(2)
+    allow(client).to receive(:create_payroll_late_hours) { |**request| claim_response(request.fetch(:target_external_pay_period_id)) }
+    fresh = service.create!(command_id: SecureRandom.uuid, cases: [ { "id" => case_id, "version" => 3 } ], pay_date: "2026-10-24", expected_version: 5)
+    expect(fresh.applied_at).to be_present
+    expect(fresh.adjustment_pay_period.payroll_items.sole.hours_worked).to eq(4)
+    expect(fresh.adjustment_pay_period_id).not_to eq(saved.adjustment_pay_period_id)
+  end
+
+  it "persists an accepted unusable claim and requires reviewed cancellation before releasing it" do
+    template = client.create_payroll_late_hours(external_pay_period_id: calendar.external_pay_period_id, target_external_pay_period_id: "1")
+    allow(client).to receive(:create_payroll_late_hours) do |**request|
+      payload = template.fetch("payroll_batch").deep_dup
+      payload["target_external_pay_period_id"] = request.fetch(:target_external_pay_period_id)
+      payload["employees"].sole["adjustments"].sole.merge!("regular_hours" => 3, "overtime_hours" => 1)
+      payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+      { "payroll_batch" => payload }
+    end
+    expect { create_run }.to raise_error(described_class::Error, /different hours/)
+    saved = TimeTrackingLateHoursRun.sole
+    expect(saved.batch_payload).not_to be_empty
+    expect(saved.state).to eq("reconciliation_required")
+    expect(saved.adjustment_pay_period.payroll_items).to be_empty
+    expect { service.cancel!(saved.id, reason: "") }.to raise_error(described_class::Error, /reason/)
+    allow(client).to receive(:cancel_payroll_late_hours).and_return("status" => "canceled")
+    service.cancel!(saved.id, reason: "Reviewed changed overtime; cancel this unpaid claim and select the current hours")
+    expect(saved.reload.state).to eq("cancelled")
+    expect(saved.batch_payload).not_to be_empty
+    expect(service.review.fetch("cases").sole["blocked_reason"]).to be_nil
+    expect(AuditLog.where(record_type: "TimeTrackingLateHoursRun", record_id: saved.id)).not_to be_empty
+  end
+
+  it "blocks only conflicting cases while an ambiguous operation waits" do
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Response lost")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error)
+    other = review["cases"].sole.deep_dup.merge("id" => SecureRandom.uuid)
+    other["adjustments"].sole["source_time_entry_id"] = "another-entry"
+    review["cases"] << other
+    available = service.review.fetch("cases").index_by { |row| row.fetch("id") }
+    expect(available.fetch(case_id)["blocked_reason"]).to match(/saved adjustment/)
+    expect(available.fetch(other.fetch("id"))["blocked_reason"]).to be_nil
+  end
+
+  it "recovers a lost response as a second authorized accountant after the creator loses access" do
+    template = client.create_payroll_late_hours(external_pay_period_id: calendar.external_pay_period_id, target_external_pay_period_id: "1")
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Response lost after remote commit")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error)
+    saved = TimeTrackingLateHoursRun.sole
+    actor.update!(role: "accountant")
+    second = create(:user, company: company, organization: company.organization, role: "accountant")
+    create(:company_assignment, user: second, company: company, client_management: true, granted_by: create(:user, company: company, role: "admin"))
+    payload = template.fetch("payroll_batch")
+    payload["target_external_pay_period_id"] = saved.adjustment_pay_period_id.to_s
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    allow(client).to receive(:recover_payroll_late_hours).and_return("status" => "claimed", "payroll_batch" => payload)
+    other_service = described_class.new(pay_period: period, source: source, actor: second)
+    expect(TimeTracking::Client).to receive(:for_payroll_actor).with(source, actor: second).and_return(client)
+    expect(other_service.retry!(saved.id).applied_at).to be_present
+    expect(saved.reload.resolved_by_id).to eq(second.id)
+    expect(TimeTrackingLateHoursRun.count).to eq(1)
+    expect(saved.adjustment_pay_period.payroll_items.sole.hours_worked).to eq(4)
+    expect { service.retry!(saved.id) }.to raise_error(described_class::Error, /Client management/)
+  end
+
+  it "keeps an authoritative rejection ambiguous until the remote fence is confirmed" do
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error.new("Source changed", response_status: 409))
+    allow(client).to receive(:recover_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Recovery unavailable")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error, /changed/)
+    saved = TimeTrackingLateHoursRun.sole
+    expect(saved.state).to eq("ambiguous")
+    expect(saved).not_to be_closed
+    expect(service.review.fetch("cases").sole["blocked_reason"]).to match(/saved adjustment/)
+  end
+
+  it "never releases a claim when remote cancellation refuses or times out" do
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Lost response")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error)
+    saved = TimeTrackingLateHoursRun.sole
+    allow(client).to receive(:cancel_payroll_late_hours).and_raise(TimeTracking::Client::Error.new("Claim has receipt evidence", response_status: 409))
+    expect { service.cancel!(saved.id, reason: "Reviewed unpaid claim for cancellation") }.to raise_error(TimeTracking::Client::Error)
+    expect(saved.reload).not_to be_closed
+    expect(saved.batch_payload).not_to be_empty
+  end
+
+  it "refuses cancellation once exact hours are locally imported" do
+    saved = create_run
+    expect(client).not_to receive(:cancel_payroll_late_hours)
+    expect { service.cancel!(saved.id, reason: "Cancel after hours have been imported") }.to raise_error(described_class::Error, /Only an unapplied/)
+    expect(saved.reload.state).to eq("applied")
+    expect(saved.adjustment_pay_period.payroll_items.sole.hours_worked).to eq(4)
+  end
+
+  it "rechecks the accountant's grant after the remote period lookup before recovery" do
+    allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Lost response")
+    expect { create_run }.to raise_error(TimeTracking::Client::Error)
+    saved = TimeTrackingLateHoursRun.sole
+    allow(client).to receive(:payroll_cockpit_late_hours) do
+      actor.update!(role: "accountant")
+      review
+    end
+    expect(client).not_to receive(:recover_payroll_late_hours)
+    expect { service.retry!(saved.id) }.to raise_error(described_class::Error, /Client management/)
+    expect(saved.reload).not_to be_closed
   end
 end

@@ -3654,17 +3654,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
     t.bigint "created_by_id", null: false
     t.text "last_error"
     t.bigint "origin_pay_period_id", null: false
-    t.jsonb "selection_snapshot", default: [], null: false
     t.jsonb "rate_snapshot", default: [], null: false
     t.jsonb "request_payload", default: {}, null: false
+    t.jsonb "resolution", default: {}, null: false
+    t.datetime "resolved_at"
+    t.bigint "resolved_by_id"
+    t.jsonb "selection_snapshot", default: [], null: false
+    t.string "state", default: "pending", null: false
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
     t.index ["adjustment_pay_period_id"], name: "idx_on_adjustment_pay_period_id_961c392589", unique: true
     t.index ["company_id"], name: "index_time_tracking_late_hours_runs_on_company_id"
     t.index ["created_by_id"], name: "index_time_tracking_late_hours_runs_on_created_by_id"
     t.index ["origin_pay_period_id"], name: "index_time_tracking_late_hours_runs_on_origin_pay_period_id"
+    t.index ["resolved_by_id"], name: "index_time_tracking_late_hours_runs_on_resolved_by_id"
     t.index ["time_tracking_source_id", "command_id"], name: "idx_late_hours_source_command", unique: true
     t.index ["time_tracking_source_id"], name: "index_time_tracking_late_hours_runs_on_time_tracking_source_id"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'ambiguous'::character varying, 'reconciliation_required'::character varying, 'applied'::character varying, 'rejected'::character varying, 'cancelled'::character varying]::text[])", name: "late_hours_recovery_state"
   end
 
   create_table "time_tracking_manual_allocations", force: :cascade do |t|
@@ -4378,6 +4384,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
   add_foreign_key "time_tracking_late_hours_runs", "pay_periods", column: "origin_pay_period_id"
   add_foreign_key "time_tracking_late_hours_runs", "time_tracking_sources"
   add_foreign_key "time_tracking_late_hours_runs", "users", column: "created_by_id"
+  add_foreign_key "time_tracking_late_hours_runs", "users", column: "resolved_by_id"
   add_foreign_key "time_tracking_manual_allocations", "companies"
   add_foreign_key "time_tracking_manual_allocations", "employees"
   add_foreign_key "time_tracking_manual_allocations", "pay_periods"

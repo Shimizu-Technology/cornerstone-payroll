@@ -13,7 +13,8 @@ module TimeTracking
     def review
       validate_source!
       payload = client.payroll_cockpit_late_hours(external_pay_period_id: external_id)
-      payload.merge("cases" => Array(payload["cases"]).map { |row| payroll_case(row) },
+      unresolved = runs.where(applied_at: nil).where.not(state: %w[rejected cancelled]).to_a
+      payload.merge("cases" => Array(payload["cases"]).map { |row| block_conflicting_case(payroll_case(row), unresolved) },
         "runs" => runs.order(:id).map { |run| present(run) },
         "can_pay" => allowed?)
     rescue Client::Error => e
@@ -50,9 +51,42 @@ module TimeTracking
       raise
     end
 
+    def cancel!(id, reason:)
+      authorize!
+      raise Error, "Enter a review reason before canceling this unpaid claim" if reason.to_s.strip.length < 10
+      run = runs.find(id)
+      failure = nil
+      run.with_lock do
+        authorize!
+        return run if run.closed?
+        run.adjustment_pay_period.with_lock do
+          begin
+            validate_unapplied!(run)
+            if run.batch_payload.blank?
+              recover_claim!(run)
+              next if run.closed?
+            end
+            response = client.cancel_payroll_late_hours(**resolution_request(run, reason),
+              expected_batch_id: run.batch_payload.fetch("batch_id"), confirm_unapplied: true)
+            raise Error, "The source did not confirm cancellation. Keep this adjustment reserved and retry" unless response["status"] == "canceled"
+            run.transition!("cancelled", actor: actor, reason: reason, evidence: response)
+            run.update!(last_error: nil)
+          rescue Error, Client::Error, KeyError => e
+            failure = e
+            run.update!(last_error: e.message)
+          end
+        end
+      end
+      raise failure if failure
+      run
+    rescue Error, Client::Error, KeyError => e
+      run&.update!(last_error: e.message)
+      raise
+    end
+
     def present(run)
       { id: run.id, pay_period_id: run.adjustment_pay_period_id, pay_date: run.adjustment_pay_period.pay_date.iso8601,
-        applied: run.applied_at.present?, last_error: run.last_error }
+        applied: run.applied_at.present?, state: run.state, closed: run.closed?, last_error: run.last_error }
     end
 
     private
@@ -131,6 +165,18 @@ module TimeTracking
       value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").strip
     end
 
+    def block_conflicting_case(row, unresolved)
+      entry_ids = Array(row["adjustments"]).pluck("source_time_entry_id").map(&:to_s)
+      conflict = unresolved.detect do |run|
+        run.selection_snapshot.any? do |selected|
+          selected["id"] == row["id"] || Array(selected["adjustments"]).any? { |line| entry_ids.include?(line["source_time_entry_id"].to_s) }
+        end
+      end
+      return row unless conflict
+
+      row.merge("blocked_reason" => "These hours belong to saved adjustment ##{conflict.adjustment_pay_period_id}. Resume or cancel that claim first.")
+    end
+
     def create_intent!(command_id, request)
       payload = review
       raise Error, "The source period changed. Refresh late hours" unless payload["period_version"] == request["expected_version"]
@@ -183,31 +229,96 @@ module TimeTracking
       end
     end
 
+    def validate_unapplied!(run)
+      unless run.applied_at.nil? && run.adjustment_pay_period.draft? &&
+          run.adjustment_pay_period.payroll_items.empty? && run.adjustment_pay_period.time_tracking_imports.empty?
+        raise Error, "Only an unapplied empty adjustment can cancel its source claim. Use the normal payroll correction flow after import"
+      end
+    end
+
+    def resolution_request(run, reason)
+      version = client.payroll_cockpit_late_hours(external_pay_period_id: external_id).fetch("period_version")
+      authorize!
+      { external_pay_period_id: external_id, source_command_id: run.command_id,
+        command_id: SecureRandom.uuid, expected_version: version,
+        reason: reason, target_external_pay_period_id: run.adjustment_pay_period_id.to_s }
+    end
+
+    def recover_claim!(run)
+      response = client.recover_payroll_late_hours(**resolution_request(run, "Recover saved late-hours adjustment #{run.adjustment_pay_period_id}"))
+      case response["status"]
+      when "no_claim"
+        run.transition!("rejected", actor: actor, reason: "AIRE durably fenced the unclaimed command; choose current hours in a new adjustment", evidence: response)
+      when "claimed"
+        save_claim!(run, response)
+      when "canceled"
+        run.transition!("cancelled", actor: actor, reason: "AIRE confirmed the original claim is cancelled", evidence: response)
+      else
+        raise Error, "AIRE could not confirm the saved claim. Keep this adjustment reserved and retry"
+      end
+    end
+
+    def save_claim!(run, response)
+      raise Error, "AIRE did not return the saved supplemental batch. Resume this adjustment" unless response.is_a?(Hash) && response["payroll_batch"].is_a?(Hash)
+      run.update!(batch_payload: response.fetch("payroll_batch"))
+    end
+
+    def claim!(run)
+      return recover_claim!(run) unless run.state == "pending"
+
+      run.transition!("ambiguous", actor: actor, reason: "Source claim requested; outcome must be reconciled before release")
+      response = client.create_payroll_late_hours(external_pay_period_id: external_id,
+        command_id: run.command_id, expected_version: run.request_payload.fetch("expected_version"),
+        reason: "Pay approved late hours in Cornerstone adjustment #{run.adjustment_pay_period_id}",
+        target_external_pay_period_id: run.adjustment_pay_period_id.to_s,
+        pay_date: run.request_payload.fetch("pay_date"), cases: run.request_payload.fetch("cases"))
+      save_claim!(run, response)
+    rescue Client::Error => e
+      # A conflict alone is not proof of no claim: durably fence the original
+      # command under AIRE's cutoff lock before allowing a fresh selection.
+      if e.response_status.in?([ 409, 422 ])
+        begin
+          recover_claim!(run)
+        rescue Client::Error, Error
+          # The original outcome remains ambiguous. Never release it locally.
+        end
+      end
+      raise e
+    end
+
     def resume!(run)
+      failure = nil
       run.with_lock do
         authorize!
+        raise Error, "This late-hours operation is closed. Choose current hours for a new adjustment" if run.closed?
         return run if run.applied_at
-        unless run.adjustment_pay_period.draft? && run.adjustment_pay_period.payroll_items.empty?
-          raise Error, "The late-hours adjustment changed before import. Review it before retrying"
+        begin
+          run.adjustment_pay_period.with_lock do
+            validate_unapplied!(run)
+            claim!(run) if run.batch_payload.blank?
+            next if run.closed?
+            # Save the remote snapshot in the outer transaction even when
+            # validation/import fails. Never orphan an accepted reservation.
+            ApplicationRecord.transaction(requires_new: true) do
+              verify_selection!(run)
+              validate_payroll_setup!(run)
+              authorize!
+              import = BatchImportPreviewService.new(pay_period: run.adjustment_pay_period, source: source,
+                supplemental_payload: run.batch_payload).call
+              result = ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
+              raise Error, result.fetch(:errors).map { |error| error.fetch(:error) }.join(". ") if result.fetch(:errors).any?
+              run.update!(applied_at: Time.current, last_error: nil)
+              run.transition!("applied", actor: actor, reason: "Recovered exact source hours imported", evidence: { "batch_id" => run.batch_payload["batch_id"] })
+            end
+          end
+        rescue Error, Client::Error, ArgumentError, ActiveRecord::RecordInvalid, PayrollGoLiveGate::BlockedError => e
+          failure = e
+          run.reload
+          run.update!(last_error: e.message)
+          run.transition!("reconciliation_required", actor: actor, reason: e.message) if run.batch_payload.present? && !run.closed?
         end
-        if run.batch_payload.blank?
-          response = client.create_payroll_late_hours(external_pay_period_id: external_id,
-            command_id: run.command_id, expected_version: run.request_payload.fetch("expected_version"),
-            reason: "Pay approved late hours in Cornerstone adjustment #{run.adjustment_pay_period_id}",
-            target_external_pay_period_id: run.adjustment_pay_period_id.to_s,
-            pay_date: run.request_payload.fetch("pay_date"), cases: run.request_payload.fetch("cases"))
-          raise Error, "AIRE did not return the saved supplemental batch. Resume this adjustment" unless response.is_a?(Hash) && response["payroll_batch"].is_a?(Hash)
-          run.update!(batch_payload: response.fetch("payroll_batch"))
-        end
-        verify_selection!(run)
-        validate_payroll_setup!(run)
-        authorize!
-        import = BatchImportPreviewService.new(pay_period: run.adjustment_pay_period, source: source,
-          supplemental_payload: run.batch_payload).call
-        result = ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
-        raise Error, result.fetch(:errors).map { |error| error.fetch(:error) }.join(". ") if result.fetch(:errors).any?
-        run.update!(applied_at: Time.current, last_error: nil)
       end
+      raise failure if failure
       run
     end
   end

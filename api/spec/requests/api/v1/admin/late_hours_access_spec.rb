@@ -24,7 +24,10 @@ RSpec.describe "Late-hours Client management access", type: :request do
   it "refuses creating or resuming before touching the remote source without the grant" do
     expect(service).not_to receive(:create!)
     expect(service).not_to receive(:retry!)
+    expect(service).not_to receive(:cancel!)
     post path, params: selection, as: :json
+    expect(response).to have_http_status(:forbidden)
+    post "#{path}/1/cancel", params: { reason: "Reviewed unpaid claim" }, as: :json
     expect(response).to have_http_status(:forbidden)
     post "#{path}/1/retry", as: :json
     expect(response).to have_http_status(:forbidden)
@@ -46,5 +49,15 @@ RSpec.describe "Late-hours Client management access", type: :request do
     expect(service).not_to receive(:retry!)
     post "/api/v1/admin/pay_periods/#{other.id}/aire_payroll_cockpit/late_hours/1/retry", as: :json
     expect(response).to have_http_status(:forbidden).or have_http_status(:not_found)
+  end
+
+  it "passes an authorized cancellation reason to the audited operation" do
+    assignment.update!(client_management: true, granted_by: grantor)
+    result = instance_double(TimeTrackingLateHoursRun)
+    expect(service).to receive(:cancel!).with("7", reason: "Reviewed changed source hours").and_return(result)
+    expect(service).to receive(:present).with(result).and_return({ id: 7, applied: false, closed: true, state: "cancelled" })
+    post "#{path}/7/cancel", params: { reason: "Reviewed changed source hours" }, as: :json
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("late_hours_run", "closed")).to be(true)
   end
 end
