@@ -40,7 +40,7 @@ it.each([
   { baseSalary: true, regular: 8, source: null, expected: '8.00' },
 ])('preserves salary hours meaning on desktop and phone ($baseSalary / $regular / $source)', ({ baseSalary, regular, source, expected }): void => {
   const item: PayrollItem = { ...props.sortPayrollItems[0], employment_type: 'salary', hours_worked: regular, overtime_hours: 0, timekeeping_source: source };
-  render(<MemoryRouter><PayRunResultsView {...props} payPeriod={{ ...props.payPeriod, includes_base_salary: baseSalary }} sortPayrollItems={[item]} payrollItemDisplayedHours={() => regular} /></MemoryRouter>);
+  render(<MemoryRouter><PayRunResultsView {...props} payPeriod={{ ...props.payPeriod, ...(baseSalary === undefined ? {} : { includes_base_salary: baseSalary }) }} sortPayrollItems={[item]} payrollItemDisplayedHours={() => regular} /></MemoryRouter>);
   const row = screen.getByRole('row', { name: /Maya Manual/ });
   const desktopHours = within(row).getAllByRole('cell')[1];
   const phone = screen.getByRole('region', { name: 'Payroll result for Maya Manual' });
