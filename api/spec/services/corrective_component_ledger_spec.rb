@@ -323,7 +323,7 @@ RSpec.describe "Corrective component ledger" do
       expect(row[2]).to include("$3.75")
       expect(row[3]).to include("Non-Taxable Pay    -$50.00")
       expect(summary).not_to include("Additional Withholding -$5.00")
-      expect(text).to include("$-3.75")
+      expect(text).to include("$-3.75", "Other pay", "Gross pay plus other pay minus total deductions equals net pay.")
       assert_cash(correction)
       data = QuickbooksPayrollReportData.new(correction.pay_period)
       expect(data.paycheck_history_rows.sole[:deductions]).to eq(correction.total_deductions.to_f)
