@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -38,6 +38,7 @@ it('returns notification-dismiss focus to the real open mobile navigation and pe
   await user.click(screen.getByRole('button', { name: 'Fail action' }));
   await user.click(screen.getByRole('button', { name: 'Open navigation' }));
   const navigation = screen.getByRole('dialog', { name: 'Navigation' });
+  await waitFor(() => expect(document.activeElement).toBe(within(navigation).getByRole('link', { name: 'Employees' })));
   await user.click(screen.getByRole('button', { name: 'Dismiss notification: Synthetic action failed' }));
   expect(screen.queryByRole('alert')).toBeNull();
   expect(document.activeElement).toBe(navigation);

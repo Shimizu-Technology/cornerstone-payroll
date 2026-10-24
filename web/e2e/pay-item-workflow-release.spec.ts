@@ -1,3 +1,4 @@
+import { openPayrollActions } from './helpers/pay-run-actions';
 import { expect as baseExpect, request, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -213,8 +214,13 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
 
   test('regular payroll applies scoped additions once, honors dates, and retains the legacy chief allowance', async ({ page }) => {
     await page.goto(`/companies/${fixture.companies.aire}/pay-runs/${fixture.periods.regular}/work`);
+    if (await page.getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
+    const calculation = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/pay_periods/${fixture.periods.regular}/run_payroll`), { timeout: 60_000 });
     await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).filter({ visible: true }).click();
-    await expect.poll(async () => (await period(aireApi, fixture.periods.regular)).status).toBe('calculated');
+    const calculationResponse = await calculation;
+    expect(calculationResponse.ok(), await calculationResponse.text()).toBeTruthy();
+    expect((await calculationResponse.json()).results.errors).toHaveLength(0);
+    await expect.poll(async () => (await period(aireApi, fixture.periods.regular)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(aireApi, fixture.periods.regular);
     const recipient = item(saved, fixture.employees.recipient);
     const entries = recipient.payroll_field_entries.filter(entry => entry.payroll_field_definition_id === personal.payroll_field_definition_id);

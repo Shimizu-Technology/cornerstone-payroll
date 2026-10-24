@@ -14,6 +14,7 @@ import { AireManualPaymentReconciliation } from '@/components/payroll/AireManual
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunSupportingDetails({
+  section = 'checks',
   aireSourceRefreshToken,
   directDepositCount,
   invalidateAireSource,
@@ -26,10 +27,10 @@ export function PayRunSupportingDetails({
   payableItems,
   payrollItems,
   setPaymentMethodItem
-}: PayRunSectionProps<'supporting'>) {
+}: PayRunSectionProps<'supporting'> & { section?: 'checks' | 'activity' }) {
   return (<>
 <section aria-label="Supporting payroll details" className="space-y-4">
-      {!isCommitted && payableItems.length > 0 && (
+      {section === 'checks' && <>{!isCommitted && payableItems.length > 0 && (
         <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4" aria-label="Payment methods for this pay period">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -70,7 +71,8 @@ export function PayRunSupportingDetails({
           </div>
         )}
           </div>
-          <details className="rounded-2xl border border-neutral-200 bg-white p-4">
+      </>}
+          {section === 'activity' && <details className="rounded-2xl border border-neutral-200 bg-white p-4">
             <summary className="cursor-pointer py-1 font-semibold text-primary-800">Run notes and processing history</summary>
             <div className="mt-4 space-y-4">
         {payPeriod.notes && (
@@ -109,7 +111,7 @@ export function PayRunSupportingDetails({
         </Card>
 
             </div>
-          </details>
+          </details>}
         </section>
   </>);
 }
