@@ -866,7 +866,7 @@ class IssueCorrectivePaycheckService
   end
 
   def annual_retirement_context
-    @annual_retirement_context ||= CorrectiveRetirementContext.new(employee: @employee, original: original_item, active: active_correctives)
+    @annual_retirement_context ||= CorrectiveRetirementContext.new(employee: @employee, original: original_item, active: active_correctives, pay_date: @pay_date)
   end
 
   def validate_component_ledger!

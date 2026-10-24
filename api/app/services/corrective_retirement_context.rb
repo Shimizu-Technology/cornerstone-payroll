@@ -6,16 +6,18 @@
 class CorrectiveRetirementContext
   MESSAGE = "This correction requires a reviewed annual retirement reconciliation with the plan administrator; another committed paycheck or annual plan limit would need to change. Review the contribution ledger before issuing a supplemental paycheck."
 
-  def initialize(employee:, original:, active:)
+  def initialize(employee:, original:, active:, pay_date: nil)
     @employee = Employee.find(employee.id)
     @original = original
     @active = active
     @year = original.pay_period.pay_date.year
+    @pay_date = (pay_date || original.pay_period.pay_date).to_date
   end
 
   def snapshot
     {
       year: year, employee_id: employee.id, date_of_birth: employee.date_of_birth,
+      governing_elections: plan_elections,
       annual_limit: annual_limit&.attributes, year_input: year_input,
       elections: employee.employee_retirement_elections.order(:id).map(&:snapshot_attributes),
       historical: projection.source, opening: opening,
@@ -39,7 +41,8 @@ class CorrectiveRetirementContext
     hold! if totals.values.any?(&:negative?)
     evidence = original.retirement_rule_snapshot.to_h
     base = annual_limit.elective_deferral_limit.to_d
-    regular = [ evidence.fetch("regular_deferral_limit", base).to_d, base ].min
+    governing_regular = plan_elections.first.to_h["regular_plan_deferral_limit"].presence
+    regular = [ governing_regular ? governing_regular.to_d : base, base ].min
     # Catch-up classifications on correction snapshots are absolute targets,
     # not additive deltas. Only retain proved permission; ambiguous new annual
     # classifications require administrator review rather than inferred room.
@@ -109,7 +112,7 @@ class CorrectiveRetirementContext
       imported = projection.totals(strict: true)
       # Opening match can be verified by a later effective election. It is an
       # alternative statement of imported match, never another additive row.
-      match = plan_elections.map do |election|
+      match = (saved_elections + plan_elections).map do |election|
         election["effective_on"].presence&.to_date&.year == year ? election["employer_match_ytd_before_system"].to_d : 0.to_d
       end.max || 0.to_d
       {
@@ -124,20 +127,30 @@ class CorrectiveRetirementContext
 
   def plan_elections
     @plan_elections ||= begin
-      saved = [ original, *rows ].map do |item|
-        evidence = item.retirement_rule_snapshot.to_h
-        election = evidence.fetch("election", {}).deep_dup
-        if evidence.fetch("version", 1).to_i < 2
-          %w[regular_plan_deferral_limit plan_annual_employee_limit employer_match_annual_cap].each do |key|
-            election.delete(key) if election[key].present? && election[key].to_d.zero?
-          end
-        end
-        election
+      through = [ @pay_date, *rows.map { |item| item.pay_period.pay_date } ].max
+      current = employee.employee_retirement_elections.effective_on(through).first
+      if current
+        [ current.snapshot_attributes.stringify_keys ]
+      else
+        # Retained legacy snapshots may be the only available election proof.
+        # Apply the latest governing snapshot, rather than every superseded cap.
+        latest = saved_elections.select { |election| election["effective_on"].blank? || election["effective_on"].to_date <= through }
+          .max_by { |election| election["effective_on"].presence&.to_date || Date.new(1, 1, 1) }
+        latest ? [ latest ] : []
       end
-      through = rows.map { |item| item.pay_period.pay_date }.max || original.pay_period.pay_date
-      current = employee.employee_retirement_elections.where("effective_on <= ?", through)
-        .map { |record| record.snapshot_attributes.stringify_keys }
-      saved + current
+    end
+  end
+
+  def saved_elections
+    @saved_elections ||= [ original, *rows ].map do |item|
+      evidence = item.retirement_rule_snapshot.to_h
+      election = evidence.fetch("election", {}).deep_dup
+      if evidence.fetch("version", 1).to_i < 2
+        %w[regular_plan_deferral_limit plan_annual_employee_limit employer_match_annual_cap].each do |key|
+          election.delete(key) if election[key].present? && election[key].to_d.zero?
+        end
+      end
+      election
     end
   end
 

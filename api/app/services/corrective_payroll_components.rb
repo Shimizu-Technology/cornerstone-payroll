@@ -9,6 +9,12 @@ class CorrectivePayrollComponents
   EARNING_ATTRIBUTES = %w[category label rate hours].freeze
 
   def initialize(original:, corrected:, active:)
+    unsupported = active.reject do |item|
+      item.calculation_context_snapshot.to_h.dig("corrective_paycheck", "component_ledger_version") == 1
+    end
+    if unsupported.any?
+      raise Error, "An active corrective paycheck predates or uses an unsupported component ledger (items #{unsupported.map(&:id).join(', ')}). Arrange a reviewed component-ledger reconciliation before issuing another correction; legacy components cannot be reconstructed automatically"
+    end
     @original = original
     @corrected = corrected
     @recorded = [ original, *active ]
@@ -140,6 +146,11 @@ class CorrectivePayrollComponents
       raise Error, "Corrective insurance classification does not reconcile with its liability components"
     end
     data = QuickbooksPayrollReportData.new(item.pay_period)
+    employer = employer_contributions(item)
+    expected_employer = employer_contributions(@corrected) - @recorded.sum { |record| employer_contributions(record) }
+    unless employer.round(2) == expected_employer.round(2)
+      raise Error, "The corrective employer contribution detail does not reconcile to the remaining target; review the saved contribution history before posting liabilities"
+    end
     earnings = data.earnings_lines_for(item).reject { |line| line.label == "Gross" }.sum { |line| line.amount.to_d }
     deductions = data.employee_tax_total(item).to_d +
       data.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_d } +
@@ -152,5 +163,9 @@ class CorrectivePayrollComponents
         (item.gross_pay.to_d + other - deductions).round(2) == item.net_pay.to_d.round(2)
       raise Error, "The corrective component detail does not reconcile to gross, deductions and net pay; review the saved earning and deduction history"
     end
+  end
+
+  def employer_contributions(item)
+    QuickbooksPayrollReportData.new(item.pay_period).employer_contribution_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }
   end
 end
