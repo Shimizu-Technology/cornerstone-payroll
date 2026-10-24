@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { AlertTriangle, Loader2, MailCheck, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-import { Card, CardContent } from '@/components/ui/card';
+import { Alert } from '@/components/ui/alert';
 
 import type { PayRunSectionProps } from './usePayRunController';
 
@@ -22,16 +22,16 @@ export function PayRunBlockers({
 }: PayRunSectionProps<'blockers'>) {
   return (<>
 {hasPendingCalculationChanges && (
-          <div role="status" className="rounded-2xl border border-warning-200 bg-warning-50 p-4 text-warning-950">
+          <Alert>
             <p className="font-semibold">Recalculate to include your changes</p>
             <p className="mt-1 text-sm leading-6 text-warning-800">
               The values below have changed, but the calculated payroll and client review still reflect the previous amounts. Recalculate before approval.
             </p>
-          </div>
+          </Alert>
         )}
 {payPeriod.client_payroll_approval_required && payPeriod.payroll_review && (
-          <Card className={payPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-warning-200 bg-warning-50/70'}>
-            <CardContent className="flex flex-col gap-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-emerald-200 bg-emerald-50/70' : 'border-warning-200 bg-warning-50/70'}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
                 <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${payPeriod.payroll_review.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-warning-100 text-warning-800'}`}>
                   {payPeriod.payroll_review.status === 'approved' ? <ShieldCheck className="h-5 w-5" /> : <MailCheck className="h-5 w-5" />}
@@ -57,11 +57,11 @@ export function PayRunBlockers({
                   {clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}
                 </Button>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Alert>
         )}
 {payPeriod.intake_stale_at && (
-          <div role="alert" className="rounded-2xl border border-danger-200 bg-danger-50 p-4 text-danger-950">
+          <Alert tone="error">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-700" aria-hidden="true" />
@@ -82,10 +82,10 @@ export function PayRunBlockers({
                 </Button>
               )}
             </div>
-          </div>
+          </Alert>
         )}
 {payPeriod.compliance_warnings?.map((warning) => (
-          <div key={warning} role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
+          <Alert key={warning}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">
                 <span className="font-semibold">
@@ -121,7 +121,7 @@ export function PayRunBlockers({
                 {payPeriod.calculated_at ? ' Because this run was already calculated, you will need to select Calculate Payroll again.' : ''}
               </p>
             )}
-          </div>
+          </Alert>
         ))}
   </>);
 }

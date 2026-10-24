@@ -1,5 +1,5 @@
 export type EmployeeWorkspaceTab = 'overview' | 'pay-setup' | 'pay-history' | 'hours-payroll' | 'activity';
-export type PayRunWorkspaceTab = 'overview' | 'work' | 'checks' | 'activity';
+export type PayRunWorkspaceTab = 'overview' | 'work' | 'checks' | 'reports' | 'activity';
 
 interface ReturnContext {
   returnTo?: string;
