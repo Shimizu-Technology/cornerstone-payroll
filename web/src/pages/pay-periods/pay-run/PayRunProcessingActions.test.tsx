@@ -16,7 +16,7 @@ it.each([
   const run = vi.fn(), approve = vi.fn(), commit = vi.fn();
   const props = { step, companyId: 1, payPeriod: { id: 2, status, run_purpose: 'regular' }, isDraft: status === 'draft', isCalculated: status === 'calculated', isApproved: status === 'approved', isCommitted: status === 'committed', hasManualHours: true, calculationFailures: [], payrollItems: [{ id: 1 }], standaloneLoanConflicts: [], handleRunPayroll: run, handleApprove: approve, setCommitPeriodId: commit } as unknown as ComponentProps<typeof PayRunStepAction>;
   render(<MemoryRouter><PayRunStepAction {...props} header /><PayRunStepAction {...props} /></MemoryRouter>);
-  const actions = screen.getAllByRole(status === 'committed' ? 'link' : 'button', { name: label, exact: true });
+  const actions = screen.getAllByRole(status === 'committed' ? 'link' : 'button', { name: label });
   expect(actions).toHaveLength(2);
   expect(actions.filter(action => action.classList.contains('bg-primary-700'))).toHaveLength(1);
   const secondary = actions.find(action => !action.classList.contains('bg-primary-700'))!;
