@@ -315,4 +315,66 @@ RSpec.describe "Corrective paycheck review regressions" do
     expect { issue(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::MissingHistoricalContextError)
     expect(company.payroll_liability_entries.where(category: "retirement_employer").sum(:amount)).to eq(1000)
   end
+
+  [ nil, 2 ].each do |version|
+    it "holds active corrections with unsupported component ledger version #{version.inspect}" do
+      add_deduction(category: "employer_contribution", sub_category: "benefit")
+      original = original!
+      legacy = issue(hours_worked: 65)
+      context = legacy.calculation_context_snapshot.deep_dup
+      context["corrective_paycheck"].delete("component_ledger_version")
+      context["corrective_paycheck"]["component_ledger_version"] = version if version
+      legacy.update_columns(calculation_context_snapshot: context)
+      legacy.payroll_item_deductions.delete_all
+      legacy.payroll_item_earnings.delete_all
+      frozen = [ freeze_history(original), freeze_history(legacy.reload) ]
+      postings = company.payroll_liability_entries.order(:id).map(&:attributes)
+      expect { preview(hours_worked: 70) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /predates.*component ledger|component ledger.*review/i)
+      expect { issue(hours_worked: 70) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /component ledger/i)
+      expect(period.supplemental_pay_periods.count).to eq(1)
+      expect([ freeze_history(original.reload), freeze_history(legacy.reload) ]).to eq(frozen)
+      expect(company.payroll_liability_entries.order(:id).map(&:attributes)).to eq(postings)
+    end
+  end
+
+  [ 65, 55 ].each do |hours|
+    it "holds mismatched signed employer contribution detail for target #{hours}" do
+      add_deduction(category: "employer_contribution", sub_category: "benefit")
+      original!
+      allow_any_instance_of(CorrectivePayrollComponents).to receive(:deduction_rows).and_wrap_original do |method|
+        method.call.map do |row|
+          row["category"] == "employer_contribution" ? row.merge("amount" => row.fetch("amount") * 2) : row
+        end
+      end
+      expect { preview(hours_worked: hours) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /employer contribution.*reconcile/i)
+      expect(PayrollLiabilityPostingService).not_to receive(:post!)
+      expect { issue(hours_worked: hours) }.to raise_error(IssueCorrectivePaycheckService::CorrectionError, /employer contribution.*reconcile/i)
+      expect(period.supplemental_pay_periods).to be_empty
+    end
+  end
+
+  it "uses the governing 2024 election instead of superseded 2022 annual caps" do
+    employee.update!(retirement_rate: 0.5, employer_retirement_match_rate: 0.05)
+    verify_synthetic_retirement_plan!(employee, Date.new(2022, 1, 1), plan_annual_employee_limit: 10000, employer_match_annual_cap: 50)
+    verify_synthetic_retirement_plan!(employee, Date.new(2024, 1, 1), plan_annual_employee_limit: 23000, employer_match_annual_cap: 2000)
+    original!
+    later!(hours_worked: 0, bonus: 21000)
+    expect(preview(hours_worked: 70).dig(:deltas, :retirement_payment)).to eq(75)
+    correction = issue(hours_worked: 70)
+    expect(correction.retirement_payment).to eq(75)
+    expect(correction.employer_retirement_match).to eq(7.5)
+    expect(employee.ytd_totals_for(2024).reload.retirement).to eq(11025)
+  end
+
+  it "uses an amended current-year cap while retaining historical target and opening evidence" do
+    employee.update!(retirement_rate: 0.5)
+    verify_synthetic_retirement_plan!(employee, Date.new(2022, 1, 1), regular_plan_deferral_limit: 500, plan_annual_employee_limit: 500)
+    original!
+    verify_synthetic_retirement_plan!(employee, Date.new(2024, 1, 20), regular_plan_deferral_limit: 1000, plan_annual_employee_limit: 1000)
+    later!
+    expect(preview(hours_worked: 65).dig(:deltas, :retirement_payment)).to eq(37.5)
+    correction = issue(hours_worked: 65)
+    expect(correction.retirement_payment).to eq(37.5)
+    expect(employee.ytd_totals_for(2024).reload.retirement).to eq(937.5)
+  end
 end
