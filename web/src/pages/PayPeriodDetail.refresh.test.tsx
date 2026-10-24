@@ -6,8 +6,24 @@ import { useState, type ComponentProps } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
-import { PayPeriodDetail } from './PayPeriodDetail';
+import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
 import { payrollFinalRecordFixture, voidedFinalRecordFixture } from '@/components/payroll/PayrollFinalRecordPanel.fixtures';
+
+// Exercise moved controls through the same tab seam used by the workspace.
+function PayPeriodDetail(props: ComponentProps<typeof PayPeriodDetailPage>) {
+  const [tab, setTab] = useState<'work' | 'checks' | 'reports' | 'activity'>('work');
+  return <PayPeriodDetailPage {...props} activeTab={tab} navigation={<nav aria-label="Test payroll tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <button key={id} onClick={() => setTab(id)}>Tab {id}</button>)}</nav>} />;
+}
+
+function payRunButton(name: string | RegExp): HTMLElement {
+  const button = screen.getByRole('button', { name, hidden: true });
+  const panel = button.closest('section[hidden][aria-label]');
+  const tab = ({ 'Checks and payments workspace': 'checks', 'Reports workspace': 'reports', 'Activity workspace': 'activity', 'Payroll workspace': 'work' } as Record<string, string>)[panel?.getAttribute('aria-label') || ''];
+  if (tab) fireEvent.click(screen.getByRole('button', { name: `Tab ${tab}` }));
+  const disclosure = button.closest('details');
+  if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector('summary')!);
+  return screen.getByRole('button', { name });
+}
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -154,11 +170,11 @@ it('lets an accountant explicitly include a fixed salary before calculating a fr
   expect(await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Payroll entry for Other Cruz' })).toBeNull();
   fireEvent.change(within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Bonus this payroll for Ana Cruz'), { target: { value: '25' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Remove Ana Cruz from this run' }));
+  fireEvent.click(payRunButton('Remove Ana Cruz from this run'));
   expect(screen.queryByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeNull();
   fireEvent.click(within(choice).getByRole('button', { name: 'Enter pay' }));
   expect((within(await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Bonus this payroll for Ana Cruz') as HTMLInputElement).value).toBe('0.00');
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate with 1 added' }));
+  fireEvent.click(payRunButton('Calculate with 1 added'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].employee_ids).toEqual([30]);
 });
@@ -250,7 +266,7 @@ it('can tab through untouched excluded fields and calculate without creating emp
   const { input } = await renderTaxableFieldPreview(false);
   await user.click(input);
   await user.tab();
-  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await user.click(payRunButton('Calculate Payroll'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']).toEqual({ '8': { mode: 'default' }, '9': { mode: 'default' } });
 });
@@ -262,11 +278,11 @@ it('keeps a cleared explicit request invalid until it is deliberately reset to e
   await user.type(input, '25');
   await user.clear(input);
   await user.tab();
-  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await user.click(payRunButton('Calculate Payroll'));
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   expect(input.getAttribute('aria-invalid')).toBe('true');
   await user.click(within(row).getByRole('button', { name: 'Enter an amount or clear this payroll amount' }));
-  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await user.click(payRunButton('Calculate Payroll'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'default' });
 });
@@ -277,7 +293,7 @@ it('retains an explicit zero override after blur when recurring setup is exclude
   await user.click(input);
   await user.type(input, '0');
   await user.tab();
-  await user.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  await user.click(payRunButton('Calculate Payroll'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].payroll_field_inputs['30']['8']).toEqual({ mode: 'override', amount: 0, replace_request: true });
 });
@@ -322,7 +338,7 @@ it('reserves the time tracking source preference for the guided verified-batch r
   expect(modal.getAttribute('data-auto-preview')).toBe('false');
   expect(modal.getAttribute('data-source-id')).toBe('');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Review verified time tracking batch' }));
+  fireEvent.click(payRunButton('Review verified time tracking batch'));
   await waitFor(() => {
     expect(modal.getAttribute('data-auto-preview')).toBe('true');
     expect(modal.getAttribute('data-source-id')).toBe('12');
@@ -493,8 +509,8 @@ it('keeps an unpaid active employee out of a calculated run while allowing pay e
   );
 
   expect(await screen.findByText('No pay in this period for 1 eligible employee')).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Enter pay' }));
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(payRunButton('Enter pay'));
   expect(await screen.findByRole('region', { name: 'Payroll entry for Noel Cruz' })).toBeTruthy();
 });
 
@@ -588,10 +604,10 @@ function approvedCommitView(refreshToken = 0, withAire = false) {
 }
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
   vi.clearAllMocks(); render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   expect(await screen.findByRole('dialog', { name: 'Commit and finalize payroll?' })).toBeTruthy();
   expect(apiMocks.commit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
+  fireEvent.click(payRunButton('Keep reviewing'));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 it('closes before the API completes, blocks duplicate writes and leaves a failed commit visible', async () => {
@@ -599,15 +615,15 @@ it('closes before the API completes, blocks duplicate writes and leaves a failed
   let rejectCommit!: (error: Error) => void;
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   const confirm = await screen.findByRole('button', { name: 'Confirm commit' });
   fireEvent.click(confirm); fireEvent.click(confirm);
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect((screen.getByRole('button', { name: 'Committing...' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Committing...') as HTMLButtonElement).disabled).toBe(true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
   expect(await screen.findByText('Commit rejected: stale approval')).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('drops an open confirmation when navigating to another approved run', async () => {
@@ -621,11 +637,11 @@ it('drops an open confirmation when navigating to another approved run', async (
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   expect(await screen.findByRole('dialog')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
-  await screen.findByRole('button', { name: 'Commit & Finalize' });
+  await screen.findByRole('button', { name: 'Commit' });
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(apiMocks.commit).not.toHaveBeenCalled();
 });
 
@@ -637,13 +653,13 @@ it('settles a commit after a same-run sibling refresh and reloads the committed 
   apiMocks.commit.mockReturnValue(new Promise(resolve => { finishCommit = resolve; }));
   apiMocks.get.mockResolvedValueOnce({ pay_period: approved }).mockResolvedValue({ pay_period: committed });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
   await act(async () => finishCommit({ pay_period: committed }));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(2));
-  expect(screen.queryByRole('button', { name: 'Commit & Finalize' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   expect(apiMocks.commit).toHaveBeenCalledExactlyOnceWith(12);
 });
 it('preserves a commit rejection after a same-run sibling refresh', async () => {
@@ -652,7 +668,7 @@ it('preserves a commit rejection after a same-run sibling refresh', async () => 
   apiMocks.commit.mockReturnValue(new Promise((_resolve, reject) => { rejectCommit = reject; }));
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved' } });
   const view = render(approvedCommitView());
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   view.rerender(approvedCommitView(1));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1));
@@ -675,15 +691,15 @@ it.each(['success', 'error'])('ignores a previous-route commit %s after navigati
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<NavigateRuns />} />
   </Routes></MemoryRouter>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  fireEvent.click(payRunButton('Other run'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13));
   await act(async () => {
     if (outcome === 'success') finishCommit({ pay_period: initialPayPeriod });
     else rejectCommit(new Error('Previous run failed'));
   });
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   expect(within(await screen.findByRole('dialog')).getByText('#13')).toBeTruthy();
   expect(screen.queryByText('Previous run failed')).toBeNull();
   expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(13);
@@ -703,7 +719,7 @@ it('shows partial calculation failures by employee and keeps failed worksheet ho
   expect(link.getAttribute('href')).toContain('retirement_year=2026#retirement-year-evidence');
   const card = screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' });
   expect((within(card).getByLabelText('Regular hours') as HTMLInputElement).value).toBe('8');
-  expect(screen.getByRole('button', { name: 'Review affected employees' })).toBeTruthy();
+  expect(payRunButton('Review affected employees')).toBeTruthy();
 });
 
 
@@ -719,7 +735,8 @@ it('invalidates every source panel without remounting or resetting payroll draft
   const panels = ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']
     .map(id => screen.getByTestId(id));
   for (const [index, name] of ['Approve source time', 'Change source hold', 'Change source allocation', 'Refresh source calendar'].entries()) {
-    await act(async () => fireEvent.click(screen.getByRole('button', { name })));
+    const button = payRunButton(name);
+    await act(async () => fireEvent.click(button));
     await waitFor(() => panels.forEach(panel => expect(panel.getAttribute('data-revision')).toBe(String(index + 1))));
     if (index === 0) expect(apiMocks.get).not.toHaveBeenCalled();
     else await waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(index));
@@ -748,8 +765,10 @@ it('preserves dirty hours, bonus edits and worksheet requests when the parent ch
   const { field, regular, bonus } = await editPayrollDrafts();
   const period = { ...initialPayPeriod, status: 'draft', notes: 'Latest sibling check metadata', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as unknown as PayPeriod;
   apiMocks.get.mockResolvedValue({ pay_period: period });
-  fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
+  fireEvent.click(payRunButton('Sibling checks changed'));
+  fireEvent.click(screen.getByRole('button', { name: 'Tab activity' }));
   await screen.findByText('Latest sibling check metadata');
+  fireEvent.click(screen.getByRole('button', { name: 'Tab work' }));
   expect(regular.value).toBe('19');
   expect(bonus.value).toBe('77.00');
   expect(field.value).toBe('888.00');
@@ -763,21 +782,21 @@ it('preserves dirty hours, bonus edits and worksheet requests when the parent ch
 
 it.each(['import', 'calculation', 'navigation'])('still applies canonical inputs after explicit %s following a passive refresh', async (action) => {
   await editPayrollDrafts();
-  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' })));
+  await act(async () => fireEvent.click(payRunButton('Sibling checks changed')));
   const worksheet = (await apiMocks.payrollFieldInputs.mock.results[0].value).payroll_field_inputs;
   const canonical = { ...initialPayPeriod, id: action === 'navigation' ? 13 : 12, status: 'draft', payroll_items: [{ id: 90, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 26, overtime_hours: 0, bonus: 12, gross_pay: 402, net_pay: 380 }] } as unknown as PayPeriod;
   apiMocks.get.mockResolvedValue({ pay_period: canonical });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { ...worksheet, assignments: worksheet.assignments.map((assignment: { requested_amount: number }) => ({ ...assignment, requested_amount: 250 })) } });
   if (action === 'import') {
-    fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
+    fireEvent.click(payRunButton(/Import time tracking|Review & add hours/));
     fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
   } else if (action === 'calculation') {
     apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...canonical, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
     await calculateWithCoverage();
   } else {
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Other draft run' }));
+      fireEvent.click(payRunButton('Sibling checks changed'));
+      fireEvent.click(payRunButton('Other draft run'));
     });
     await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(13));
   }
@@ -792,7 +811,7 @@ it('initializes worksheet inputs when a parent token supersedes the first pendin
   apiMocks.employeesList.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
   const ready = renderCappedFieldWorksheet();
   await waitFor(() => expect(apiMocks.employeesList).toHaveBeenCalledTimes(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Sibling checks changed' }));
+  fireEvent.click(payRunButton('Sibling checks changed'));
   const field = await ready;
   expect(field).toHaveProperty('value', '1070.00');
   await act(async () => resolveOld({ data: [], meta: { total_pages: 1 } }));
@@ -804,7 +823,7 @@ it('owns calendar refresh completion while keeping all dirty payroll inputs', as
   const { field, regular, bonus } = await editPayrollDrafts();
   let finishReload!: (value: { pay_period: PayPeriod }) => void;
   apiMocks.get.mockReturnValueOnce(new Promise(resolve => { finishReload = resolve; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh source calendar' }));
+  fireEvent.click(payRunButton('Refresh source calendar'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12));
   expect(componentMocks.calendarRefreshCompleted).not.toHaveBeenCalled();
   const updated = { ...initialPayPeriod, status: 'draft', notes: 'Delivered calendar metadata',
@@ -825,7 +844,7 @@ it.each(['import', 'calculation'])('explicitly refreshes every source panel afte
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'calculated', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('0');
   if (action === 'import') {
-    fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
+    fireEvent.click(payRunButton(/Import time tracking|Review & add hours/));
     fireEvent.click(await screen.findByRole('button', { name: 'Complete explicit time import' }));
   } else {
     await calculateWithCoverage();
@@ -846,7 +865,7 @@ it('refreshes committed source receipt and history panels once after the canonic
   apiMocks.commit.mockResolvedValue({ pay_period: committed });
   apiMocks.get.mockResolvedValue({ pay_period: committed });
   render(approvedCommitView(0, true));
-  fireEvent.click(await screen.findByRole('button', { name: 'Commit & Finalize' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Commit' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Confirm commit' }));
   await waitFor(() => {
     for (const id of ['source-cockpit-revision', 'source-holds-revision', 'source-reconciliation-revision']) {
@@ -862,7 +881,7 @@ it('refreshes accounting correction metadata and every source panel while preser
   const { field, regular, bonus } = await editPayrollDrafts();
   apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', notes: 'Accounting correction metadata refreshed',
     time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
-  fireEvent.click(screen.getByRole('button', { name: /Import time tracking|Review & add hours/ }));
+  fireEvent.click(payRunButton(/Import time tracking|Review & add hours/));
   fireEvent.click(await screen.findByRole('button', { name: 'Record accounting correction' }));
   await screen.findByText('Accounting correction metadata refreshed');
   expect(screen.getByTestId('source-cockpit-revision').getAttribute('data-revision')).toBe('1');
@@ -901,8 +920,8 @@ async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' =
 it('recalculates exactly the selected correction employee with a named loan repayment', async () => {
   const card = await renderLoanWorksheet();
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(payRunButton('Recalculate'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   const payload = apiMocks.runPayroll.mock.calls[0][1];
   expect(payload.employee_ids).toEqual([30]);
@@ -913,7 +932,7 @@ it('recalculates exactly the selected correction employee with a named loan repa
 
 it('withdraws approval and refreshes saved setup without asking the user to recreate payroll', async () => {
   await renderLoanWorksheet('approved');
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getByText(/Existing approval and client review will be withdrawn/)).toBeTruthy();
   fireEvent.click(within(dialog).getByLabelText('Include recurring employee setup'));
@@ -926,12 +945,12 @@ it.each(['payroll', 'employees'])('hides stale approved controls when setup chan
   await renderLoanWorksheet('approved');
   if (failedRead === 'payroll') apiMocks.get.mockRejectedValueOnce(new Error('Payroll read unavailable'));
   else apiMocks.employeesList.mockRejectedValueOnce(new Error('Employee read unavailable'));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   expect(await screen.findByText(/Setup changed, but the updated payroll could not load/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   expect(screen.queryByText(/Current setup applied to the saved employees/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  fireEvent.click(payRunButton('Try again'));
   expect(await screen.findByRole('button', { name: 'Recalculate' })).toBeTruthy();
   expect(apiMocks.refreshSetup).toHaveBeenCalledTimes(1);
 });
@@ -939,7 +958,7 @@ it.each(['payroll', 'employees'])('hides stale approved controls when setup chan
 it('protects unsaved hours in a saved draft from being overwritten by setup refresh', async () => {
   const card = await renderLoanWorksheet('draft');
   fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
-  const refresh = screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement;
+  const refresh = payRunButton('Refresh current setup') as HTMLButtonElement;
   expect(refresh.disabled).toBe(true);
   expect(refresh.title).toMatch(/Calculate your worksheet edits first/);
   expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
@@ -948,10 +967,10 @@ it('protects unsaved hours in a saved draft from being overwritten by setup refr
 it('keeps a setup refresh failure visible without discarding the existing approved payroll', async () => {
   await renderLoanWorksheet('approved');
   apiMocks.refreshSetup.mockRejectedValue(new Error('Employee setup is invalid; correct the saved schedule.'));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   expect(await within(screen.getByRole('dialog')).findByText('Employee setup is invalid; correct the saved schedule.')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Commit & Finalize' })).toBeTruthy();
+  expect(payRunButton('Commit')).toBeTruthy();
 });
 
 
@@ -960,7 +979,7 @@ it('retains a linked loan request when that employee needs calculation recovery'
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '400' } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'draft', run_purpose: 'correction', includes_recurring_items: false, payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 16, hours_worked: 80.3, overtime_hours: 14 }] }, results: { success: [], skipped: [], errors: [{ employee_id: 30, name: 'Ana Cruz', error: 'Loan balance needs review.' }] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  fireEvent.click(payRunButton('Recalculate'));
   await screen.findByText('Calculated 0 employees. 1 employee needs attention before approval.');
   const restoredCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
   expect((within(restoredCard).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('400.00');
@@ -1034,19 +1053,19 @@ it('labels the saved loan total as loan deductions while keeping standalone entr
   const header = screen.getByRole('columnheader', { name: 'Loan deductions' });
   expect(header.title).toBe('Calculated total of linked loan repayments and any standalone loan deduction.');
   expect(screen.queryByRole('columnheader', { name: 'Standalone deduction' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '+ Tips & Deductions' }));
+  fireEvent.click(payRunButton('+ Tips & Deductions'));
   expect(await screen.findByRole('columnheader', { name: 'Standalone deduction' })).toBeTruthy();
 });
 
 
 it('clears a previous refresh success while a new request is pending and keeps a rejection in context', async () => {
   await renderLoanWorksheet('approved');
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   await screen.findByText(/Current setup applied to the saved employees and inputs/);
   let reject!: (error: Error) => void;
   apiMocks.refreshSetup.mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   const dialog = screen.getByRole('dialog');
   fireEvent.click(within(dialog).getByLabelText('Include recurring employee setup'));
   fireEvent.click(within(dialog).getByRole('button', { name: 'Refresh and recalculate' }));
@@ -1065,24 +1084,24 @@ it('clears a previous refresh success while a new request is pending and keeps a
 it('reports partial setup refresh errors without claiming success or expanding the saved roster', async () => {
   await renderLoanWorksheet('approved');
   apiMocks.refreshSetup.mockResolvedValueOnce({ results: { success: [], skipped: [], errors: [{ employee_id: 30, error: 'Current tax setup needs review.' }] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   expect(await screen.findByText('1 employee needs attention after refreshing setup.')).toBeTruthy();
   expect(screen.getByText('Current tax setup needs review.')).toBeTruthy();
   expect(screen.queryByText(/Current setup applied to the saved employees and inputs/)).toBeNull();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole('region', { name: 'Payroll entry for Other Cruz' })).toBeNull();
 });
 
 it('clears previous employee refresh failures before the next deferred request', async () => {
   await renderLoanWorksheet('approved');
   apiMocks.refreshSetup.mockResolvedValueOnce({ results: { success: [], skipped: [], errors: [{ employee_id: 30, error: 'Old setup outcome.' }] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   await screen.findByText('Old setup outcome.');
   let resolve!: (value: unknown) => void;
   apiMocks.refreshSetup.mockImplementationOnce(() => new Promise(success => { resolve = success; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   expect(screen.queryByText('Old setup outcome.')).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Resolve these employees before approval' })).toBeNull();
@@ -1126,6 +1145,7 @@ async function renderCorrectionRefresh() {
       <PayPeriodDetail initialPayPeriod={correctionOriginal} /></>;
   }
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Tab activity' }));
   await screen.findByRole('button', { name: 'Finish correction' });
 }
 
@@ -1142,10 +1162,10 @@ it('refreshes the real final record immediately after same-ID void even when the
   let finish!: (value: { final_record: typeof voidedFinalRecordFixture }) => void;
   apiMocks.payrollFinalRecord.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
   apiMocks.get.mockRejectedValueOnce(new Error('Surrounding payroll could not reload'));
-  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  fireEvent.click(payRunButton('Finish correction'));
   await waitFor(() => expect(apiMocks.payrollFinalRecord).toHaveBeenCalledTimes(2));
   expect(screen.queryByText('$750.00 net')).toBeNull();
-  expect((screen.getByRole('button', { name: 'Export final payroll record' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Export final payroll record') as HTMLButtonElement).disabled).toBe(true);
   await act(async () => finish({ final_record: { ...voidedFinalRecordFixture,
     company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...voidedFinalRecordFixture.pay_period, id: 12 } } }));
   expect(await screen.findByText('$0.00 net')).toBeTruthy();
@@ -1163,7 +1183,7 @@ it('refreshes final payment settlement after the checks callback without relying
   apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
     company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
     employee_payments: { ...payrollFinalRecordFixture.employee_payments, reconciled_count: 1, outstanding_count: 0 } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Saved employee check changed' }));
+  fireEvent.click(payRunButton('Saved employee check changed'));
   expect(await screen.findByText('1 of 1 reconciled')).toBeTruthy();
   expect(screen.getByText('0 checks open · 0 direct deposit')).toBeTruthy();
 });
@@ -1175,7 +1195,7 @@ it('refreshes final liability totals when the non-employee check observer report
   apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
     company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
     liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Saved liability check changed' }));
+  fireEvent.click(payRunButton('Saved liability check changed'));
   expect(await screen.findByText('$316.50 paid')).toBeTruthy();
   expect(screen.getByText('$0.00 outstanding')).toBeTruthy();
   expect(apiMocks.get).not.toHaveBeenCalled();
@@ -1186,14 +1206,15 @@ it('invalidates final liability truth after a saved check without requiring a su
   await renderCorrectionRefresh();
   await screen.findByText('$316.50 outstanding');
   apiMocks.payrollFinalRecord.mockRejectedValueOnce(new Error('Final record reload unavailable'));
-  fireEvent.click(screen.getByRole('button', { name: 'Liability saved without a list reload' }));
+  fireEvent.click(payRunButton('Liability saved without a list reload'));
+  fireEvent.click(payRunButton('Tab reports'));
   expect((await screen.findByRole('alert')).textContent).toContain('Final record reload unavailable');
   expect(screen.queryByText('$316.50 outstanding')).toBeNull();
-  expect((screen.getByRole('button', { name: 'Export final payroll record' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Export final payroll record') as HTMLButtonElement).disabled).toBe(true);
   apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
     company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
     liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Reload final payroll record' }));
+  fireEvent.click(payRunButton('Reload final payroll record'));
   expect(await screen.findByText('$316.50 paid')).toBeTruthy();
   expect(apiMocks.get).not.toHaveBeenCalled();
   expect(apiMocks.commit).not.toHaveBeenCalled();
@@ -1205,9 +1226,9 @@ it('reloads saved instruments, journal liabilities and source history after a pa
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: { status: 'reversed', postings: [{}, {}] } });
   let resolve!: (value: { pay_period: PayPeriod }) => void;
   apiMocks.get.mockImplementationOnce(() => new Promise(success => { resolve = success; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  fireEvent.click(payRunButton('Finish correction'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledExactlyOnceWith(12));
-  expect(screen.getByText('Voided', { selector: 'span' })).toBeTruthy();
+  expect(within(screen.getByLabelText('Pay run identity')).getByText('Voided', { selector: 'span' })).toBeTruthy();
   await act(async () => resolve({ pay_period: correctionCanonical }));
   expect(await screen.findByText('Canonical voided instruments and history')).toBeTruthy();
   expect(screen.getByTestId('saved-instrument-state').textContent).toBe('Voided');
@@ -1224,7 +1245,7 @@ it.each(['Other run', 'Other company'])('ignores a late correction response afte
   const oldCallback = componentMocks.correctionCallback.mock.calls.at(-1)![0] as (updated: PayPeriod) => void;
   const other = { ...correctionOriginal, id: label === 'Other run' ? 13 : 12, company_id: label === 'Other company' ? 8 : 7, notes: 'Different active scope' };
   apiMocks.get.mockResolvedValue({ pay_period: other });
-  fireEvent.click(screen.getByRole('button', { name: label }));
+  fireEvent.click(payRunButton(label));
   await screen.findByText('Different active scope');
   const calls = apiMocks.get.mock.calls.length;
   act(() => oldCallback(correctionCanonical));
@@ -1237,10 +1258,10 @@ it('does not apply a pending correction reload after navigating to another run',
   await renderCorrectionRefresh();
   let resolve!: (value: { pay_period: PayPeriod }) => void;
   apiMocks.get.mockImplementationOnce(() => new Promise(success => { resolve = success; }));
-  fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+  fireEvent.click(payRunButton('Finish correction'));
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
   apiMocks.get.mockResolvedValue({ pay_period: { ...correctionOriginal, id: 13, notes: 'New run remains current' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Other run' }));
+  fireEvent.click(payRunButton('Other run'));
   await screen.findByText('New run remains current');
   await act(async () => resolve({ pay_period: correctionCanonical }));
   expect(screen.getByText('New run remains current')).toBeTruthy();
@@ -1269,13 +1290,13 @@ async function renderRefreshNavigation() {
 }
 
 function submitRefreshNavigation() {
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh current setup' }));
+  fireEvent.click(payRunButton('Refresh current setup'));
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Refresh and recalculate' }));
   const reason = screen.queryByLabelText('Reason for calculating without imported hours');
   if (reason) {
     fireEvent.change(reason, { target: { value: 'Manually verified hours for this synthetic payroll.' } });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Calculate without imported hours' }));
+    fireEvent.click(payRunButton('Calculate without imported hours'));
   }
 }
 
@@ -1288,10 +1309,10 @@ it.each(['run', 'company'])('does not reload the old run or clear a new busy ref
   submitRefreshNavigation();
   const next = { ...original, id: scope === 'run' ? 13 : 12, company_id: scope === 'company' ? 8 : 7, notes: 'New active refresh scope' };
   apiMocks.get.mockResolvedValue({ pay_period: next });
-  fireEvent.click(screen.getByRole('button', { name: scope === 'run' ? 'Next refresh run' : 'Next refresh company' }));
+  fireEvent.click(payRunButton(scope === 'run' ? 'Next refresh run' : 'Next refresh company'));
   await screen.findByText('New active refresh scope');
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Refresh current setup') as HTMLButtonElement).disabled).toBe(false);
   submitRefreshNavigation();
   const calls = apiMocks.get.mock.calls.length;
   await act(async () => finishOld({ results: { success: [], skipped: [], errors: [{ employee_id: 30, error: 'Old run failure must stay behind.' }] } }));
@@ -1311,7 +1332,7 @@ it('does not add old refresh outcome feedback after its deferred canonical GET a
   submitRefreshNavigation();
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
   apiMocks.get.mockResolvedValue({ pay_period: { ...original, id: 13, notes: 'New active refresh scope' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Next refresh run' }));
+  fireEvent.click(payRunButton('Next refresh run'));
   await screen.findByText('New active refresh scope');
   await act(async () => finishGet({ pay_period: { ...original, notes: 'Old canonical refresh result' } }));
   expect(screen.getByText('New active refresh scope')).toBeTruthy();
@@ -1325,7 +1346,7 @@ it('keeps a late refresh POST rejection out of the new run', async () => {
   let reject!: (error: Error) => void;
   apiMocks.refreshSetup.mockImplementationOnce(() => new Promise((_resolve, failure) => { reject = failure; }));
   submitRefreshNavigation();
-  fireEvent.click(screen.getByRole('button', { name: 'Next refresh run' }));
+  fireEvent.click(payRunButton('Next refresh run'));
   await screen.findByText('New active refresh scope');
   await act(async () => reject(new Error('Old refresh request was rejected.')));
   expect(screen.queryByText('Old refresh request was rejected.')).toBeNull();
@@ -1334,17 +1355,17 @@ it('keeps a late refresh POST rejection out of the new run', async () => {
 
 it('allows approval with a calculated linked payment and an unrelated standalone deduction', async () => {
   await renderLoanWorksheet('calculated', undefined, 340, undefined, 40, 300);
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('allows a separate standalone deduction when the named repayment is explicitly skipped', async () => {
   await renderLoanWorksheet('calculated', undefined, 40, undefined, 40, 0, 0);
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('blocks approval when a standalone deduction has replaced the due named repayment', async () => {
   await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('keeps a missing linked repayment warning after unrelated edits to a saved positive override', async () => {
@@ -1352,15 +1373,15 @@ it('keeps a missing linked repayment warning after unrelated edits to a saved po
   expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
   expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '200' } });
   expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('saves both named and standalone amounts through worksheet recalculation', async () => {
   await renderLoanWorksheet('calculated', undefined, 340, undefined, 40, 300, 300);
-  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  fireEvent.click(payRunButton('Recalculate'));
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalled());
   expect(apiMocks.runPayroll.mock.calls[0][1].named_loan_payments).toEqual({ '30': { '2': { mode: 'override', amount: 300 } } });
   expect(apiMocks.runPayroll.mock.calls[0][1].loan_deductions).toEqual({ '30': 40 });
@@ -1373,7 +1394,7 @@ it('updates the separate-deduction warning for a staged zero skip while requirin
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
   expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('accepts a staged positive linked request alongside a separate amount without warning to clear it', async () => {
@@ -1381,7 +1402,7 @@ it('accepts a staged positive linked request alongside a separate amount without
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
   expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
 it.each(['mobile', 'desktop'])('retains both imported earning buckets and captured rates on the %s worksheet and calculate request', async surface => {
@@ -1525,11 +1546,11 @@ it.each(['draft', 'calculated', 'committed'])('shows retained correction holds a
     expect(within(mobile).getByText(reason)).toBeTruthy();
     const row = screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }) && within(row).queryByText(reason))!;
     expect(within(row).getByText('Retained pay basis · review required')).toBeTruthy();
-    const calculate = screen.getByRole('button', { name: status === 'draft' ? 'Calculate Payroll' : 'Recalculate' }) as HTMLButtonElement;
+    const calculate = payRunButton(status === 'draft' ? 'Calculate Payroll' : 'Recalculate') as HTMLButtonElement;
     expect(calculate.disabled).toBe(true);
     fireEvent.click(calculate);
     expect(apiMocks.runPayroll).not.toHaveBeenCalled();
-    if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+    if (status === 'calculated') expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   } else {
     expect(screen.getAllByRole('button', { name: 'View details' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Recalculate' })).toBeNull();
@@ -1567,10 +1588,10 @@ it.each([
   expect(screen.queryByText('Current secondary profile')).toBeNull();
   expect(screen.getByText('Saved gross pay')).toBeTruthy();
   expect(screen.getByText(/held correction records/)).toBeTruthy();
-  const calculate = screen.getByRole('button', { name: status === 'draft' ? 'Calculate Payroll' : 'Recalculate' });
+  const calculate = payRunButton(status === 'draft' ? 'Calculate Payroll' : 'Recalculate');
   expect((calculate as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(calculate);
-  if (status === 'calculated') expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  if (status === 'calculated') expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
 
@@ -1583,7 +1604,7 @@ it.each(['resolve', 'reject'])('retains a newer same-run reload when the setup G
   submitRefreshNavigation();
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
   apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Latest same-run payroll' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  fireEvent.click(payRunButton('Sibling refresh'));
   await screen.findByText('Latest same-run payroll');
   await act(async () => completion === 'resolve'
     ? finish({ pay_period: { ...original, notes: 'Old canonical setup' } })
@@ -1608,16 +1629,16 @@ it('retains saved-import context, blocks stale approval/commit and retries canon
   apiMocks.get.mockRejectedValueOnce(new Error('Saved source payroll read unavailable'));
   await act(async () => { expect(await callback()).toBe(false); });
   expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
   expect(apiMocks.commit).not.toHaveBeenCalled();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Canonical saved source hours' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  fireEvent.click(payRunButton('Reload saved payroll'));
   await screen.findByText('Canonical saved source hours');
   expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
   expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull();
-  expect((screen.getByRole('button', { name: 'Refresh current setup' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Refresh current setup') as HTMLButtonElement).disabled).toBe(false);
   expect(apiMocks.commit).not.toHaveBeenCalled();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
@@ -1631,7 +1652,7 @@ it('accepts a newer successful canonical read when the saved-import reload is su
   act(() => { pending = callback(); });
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
   apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Fresh canonical imported payroll' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  fireEvent.click(payRunButton('Sibling refresh'));
   await screen.findByText('Fresh canonical imported payroll');
   await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(true); });
   expect(screen.getByText('Fresh canonical imported payroll')).toBeTruthy();
@@ -1653,16 +1674,16 @@ it('requires the saved-import worksheet before clearing the hold and preserves s
   apiMocks.payrollFieldInputs.mockRejectedValueOnce(new Error('Worksheet unavailable'));
   await act(async () => { expect(await callback()).toBe(false); });
   expect(await screen.findByText(/Source hours were saved, but the current payroll could not load/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Recalculate') as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getAllByText('Retained allowance').length).toBeGreaterThan(0);
   expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('88.00');
   expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Employee Loan repayment amount') as HTMLInputElement).value).toBe('125.00');
   expect(within(screen.getByRole('region', { name: 'Retained manual retirement entries' })).getByText(/Retained 401\(k\).*requested \$50.00, applied \$50.00/)).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  fireEvent.click(payRunButton('Reload saved payroll'));
   await waitFor(() => expect(screen.queryByText(/Source hours were saved, but the current payroll could not load/)).toBeNull());
-  expect((screen.getByRole('button', { name: 'Recalculate' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((payRunButton('Recalculate') as HTMLButtonElement).disabled).toBe(false);
   expect((within(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).getByLabelText('Retained allowance') as HTMLInputElement).value).toBe('75.00');
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
@@ -1678,13 +1699,13 @@ it('keeps the saved-import hold when a newer superseding read fails its required
   act(() => { pending = callback(); });
   await waitFor(() => expect(apiMocks.get).toHaveBeenCalledWith(12));
   apiMocks.get.mockResolvedValue({ pay_period: { ...original, status: 'calculated', notes: 'Incomplete newer read' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sibling refresh' }));
+  fireEvent.click(payRunButton('Sibling refresh'));
   await screen.findByText('Saved payroll worksheet could not load: Newer required worksheet unavailable');
   await act(async () => { finish({ pay_period: original }); expect(await pending).toBe(false); });
   expect(screen.queryByText('Incomplete newer read')).toBeNull();
-  expect((screen.getByRole('button', { name: 'Commit & Finalize' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole('button', { name: 'Refresh current setup' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Reload saved payroll' }));
+  fireEvent.click(payRunButton('Reload saved payroll'));
   await screen.findByText('Incomplete newer read');
   expect(screen.queryByText(/Saved source hours need a current payroll reload before processing/)).toBeNull();
   expect(apiMocks.commit).not.toHaveBeenCalled();
@@ -1752,12 +1773,12 @@ it('keeps whole-period AIRE readiness out of a selected-only adjustment', async 
 });
 
 async function calculateWithCoverage(): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  fireEvent.click(payRunButton('Calculate Payroll'));
   const reason = screen.queryByLabelText('Reason for calculating without imported hours');
   if (!reason) return;
   fireEvent.change(reason, { target: { value: 'Manually verified hours for this synthetic payroll.' } });
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox'));
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate without imported hours' }));
+  fireEvent.click(payRunButton('Calculate without imported hours'));
 }
 
 it('requires a reason and acknowledgement for a scheduled connected run before import, then calculates the saved salary roster', async () => {
@@ -1770,8 +1791,8 @@ it('requires a reason and acknowledgement for a scheduled connected run before i
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  expect(await screen.findByRole('button', { name: 'Review & add hours' })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
+  expect((await screen.findByRole('button', { name: 'Review & add hours' })).className).toContain('bg-primary-700');
+  fireEvent.click(payRunButton('Calculate Payroll'));
   const dialog = await screen.findByRole('dialog');
   const calculate = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
   expect(calculate.disabled).toBe(true);
@@ -1799,7 +1820,7 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   fireEvent.click(await screen.findByRole('button', { name: 'Refresh current setup' }));
   fireEvent.click(screen.getByLabelText('Include recurring employee setup'));
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh and recalculate' }));
+  fireEvent.click(payRunButton('Refresh and recalculate'));
   let dialog = screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' });
   let confirm = within(dialog).getByRole('button', { name: 'Calculate without imported hours' }) as HTMLButtonElement;
   expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
@@ -1810,7 +1831,7 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   expect(confirm.disabled).toBe(true);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   expect(apiMocks.refreshSetup).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh and recalculate' }));
+  fireEvent.click(payRunButton('Refresh and recalculate'));
   dialog = screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' });
   expect((within(dialog).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
   expect((within(dialog).getByLabelText('Reason for calculating without imported hours') as HTMLTextAreaElement).value).toBe('');
@@ -1823,7 +1844,7 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   }));
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
   expect(await screen.findByText(/Current setup applied to the saved employees/)).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  fireEvent.click(payRunButton('Recalculate'));
   expect(screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' })).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });

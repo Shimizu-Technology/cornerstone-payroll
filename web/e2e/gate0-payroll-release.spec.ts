@@ -1,3 +1,4 @@
+import { openPayrollActions, showPayrollTab } from './helpers/pay-run-actions';
 import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type Page, type Route } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -593,7 +594,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const page = await context.newPage();
     const payRunId = fixture.workflow_pay_period_id;
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${payRunId}/overview`);
-    await expect(page.getByText(`Pay run #${payRunId}`, { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Pay run identity').getByText(`Run #${payRunId}`, { exact: false })).toBeVisible();
 
     let markBoundaryLoadStarted: (() => void) | undefined;
     const boundaryLoadStarted = new Promise<void>((resolve): void => {
@@ -626,7 +627,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(boundaryPath);
     await boundaryLoadStarted;
     await expect(page.getByText('Loading pay-run workspace')).toBeVisible();
-    await expect(page.getByText(`Pay run #${payRunId}`, { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('Pay run identity').getByText(`Run #${payRunId}`, { exact: false })).toHaveCount(0);
     releaseBoundaryLoad?.();
     const boundaryResponse = await boundaryResponsePromise;
     expect(boundaryResponse.request().headers()['x-company-id']).toBe(String(fixture.other_company_id));
@@ -1092,7 +1093,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
     const page = await accountantContext.newPage();
     await page.goto(`/pay-periods/${fixture.bonus_sync_pay_period_id}`);
-    await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Aug 2 - 15, 2026/i })).toBeVisible();
 
     const calculation = page.waitForResponse((response): boolean =>
       response.request().method() === 'POST' &&
@@ -1282,6 +1283,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const page = await context.newPage();
 
     await page.goto(`/pay-periods/${fixture.safe_payroll_import_period_id}`);
+    await openPayrollActions(page);
     await page.getByRole('button', { name: 'Import (MoSa)' }).click();
     const safeDialog = page.locator('.dialog-wide');
     await expect(safeDialog.getByText('Revel pay rates and pay amounts are ignored.', { exact: false })).toBeVisible();
@@ -1321,6 +1323,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(Number(typoEmployeeItem?.gross_pay)).not.toBe(8_888.88);
 
     await page.goto(`/pay-periods/${fixture.blocked_payroll_import_period_id}`);
+    await openPayrollActions(page);
     await page.getByRole('button', { name: 'Import (MoSa)' }).click();
     const blockedDialog = page.locator('.dialog-wide');
     await blockedDialog.locator('input[type="file"]').nth(0).setInputFiles(fixture.blocked_payroll_import_pdf_path);
@@ -1542,16 +1545,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const workflowRow = page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' });
 
     await workflowRow.getByRole('button', { name: 'View', exact: true }).click();
-    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
     const payRunIdentity = page.getByLabel('Pay run identity');
-    await expect(payRunIdentity).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
+    await expect(payRunIdentity).toContainText(`Run #${fixture.workflow_pay_period_id}`);
     await payRunIdentity.evaluate((element): void => element.setAttribute('data-workspace-shell-probe', 'preserved'));
     await page.evaluate((): void => {
       (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe = 'preserved';
     });
 
     const workspaceNavigation = page.getByRole('navigation', { name: 'Pay-run workspace sections' });
-    await workspaceNavigation.getByRole('link', { name: 'Process payroll' }).click();
+    await workspaceNavigation.getByRole('link', { name: 'Payroll' }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
     await expect(page.getByLabel('Payroll processing actions')).toBeVisible();
     await expect(payRunIdentity).toHaveAttribute('data-workspace-shell-probe', 'preserved');
@@ -1559,12 +1562,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     const processingSearch = page.getByPlaceholder('Search employees...');
     await processingSearch.fill('Avery');
-    await workspaceNavigation.getByRole('link', { name: 'Overview' }).click();
-    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await workspaceNavigation.getByRole('link', { name: 'Reports' }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/reports?return_to=${encodeURIComponent(queueReturnTo)}`);
     await expect(payRunIdentity).toHaveAttribute('data-workspace-shell-probe', 'preserved');
-    await workspaceNavigation.getByRole('link', { name: 'Process payroll' }).click();
+    await workspaceNavigation.getByRole('link', { name: 'Payroll' }).click();
     await expect(processingSearch).toHaveValue('Avery');
-    await workspaceNavigation.getByRole('link', { name: 'Overview' }).click();
+    await workspaceNavigation.getByRole('link', { name: 'Reports' }).click();
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
 
@@ -1709,7 +1712,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const mobileReturnTo = `${mobileQueueLocation.pathname}${mobileQueueLocation.search}`;
 
     await page.getByRole('button', { name: 'View', exact: true }).click();
-    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(mobileReturnTo)}`);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(mobileReturnTo)}`);
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(mobileQueueUrl);
 
@@ -1731,28 +1734,32 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
   test('calculates, reviews, rolls back approval, commits, and rejects a retry or edit after commit', async ({ page }): Promise<void> => {
     await page.goto(`/pay-periods/${fixture.workflow_pay_period_id}`);
-    await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Aug 2 - 15, 2026/i })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Calculate Payroll' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Calculate Payroll' }).click();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+    await showPayrollTab(page, 'Reports');
     await expect(page.getByText('Reports & Documents')).toBeVisible();
+    await showPayrollTab(page, 'Payroll');
 
     await page.getByRole('button', { name: 'Approve' }).click();
+    await openPayrollActions(page);
     await expect(page.getByRole('button', { name: 'Roll Back Approval' })).toBeVisible();
 
     page.once('dialog', (dialog) => dialog.accept());
+    await openPayrollActions(page);
     await page.getByRole('button', { name: 'Roll Back Approval' }).click();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Approve' }).click();
-    await expect(page.getByRole('button', { name: 'Commit & Finalize' })).toBeVisible();
-    await page.getByRole('button', { name: 'Commit & Finalize' }).click();
+    await expect(page.getByRole('button', { name: 'Commit' })).toBeVisible();
+    await page.getByRole('button', { name: 'Commit' }).click();
     const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
     await expect(commitDialog).toBeVisible();
     await commitDialog.getByRole('button', { name: 'Confirm commit', exact: true }).click();
     await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Commit & Finalize' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Commit' })).toHaveCount(0);
 
     const committedBeforeRetry = await adminApi.get(`admin/pay_periods/${fixture.workflow_pay_period_id}`);
     expect(committedBeforeRetry.ok()).toBeTruthy();
@@ -1774,7 +1781,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.reload();
     await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
+    await showPayrollTab(page, 'Reports');
     await expect(page.getByText('Reports & Documents')).toBeVisible();
+    await showPayrollTab(page, 'Payroll');
 
     const employeeHistoryUrl = `/companies/${fixture.company_id}/employees/${fixture.employee_id}/pay-history`;
     await page.goto(employeeHistoryUrl);
@@ -1989,6 +1998,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(
       `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(filteredReturnTo)}`,
     );
+    await showPayrollTab(page, 'Activity');
     await page.getByRole('button', { name: 'Create Correction Run', exact: true }).click();
     await page.getByLabel(/Reason for correction/).fill('Correct payroll while preserving filtered queue context');
     await page.getByRole('dialog').getByRole('button', { name: 'Create Correction Run', exact: true }).click();
@@ -2053,11 +2063,13 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
           results: { success: [], skipped: [], errors: [{ employee_id: fixture.employee_id, error: 'Review this employee setup before retrying.' }] },
         } });
       }, { times: 1 });
+      await openPayrollActions(page);
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
       await expect(page.getByText(/Review this employee setup before retrying/)).toBeVisible();
       await expect(bonus).toHaveValue('321.09');
       await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
       const save = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await openPayrollActions(page);
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
       const result = await (await save).json();
       expect(result.results.errors).toEqual([]);
@@ -2071,6 +2083,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await bonus.fill('0');
       await bonus.press('Tab');
       const clear = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      await openPayrollActions(page);
       await page.getByRole('button', { name: 'Recalculate', exact: true }).click();
       const cleared = await (await clear).json();
       expect(cleared.results.errors).toEqual([]);
@@ -2108,6 +2121,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await loan.fill('75');
       await loan.press('Tab');
       const saved = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      if (await page.getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
       await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
       const body = await (await saved).json();
       expect(body.results.errors).toEqual([]);
@@ -2122,6 +2136,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await loan.fill('0');
       await loan.press('Tab');
       const cleared = page.waitForResponse((response) => response.url().endsWith('/run_payroll') && response.request().method() === 'POST');
+      if (await page.getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
       await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).click();
       const final = await (await cleared).json();
       expect(final.results.errors).toEqual([]);

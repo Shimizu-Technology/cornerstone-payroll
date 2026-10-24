@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
@@ -65,9 +66,10 @@ vi.mock('@/components/payroll/ChecksPanel', () => ({
 }));
 
 vi.mock('@/pages/PayPeriodDetail', () => ({
-  PayPeriodDetail: ({ refreshToken }: { refreshToken?: number }) => (
-    <div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
-  ),
+  PayPeriodDetail: ({ refreshToken, activeTab, navigation, checksContent, activityContent }: { refreshToken?: number; activeTab?: string; navigation?: ReactNode; checksContent?: (options: { searchTerm: string; onChecksLoaded: () => void }) => ReactNode; activityContent?: ReactNode }) => <>
+    {navigation}<div data-testid="mounted-processing-refresh-token">{refreshToken}</div>
+    {activeTab === 'checks' && checksContent?.({ searchTerm: '', onChecksLoaded: () => {} })}{activeTab === 'activity' && activityContent}
+  </>,
 }));
 
 vi.mock('@/components/documents/PdfPreview', () => ({
@@ -111,6 +113,14 @@ const payRun = {
 describe('PayRunWorkspace rehearsal checks', () => {
   afterEach(cleanup);
 
+  it('redirects the writer overview alias into Payroll and exposes Reports', async () => {
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/overview?return_to=%2Fclients']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes></MemoryRouter>);
+    expect(await screen.findByRole('link', { name: 'Payroll' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Reports' })).toBeTruthy();
+    expect(await screen.findByTestId('mounted-processing-refresh-token')).toBeTruthy();
+  });
+
+
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.isAdmin = true;
@@ -132,6 +142,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
   });
 
   it('labels held correction totals as saved amounts without dropping their retained money', async () => {
+    apiMocks.activeCompany = { id: 7, workspace_can_write: false };
     apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, payroll_items: [{ ...payrollItem,
       correction_pay_basis_hold: { reason: 'Review retained original frequency before recalculation.' } }] } });
     render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/overview']}><Routes>
@@ -173,7 +184,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.queryByText('Process payroll')).toBeNull();
     expect(screen.queryByText('Open processing')).toBeNull();
     expect(screen.getByRole('button', { name: 'Open payroll item for Alice Reyes' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: /Checks & direct deposit/ })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Checks & payments/ })).toBeTruthy();
   });
 
   it('allows the reviewer to inspect a VOID rehearsal PDF without enabling payment actions', async () => {
@@ -203,7 +214,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Locked reference history')).toBeTruthy();
     expect(screen.getByText('Locked reference records')).toBeTruthy();
     expect(screen.queryByText('Process payroll')).toBeNull();
-    expect(screen.queryByText('Checks & direct deposit')).toBeNull();
+    expect(screen.queryByText('Checks & payments')).toBeNull();
   });
 
   it.each(['work', 'checks'])('routes sealed backups from %s to a review-only workspace', async (tab) => {
@@ -225,7 +236,7 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByText('Read-only snapshot')).toBeTruthy();
     expect(screen.getByText('Read-only payroll records')).toBeTruthy();
     expect(screen.queryByText('Process payroll')).toBeNull();
-    expect(screen.queryByText('Checks & direct deposit')).toBeNull();
+    expect(screen.queryByText('Checks & payments')).toBeNull();
     expect(screen.queryByText('Open processing')).toBeNull();
   });
 
@@ -529,12 +540,12 @@ describe('PayRunWorkspace check status refresh', () => {
     );
 
     expect((await screen.findByTestId('mounted-processing-refresh-token')).textContent).toBe('0');
-    fireEvent.click(screen.getByRole('link', { name: /Checks & direct deposit/ }));
+    fireEvent.click(screen.getByRole('link', { name: /Checks & payments/ }));
     expect(await screen.findAllByText('Prepared')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate check status change' }));
     expect(await screen.findAllByText('Issued')).toHaveLength(2);
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
-    fireEvent.click(screen.getByRole('link', { name: 'Process payroll' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Payroll' }));
     expect(screen.getByTestId('mounted-processing-refresh-token').textContent).toBe('1');
   });
 });

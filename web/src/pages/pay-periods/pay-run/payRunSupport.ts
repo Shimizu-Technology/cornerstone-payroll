@@ -288,6 +288,10 @@ export const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant
 
 export interface PayPeriodDetailProps {
   active?: boolean;
+  activeTab?: import('@/lib/routes').PayRunWorkspaceTab;
+  navigation?: import('react').ReactNode;
+  checksContent?: (options: { searchTerm: string; onChecksLoaded: (checks: import('@/types').NonEmployeeCheck[]) => void }) => import('react').ReactNode;
+  activityContent?: import('react').ReactNode;
   initialPayPeriod?: PayPeriod;
   onPayPeriodChange?: (payPeriod: PayPeriod) => void;
   refreshToken?: number;

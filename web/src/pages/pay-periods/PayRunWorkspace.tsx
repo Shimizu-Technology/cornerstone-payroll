@@ -19,7 +19,8 @@ import { Link, Navigate, useLocation, useParams, useSearchParams } from 'react-r
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Header } from '@/components/layout/Header';
+import { PayRunRecordHeader } from './pay-run/PayRunRecordHeader';
+import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollItemReviewDialog } from '@/components/payroll/PayrollItemReviewDialog';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
@@ -36,7 +37,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { HelpTip } from '@/components/ui/help-tip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
 import {
   currentAppPath,
   employeePath,
@@ -50,17 +51,17 @@ import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { checksApi, payPeriodsApi } from '@/services/api';
 import type { PromotedPaymentPreview } from '@/services/api';
-import type { PayPeriod, PayrollItem } from '@/types';
+import type { NonEmployeeCheck, PayPeriod, PayrollItem } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
 
 const tabs: Array<{ id: PayRunWorkspaceTab; label: string; icon: typeof ClipboardList }> = [
-  { id: 'overview', label: 'Overview', icon: ClipboardList },
-  { id: 'work', label: 'Process payroll', icon: Banknote },
-  { id: 'checks', label: 'Checks & direct deposit', icon: Printer },
+  { id: 'work', label: 'Payroll', icon: Banknote },
+  { id: 'checks', label: 'Checks & payments', icon: Printer },
+  { id: 'reports', label: 'Reports', icon: ReceiptText },
   { id: 'activity', label: 'Activity', icon: Activity },
 ];
-const tabIds = new Set(tabs.map((tab) => tab.id));
+const tabIds = new Set([...tabs.map((tab) => tab.id), 'overview']);
 
 const runPurposeLabels: Record<string, string> = {
   regular: 'Regular payroll',
@@ -80,7 +81,7 @@ export function PayRunWorkspace(): ReactElement {
   }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const payRunId = parsePayRunId(idParam) ?? 0;
-  const activeTab = tabIds.has(tabParam as PayRunWorkspaceTab) ? tabParam as PayRunWorkspaceTab : 'overview';
+  const activeTab = tabIds.has(tabParam as PayRunWorkspaceTab) ? tabParam as PayRunWorkspaceTab : 'work';
   const location = useLocation();
   const { activeCompany } = useCompany();
   const [searchParams] = useSearchParams();
@@ -92,9 +93,7 @@ export function PayRunWorkspace(): ReactElement {
   const [processingRefreshToken, setProcessingRefreshToken] = useState(0);
   const routeKey = `${companyId}:${payRunId}`;
   const hasValidRouteIds = [companyId, payRunId].every((value) => Number.isInteger(value) && value > 0);
-  const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
-    activeTab === 'work' ? payRunId : null,
-  );
+
 
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
@@ -136,9 +135,7 @@ export function PayRunWorkspace(): ReactElement {
     };
   }, [load]);
 
-  useEffect(() => {
-    if (activeTab === 'work') setMountedProcessingPayRunId(payRunId);
-  }, [activeTab, payRunId]);
+
 
   const handlePayRunChange = useCallback((updated: PayPeriod): void => {
     setPayRun((current) => current?.id === updated.id
@@ -154,8 +151,8 @@ export function PayRunWorkspace(): ReactElement {
   const payRunListFallback = Number.isInteger(companyId) && companyId > 0 ? payRunsPath(companyId) : '/pay-periods';
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunListFallback);
 
-  if (hasValidRouteIds && tabParam && !tabIds.has(tabParam as PayRunWorkspaceTab)) {
-    return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
+  if (hasValidRouteIds && tabParam && (!tabIds.has(tabParam as PayRunWorkspaceTab) || tabParam === 'overview')) {
+    return <Navigate to={`${payRunPath(companyId, payRunId, 'work', { returnTo })}${location.hash}`}  replace />;
   }
 
   const currentPath = currentAppPath(location.pathname, location.search);
@@ -186,61 +183,30 @@ export function PayRunWorkspace(): ReactElement {
     : readOnlyWorkspace
       ? activeCompany?.test_workspace_purpose === 'backup_snapshot' ? 'backup_snapshot' : 'workspace_access'
       : null;
-  if (readOnlyMode && (activeTab === 'work' || (activeTab === 'checks' && readOnlyMode !== 'workspace_access'))) {
-    return <Navigate to={payRunPath(companyId, payRunId, 'overview', { returnTo })} replace />;
+  if (readOnlyMode && activeTab === 'checks' && readOnlyMode !== 'workspace_access') {
+    return <Navigate to={payRunPath(companyId, payRunId, 'work', { returnTo })} replace />;
   }
 
   const items = [...(payRun.payroll_items || [])].sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || '') || a.id - b.id);
   const reportableItems = items.filter((item) => item.payroll_included !== false);
-  const statusConfig = payPeriodStatusConfig[payRun.status];
+  const navigation = <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.filter(tab => !(readOnlyMode && readOnlyMode !== 'workspace_access' && tab.id === 'checks')).map(tab => ({ ...tab, href: payRunPath(companyId, payRunId, tab.id, { returnTo }), count: tab.id === 'checks' ? items.filter(item => item.payroll_included !== false && (item.earnings_statement_eligible ?? (Number(item.gross_pay || 0) !== 0 || Number(item.net_pay || 0) !== 0 || Boolean(item.check_number)))).length : undefined }))} />;
+  const activity = <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />;
+  const checks = <PayRunChecks readOnly={readOnlyMode === 'workspace_access'} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />;
 
-  return (
-    <div>
-      <Header
-        title={`Pay Period: ${formatDateRange(payRun.start_date, payRun.end_date)}`}
-        description={`Pay date ${formatDate(payRun.pay_date)} · ${runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}`}
-        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{!readOnlyMode && activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
-      />
-
-      <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Pay run identity">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={payRun.correction_status === 'voided' ? 'danger' : payRun.status === 'committed' ? 'success' : payRun.status === 'approved' ? 'info' : payRun.status === 'calculated' ? 'warning' : 'default'}>{payRun.correction_status === 'voided' ? 'Voided' : statusConfig?.label || payRun.status}</Badge>
-          <Badge variant={payRun.run_purpose === 'regular' ? 'default' : 'warning'}>{runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}</Badge>
-          {!readOnlyWorkspace && payRun.parallel_run && <span className="inline-flex items-center"><Badge variant="info"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Parallel comparison · cannot commit</Badge><HelpTip label="parallel comparison">This run is isolated from live payroll actions. It can be calculated and reviewed, but never committed, paid, printed, or filed.</HelpTip></span>}
-          {isTrainingBaseline && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />Locked reference history</Badge><HelpTip label="locked reference history">This copied payroll is view-only and preserves the year-to-date starting point for safe testing.</HelpTip></span>}
-          {readOnlyWorkspace && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3.5 w-3.5" />{readOnlyMode === 'backup_snapshot' ? 'Read-only snapshot' : 'Read-only workspace'}</Badge><HelpTip label="read-only workspace">{companyReadOnlyMessage(activeCompany)}</HelpTip></span>}
-          <span className="text-sm font-medium text-neutral-500">Pay run #{payRun.id}</span>
-        </div>
-      </section>
-
-      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.filter((tab) => !readOnlyMode || (tab.id !== 'work' && (tab.id !== 'checks' || readOnlyMode === 'workspace_access'))).map((tab) => ({
-        ...tab,
-        href: payRunPath(companyId, payRunId, tab.id, { returnTo }),
-        count: tab.id === 'checks'
-          ? items.filter(item => item.payroll_included !== false && (item.earnings_statement_eligible ?? (Number(item.gross_pay || 0) !== 0 || Number(item.net_pay || 0) !== 0 || Boolean(item.check_number)))).length
-          : undefined,
-      }))} />
-
-      <div className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
-        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
-        {activeTab === 'checks' && <PayRunChecks readOnly={readOnlyMode === 'workspace_access'} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} />}
-        {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
-        {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
-          <section hidden={activeTab !== 'work'} aria-label="Process payroll workspace">
-            <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
-              <PayPeriodDetail
-                key={`${companyId}:${payRunId}`}
-                active={activeTab === 'work'}
-                initialPayPeriod={payRun}
-                onPayPeriodChange={handlePayRunChange}
-                refreshToken={processingRefreshToken}
-              />
-            </Suspense>
-          </section>
-        )}
-      </div>
+  if (readOnlyMode) return <div>
+    <PayRunRecordHeader payRun={payRun} client={activeCompany?.name} returnTo={returnTo} attention={<span className="inline-flex items-center gap-2"><LockKeyhole className="h-4 w-4" aria-hidden="true" />{readOnlyMode === 'training_baseline' ? 'Locked reference history' : readOnlyMode === 'backup_snapshot' ? 'Read-only snapshot' : 'Read-only workspace'}<HelpTip label="read-only workspace">{isTrainingBaseline ? 'This copied payroll is view-only and preserves the year-to-date starting point for safe testing.' : companyReadOnlyMessage(activeCompany)}</HelpTip></span>} />
+    {navigation}
+    <div className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
+      {activeTab === 'work' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
+      {activeTab === 'checks' && checks}
+      {activeTab === 'activity' && activity}
+      {activeTab === 'reports' && (payRun.status !== 'draft' && reportableItems.length ? <ReportsDownloadPanel payPeriodId={payRun.id} payPeriodStatus={payRun.status} payDate={payRun.pay_date} /> : <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>)}
     </div>
-  );
+  </div>;
+
+  return <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
+    <PayPeriodDetail key={`${companyId}:${payRunId}`} activeTab={activeTab} initialPayPeriod={payRun} onPayPeriodChange={handlePayRunChange} refreshToken={processingRefreshToken} navigation={navigation} checksContent={({ searchTerm, onChecksLoaded }) => <PayRunChecks readOnly={false} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} searchTerm={searchTerm} onChecksLoaded={onChecksLoaded} />} activityContent={activity} />
+  </Suspense>;
 }
 
 interface PayRunOverviewProps {
@@ -297,6 +263,8 @@ function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo,
 }
 
 interface PayRunChecksProps {
+  searchTerm?: string;
+  onChecksLoaded?: (checks: NonEmployeeCheck[]) => void;
   readOnly: boolean;
   companyId: number;
   payRun: PayPeriod;
@@ -307,7 +275,7 @@ interface PayRunChecksProps {
   isRehearsal: boolean;
 }
 
-function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceReturnTo, onChanged, isRehearsal }: PayRunChecksProps): ReactElement {
+function PayRunChecks({ searchTerm, onChecksLoaded, readOnly, companyId, payRun, items, returnTo, workspaceReturnTo, onChanged, isRehearsal }: PayRunChecksProps): ReactElement {
   const { isAdmin } = useAuth();
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [mockPreviewBusy, setMockPreviewBusy] = useState(false);
@@ -508,6 +476,7 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
   return (
     <>
       <PayrollItemReviewDialog companyId={companyId} payRunId={payRun.id} item={reviewingItem} returnTo={returnTo} onClose={() => setReviewingItem(null)} />
+      {!readOnly && <Link to="/check-settings" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700">Check Settings ›</Link>}
       <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
       {paymentNotice && (
         <ActionFeedback tone="success" message={paymentNotice}><strong>Ready to print.</strong> {paymentNotice}</ActionFeedback>
@@ -571,12 +540,12 @@ function PayRunChecks({ readOnly, companyId, payRun, items, returnTo, workspaceR
       </Card>
       {!readOnly && !isRehearsal && payRun.status === 'committed' && (
         <>
-          <ChecksPanel timeTrackingReviewHref={`${payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })}#time-tracking-sync`} payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
+          <ChecksPanel searchTerm={searchTerm} timeTrackingReviewHref={`${payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })}#time-tracking-sync`} payPeriod={payRun} refreshToken={checkPrintRefreshToken} onChecksChanged={refreshPayRunSummary} onChangePaymentMethod={id => setSwitchItem(items.find(item => item.id === id) || null)} />
           <NonEmployeeChecksPanel
             payPeriodId={payRun.id} companyId={companyId} payPeriodStatus={payRun.status}
             payPeriodVoided={payRun.correction_status === 'voided'} payDate={payRun.pay_date}
             refreshToken={checkPrintRefreshToken}
-            onChecksLoaded={checks => setHasNonEmployeeChecks(checks.some(check => !check.voided))}
+            onChecksLoaded={checks => { setHasNonEmployeeChecks(checks.some(check => !check.voided)); onChecksLoaded?.(checks); }}
             onChecksChanged={() => { setCheckPrintRefreshToken(value => value + 1); void refreshPayRunSummary(); }}
           />
           <UnifiedCheckPrintDialog

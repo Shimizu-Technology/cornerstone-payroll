@@ -1,3 +1,4 @@
+import { openPayrollActions } from './helpers/pay-run-actions';
 import { expect as baseExpect, request, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -213,6 +214,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
 
   test('regular payroll applies scoped additions once, honors dates, and retains the legacy chief allowance', async ({ page }) => {
     await page.goto(`/companies/${fixture.companies.aire}/pay-runs/${fixture.periods.regular}/work`);
+    if (await page.getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
     await page.getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).filter({ visible: true }).click();
     await expect.poll(async () => (await period(aireApi, fixture.periods.regular)).status).toBe('calculated');
     const saved = await period(aireApi, fixture.periods.regular);
