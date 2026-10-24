@@ -6,7 +6,11 @@ RSpec.describe StagingCloneContainment do
   around do |example|
     old = ENV.to_h
     ENV["DEPLOYMENT_ENV"] = "staging"
-    ENV["STAGING_DATABASE_HOSTS"] = "127.0.0.1"
+    # CI may supply DATABASE_URL or TEST_DATABASE_URL with a different host.
+    database = ActiveRecord::Base.connection_db_config.configuration_hash
+    StagingOutboundPolicy::DATABASE_SETTINGS.each { |name| ENV.delete(name) }
+    ENV["DATABASE_URL"] = URI::Generic.build(scheme: "postgresql", host: database.fetch(:host), port: database[:port], path: "/#{database.fetch(:database)}").to_s
+    ENV["STAGING_DATABASE_HOSTS"] = database.fetch(:host).downcase
     ENV["PRODUCTION_DATABASE_HOSTS"] = "production-db.example.test"
     ENV["STAGING_TESTER_BINDINGS"] = '{"leon@example.test":"user_leon","chels@example.test":"user_chels"}'
     ENV["STAGING_INTEGRATION_HOSTS"] = "aire-staging.example.test"
@@ -29,7 +33,7 @@ RSpec.describe StagingCloneContainment do
   end
 
   it "rejects a production host and an actual-connection mismatch" do
-    ENV["PRODUCTION_DATABASE_HOSTS"] = "127.0.0.1"
+    ENV["PRODUCTION_DATABASE_HOSTS"] = ENV.fetch("STAGING_DATABASE_HOSTS")
     expect { described_class.new.quarantine(apply: true) }.to raise_error(StagingOutboundPolicy::ConfigurationError)
     ENV["PRODUCTION_DATABASE_HOSTS"] = "production-db.example.test"
     ENV["STAGING_DATABASE_HOSTS"] = "other-clone.example.test"
