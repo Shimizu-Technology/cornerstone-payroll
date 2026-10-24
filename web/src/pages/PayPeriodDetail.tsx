@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useEffect } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { payRunPath } from '@/lib/routes';
@@ -28,7 +28,34 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const state = usePayRunController(props);
   const { activeCompany } = useCompany();
   const location = useLocation();
+  const navigate = useNavigate();
   const activeTab = props.activeTab ?? 'work';
+  const feedbackRoute = state.status === 'ready' ? payRunPath(state.sections.processing.companyId, state.sections.processing.payPeriod.id, 'work', { returnTo: state.sections.processing.returnTo }) : null;
+  const feedback = state.status === 'ready' ? state.sections.feedback : null;
+  const hasFeedback = Boolean(feedback && (feedback.error || feedback.calculationNotice || feedback.calendarRefreshError || feedback.worksheetRefreshWarning || feedback.savedImportReloadRequired || feedback.calculationFailures.length));
+  useEffect(() => {
+    if (!hasFeedback || !feedbackRoute) return;
+    if (activeTab !== 'work') {
+      void navigate(feedbackRoute);
+      return;
+    }
+    // A fast API rejection can arrive before the confirmation dialog finishes
+    // closing. Let its focus restoration finish before focusing the feedback.
+    const observer = new MutationObserver(focusFeedback);
+    function focusFeedback() {
+      if (document.querySelector('[role="dialog"]')) return;
+      const target = document.getElementById('payroll-feedback');
+      if (!target) return;
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+      target.scrollIntoView?.({ block: 'nearest' });
+      target.focus({ preventScroll: true });
+      observer.disconnect();
+    }
+    observer.observe(document.body, { childList: true, subtree: true });
+    focusFeedback();
+    return () => observer.disconnect();
+  // Feedback fields identify a new outcome; routine worksheet edits must not steal focus.
+  }, [activeTab, feedbackRoute, hasFeedback, feedback?.errorFeedbackAttempt, feedback?.error, feedback?.calculationNotice, feedback?.calendarRefreshError, feedback?.worksheetRefreshWarning, feedback?.savedImportReloadRequired, feedback?.calculationFailures.length, navigate]);
   useEffect(() => {
     if (!location.hash || state.status !== 'ready') return;
     let fragment: string;

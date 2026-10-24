@@ -630,7 +630,9 @@ it('closes before the API completes, blocks duplicate writes and leaves a failed
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect((payRunButton('Committing...') as HTMLButtonElement).disabled).toBe(true);
   await act(async () => rejectCommit(new Error('Commit rejected: stale approval')));
-  expect(await screen.findByText('Commit rejected: stale approval')).toBeTruthy();
+  const feedback = await screen.findByText('Commit rejected: stale approval');
+  expect(feedback.closest('details')?.id).toBe('payroll-commit');
+  await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
   expect((payRunButton('Commit') as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -1379,12 +1381,12 @@ it('blocks approval when a standalone deduction has replaced the due named repay
 
 it('keeps a missing linked repayment warning after unrelated edits to a saved positive override', async () => {
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40, 0, 300);
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   fireEvent.change(within(card!).getByLabelText('Regular hours'), { target: { value: '81' } });
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '200' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1398,11 +1400,11 @@ it('saves both named and standalone amounts through worksheet recalculation', as
 
 it('updates the separate-deduction warning for a staged zero skip while requiring recalculation', async () => {
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
-  expect(screen.getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
+  expect(within(document.getElementById('payroll-loan-inputs')!).getByText(/Clear the standalone one-time deduction/)).toBeTruthy();
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment amount'), { target: { value: '0' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1410,7 +1412,7 @@ it('accepts a staged positive linked request alongside a separate amount without
   const card = await renderLoanWorksheet('calculated', undefined, 40, undefined, 40);
   fireEvent.change(within(card!).getByLabelText('Employee Loan repayment choice'), { target: { value: 'override' } });
   fireEvent.change(within(card!).getByLabelText('Standalone one-time deduction'), { target: { value: '40' } });
-  expect(screen.queryByText(/Clear the standalone one-time deduction/)).toBeNull();
+  expect(within(document.getElementById('payroll-loan-inputs')!).queryByText(/Clear the standalone one-time deduction/)).toBeNull();
   expect((payRunButton('Approve') as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -1801,7 +1803,8 @@ it('requires a reason and acknowledgement for a scheduled connected run before i
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated', payroll_items: [] }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
-  expect((await findPayRunButton('Review & add hours')).className).toContain('bg-primary-700');
+  await findPayRunButton('Review & add hours');
+  expect(within(document.querySelector('section[aria-label="Payroll processing actions"]') as HTMLElement).getByRole('button', { name: 'Review & add hours' }).className).toContain('bg-primary-700');
   expect((payRunButton('Calculate Payroll') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(payRunButton('Review source coverage'));
   const dialog = await screen.findByRole('dialog');
@@ -1931,4 +1934,20 @@ it('reveals actual withholding and FICA fields in phone tax detail', async () =>
   const result = screen.getByRole('region', { name: /^Payroll result for / });
   for (const label of ['FIT', 'Additional withholding', 'Social Security', 'Employee Medicare', 'Employer Medicare']) expect(within(result).getByText(label, { exact: true })).toBeTruthy();
   expect(within(result).getByText('Net pay', { exact: true })).toBeTruthy();
+});
+
+it('uses the singular saved employee record count', async () => {
+  await renderLoanWorksheet('calculated');
+  expect(screen.getByText('1 employee record · Review saved pay')).toBeTruthy();
+});
+
+it('opens the completed Hours step from a blocking loan approval reason', async () => {
+  await renderLoanWorksheet('calculated', undefined, 0, undefined, 300, 0);
+  const hours = document.getElementById('payroll-hours') as HTMLDetailsElement;
+  hours.open = false;
+  const results = document.getElementById('payroll-results')!;
+  expect((within(results).getByRole('button', { name: 'Approve', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(within(results).getByRole('link', { name: 'Review loan inputs', hidden: true }));
+  expect(hours.open).toBe(true);
+  expect(document.activeElement?.id).toBe('payroll-loan-inputs');
 });

@@ -68,11 +68,11 @@ export function PayRunEmployeeResults({
           const totalCols = 12 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <PayRunResultsView primaryAction={action} companyId={companyId} currentPath={currentPath} isCalculated={isCalculated} isCommitted={isCommitted} payPeriod={payPeriod} payrollItems={payrollItems} sortPayrollItems={sortPayrollItems} registerTotals={registerTotals} payrollItemDisplayedHours={payrollItemDisplayedHours} setReviewingItem={setReviewingItem} setEditingItem={setEditingItem} setCorrectingItem={setCorrectingItem} setReplacingItem={setReplacingItem}
-            filters={<div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">                  <Select
+            filters={<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">                  <Select
                     aria-label="Employee type"
                     value={employeeTypeFilter}
                     onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
-                    className="w-full lg:w-36"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="all">All Types</option>
                     <option value="salary">Salary</option>
@@ -83,7 +83,7 @@ export function PayRunEmployeeResults({
                     aria-label="Department"
                     value={departmentFilter}
                     onChange={(event) => setDepartmentFilter(event.target.value)}
-                    className="w-full lg:w-44"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="all">All Departments</option>
                     {departmentOptions.map(([deptId, deptName]) => (
@@ -98,7 +98,7 @@ export function PayRunEmployeeResults({
                       setResultsSortBy(sortBy);
                       setResultsSortDirection(direction);
                     }}
-                    className="w-full lg:w-44"
+                    className="w-full sm:w-auto sm:max-w-48"
                   >
                     <option value="name:asc">Name A-Z</option>
                     <option value="name:desc">Name Z-A</option>
@@ -113,14 +113,14 @@ export function PayRunEmployeeResults({
                     <option value="fit:desc">FIT High-Low</option>
                     <option value="fit:asc">FIT Low-High</option>
                   </Select>
-                  <div className="relative sm:col-span-2 lg:col-span-1">
+                  <div className="relative min-w-0 sm:min-w-48 sm:flex-1">
                     <input
                       type="text"
                       aria-label="Search employees"
-                      placeholder="Search employees and checks..."
+                      placeholder="Search name or check #"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full rounded-lg border border-neutral-300 py-2.5 pl-8 pr-3 text-base sm:text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 lg:w-56"
+                      className="w-full rounded-lg border border-neutral-300 py-2.5 pl-8 pr-3 text-base sm:text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                     />
                     <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

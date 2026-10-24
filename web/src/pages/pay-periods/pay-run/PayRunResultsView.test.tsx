@@ -38,3 +38,11 @@ it('reveals full tax columns using the keyboard and persists the preference', as
   expect((screen.getByRole('checkbox', { name: 'Show tax detail' }) as HTMLInputElement).checked).toBe(true);
   expect(screen.getByRole('columnheader', { name: 'FIT' })).toBeTruthy();
 });
+it('retains every combined flag and the contractor correction guards', () => {
+  const item = { ...props.sortPayrollItems[0], voided: true, correction_pay_basis_hold: true, withholding_tax_override: 0, employment_type: 'contractor', wage_rate_hours: [{ hours: 1 }, { hours: 2 }] };
+  render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item] as typeof props.sortPayrollItems} /></MemoryRouter>);
+  const row = screen.getByRole('row', { name: /Maya Manual/ });
+  for (const label of ['Voided', 'Pay setup held', 'FIT override', '1099', 'Multiple rates']) expect(row.textContent).toContain(label);
+  expect(within(row).queryByText('Correct', { exact: true })).toBeNull();
+  expect(within(row).queryByText('Replace check', { exact: true })).toBeNull();
+});
