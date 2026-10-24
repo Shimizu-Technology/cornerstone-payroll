@@ -1,0 +1,422 @@
+{
+  "baseline": "34c99bb2",
+  "method": "Same capture-helpers rendered-style/count selectors as c-design-capture; visible Payroll tab; hidden moved panels excluded. Phone result y uses section heading because original table-only probe returned null.",
+  "measurements": [
+    {
+      "state": "connected-committed-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 7115,
+        "screens": 8.89,
+        "totalsY": 275,
+        "resultsY": 1358,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 22,
+        "buttons": 123,
+        "callouts": 7
+      },
+      "after": {
+        "scrollHeight": 2255,
+        "screens": 2.82,
+        "totalsY": 164,
+        "resultsY": 1116,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 7,
+        "buttons": 46,
+        "callouts": 3
+      },
+      "prior_audit": {
+        "scrollHeight": 7063,
+        "screens": 8.83,
+        "totalsY": 275,
+        "resultsY": 1358,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 22,
+        "buttons": 123,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "connected-draft-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 4396,
+        "screens": 5.5,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 9,
+        "buttons": 17,
+        "callouts": 5
+      },
+      "after": {
+        "scrollHeight": 3263,
+        "screens": 4.08,
+        "totalsY": 164,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 6,
+        "buttons": 14,
+        "callouts": 4
+      },
+      "prior_audit": {
+        "scrollHeight": 6406,
+        "screens": 8.01,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 9,
+        "buttons": 38,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "adjustment-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 5777,
+        "screens": 7.22,
+        "totalsY": 275,
+        "resultsY": 1257,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 19,
+        "buttons": 48,
+        "callouts": 5
+      },
+      "after": {
+        "scrollHeight": 1891,
+        "screens": 2.36,
+        "totalsY": 164,
+        "resultsY": 1015,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 6,
+        "callouts": 2
+      },
+      "prior_audit": {
+        "scrollHeight": 5785,
+        "screens": 7.23,
+        "totalsY": 275,
+        "resultsY": 1258,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 19,
+        "buttons": 48,
+        "callouts": 5
+      }
+    },
+    {
+      "state": "manual-committed-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 4674,
+        "screens": 5.84,
+        "totalsY": 275,
+        "resultsY": 843,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 17,
+        "buttons": 64,
+        "callouts": 7
+      },
+      "after": {
+        "scrollHeight": 1646,
+        "screens": 2.06,
+        "totalsY": 164,
+        "resultsY": 647,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 8,
+        "callouts": 3
+      },
+      "prior_audit": {
+        "scrollHeight": 4636,
+        "screens": 5.79,
+        "totalsY": 275,
+        "resultsY": 843,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 17,
+        "buttons": 64,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "fresh-draft-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 1293,
+        "screens": 1.62,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 3,
+        "buttons": 6,
+        "callouts": 0
+      },
+      "after": {
+        "scrollHeight": 1109,
+        "screens": 1.39,
+        "totalsY": 164,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 3,
+        "buttons": 6,
+        "callouts": 0
+      }
+    },
+    {
+      "state": "fresh-calculated-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 3171,
+        "screens": 3.96,
+        "totalsY": 275,
+        "resultsY": 765,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 12,
+        "buttons": 28,
+        "callouts": 2
+      },
+      "after": {
+        "scrollHeight": 2194,
+        "screens": 2.74,
+        "totalsY": 164,
+        "resultsY": 569,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 5,
+        "buttons": 9,
+        "callouts": 2
+      }
+    },
+    {
+      "state": "fresh-approved-1280-work",
+      "width": 1280,
+      "before": {
+        "scrollHeight": 2719,
+        "screens": 3.4,
+        "totalsY": 275,
+        "resultsY": 765,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 11,
+        "buttons": 24,
+        "callouts": 2
+      },
+      "after": {
+        "scrollHeight": 1742,
+        "screens": 2.18,
+        "totalsY": 164,
+        "resultsY": 569,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 5,
+        "callouts": 2
+      }
+    },
+    {
+      "state": "connected-committed-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 13816,
+        "screens": 16.37,
+        "totalsY": 298,
+        "resultsY": 2086,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 22,
+        "buttons": 123,
+        "callouts": 7
+      },
+      "after": {
+        "scrollHeight": 4558,
+        "screens": 5.4,
+        "totalsY": 284,
+        "resultsY": 1483,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 7,
+        "buttons": 46,
+        "callouts": 3
+      },
+      "prior_audit": {
+        "scrollHeight": 13849,
+        "screens": 16.41,
+        "totalsY": 299,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 22,
+        "buttons": 123,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "connected-draft-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 8817,
+        "screens": 10.45,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 9,
+        "buttons": 17,
+        "callouts": 5
+      },
+      "after": {
+        "scrollHeight": 7421,
+        "screens": 8.79,
+        "totalsY": 240,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 6,
+        "buttons": 14,
+        "callouts": 4
+      },
+      "prior_audit": {
+        "scrollHeight": 13665,
+        "screens": 16.19,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 9,
+        "buttons": 38,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "adjustment-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 9248,
+        "screens": 10.96,
+        "totalsY": 298,
+        "resultsY": 1769,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 19,
+        "buttons": 48,
+        "callouts": 5
+      },
+      "after": {
+        "scrollHeight": 2748,
+        "screens": 3.26,
+        "totalsY": 240,
+        "resultsY": 1138,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 6,
+        "callouts": 2
+      },
+      "prior_audit": {
+        "scrollHeight": 9232,
+        "screens": 10.94,
+        "totalsY": 299,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 19,
+        "buttons": 48,
+        "callouts": 5
+      }
+    },
+    {
+      "state": "manual-committed-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 8579,
+        "screens": 10.16,
+        "totalsY": 298,
+        "resultsY": 1305,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 17,
+        "buttons": 64,
+        "callouts": 7
+      },
+      "after": {
+        "scrollHeight": 2687,
+        "screens": 3.18,
+        "totalsY": 220,
+        "resultsY": 690,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 8,
+        "callouts": 3
+      },
+      "prior_audit": {
+        "scrollHeight": 8615,
+        "screens": 10.21,
+        "totalsY": 299,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 17,
+        "buttons": 64,
+        "callouts": 7
+      }
+    },
+    {
+      "state": "fresh-draft-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 2003,
+        "screens": 2.37,
+        "totalsY": null,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 3,
+        "buttons": 6,
+        "callouts": 0
+      },
+      "after": {
+        "scrollHeight": 1900,
+        "screens": 2.25,
+        "totalsY": 220,
+        "resultsY": null,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 3,
+        "buttons": 6,
+        "callouts": 0
+      }
+    },
+    {
+      "state": "fresh-calculated-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 5154,
+        "screens": 6.11,
+        "totalsY": 331,
+        "resultsY": 1377,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 12,
+        "buttons": 28,
+        "callouts": 2
+      },
+      "after": {
+        "scrollHeight": 3273,
+        "screens": 3.88,
+        "totalsY": 220,
+        "resultsY": 781,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 5,
+        "buttons": 9,
+        "callouts": 2
+      }
+    },
+    {
+      "state": "fresh-approved-390-work",
+      "width": 390,
+      "before": {
+        "scrollHeight": 4247,
+        "screens": 5.03,
+        "totalsY": 298,
+        "resultsY": 1324,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 11,
+        "buttons": 24,
+        "callouts": 2
+      },
+      "after": {
+        "scrollHeight": 2419,
+        "screens": 2.87,
+        "totalsY": 220,
+        "resultsY": 781,
+        "resultsYDefinition": "visible table (desktop), Employee payroll section heading (phone)",
+        "cards": 4,
+        "buttons": 5,
+        "callouts": 2
+      }
+    }
+  ]
+}

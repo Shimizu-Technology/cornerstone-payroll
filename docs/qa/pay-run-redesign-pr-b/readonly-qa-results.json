@@ -1,0 +1,50 @@
+[
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "training_baseline",
+    "width": 1280,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  },
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "backup_snapshot",
+    "width": 1280,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  },
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "workspace_access",
+    "width": 1280,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  },
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "training_baseline",
+    "width": 390,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  },
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "backup_snapshot",
+    "width": 390,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  },
+  {
+    "case": "readonly-summary-alias-reports",
+    "mode": "workspace_access",
+    "width": 390,
+    "status": "passed",
+    "fixture": "actual private API response plus effective read-only metadata override; server authorization covered separately by existing lanes",
+    "apiWrites": 0
+  }
+]

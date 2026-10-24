@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "positions": [
+    {
+      "label": "Employees",
+      "y": 360,
+      "x": 16,
+      "width": 179
+    },
+    {
+      "label": "Gross pay",
+      "y": 360,
+      "x": 195,
+      "width": 179
+    },
+    {
+      "label": "Total deductions",
+      "y": 424,
+      "x": 16,
+      "width": 179
+    },
+    {
+      "label": "Net pay",
+      "y": 488,
+      "x": 16,
+      "width": 358
+    },
+    {
+      "label": "DRT deposit",
+      "y": 424,
+      "x": 195,
+      "width": 179
+    }
+  ]
+}
