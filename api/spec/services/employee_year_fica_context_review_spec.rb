@@ -236,4 +236,54 @@ RSpec.describe "PR376 independent review edges" do
     expect { calc(period("2024-02-02", status: "draft"), 75) }
       .to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /explicit reviewed annual reconciliation/)
   end
+
+  it "retains a later retired check in annual FICA context when correcting an earlier paycheck" do
+    original = calc(period("2024-01-19"), 900)
+    later = calc(period("2024-02-02"), 199150, tips: 100)
+    [ original, later ].each do |item|
+      employee.ytd_totals_for(2024).add_payroll_item!(item)
+      CompanyYtdTotal.find_or_create_by!(company: company, year: 2024).add_payroll_item!(item)
+    end
+    company.assign_check_numbers!([ later ])
+    later.reload
+    before = EmployeeYearFicaContext.new(employee: employee, year: 2024).snapshot
+    later.void!(user: actor, reason: "Retire lost instrument; earned payroll retained")
+    expect(EmployeeYearFicaContext.new(employee: employee, year: 2024).snapshot).to eq(before)
+    reviewed = IssueCorrectivePaycheckService.preview(original_pay_period: original.pay_period, employee: employee,
+      corrected_inputs: { bonus: 975 }, pay_date: "2024-02-09")
+    expect(reviewed[:deltas]).to include(social_security_taxable_wages: 0.to_d, social_security_taxable_tips: 0.to_d,
+      social_security_tax: 0.to_d, additional_medicare_taxable_wages: 75.to_d, additional_medicare_tax: "0.68".to_d)
+    _, correction = IssueCorrectivePaycheckService.issue!(original_pay_period: original.pay_period, employee: employee,
+      corrected_inputs: { bonus: 975 }, pay_date: "2024-02-09", reason: "Correction after later check retirement", actor: actor,
+      expected_review_digest: reviewed[:meta][:review_digest])
+    expect(correction.net_pay).to eq(reviewed[:deltas][:net_pay].to_d)
+    expect(correction.additional_medicare_tax).to eq("0.68".to_d)
+    ledger = EmployeeYearFicaContext.reportable_items(employee: employee, year: 2024)
+    expect(ledger.sum(:social_security_taxable_wages) + ledger.sum(:social_security_taxable_tips)).to eq(168600)
+    expect(employee.ytd_totals_for(2024).reload.social_security_tax).to eq(ledger.sum(:social_security_tax))
+    entries = correction.pay_period.payroll_liability_postings.sole.entries
+    expect(entries.where(category: "additional_medicare_employee").sum(:amount)).to eq("0.68".to_d)
+    w2 = W2GuAggregator.new(company, 2024, include_historical: false).generate.fetch(:employees).sole
+    form = Form941GuAggregator.new(company, 2024, 1, include_historical: false).generate
+    expect(w2[:box3_social_security_wages].to_d + w2[:box7_social_security_tips].to_d).to eq(168600)
+    expect(w2[:box5_medicare_wages_tips].to_d).to eq(200125)
+    expect(form[:lines][:line5a_ss_wages].to_d + form[:lines][:line5b_ss_tips].to_d).to eq(168600)
+    expect(form[:lines][:line5d_add_medicare_wages].to_d).to eq(125)
+  end
+
+  it "retains a retired corrective check in the baseline for a repeated correction" do
+    original = calc(period("2024-01-19"), 900)
+    _, first = IssueCorrectivePaycheckService.issue!(original_pay_period: original.pay_period, employee: employee,
+      corrected_inputs: { bonus: 975 }, pay_date: "2024-02-09", reason: "First signed adjustment", actor: actor)
+    first.void!(user: actor, reason: "Retire corrective check; payroll retained")
+    reviewed = IssueCorrectivePaycheckService.preview(original_pay_period: original.pay_period, employee: employee,
+      corrected_inputs: { bonus: 1000 }, pay_date: "2024-02-16")
+    expect(reviewed[:deltas]).to include(gross_pay: 25.to_d, social_security_taxable_wages: 25.to_d,
+      social_security_tax: "1.55".to_d)
+    _, second = IssueCorrectivePaycheckService.issue!(original_pay_period: original.pay_period, employee: employee,
+      corrected_inputs: { bonus: 1000 }, pay_date: "2024-02-16", reason: "Continue retained signed baseline", actor: actor,
+      expected_review_digest: reviewed[:meta][:review_digest])
+    expect(second.gross_pay).to eq(25)
+    expect(EmployeeYearFicaContext.reportable_items(employee: employee, year: 2024).sum(:medicare_taxable_wages)).to eq(1000)
+  end
 end

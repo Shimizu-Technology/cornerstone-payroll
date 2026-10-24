@@ -28,14 +28,14 @@ class EmployeeYearFicaContext
   ROW_FIELDS = (FINGERPRINT_FIELDS + [ "employee_id",
     Arel.sql("tax_rule_snapshot -> 'annual_fica_context' AS recorded_annual_fica_context") ]).freeze
 
-  # One reportability query for single-employee and batch operations. P-void's
-  # financial inclusion policy must be applied here, not at individual callers.
+  # Retired instruments retain earned payroll; only financial reversals remove
+  # rows. Share the same inclusion policy as reports and corrective baselines.
   def self.reportable_items(employee: nil, company: nil, employee_ids: nil, year:, excluding_pay_period_id: nil)
     company ||= employee.company
     employee_ids ||= [ employee.id ]
     periods = PayPeriod.reportable_for_company(company).for_year(year)
     periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
-    PayrollItem.not_voided.where(company_id: company.id, employee_id: employee_ids, pay_period_id: periods.select(:id))
+    PayrollItem.financially_reportable.where(company_id: company.id, employee_id: employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor")
   end
 

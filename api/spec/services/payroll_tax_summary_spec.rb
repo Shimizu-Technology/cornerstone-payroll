@@ -13,6 +13,7 @@ RSpec.describe PayrollTaxSummary do
     previous = create(:pay_period, :committed, company:, start_date: "2030-01-01", end_date: "2030-01-14", pay_date: "2030-01-18")
     create(:payroll_item, pay_period: previous, employee:, gross_pay: 199_500,
       medicare_taxable_wages: 199_500, social_security_taxable_wages: 184_500,
+      social_security_taxable_tips: 0, additional_medicare_taxable_wages: 0,
       social_security_tax: 11_439, medicare_tax: 2_892.75)
     period = create(:pay_period, company:, start_date: "2030-01-15", end_date: "2030-01-28", pay_date: "2030-02-01")
     item = build(:payroll_item, company:, employee:, pay_period: period, hours_worked: 1, pay_rate: 1_000)
