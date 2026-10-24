@@ -1,0 +1,44 @@
+[
+  {
+    "mode": "flat-fee",
+    "width": 1280,
+    "hours": "0.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary",
+    "width": 1280,
+    "hours": "16.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "hourly",
+    "width": 1280,
+    "hours": "18.00\n16.00 reg + 2.00 OT",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "flat-fee",
+    "width": 390,
+    "hours": "0.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "salary",
+    "width": 390,
+    "hours": "16.00",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  },
+  {
+    "mode": "hourly",
+    "width": 390,
+    "hours": "18.00\n16.00 reg + 2.00 OT",
+    "status": "passed",
+    "fixture": "Presentation-only GET response override; no saved payroll amounts or database records changed"
+  }
+]

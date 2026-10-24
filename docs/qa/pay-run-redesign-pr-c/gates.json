@@ -1,46 +1,61 @@
 {
-  "applicationHead": "36b291d10f9f813bb1806ef46f264d3c3b6dd667",
+  "applicationHead": "72e5cc30c835910e4a40d420b4bba20ea7f514f0",
   "integratedBase": "ce12d1da",
-  "webTree": "addd1426db57cf2c29ff16349cac5414ea62d6ad",
+  "webTree": "502d2b4b593d9231ff497e4cc44f9d37f5b71e3c",
+  "reviewRound": 2,
   "unit": {
     "files": 131,
-    "passed": 1242
+    "passed": 1248
   },
   "browser": {
-    "public": {
-      "startTime": "2026-10-24T13:43:37.848Z",
-      "duration": 269432.343,
-      "expected": 131,
-      "skipped": 0,
-      "unexpected": 0,
-      "flaky": 0
-    },
     "release": {
-      "startTime": "2026-10-24T13:32:18.556Z",
-      "duration": 163308.655,
+      "startTime": "2026-10-24T14:01:52.972Z",
+      "duration": 198104.48,
       "expected": 45,
-      "skipped": 0,
-      "unexpected": 0,
-      "flaky": 0
-    },
-    "refresh": {
-      "startTime": "2026-10-24T13:35:15.959Z",
-      "duration": 132697.654,
-      "expected": 10,
-      "skipped": 0,
-      "unexpected": 0,
-      "flaky": 0
-    },
-    "pay-items": {
-      "startTime": "2026-10-24T13:38:02.714Z",
-      "duration": 106797.587,
-      "expected": 24,
       "skipped": 0,
       "unexpected": 0,
       "flaky": 0
     }
   },
-  "apiTreeUnchanged": true,
-  "reviewRound": 1,
-  "axeScans": 32
+  "priorRoundEvidence": {
+    "applicationHead": "36b291d10f9f813bb1806ef46f264d3c3b6dd667",
+    "browser": {
+      "public": {
+        "startTime": "2026-10-24T13:43:37.848Z",
+        "duration": 269432.343,
+        "expected": 131,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "release": {
+        "startTime": "2026-10-24T13:32:18.556Z",
+        "duration": 163308.655,
+        "expected": 45,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "refresh": {
+        "startTime": "2026-10-24T13:35:15.959Z",
+        "duration": 132697.654,
+        "expected": 10,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "pay-items": {
+        "startTime": "2026-10-24T13:38:02.714Z",
+        "duration": 106797.587,
+        "expected": 24,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "axeScans": 32,
+    "note": "Public, refresh, pay-items and broad QA were accepted in review round 1. Only the full web gate and release lane were rerun for the final hours-only change, as requested."
+  },
+  "hoursBrowserChecks": 6,
+  "apiTreeUnchanged": true
 }
