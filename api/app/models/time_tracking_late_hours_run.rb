@@ -8,14 +8,38 @@ class TimeTrackingLateHoursRun < ApplicationRecord
   belongs_to :origin_pay_period, class_name: "PayPeriod"
   belongs_to :adjustment_pay_period, class_name: "PayPeriod"
   belongs_to :created_by, class_name: "User"
+  belongs_to :resolved_by, class_name: "User", optional: true
 
   validates :command_id, presence: true, uniqueness: { scope: :time_tracking_source_id }
+  validates :state, inclusion: { in: %w[pending ambiguous reconciliation_required applied rejected cancelled] }
   validate :matching_ownership
   validate :immutable_intent, on: :update
 
   def wage_rates_for(employee)
     rate_snapshot.select { |rate| rate.fetch("employee_id") == employee.id }
       .map { |attributes| EmployeeWageRate.instantiate(attributes) }
+  end
+
+  def closed?
+    state.in?(%w[rejected cancelled])
+  end
+
+  def unresolved?
+    applied_at.nil? && !closed?
+  end
+
+  def transition!(next_state, actor:, reason: nil, evidence: nil)
+    raise ArgumentError, "A closed late-hours operation cannot be reopened" if closed? && state != next_state
+    previous = state
+    attributes = { state: next_state }
+    if evidence
+      attributes.merge!(resolved_by: actor, resolved_at: Time.current, resolution: evidence)
+    end
+    update!(attributes)
+    AuditLog.record!(user: actor, company_id: company_id, action: "late_hours#state_changed",
+      record_type: self.class.name, record_id: id, subject_name: "Late-hours adjustment #{adjustment_pay_period_id}",
+      event_category: "payroll", metadata: { from: previous, to: next_state, reason: reason,
+        source_command_id: command_id, pay_period_id: adjustment_pay_period_id, evidence: evidence }.compact)
   end
 
   private

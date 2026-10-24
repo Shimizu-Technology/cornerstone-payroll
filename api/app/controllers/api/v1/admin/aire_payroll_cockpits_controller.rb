@@ -179,6 +179,15 @@ module Api
           render_source_error(e)
         end
 
+        def cancel_late_hours
+          run = late_hours_service.cancel!(params[:late_hours_run_id], reason: params.require(:reason))
+          render json: { late_hours_run: late_hours_service.present(run) }
+        rescue ActionController::ParameterMissing, TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def settlement_cases
           payload = cockpit_client.payroll_cockpit_settlement_cases(
             external_pay_period_id: external_pay_period_id,
