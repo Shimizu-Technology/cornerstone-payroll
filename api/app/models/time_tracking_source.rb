@@ -8,6 +8,7 @@ class TimeTrackingSource < ApplicationRecord
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :time_tracking_legacy_identity_bindings, dependent: :restrict_with_error
   has_many :time_tracking_employee_mappings, dependent: :destroy
+  has_many :time_tracking_late_hours_runs, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :aire_verified_history_rollout_receipts, dependent: :restrict_with_error
