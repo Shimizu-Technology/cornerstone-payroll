@@ -808,7 +808,7 @@ export function PayPeriods() {
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -tranneutral-y-1/2 text-neutral-600" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
@@ -1002,7 +1002,7 @@ export function PayPeriods() {
                               View
                             </button>
                             {!periodReadOnly && period.capabilities.edit && <><span className="text-neutral-300">·</span><button className="text-neutral-600 hover:text-neutral-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
                           {!periodReadOnly && period.capabilities.enter_hours && (
@@ -1085,7 +1085,7 @@ export function PayPeriods() {
               <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-yellow-600">2</span>
+                  <span className="text-sm font-medium text-warning-800">2</span>
                 </div>
                 <div>
                   <p className="font-medium text-neutral-900">Calculated</p>
@@ -1105,7 +1105,7 @@ export function PayPeriods() {
               <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-green-600">4</span>
+                  <span className="text-sm font-medium text-success-800">4</span>
                 </div>
                 <div>
                   <p className="font-medium text-neutral-900">Committed</p>
