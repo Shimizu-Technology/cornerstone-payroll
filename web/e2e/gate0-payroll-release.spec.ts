@@ -2340,14 +2340,22 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       expect(createdLoan.current_balance).toBeNull();
       expect(createdLoan.scheduled).toBe(true);
 
+      const transition = async (button: string, action: string, status: string): Promise<void> => {
+        const saved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/employee_loans/${loanId}/${action}`));
+        await page.getByRole('button', { name: button, exact: true }).click();
+        const response = await saved;
+        expect(response.ok(), await response.text()).toBeTruthy();
+        expect((await response.json()).loan.status).toBe(status);
+      };
+
       await page.getByRole('button', { name: new RegExp(deductionName) }).click();
       await expect(page.getByText('Recurring deduction without a known balance')).toBeVisible();
-      await page.getByRole('button', { name: 'Pause', exact: true }).click();
+      await transition('Pause', 'suspend', 'suspended');
       await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
-      await page.getByRole('button', { name: 'Resume', exact: true }).click();
+      await transition('Resume', 'reactivate', 'active');
       await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
       await page.getByLabel('Reason to stop permanently', { exact: true }).fill('Synthetic client authorization');
-      await page.getByRole('button', { name: 'Stop Permanently', exact: true }).click();
+      await transition('Stop Permanently', 'stop', 'stopped');
       await expect(page.getByRole('combobox').nth(1)).toHaveValue('stopped');
       await expect(page.getByRole('button', { name: new RegExp(`${deductionName}.*Stopped`) })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Pause', exact: true })).toHaveCount(0);
