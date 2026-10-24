@@ -171,7 +171,7 @@ it.each([
   const employee = {
     id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly',
     pay_rate: 16, pay_frequency: 'semimonthly', status: 'active',
-    default_custom_earnings: [{ name: 'Allowance', amount: 120 }],
+    default_custom_earnings: [{ label: 'Allowance', amount: 120 }],
     default_payroll_adjustments: [
       { label: 'Additional allowance', amount: 30, treatment: 'taxable_addition', active: true },
       { label: 'Inactive allowance', amount: 90, treatment: 'taxable_addition', active: false },
@@ -1825,5 +1825,44 @@ it.each(['draft', 'calculated', 'approved'] as const)('requires fresh coverage a
   expect(await screen.findByText(/Current setup applied to the saved employees/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
   expect(screen.getByRole('dialog', { name: 'Calculate without time tracking hours?' })).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+it('previews holiday hours and a saved per-period salary override using the same gross values as calculation', async () => {
+  vi.clearAllMocks();
+  const hourly = { id: 30, company_id: 7, first_name: 'Holiday', last_name: 'Employee', employment_type: 'hourly', pay_rate: 15, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const salary = { ...hourly, id: 31, first_name: 'Salary', employment_type: 'salary', salary_type: 'per_period', pay_rate: 1000 } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_base_salary: true, includes_recurring_items: false,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 0, overtime_hours: 0, holiday_hours: 8, gross_pay: 0 },
+      { id: 2, employee_id: 31, employment_type: 'salary', pay_rate: 1000, salary_override: 725, hours_worked: 0, overtime_hours: 0, gross_pay: 0 }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [hourly, salary], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  await screen.findByText('Enter Hours');
+  expect(screen.getAllByText('$120.00').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('$725.00').length).toBeGreaterThan(0);
+  const sort = screen.getByRole('option', { name: 'Est. Gross Low-High' }).closest('select')!;
+  fireEvent.change(sort, { target: { value: 'gross:desc' } });
+  const salaryRow = screen.getAllByRole('link', { name: 'Salary Employee' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(salaryRow.closest('table')!).getAllByRole('link')[0].textContent).toBe('Salary Employee');
+  expect(within(salaryRow).getByText('$725.00')).toBeTruthy();
+});
+
+it('includes automatic hidden taxable fields in the estimate without adding worksheet controls', async (): Promise<void> => {
+  vi.clearAllMocks();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 15, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const period = { ...initialPayPeriod, status: 'draft', includes_recurring_items: true,
+    payroll_items: [{ id: 1, employee_id: 30, employment_type: 'hourly', pay_rate: 15, hours_worked: 8, overtime_hours: 0 }] } as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [],
+    estimate_only_assignments: [{ employee_id: 30, payroll_field_definition_id: 8, amount_type: 'fixed', default_amount: 25, tax_treatment: 'taxable_addition', editable: false }] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  const mobileCard = await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  expect(within(mobileCard).getByText('Estimated gross: $145.00')).toBeTruthy();
+  const row = screen.getAllByRole('link', { name: 'Ana Cruz' }).map(link => link.closest('tr')).find(Boolean)!;
+  expect(within(row).getByText('$145.00')).toBeTruthy();
+  expect(screen.queryByText('Hidden allowance')).toBeNull();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });

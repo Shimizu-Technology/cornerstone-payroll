@@ -161,6 +161,7 @@ export interface PayPeriodPayrollFieldAssignment {
   current_amount?: number | null;
   requested_amount?: number | null;
   current_source?: PayrollItemFieldEntry['source'] | null;
+  current_active?: boolean | null;
   overridden: boolean;
   editable: boolean;
   skipped_reason?: string | null;
@@ -181,6 +182,7 @@ export interface NamedLoanOption {
 }
 
 export interface PayPeriodPayrollFieldInputs {
+  estimate_only_assignments?: Array<PayPeriodPayrollFieldAssignment & { tax_treatment: string }>;
   named_loan_options?: NamedLoanOption[];
   fields: PayrollFieldDefinition[];
   assignments: PayPeriodPayrollFieldAssignment[];
@@ -1469,6 +1471,11 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  draft_earning_sources?: {
+    custom_earnings?: string | null;
+    payroll_adjustments?: string | null;
+    payroll_adjustments_overridden?: boolean;
+  };
   payroll_included?: boolean;
   named_loan_payments?: Record<string, number>;
   id: number;
