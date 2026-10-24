@@ -84,6 +84,66 @@ class AnnualTaxConfig < ApplicationRecord
   validates :additional_medicare_rate, presence: true, numericality: { greater_than_or_equal_to: 0, less_than: 1 }
   validates :additional_medicare_threshold, presence: true, numericality: { greater_than: 0 }
 
+  RULE_ATTRIBUTES = %w[tax_year ss_wage_base ss_rate medicare_rate additional_medicare_rate additional_medicare_threshold].freeze
+  validates :verification_status, inclusion: { in: %w[draft verified] }
+  before_update :invalidate_changed_rules
+
+  def verified?
+    verification_status == "verified"
+  end
+
+  def self.unverified_message(year)
+    "#{year} tax tables have not been verified. An administrator must verify them before #{year} payroll can be calculated."
+  end
+
+  def self.verified_for_year?(year)
+    config = for_year(year)
+    return config.verified? if config
+
+    # Only grandfathered legacy years can use the legacy calculation path.
+    year.to_i <= 2026 && TaxTable.where(tax_year: year, verification_status: "verified").exists?
+  end
+
+  def self.require_verified!(year)
+    raise ArgumentError, unverified_message(year) unless verified_for_year?(year)
+  end
+
+  def invalidate_verification!
+    update_columns(verification_status: "draft", verified_by: nil, verified_at: nil) if persisted? && verified?
+  end
+
+  def verify!(actor:, source_note:)
+    raise ArgumentError, "Admin access required" unless actor&.organization_admin?
+    raise ArgumentError, "A source note is required to verify tax tables" if source_note.to_s.strip.blank?
+
+    with_lock do
+      unless FilingStatusConfig::FILING_STATUSES.all? { |status| complete_withholding?(config_for(status)) }
+        raise ArgumentError, "Complete withholding tables for every filing status before verification"
+      end
+      update!(verification_status: "verified", verified_by: actor.id.to_s,
+              verified_at: Time.current, source_references: source_note.strip)
+    end
+  end
+
+  def complete_withholding?(filing)
+    return false unless filing
+
+    brackets = filing.tax_brackets.order(:bracket_order).to_a
+    return false if brackets.empty? || brackets.first.min_income != 0 || brackets.last.max_income.present?
+
+    return false unless brackets.all? { |bracket| bracket.max_income.nil? || bracket.max_income > bracket.min_income }
+
+    brackets.each_cons(2).all? { |left, right| left.max_income == right.min_income }
+  end
+
+  def invalidate_changed_rules
+    return unless RULE_ATTRIBUTES.any? { |attribute| will_save_change_to_attribute?(attribute) }
+
+    self.verification_status = "draft"
+    self.verified_by = nil
+    self.verified_at = nil
+  end
+
   scope :active, -> { where(is_active: true) }
 
   # Get config for a specific year (returns single record or nil)
@@ -94,7 +154,7 @@ class AnnualTaxConfig < ApplicationRecord
   # Select rules strictly by the requested tax year. `is_active` controls the
   # admin UI/default setup flow; it must never override a pay date's year.
   def self.current(year = Date.current.year)
-    for_year(year)
+    for_year(year)&.then { |config| config if config.verified? }
   end
 
   # The importer must reproduce retained history before a client's tax setup
@@ -144,7 +204,9 @@ class AnnualTaxConfig < ApplicationRecord
         medicare_rate: source.medicare_rate,
         additional_medicare_rate: source.additional_medicare_rate,
         additional_medicare_threshold: source.additional_medicare_threshold,
-        is_active: false
+        is_active: false,
+        verification_status: "draft",
+        source_references: "Copied from #{source_year}. All copied values require independent review for #{new_year}."
       )
 
       source.filing_status_configs.each do |fsc|

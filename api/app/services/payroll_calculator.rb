@@ -19,6 +19,7 @@ class PayrollCalculator
   attr_reader :employee, :payroll_item
 
   def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+    AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year) if calculation_context.blank?
     TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
@@ -55,6 +56,7 @@ class PayrollCalculator
         return snapshotted_tax_calculator
       end
 
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year)
       config = AnnualTaxConfig.current(pay_period.pay_date.year)
 
       if config.present?

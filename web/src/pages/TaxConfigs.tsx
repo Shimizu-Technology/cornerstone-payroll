@@ -5,6 +5,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { TaxYearVerification } from '@/components/settings/TaxYearVerification';
 import { AnnualRetirementLimitsPanel } from '@/components/settings/AnnualRetirementLimitsPanel';
 import {
   taxConfigsApi,
@@ -26,6 +27,7 @@ export default function TaxConfigs() {
   const { notify } = useFeedback();
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
+  const [previousConfig, setPreviousConfig] = useState<TaxConfig | null>(null);
   const [auditLogs, setAuditLogs] = useState<TaxConfigAuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -65,7 +67,7 @@ export default function TaxConfigs() {
     try {
       const data = await taxConfigsApi.get(id);
       setLoadingDetailId((prev) => {
-        if (prev === id) setSelectedConfig(data.tax_config);
+        if (prev === id) { setSelectedConfig(data.tax_config); setPreviousConfig(data.previous_year); }
         return prev;
       });
     } catch (error) {
@@ -88,12 +90,13 @@ export default function TaxConfigs() {
   const createConfig = async () => {
     setCreating(true);
     try {
-      await taxConfigsApi.create({
+      const created = await taxConfigsApi.create({
         tax_year: newYear,
         copy_from_year: copyFromYear ?? undefined,
       });
       setShowCreateModal(false);
-      notify({ tone: 'success', message: 'Tax year added. Retirement limits are configured separately below.' });
+      await fetchConfigDetails(created.tax_config.id);
+      notify({ tone: 'success', message: 'Draft tax year added. Review and verify before payroll. Retirement limits are configured separately below.' });
       fetchConfigs();
     } catch (error) {
       notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to create config. Check the entered values and try again.' });
@@ -181,6 +184,7 @@ export default function TaxConfigs() {
       });
       notify({ tone: 'success', message: 'Filing status deduction saved.' });
       await fetchConfigDetails(selectedConfig.id);
+      await fetchConfigs();
       setEditingFilingStatus(null);
     } catch (error) {
       notify({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to save filing status. Check the entered values and try again.' });
@@ -219,6 +223,7 @@ export default function TaxConfigs() {
       });
       notify({ tone: 'success', message: 'Tax brackets saved.' });
       await fetchConfigDetails(selectedConfig.id);
+      await fetchConfigs();
       setEditingBrackets(null);
       setEditableBrackets([]);
     } catch (error) {
@@ -291,7 +296,7 @@ export default function TaxConfigs() {
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <MobileField label="SS Wage Base" value={formatCurrency(config.ss_wage_base)} />
-              <MobileField label="Status" value={config.is_active ? 'Active' : 'Inactive'} />
+              <MobileField label="Verification" value={config.verification_status === 'verified' ? 'Verified' : 'Draft — payroll blocked'} />
             </div>
             <MobileCardActions>
               <Button size="sm" variant="outline" onClick={() => fetchConfigDetails(config.id)}>
@@ -359,6 +364,7 @@ export default function TaxConfigs() {
                   {formatCurrency(config.ss_wage_base)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
+                  <p className="text-sm font-medium">{config.verification_status === 'verified' ? 'Verified' : 'Draft — payroll blocked'}</p>
                   {config.is_active ? (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                       Active
@@ -441,6 +447,7 @@ export default function TaxConfigs() {
             </button>
           </div>
 
+          <TaxYearVerification key={`${selectedConfig.id}-${selectedConfig.updated_at}`} config={selectedConfig} previous={previousConfig} onSaved={async () => { await fetchConfigDetails(selectedConfig.id); await fetchConfigs(); }} />
           {/* Global Settings */}
           <div className="mb-8 p-4 bg-gray-50 rounded-lg">
             <div className="flex justify-between items-center mb-4">

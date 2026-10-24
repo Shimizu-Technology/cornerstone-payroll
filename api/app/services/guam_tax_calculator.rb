@@ -33,6 +33,12 @@ class GuamTaxCalculator
         pay_frequency: pay_frequency
       )
     end
+    unless @source_rule_snapshot.present?
+      AnnualTaxConfig.require_verified!(tax_year)
+      unless tax_year.to_i <= 2026 && @tax_table.verification_status == "verified"
+        raise ArgumentError, AnnualTaxConfig.unverified_message(tax_year)
+      end
+    end
     @allowances = allowances
     @pay_frequency = pay_frequency
     @periods_per_year = PAY_FREQUENCIES[pay_frequency]

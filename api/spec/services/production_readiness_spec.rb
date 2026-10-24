@@ -125,6 +125,7 @@ RSpec.describe ProductionReadiness do
       encryption_credentials: encryption_credentials,
       encrypted_data_probe: encrypted_data_probe,
       tax_configuration_valid: tax_configuration_valid,
+      tax_year_readiness: -> { { warnings: [] } },
       http_get: http_get
     )
   end
