@@ -216,6 +216,7 @@ class PayrollLiabilityPostingService
     end
     metadata = metadata.merge("ambiguous_insurance_history" => true) if insurance_ids.any?
     metadata = metadata.merge("ambiguous_employer_contribution_history" => true) if employer_ids.any?
+    metadata = metadata.merge(PayrollLegacyEmployerComponents::LIFECYCLE_CAPTURE_KEY => true) if legacy_capture
     metadata = metadata.merge(PayrollLegacyEmployerComponents::POSTING_VERSION_KEY => 1) unless legacy_capture
     %w[legacy_unposted_employer_component legacy_employer_posting_compatibility].each do |key_name|
       values = locked.payroll_items.flat_map { |item| Array(item.calculation_context_snapshot.to_h.dig("corrective_paycheck", key_name)) }
