@@ -524,6 +524,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     releaseBoundaryResponse?.();
     await expect(page.getByText(boundaryTotalLabel)).toBeVisible();
+    await page.unrouteAll({ behavior: 'wait' });
     await context.close();
   });
 
