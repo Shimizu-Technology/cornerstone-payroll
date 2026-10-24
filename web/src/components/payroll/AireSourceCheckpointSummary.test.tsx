@@ -96,7 +96,7 @@ it('explains manual mode in the compact Hours checkpoint without a nominal-cutof
 
 it('labels a manually locked batch while its verification is still pending', () => {
   render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'batch_verifying', finalized_batch: { ...batch, verification_status: 'pending' } }} />);
-  expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByText('Locked manually by you')).toBeTruthy();
+  expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByText('Locked manually')).toBeTruthy();
 });
 
 it('names the scheduled November cutoff plainly inside the compact checkpoint', () => {
