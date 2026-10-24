@@ -1469,6 +1469,7 @@ export interface PayPeriodComparisonResponse {
 // ----------------
 
 export interface PayrollItem {
+  payroll_included?: boolean;
   named_loan_payments?: Record<string, number>;
   id: number;
   pay_period_id?: number;
@@ -1902,6 +1903,8 @@ export interface PaymentCancellationSync {
 }
 
 export interface CheckItem {
+  payroll_included?: boolean;
+  payroll_reversed_at?: string | null;
   source_payment_blocker?: string | null;
   payment_cancellation_sync?: PaymentCancellationSync | null;
   id: number;

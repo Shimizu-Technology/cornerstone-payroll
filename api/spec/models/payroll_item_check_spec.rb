@@ -193,7 +193,10 @@ RSpec.describe PayrollItem, type: :model do
       expect(receipts).to all(have_attributes(contract_version: "2.0"))
     end
 
-    it "records a void after delivery without erasing the earlier payment history" do
+    it "records instrument cancellation after delivery without erasing earned payroll" do
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_cancellation_v1" ])
       item.mark_printed!(user: admin_user)
       item.mark_delivered!(
         user: admin_user,
@@ -207,7 +210,7 @@ RSpec.describe PayrollItem, type: :model do
       expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
         "payment_prepared",
         "payment_issued",
-        "payment_voided"
+        "payment_cancelled"
       )
     end
 

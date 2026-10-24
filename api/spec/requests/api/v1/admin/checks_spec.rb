@@ -141,14 +141,14 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
 
       json = response.parsed_body
-      expect(json.fetch("earnings_statement_items").map { |row| row.fetch("id") }).to contain_exactly(item_a.id, zero_item.id, zero_deposit.id)
+      expect(json.fetch("earnings_statement_items").map { |row| row.fetch("id") }).to contain_exactly(item_a.id, item_b.id, zero_item.id, zero_deposit.id)
       expect(json.fetch("earnings_statement_items")).to include(a_hash_including(
         "id" => zero_item.id, "gross_pay" => 197.67, "total_deductions" => 197.67,
         "net_pay" => 0.0, "statement_only" => true, "payment_delivery_method" => "paper_check"
       ))
       expect(json.fetch("checks").map { |row| row.fetch("id") }).not_to include(zero_item.id, zero_deposit.id, blank.id)
       expect(json.fetch("direct_deposit_items")).to be_empty
-      expect(json.dig("meta", "earnings_statement_count")).to eq(3)
+      expect(json.dig("meta", "earnings_statement_count")).to eq(4)
       expect(json.dig("meta", "statement_only_count")).to eq(2)
       expect(json.dig("meta", "direct_deposit_count")).to eq(0)
       expect(zero_item.reload.check_number).to be_nil
@@ -549,10 +549,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body["error"]).to eq("A reason is required to reissue a check")
     end
 
-    it "returns 422 when reprinting an already-voided check" do
+    it "reissues a retired check without creating duplicate earned wages" do
       item_a.update!(voided: true, voided_at: Time.current, void_reason: "Was already voided before test")
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
-      expect(response).to have_http_status(:unprocessable_entity)
+      expect { post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" } }.not_to change(PayrollItem, :count)
+      expect(response).to have_http_status(:created)
+      expect(item_a.reload).to have_attributes(voided: false, gross_pay: 1200, net_pay: 960)
     end
   end
 

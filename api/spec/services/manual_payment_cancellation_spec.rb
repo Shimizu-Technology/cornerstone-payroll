@@ -197,4 +197,28 @@ RSpec.describe "Manual allocation instrument cancellation" do
     expect(allocation.issue_command_id).to eq(command)
     expect(allocation.payment_cancellation_receipts).to be_empty
   end
+  it "retains manually reserved hours after a check void and repeated cancellation sync" do
+    item.check_events.create!(event_type: "delivered", check_number: "8000", user: actor)
+    service.sync!(allocation, raise_on_failure: true)
+    item.void!(user: actor, reason: "Recovered damaged paper check")
+    service.sync!(allocation, raise_on_failure: true)
+    service.sync!(allocation, raise_on_failure: true)
+    expect(allocation.reload).to have_attributes(status: "committed", regular_hours: 5, overtime_hours: 1)
+    expect(item.reload).to be_payroll_included
+    expect(allocation.payment_cancellation_receipts.length).to eq(1)
+  end
+  it "syncs the later whole-period financial reversal of an already cancelled manual payment once" do
+    item.mark_printed!(user: actor)
+    item.void!(user: actor, reason: "Recovered damaged paper check")
+    service.sync!(allocation, raise_on_failure: true)
+    expect(allocation.reload.status).to eq("committed")
+    allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
+    expect(AireManualAllocationSyncJob).to receive(:perform_later).with(allocation.id)
+    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse the earned payroll explicitly")
+    allow(client).to receive(:void_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501", "version" => 3 })
+    service.sync!(allocation, raise_on_failure: true)
+    service.sync!(allocation, raise_on_failure: true)
+    expect(allocation.reload.status).to eq("voided")
+    expect(client).to have_received(:void_payroll_manual_allocation).once
+  end
 end
