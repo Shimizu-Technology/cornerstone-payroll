@@ -2,8 +2,8 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState, type ComponentProps, type ReactNode } from 'react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
@@ -38,6 +38,7 @@ const apiMocks = vi.hoisted(() => ({
   employeesList: vi.fn(),
   runPayroll: vi.fn(),
   commit: vi.fn(),
+  unapprove: vi.fn(),
   refreshSetup: vi.fn(),
   comparison: vi.fn(),
   payrollFinalRecord: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock('@/services/api', () => ({
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
     commit: apiMocks.commit,
+    unapprove: apiMocks.unapprove,
     refreshSetup: apiMocks.refreshSetup,
     comparison: apiMocks.comparison,
   },
@@ -153,6 +155,69 @@ const sourceCalendar: AirePayrollCalendarState = {
   finalized_batch: { event_id: 'event-12', verification_status: 'verified', verification_attempts: 1,
     occurred_at: '2026-09-22T07:00:00Z', payroll_batch_id: 'batch-12', payroll_batch_checksum: 'checksum-12' },
 };
+
+function RoutedFeedbackPayRun({ period }: { period: PayPeriod }): ReactElement {
+  const { tab } = useParams();
+  const location = useLocation();
+  return <><output aria-label="Current payroll path">{location.pathname}</output>
+    <PayPeriodDetailPage initialPayPeriod={period} activeTab={tab as 'work' | 'checks' | 'reports' | 'activity'}
+      navigation={<nav aria-label="Feedback test tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <Link key={id} to={`/companies/7/pay-runs/12/${id}`}>Go to {id}</Link>)}</nav>} />
+  </>;
+}
+
+it.each(['reports', 'checks', 'activity'] as const)('retains %s navigation after a successful calculation', async (tab): Promise<void> => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const employee = { id: 30, company_id: 7, first_name: 'Ana', last_name: 'Cruz', employment_type: 'hourly', pay_rate: 16, pay_frequency: 'biweekly', status: 'active' } as Employee;
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0, gross_pay: 64, net_pay: 60 };
+  const period = { ...initialPayPeriod, status: 'draft', run_purpose: 'adjustment', payroll_items: [item] } as unknown as PayPeriod;
+  apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
+  await user.click(payRunButton('Calculate Payroll'));
+  await screen.findByText('Payroll calculated for 1 employee. Review the results before approval.');
+  await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
+  await user.click(screen.getByRole('link', { name: `Go to ${tab}` }));
+  expect(screen.getByLabelText('Current payroll path').textContent).toBe(`/companies/7/pay-runs/12/${tab}`);
+});
+
+it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to Payroll and focuses it', async (action): Promise<void> => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  try {
+    const period = { ...initialPayPeriod, status: 'approved' } as PayPeriod;
+    apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+    apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+    apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+    const apiAction = action === 'commit' ? apiMocks.commit : apiMocks.unapprove;
+    apiAction.mockRejectedValue(new Error(`New ${action} rejected`));
+    render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/reports']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
+    const processing = await screen.findByRole('region', { name: 'Payroll processing actions' });
+    for (const attempt of [1, 2]) {
+      if (attempt === 2) {
+        await user.click(screen.getByRole('link', { name: 'Go to reports' }));
+        expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/reports');
+      }
+      if (action === 'commit') {
+        await user.click(within(processing).getByRole('button', { name: 'Commit' }));
+        await user.click(await screen.findByRole('button', { name: 'Confirm commit' }));
+      } else {
+        await user.click(within(processing).getByLabelText('More payroll actions'));
+        await user.click(within(processing).getByRole('button', { name: 'Roll Back Approval' }));
+      }
+      const feedback = await screen.findByText(`New ${action} rejected`);
+      expect(apiAction).toHaveBeenCalledTimes(attempt);
+      expect(apiAction).toHaveBeenLastCalledWith(12);
+      await waitFor(() => expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/work'));
+      expect(feedback.closest('details')?.id).toBe('payroll-commit');
+      await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
+    }
+  } finally { confirm.mockRestore(); }
+});
 
 afterEach(() => {
   localStorage.clear(); cleanup(); componentMocks.finalRecordEnabled = false; });
