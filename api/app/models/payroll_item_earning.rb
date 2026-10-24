@@ -9,6 +9,7 @@ class PayrollItemEarning < ApplicationRecord
   validates :category, presence: true, inclusion: { in: CATEGORIES }
   validates :label, presence: true
   validates :amount, presence: true, numericality: true
-  validates :hours, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :hours, numericality: true, allow_nil: true
+  validates :hours, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true, unless: -> { payroll_item&.signed_correction_components? }
   validates :label, uniqueness: { scope: [ :payroll_item_id, :category ] }
 end
