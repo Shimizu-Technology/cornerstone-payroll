@@ -23,7 +23,7 @@ RSpec.describe Form1099NecAggregator, type: :service do
       net_pay: 500.00,
       withholding_tax: 0.00
     )
-    create(:payroll_item, :voided, payroll_reversed_at: Time.current,
+    create(:payroll_item, :voided, **payroll_reversal_fixture,
       pay_period: voided_pay_period,
       employee: contractor,
       company: company,
@@ -33,15 +33,17 @@ RSpec.describe Form1099NecAggregator, type: :service do
       withholding_tax: 0.00
     )
 
+    create(:payroll_item, :voided, pay_period: create(:pay_period, :committed, company: company, pay_date: pay_period.pay_date), employee: contractor, company: company,
+      employment_type: "contractor", gross_pay: 225, net_pay: 225, withholding_tax: 0)
     report = described_class.new(company, 2026).generate
     asia = report[:all_contractors].find { |row| row[:employee_id] == contractor.id }
 
-    expect(asia[:total_compensation]).to eq(500.00)
-    expect(asia[:payment_count]).to eq(1)
+    expect(asia[:total_compensation]).to eq(725.00)
+    expect(asia[:payment_count]).to eq(2)
     expect(asia[:requires_filing]).to eq(false)
     expect(report[:meta][:filing_threshold]).to eq(2_000.0)
     expect(report[:meta][:filing_threshold_rule_id]).to eq(threshold_rule.id)
-    expect(report[:totals][:total_compensation]).to eq(500.00)
+    expect(report[:totals][:total_compensation]).to eq(725.00)
   end
 
 

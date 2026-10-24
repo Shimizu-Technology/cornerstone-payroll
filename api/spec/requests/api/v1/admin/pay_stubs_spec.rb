@@ -110,12 +110,12 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
     end
 
     it "does not generate a current statement for financially reversed or no-activity records" do
-      payroll_item.update!(voided: true, payroll_reversed_at: Time.current, voided_at: Time.current, void_reason: "Cancelled test payroll")
+      payroll_item.update!(voided: true, **payroll_reversal_fixture, voided_at: Time.current, void_reason: "Cancelled test payroll")
       get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Reversed payroll")
 
-      payroll_item.update!(voided: false, payroll_reversed_at: nil, gross_pay: 0, net_pay: 0)
+      payroll_item.update!(voided: false, payroll_reversed_at: nil, payroll_reversed_by_id: nil, payroll_reversal_reason: nil, gross_pay: 0, net_pay: 0)
       get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("no earnings-statement activity")
@@ -127,19 +127,24 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
     end
 
-    it "reports skipped payroll items with no pay activity without counting voided checks" do
+    it "generates retired-check wage statements, skips no activity and excludes financial reversals" do
       unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
       voided_employee = create(:employee, company: company, department: department, first_name: "Vera", last_name: "Voided")
       create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
-      create(:payroll_item, :voided, payroll_reversed_at: Time.current, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
+      create(:payroll_item, :voided, **payroll_reversal_fixture, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
+      retired_employee = create(:employee, company: company, department: department, first_name: "Retained", last_name: "Wages")
+      retired = create(:payroll_item, :voided, pay_period: pay_period, employee: retired_employee, gross_pay: 500, net_pay: 400)
 
       post "/api/v1/admin/pay_stubs/batch_generate", params: { pay_period_id: pay_period.id }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.fetch("total")).to eq(3)
-      expect(response.parsed_body.fetch("generated")).to eq(2)
+      expect(response.parsed_body.fetch("total")).to eq(4)
+      expect(response.parsed_body.fetch("generated")).to eq(3)
       expect(response.parsed_body.fetch("skipped")).to eq(1)
       expect(response.parsed_body.fetch("errors")).to eq(0)
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id, payroll_item_ids: [ retired.id ] }
+      expect(response).to have_http_status(:ok)
+      expect(CombinePDF.parse(response.body).pages.count).to eq(1)
     end
   end
 
@@ -272,7 +277,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       voided_item = create(
         :payroll_item,
         :voided,
-        payroll_reversed_at: Time.current,
+        **payroll_reversal_fixture,
         pay_period: pay_period,
         employee: voided_employee,
         gross_pay: 1200.0,

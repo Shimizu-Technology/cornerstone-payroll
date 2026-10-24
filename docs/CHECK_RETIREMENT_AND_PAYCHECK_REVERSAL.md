@@ -86,3 +86,9 @@ CST payloads now identify explicitly reversed items and permit a zero remaining 
 The task evidence, exact gate counts and viewport scenario results are recorded in `output/payroll-aire-review-2026-10-24/impl/payroll-void/RESULT.md` outside this repository. Required viewports are 1280×800 and 390×844. The original $900 failure is retained in `regression-before.log`; the UI regression failure is retained in `ui-before-node24.log`.
 
 Shared-file touches: inclusion scopes only in `issue_corrective_paycheck_service.rb` (four readers); source/participation validation scopes and FIT inclusion in `pay_period_lifecycle_service.rb`. No annual FICA calculation logic or `payroll_review/calculation_snapshot.rb` edits.
+
+Single-paycheck reversal scopes employee payment evidence to the selected item. Other employees' delivered, cleared or direct-deposit payments do not block it; shared filing/liability payment guards remain period-wide. Its own issued/cleared or positive direct-deposit payment remains blocked.
+
+Reversal liability entries net all prior postings by `component_key`, omit zero balances, and record the complete input-entry audit in `metadata.reverses_entry_ids`. Whole-posting reversal retains its existing immediate-parent `reverses_entry_id`; no existing reader interprets the former single-item singular key. The database requires the reversal timestamp, actor and reason to be either all NULL or all populated.
+
+Rollout: run `payroll:legacy_check_voids` read-only in production. The accountant classifies each legacy void as instrument retirement or financial reversal. Apply `ReversePaycheckService` for financial reversals before the first tax sync or filing export after deploy. A guarded reversal must be resolved through its reviewed correction path before exports resume; do not bypass payment/source/filing guards.
