@@ -147,7 +147,7 @@ function PayrollAdjustmentCell({ worker, column }: PayrollAdjustmentCellProps): 
   const amount = payrollAdjustmentAmount(worker, column);
   return (
     <td className="border-b border-r border-neutral-100 bg-white px-4 py-2 text-right tabular-nums">
-      {amount === null ? <span className="text-neutral-400">—</span> : currency(amount)}
+      {amount === null ? <span className="text-neutral-600">—</span> : currency(amount)}
     </td>
   );
 }
@@ -229,7 +229,7 @@ function PayrollFieldCell({ worker, column }: { worker: PayrollWorker; column: P
   const amount = payrollFieldAmount(worker, column);
   return (
     <td className="border-b border-r border-neutral-100 bg-white px-3 py-2 text-right tabular-nums">
-      {amount === null ? <span className="text-neutral-400">—</span> : currency(amount)}
+      {amount === null ? <span className="text-neutral-600">—</span> : currency(amount)}
     </td>
   );
 }
@@ -749,7 +749,7 @@ export function PayrollRegisterPreviewModal({
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-white sm:px-5">
           <div className="min-w-0">
             <p className="truncate text-sm font-bold sm:text-base">Payroll Register</p>
-            <p className="truncate text-xs text-neutral-600">
+            <p className="truncate text-xs text-neutral-300">
               {report ? `${report.pay_period.start_date} – ${report.pay_period.end_date}` : 'Loading report preview'}
             </p>
           </div>
@@ -761,7 +761,7 @@ export function PayrollRegisterPreviewModal({
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {loading && (
             <div className="flex min-h-[420px] items-center justify-center">
               <div className="flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-5 py-3 text-sm font-semibold text-neutral-600 shadow-sm">
@@ -777,7 +777,7 @@ export function PayrollRegisterPreviewModal({
             </div>
           )}
           {!loading && !error && report && <PayrollRegisterPreviewContent report={report} />}
-        </main>
+        </div>
       </div>
     </div>,
     document.body

@@ -11,7 +11,7 @@ vi.mock('./Sidebar', () => ({ Sidebar: ({ onNavigate, onOpenCommandPalette }: { 
 beforeEach(() => { vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-function view() {
+function view(): React.ReactElement {
   return <MemoryRouter><Routes><Route element={<Layout />}><Route path="/" element={<button>Background action</button>} /><Route path="/employees" element={<h1>Employees page</h1>} /></Route></Routes></MemoryRouter>;
 }
 

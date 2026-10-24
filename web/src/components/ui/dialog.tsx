@@ -207,7 +207,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
   }, [open]);
 
   const onAfterCloseRef = React.useRef(onAfterClose);
-  onAfterCloseRef.current = onAfterClose;
+  React.useLayoutEffect(() => { onAfterCloseRef.current = onAfterClose; }, [onAfterClose]);
   const previouslyActive = React.useRef(active);
   React.useEffect(() => {
     // Focus ownership has already been released by the effect cleanup above.

@@ -228,9 +228,9 @@ function PaycheckDetail({ paycheck }: { paycheck: HistoricalPaycheck }): ReactEl
   return (
     <div className="space-y-6">
       <div className="grid gap-4 rounded-2xl bg-neutral-950 p-6 text-white sm:grid-cols-3">
-        <div><p className="text-xs text-neutral-600">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div>
-        <div><p className="text-xs text-neutral-600">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(taxesAndDeductions)}</p></div>
-        <div><p className="text-xs text-neutral-600">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div>
+        <div><p className="text-xs text-neutral-300">Gross</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.gross_pay)}</p></div>
+        <div><p className="text-xs text-neutral-300">Taxes + deductions</p><p className="mt-1 text-xl font-bold">{dollars(taxesAndDeductions)}</p></div>
+        <div><p className="text-xs text-neutral-300">Net</p><p className="mt-1 text-xl font-bold">{dollars(paycheck.net_pay)}</p></div>
       </div>
       <div className="grid gap-6 md:grid-cols-2">
         <Breakdown title="Hours" lines={paycheck.hours_breakdown} unit="hours" />

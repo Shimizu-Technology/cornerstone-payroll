@@ -28,7 +28,7 @@ it('keeps a closing dialog modal through exit and cancels removal when reopened'
   const changed = vi.fn();
   const trigger = document.createElement('button');
   document.body.appendChild(trigger);trigger.focus();
-  const view = (open: boolean) => <Dialog open={open} onOpenChange={changed}><DialogContent><DialogTitle>Review</DialogTitle><button>Confirm</button></DialogContent></Dialog>;
+  const view = (open: boolean): React.ReactElement => <Dialog open={open} onOpenChange={changed}><DialogContent><DialogTitle>Review</DialogTitle><button>Confirm</button></DialogContent></Dialog>;
   const { rerender } = render(view(true));
   rerender(view(false));
   expect(screen.getByRole('dialog', { name: 'Review' })).toBeTruthy();
@@ -47,7 +47,7 @@ it('keeps a closing dialog modal through exit and cancels removal when reopened'
 
 it('returns to the explicit opener when an asynchronous action blurred it before opening', async () => {
   const opener = React.createRef<HTMLButtonElement>();
-  const view = (open: boolean) => <><button ref={opener}>Open PDF</button><button autoFocus>Other action</button>
+  const view = (open: boolean): React.ReactElement => <><button ref={opener}>Open PDF</button><button autoFocus>Other action</button>
     <Dialog open={open} onOpenChange={vi.fn()} returnFocusRef={opener}><DialogContent><DialogTitle>PDF</DialogTitle><button>Close PDF</button></DialogContent></Dialog></>;
   const { rerender } = render(view(false));
   rerender(view(true));
@@ -58,7 +58,7 @@ it('returns to the explicit opener when an asynchronous action blurred it before
 
 
 it('finishes a focused numeric draft before reopening with reset values', async () => {
-  function Entry({ open }: { open: boolean }) {
+  function Entry({ open }: { open: boolean }): React.ReactElement {
     const [value, setValue] = React.useState(10);
     React.useEffect(() => { if (open) setValue(10); }, [open]);
     return <Dialog open={open} onOpenChange={vi.fn()}><DialogContent><DialogTitle>Entry</DialogTitle>
@@ -72,4 +72,15 @@ it('finishes a focused numeric draft before reopening with reset values', async 
   expect((input as HTMLInputElement).value).toBe('1');
   rerender(<Entry open={false} />); rerender(<Entry open />);
   await waitFor(() => expect((input as HTMLInputElement).value).toBe('10'));
+});
+
+it('hands off after release using the latest committed close callback', async (): Promise<void> => {
+  const first = vi.fn();
+  const committed = vi.fn((): void => { expect(screen.queryByRole('dialog')).toBeNull(); });
+  const view = (open: boolean, after: () => void): React.ReactElement => <Dialog open={open} onOpenChange={vi.fn()} onAfterClose={after}><DialogContent><DialogTitle>Handoff</DialogTitle></DialogContent></Dialog>;
+  const { rerender } = render(view(true, first));
+  rerender(view(true, committed));
+  rerender(view(false, committed));
+  await waitFor(() => expect(committed).toHaveBeenCalledTimes(1));
+  expect(first).not.toHaveBeenCalled();
 });

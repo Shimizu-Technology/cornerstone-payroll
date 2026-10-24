@@ -554,7 +554,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                               )}
                             </span>
                           ) : (
-                            <span className="text-neutral-400">—</span>
+                            <span className="text-neutral-600">—</span>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
@@ -575,7 +575,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                               )}
                             </div>
                           ) : (
-                            <span className="text-neutral-400">—</span>
+                            <span className="text-neutral-600">—</span>
                           )}
                         </TableCell>
                         <TableCell>
@@ -599,7 +599,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onSourcePreviewed
                               )}
                             </div>
                           ) : (
-                            <span className="text-neutral-400">—</span>
+                            <span className="text-neutral-600">—</span>
                           )}
                         </TableCell>
                         <TableCell className="text-center">
