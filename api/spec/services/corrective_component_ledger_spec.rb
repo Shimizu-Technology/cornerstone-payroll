@@ -3,55 +3,10 @@
 require "rails_helper"
 require "pdf/reader"
 require "roo"
+require "tmpdir"
 
 RSpec.describe "Corrective component ledger" do
-  let!(:tax_table) { create(:tax_table) }
-  let(:company) { create(:company, auto_create_fit_check: false) }
-  let(:employee) { create(:employee, company: company, pay_rate: 15, pay_frequency: "biweekly", filing_status: "single") }
-  let(:actor) { create(:user, company: company, role: "admin") }
-  let(:period) do
-    create(:pay_period, :committed, company: company, start_date: Date.new(2024, 1, 1),
-      end_date: Date.new(2024, 1, 14), pay_date: Date.new(2024, 1, 19))
-  end
-
-  def original!(**inputs)
-    item = period.payroll_items.build(employee: employee, company: company, employment_type: "hourly", pay_rate: 15, hours_worked: 60, **inputs)
-    PayrollCalculator.for(employee, item).calculate
-    item.save!
-    employee.ytd_totals_for(2024).add_payroll_item!(item)
-    CompanyYtdTotal.find_or_create_by!(company: company, year: 2024).add_payroll_item!(item)
-    PayrollLiabilityPostingService.post!(pay_period: period, actor: actor)
-    item.reload
-  end
-
-  def preview(inputs)
-    IssueCorrectivePaycheckService.preview(original_pay_period: period, employee: employee, corrected_inputs: inputs, pay_date: Date.new(2024, 1, 26))
-  end
-
-  def issue(inputs = {}, digest: nil, **overrides)
-    inputs = inputs.merge(overrides)
-    IssueCorrectivePaycheckService.issue!(original_pay_period: period, employee: employee, corrected_inputs: inputs,
-      pay_date: Date.new(2024, 1, 26), reason: "Component reconciliation", actor: actor, expected_review_digest: digest).last
-  end
-
-  def add_deduction(category:, sub_category:, reporting_group: nil, percentage: 5)
-    type = DeductionType.create!(company: company, name: "Synthetic #{category} #{sub_category}", category: category,
-      sub_category: sub_category, reporting_group: reporting_group)
-    employee.employee_deductions.create!(deduction_type: type, amount: percentage, is_percentage: true, active: true)
-    verify_synthetic_retirement_plan!(employee, period.pay_date) if sub_category == "retirement"
-    type
-  end
-
-  def assert_cash(item)
-    data = QuickbooksPayrollReportData.new(item.pay_period)
-    deductions = data.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_d } +
-      data.after_tax_deduction_lines_for(item).sum { |line| line.amount.to_d } + data.employee_tax_total(item).to_d
-    expect(deductions.round(2)).to eq(item.total_deductions), "deduction detail"
-    other = data.other_pay_lines_for(item).sum { |line| line.amount.to_d }
-    expect((item.gross_pay + other - deductions).round(2)).to eq(item.net_pay), "cash reconciliation"
-    earnings = data.earnings_lines_for(item).reject { |line| line.label == "Gross" }
-    expect(earnings.sum { |line| line.amount.to_d }.round(2)).to eq(item.gross_pay), "taxable earnings detail"
-  end
+  include_context "corrective payroll ledger fixtures"
 
   [
     [ "pre_tax", "retirement", "401k_pre_tax" ],
@@ -273,7 +228,6 @@ RSpec.describe "Corrective component ledger" do
     expect(period.supplemental_pay_periods).to be_empty
   end
 
-
   it "preserves signed regular, overtime, holiday and PTO earnings across a void" do
     original = original!(overtime_hours: 5, holiday_hours: 3, pto_hours: 2)
     first = issue(hours_worked: 65, overtime_hours: 7, holiday_hours: 4, pto_hours: 1)
@@ -303,8 +257,6 @@ RSpec.describe "Corrective component ledger" do
     [ original, second, repair ].each { |item| assert_cash(item) }
     expect(employee.ytd_totals_for(2024).reload.overtime_pay).to eq(196.88)
   end
-
-
 
   it "does not repay or change an unchanged scheduled loan while correcting wages" do
     type = DeductionType.create!(company: company, name: "Fixed tracked loan", category: "post_tax", sub_category: "loan")
@@ -403,9 +355,11 @@ RSpec.describe "Corrective component ledger" do
       data = QuickbooksPayrollReportData.new(correction.pay_period)
       expect(data.paycheck_history_rows.sole[:deductions]).to eq(correction.total_deductions.to_f)
       expect(data.retirement_rows.sole.employee_amount).to eq(-3.75)
-      path = Rails.root.join("tmp", "corrective-ledger-negative-package.pdf")
-      File.binwrite(path, response.body)
-      File.binwrite(Rails.root.join("tmp", "corrective-ledger-negative-summary.pdf"), PayrollSummaryByEmployeePdfGenerator.new(correction.pay_period).generate)
+      if ENV["PAYROLL_LEDGER_PDF_ARTIFACTS_DIR"].present?
+        directory = Dir.mktmpdir("corrective-ledger-", ENV.fetch("PAYROLL_LEDGER_PDF_ARTIFACTS_DIR"))
+        File.binwrite(File.join(directory, "negative-package.pdf"), response.body)
+        File.binwrite(File.join(directory, "negative-summary.pdf"), PayrollSummaryByEmployeePdfGenerator.new(correction.pay_period).generate)
+      end
     end
   end
 end

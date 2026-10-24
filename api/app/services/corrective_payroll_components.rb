@@ -163,6 +163,6 @@ class CorrectivePayrollComponents
   end
 
   def employer_contributions(item)
-    QuickbooksPayrollReportData.new(item.pay_period).employer_contribution_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }
+    PayrollEmployerContributions.total(item)
   end
 end

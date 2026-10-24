@@ -353,7 +353,11 @@ class PayrollCalculator
     payroll_item.payroll_item_field_entries.each do |entry|
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
-      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category, reporting_group: entry.reporting_group)
+      deduction = payroll_item.payroll_item_deductions.build(
+        deduction_type: payroll_field_mirror_type(entry, "employer_contribution"), amount: entry.amount,
+        category: "employer_contribution", label: entry.label, reporting_group: entry.reporting_group
+      )
+      PayrollComponentMirrors.record!(entry, deduction)
     end
   end
 
@@ -364,8 +368,8 @@ class PayrollCalculator
       next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
 
       category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
-      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
-      payroll_item.payroll_item_deductions.build(
+      deduction_type = payroll_field_mirror_type(entry, category)
+      deduction = payroll_item.payroll_item_deductions.build(
         deduction_type: deduction_type,
         amount: entry.amount,
         category: category,
@@ -374,7 +378,16 @@ class PayrollCalculator
         employee_loan_id: historical_calculation? ? nil : entry.metadata&.fetch("employee_loan_id", nil),
         loan_schedule_snapshot: historical_calculation? ? {} : (entry.metadata || {}).fetch("loan_schedule_snapshot", {})
       )
+      PayrollComponentMirrors.record!(entry, deduction)
     end
+  end
+
+  def payroll_field_mirror_type(entry, category)
+    identity = entry.metadata.to_h[PayrollComponentMirrors::IDENTITY_KEY]
+    if historical_calculation? && identity&.fetch("version", nil) == 1
+      return (payroll_item.company || pay_period.company).deduction_types.find(identity.fetch("deduction_type_id"))
+    end
+    find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
   end
 
   def apply_named_loan_repayments!
@@ -935,7 +948,10 @@ class PayrollCalculator
   end
 
   def capture_calculation_context!
-    return if historical_calculation?
+    if historical_calculation?
+      payroll_item.calculation_context_snapshot = @calculation_context.deep_dup.merge(built_in_employer_match_identity)
+      return
+    end
 
     if payroll_item.tax_rule_snapshot["engine"] == "contractor_no_withholding"
       AnnualTaxConfig.require_verified!(pay_period.pay_date.year, lock: true)
@@ -954,7 +970,12 @@ class PayrollCalculator
       payroll_field_assignments: payroll_field_assignments_for_calculation,
       w4_election: w4_election_for_calculation,
       retirement_election: retirement_election_for_calculation
-    )
+    ).merge(built_in_employer_match_identity)
+  end
+
+  def built_in_employer_match_identity
+    { "built_in_employer_match_mirrors" => { "version" => 1,
+      "sources" => @built_in_employer_match_rows.to_h.transform_keys(&:to_s).transform_values(&:deduction_type_id) } }
   end
 
   def retirement_election_for_calculation

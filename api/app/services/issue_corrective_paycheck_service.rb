@@ -192,6 +192,8 @@ class IssueCorrectivePaycheckService
         is_zero_change: zero_change?
       }
     }
+  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+    raise MissingHistoricalContextError, e.message
   end
 
   def issue!
@@ -258,6 +260,8 @@ class IssueCorrectivePaycheckService
 
       [ supplemental, corrective_item ]
     end
+  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+    raise MissingHistoricalContextError, e.message
   end
 
   private
@@ -695,7 +699,7 @@ class IssueCorrectivePaycheckService
 
   def clone_original_payroll_field_entries!(temp)
     original_item.payroll_item_field_entries.each do |entry|
-      temp.payroll_item_field_entries.build(
+      copied = temp.payroll_item_field_entries.build(
         payroll_field_definition_id: entry.payroll_field_definition_id,
         label: entry.label,
         kind: entry.kind,
@@ -710,6 +714,8 @@ class IssueCorrectivePaycheckService
         notes: entry.notes,
         metadata: entry.metadata.deep_dup
       )
+      mirror = PayrollComponentMirrors.deduction_for(original_item, entry)
+      PayrollComponentMirrors.record!(copied, mirror) if mirror
     end
   end
 
@@ -879,7 +885,7 @@ class IssueCorrectivePaycheckService
     supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
       corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
     create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
-  rescue PayrollInsuranceComponents::AmbiguousHistoryError, PayrollLiabilityPostingService::InvalidStateError => e
+  rescue PayrollInsuranceComponents::AmbiguousHistoryError, PayrollLiabilityPostingService::InvalidStateError, PayrollComponentMirrors::AmbiguousHistoryError => e
     raise MissingHistoricalContextError, e.message
   end
 

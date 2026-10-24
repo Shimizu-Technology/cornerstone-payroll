@@ -147,6 +147,17 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(TimeTrackingCorrectionDisposition.count).to eq(0)
   end
 
+  it "rejects stale current-item proof without changing component-reconciliation inputs" do
+    _period, current = paid_successor
+    preview = service.preview
+    postings = PayrollLiabilityPosting.order(:id).map(&:attributes)
+    current.update_columns(correction_reason: "Synthetic proof annotation")
+    expect(service.preview[:deltas]).to eq(preview[:deltas])
+    expect { confirm(preview) }.to raise_error(ArgumentError, /Source or payroll history changed/)
+    expect(PayrollLiabilityPosting.order(:id).map(&:attributes)).to eq(postings)
+    expect(TimeTrackingCorrectionDisposition.count).to eq(0)
+  end
+
   it "rejects a forged trusted-target argument instead of accepting an API-style hash" do
     period, _current = paid_successor
     expect { IssueCorrectivePaycheckService.new(original_pay_period: period, employee: employee,
