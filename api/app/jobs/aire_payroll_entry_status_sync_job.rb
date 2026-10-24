@@ -7,6 +7,7 @@ class AirePayrollEntryStatusSyncJob < ApplicationJob
   discard_on ActiveRecord::RecordNotFound
 
   def perform(acknowledgement_id)
+    return if StagingQuarantine.suppressed?("aire_payroll_entry_acknowledgements", acknowledgement_id)
     acknowledgement = AirePayrollEntryAcknowledgement.includes(
       time_tracking_import: [ :time_tracking_source, { pay_period: :company } ]
     ).find(acknowledgement_id)

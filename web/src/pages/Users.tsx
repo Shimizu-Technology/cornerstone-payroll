@@ -1,4 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -182,15 +183,7 @@ export function Users() {
         company_ids: assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies),
       };
       const response = await usersApi.create(payload);
-      const createdUser = response.data;
-
-      if (response.invitation_sent) {
-        setSuccessMessage(`Invitation sent to ${createdUser.email}`);
-      } else if (response.invitation_error) {
-        setSuccessMessage(`User created, but invitation email failed: ${response.invitation_error}. You can resend it.`);
-      } else {
-        setSuccessMessage(`User created. Configure Resend to send invitation emails.`);
-      }
+      setSuccessMessage(`User created. ${invitationOutcomeMessage(response)}`);
 
       handleCancelAddNew();
       await fetchUsers();
@@ -206,12 +199,11 @@ export function Users() {
     setResendingId(user.id);
     try {
       const response = await usersApi.resendInvitation(user.id);
-      if (response.invitation_sent) {
-        setSuccessMessage(`Invitation resent to ${user.email}`);
-      } else {
-        setError(response.invitation_error || 'Failed to resend invitation');
-      }
-      fetchUsers();
+      await fetchUsers();
+      setError(null);
+      setSuccessMessage(null);
+      if (response.invitation_delivery_status === 'failed') setError(invitationOutcomeMessage(response));
+      else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invitation');
     } finally {
@@ -475,7 +467,7 @@ export function Users() {
           <Card className="mb-6 p-5">
             <h3 className="text-sm font-semibold text-neutral-900 mb-1">Invite New User</h3>
             <p className="text-xs text-neutral-600 mb-4">
-              An invitation will be sent via Clerk. Their name will update from their profile when they accept.
+              Create a pending account and request an invitation email. Their name will update from their profile when they accept.
             </p>
             {newError && (
               <ActionFeedback retryKey={newErrorFeedbackAttempt} tone="error" message={newError}><p className="text-sm text-danger-600">{newError}</p></ActionFeedback>

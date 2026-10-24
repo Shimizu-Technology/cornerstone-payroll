@@ -44,6 +44,7 @@ module Api
         def export
           scope = filtered_scope.reorder(nil)
           filename = "audit-history-#{Time.zone.today.iso8601}.csv"
+          filename = "STAGING_#{filename}" if StagingOutboundPolicy.staging?
           response.headers["Content-Type"] = "text/csv; charset=utf-8"
           response.headers["Content-Disposition"] = %(attachment; filename="#{filename}")
           self.response_body = audit_csv_stream(scope)
@@ -146,7 +147,9 @@ module Api
         # audit export has bounded memory use. The created_at/id cursor keeps
         # ordering stable when multiple events share a timestamp.
         def audit_csv_stream(scope)
+          staging = StagingOutboundPolicy.staging?
           Enumerator.new do |stream|
+            stream << CSV.generate_line([ StagingOutboundPolicy::LABEL ]) if staging
             stream << CSV.generate_line([ "Time", "Person", "Activity", "Actor email", "Role", "Category", "Affected record", "Technical action", "Record type", "Record ID", "Organization", "Client", "IP address", "Request ID", "Advanced details" ])
             cursor = nil
 

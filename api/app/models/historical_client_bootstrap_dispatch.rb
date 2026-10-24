@@ -22,7 +22,7 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   }
 
   def self.dispatch_pending!(ids: nil)
-    scope = due_for_dispatch
+    scope = StagingQuarantine.excluding(due_for_dispatch)
     scope = scope.where(id: ids) if ids.present?
     scope.find_each do |dispatch|
       dispatch.dispatch!
@@ -33,6 +33,7 @@ class HistoricalClientBootstrapDispatch < ApplicationRecord
   end
 
   def dispatch!(authorization_actor: nil)
+    return false if StagingQuarantine.suppressed?(self.class.table_name, id)
     with_active_dispatch_lock do
       bootstrap = historical_client_bootstrap
       prepared = with_business_locks(bootstrap) do

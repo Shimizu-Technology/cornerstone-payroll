@@ -11,6 +11,7 @@ module AirePayrollCalendar
     end
 
     def call
+      return { publication_id: @publication_id, status: "quarantined" } if StagingQuarantine.suppressed?("aire_payroll_calendar_publications", @publication_id)
       publication = claim!
       return publication if publication.is_a?(Hash)
 
