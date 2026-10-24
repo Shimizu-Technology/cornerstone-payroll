@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeft } from 'lucide-react';
+import { HelpTip } from '@/components/ui/help-tip';
 import { formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
 
@@ -19,7 +20,7 @@ export function PayRunRecordHeader({ payRun, client, returnTo, attention, action
         <p className="mt-1 break-words text-sm text-neutral-600">{client && <>{client} · </>}Pay date {formatDate(payRun.pay_date)} · {purposes[payRun.run_purpose] || payRun.run_purpose} · Run #{payRun.id}</p>
       </div>
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm sm:col-span-2 sm:row-start-2" aria-label="Payroll status and attention">
-      <span className="inline-flex items-center gap-2 font-semibold text-neutral-950"><span aria-hidden="true" className={`h-2 w-2 rounded-full ${voided ? 'bg-danger-700' : payRun.status === 'committed' ? 'bg-success-700' : 'bg-primary-700'}`} />{status}</span>
+      <span className="inline-flex items-center gap-2 font-semibold text-neutral-950"><span aria-hidden="true" className={`h-2 w-2 rounded-full ${voided ? 'bg-danger-700' : payRun.status === 'committed' ? 'bg-success-700' : 'bg-primary-700'}`} />{status}{payRun.parallel_run && <HelpTip label="parallel comparison">This run is isolated from live payroll actions. It can be calculated and reviewed, but never committed, paid, printed, or filed.</HelpTip>}</span>
       <div className="min-w-0 text-neutral-700">{attention}</div>
     </div>
       {actions && <div className="flex w-full items-start gap-2 sm:col-start-2 sm:row-start-1 sm:w-auto">{actions}</div>}

@@ -19,6 +19,11 @@ const apiMocks = vi.hoisted(() => ({
   recordActivities: vi.fn(),
   updatePaymentMethod: vi.fn(),
   getPayrollItem: vi.fn(),
+  reportTransmittalPreview: vi.fn(),
+  reportSignoffPreview: vi.fn(),
+  signoffPdf: vi.fn(),
+  transmittalPdf: vi.fn(),
+  packagePdf: vi.fn(),
   isAdmin: true,
   activeCompany: { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true } as Record<string, unknown>,
 }));
@@ -45,6 +50,8 @@ vi.mock('@/services/api', () => ({
   recordActivitiesApi: { list: apiMocks.recordActivities },
   checksApi: { rehearsalPreviewPdf: apiMocks.rehearsalPreviewPdf, printQueue: apiMocks.printQueue },
   payrollItemsApi: { get: apiMocks.getPayrollItem, updatePaymentMethod: apiMocks.updatePaymentMethod },
+  transmittalApi: { preview: apiMocks.reportTransmittalPreview },
+  reportsApi: { checkSignoffPreview: apiMocks.reportSignoffPreview, checkSignoffPdf: apiMocks.signoffPdf, transmittalLogPdf: apiMocks.transmittalPdf, fullPrintPackagePdf: apiMocks.packagePdf },
 }));
 
 vi.mock('@/components/checks/UnifiedCheckPrintDialog', () => ({
@@ -129,6 +136,8 @@ describe('PayRunWorkspace rehearsal checks', () => {
     apiMocks.isAdmin = true;
     apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', workspace_can_write: true };
     apiMocks.getPayPeriod.mockResolvedValue({ pay_period: payRun });
+    apiMocks.reportTransmittalPreview.mockResolvedValue({ saved_transmittal: null });
+    apiMocks.reportSignoffPreview.mockResolvedValue({ entries: [], saved_signoff: null });
     apiMocks.rehearsalPreviewPdf.mockResolvedValue({
       blob: new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
       filename: 'void_rehearsal_checks_2026-09-24.pdf',
@@ -232,6 +241,25 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(screen.queryByText('Process payroll')).toBeNull();
     expect(screen.queryByText('Checks & payments')).toBeNull();
   });
+
+  for (const mode of ['training_baseline', 'backup_snapshot', 'workspace_access']) {
+    it.each(['reports', 'work'])(`keeps ${mode} Reports read-only when entering through %s`, async entry => {
+      apiMocks.activeCompany = { id: 7, workspace_can_write: mode === 'training_baseline', ...(mode === 'backup_snapshot' ? { test_workspace_purpose: 'backup_snapshot' } : {}) };
+      apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, status: 'approved', ...(mode === 'training_baseline' ? { test_workspace_role: 'baseline' } : {}) } });
+      render(<MemoryRouter initialEntries={[`/companies/7/pay-runs/12/${entry}`]}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} /></Routes></MemoryRouter>);
+      if (entry === 'work') fireEvent.click(await screen.findByRole('link', { name: 'Reports' }));
+      expect(await screen.findByText('Reports & Documents')).toBeTruthy();
+      expect(screen.getByText('Payroll Register', { exact: true })).toBeTruthy();
+      for (const name of ['Transmittal Log', 'Full Print Package', 'Check Sign-Off Sheet']) expect(screen.queryByText(name, { exact: true })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Generate|Add Row|Edit|Form 500/ })).toBeNull();
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(apiMocks.reportTransmittalPreview).not.toHaveBeenCalled();
+      expect(apiMocks.reportSignoffPreview).not.toHaveBeenCalled();
+      expect(apiMocks.signoffPdf).not.toHaveBeenCalled();
+      expect(apiMocks.transmittalPdf).not.toHaveBeenCalled();
+      expect(apiMocks.packagePdf).not.toHaveBeenCalled();
+    });
+  }
 
   it.each(['work', 'checks'])('routes sealed backups from %s to a review-only workspace', async (tab) => {
     apiMocks.activeCompany = {
