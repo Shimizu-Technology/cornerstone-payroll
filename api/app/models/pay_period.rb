@@ -139,9 +139,11 @@ class PayPeriod < ApplicationRecord
       errors.add(:base, AnnualTaxConfig.unverified_message(pay_date.year))
       return
     end
-    return if pay_date.year <= 2026
-
     config = AnnualTaxConfig.current(pay_date.year)
+    # Retained legacy years have no annual verification workflow. Their table
+    # edits invalidate the year gate above; annual rules always require matching
+    # calculation evidence, including ordinary live runs through 2026.
+    return unless config
     verification = config&.verified_at&.utc&.iso8601(6)
     signatures = {}
     # Historical corrective entries retain the original committed rule snapshot.
