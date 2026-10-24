@@ -263,7 +263,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
             </p>
           </div>
           {step !== 'importing' && (
-            <button onClick={handleClose} className="text-neutral-400 hover:text-neutral-600 p-1">
+            <button onClick={handleClose} className="text-neutral-600 hover:text-neutral-600 p-1">
               <X className="w-5 h-5" />
             </button>
           )}
@@ -315,7 +315,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3">
-                    <Upload className="w-10 h-10 text-neutral-400" />
+                    <Upload className="w-10 h-10 text-neutral-600" />
                     <div>
                       <p className="font-medium text-neutral-700">Drop your file here, or click to browse</p>
                       <p className="text-sm text-neutral-500 mt-1">Supports CSV and Excel (.xlsx, .xls) files</p>
@@ -567,13 +567,13 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
           onClick={(e) => e.stopPropagation()}
           className="rounded border-neutral-300 shrink-0"
         />
-        <button className="shrink-0 text-neutral-400">
+        <button className="shrink-0 text-neutral-600">
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
         <div className="flex-1 grid grid-cols-[1fr_80px_80px_80px_70px_80px_auto] gap-2 items-center text-sm min-w-0">
           <span className="font-medium text-neutral-900 truncate">
-            {row.data.first_name || <span className="text-neutral-400 italic">First</span>}{' '}
-            {row.data.last_name || <span className="text-neutral-400 italic">Last</span>}
+            {row.data.first_name || <span className="text-neutral-600 italic">First</span>}{' '}
+            {row.data.last_name || <span className="text-neutral-600 italic">Last</span>}
             {row.isNew && <Badge className="ml-2 bg-blue-100 text-blue-700 text-xs px-1.5 py-0">New</Badge>}
           </span>
           <Badge variant="outline" className="text-xs justify-center">
@@ -594,16 +594,16 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
             ) : row.duplicate ? (
               <div className="flex items-center gap-1">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="text-xs text-amber-600">Duplicate</span>
+                <span className="text-xs text-warning-800">Duplicate</span>
               </div>
             ) : (
               <div className="flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
-                <span className="text-xs text-green-600">Valid</span>
+                <span className="text-xs text-success-800">Valid</span>
               </div>
             )}
             {!expanded && (
-              <Pencil className="w-3 h-3 text-neutral-400 ml-1" />
+              <Pencil className="w-3 h-3 text-neutral-600 ml-1" />
             )}
           </div>
         </div>

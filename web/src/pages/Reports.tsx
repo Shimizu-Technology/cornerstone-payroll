@@ -323,7 +323,7 @@ export function PayrollRegisterPanel() {
                 Pay Period
               </label>
               {loadingPeriods ? (
-                <span className="text-sm text-neutral-400">Loading…</span>
+                <span className="text-sm text-neutral-600">Loading…</span>
               ) : (
                 <select
                   id="pr-period"
@@ -1144,7 +1144,7 @@ export function W2GuPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-neutral-400">
+                      <td colSpan={9} className="py-6 text-center text-neutral-600">
                         No committed payroll data found for {report.meta.year}.
                       </td>
                     </tr>
@@ -1281,7 +1281,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                 Employee
               </label>
               {loadingEmployees ? (
-                <span className="text-sm text-neutral-400">Loading…</span>
+                <span className="text-sm text-neutral-600">Loading…</span>
               ) : (
                 <select
                   id="eph-employee"
@@ -1394,7 +1394,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="py-6 text-center text-neutral-400">
+                      <td colSpan={11} className="py-6 text-center text-neutral-600">
                         No pay history found.
                       </td>
                     </tr>
@@ -1956,7 +1956,7 @@ export function YtdSummaryPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-neutral-400">
+                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-neutral-600">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -3157,7 +3157,7 @@ function QuarterlyOfficialFormModal({
                 {previewUrl ? (
                   <iframe src={previewUrl} title={fields?.title || 'Official form preview'} className="h-full w-full border-0 bg-white" />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-neutral-500">Preview the PDF after reviewing the values.</div>
+                  <div className="flex h-full items-center justify-center text-sm text-neutral-700">Preview the PDF after reviewing the values.</div>
                 )}
               </div>
             </div>
@@ -3389,58 +3389,58 @@ export function Form941GuPanel() {
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5e_total_ss_medicare)}</td>
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
-                        <td className="px-4 py-2 font-mono text-neutral-500">6</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">6</td>
                         <td className="px-4 py-2">Total taxes before adjustments (line 5e for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line6_total_taxes_before_adj)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-neutral-500">7</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">7</td>
                         <td className="px-4 py-2">Adjustment: fractions of cents</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line7_adj_fractions_cents)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-neutral-500">8</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">8</td>
                         <td className="px-4 py-2">Adjustment: sick pay</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line8_adj_sick_pay)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-600">{fmtOrPlaceholder(report.lines.line8_adj_sick_pay)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-neutral-500">9</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">9</td>
                         <td className="px-4 py-2">Adjustment: tips and group-term life</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line9_adj_tips_group_life)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-600">{fmtOrPlaceholder(report.lines.line9_adj_tips_group_life)}</td>
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
-                        <td className="px-4 py-2 font-mono text-neutral-500">10</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">10</td>
                         <td className="px-4 py-2">Total taxes after adjustments</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line10_total_taxes_after_adj)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-neutral-500">11</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">11</td>
                         <td className="px-4 py-2">Nonrefundable portion of credit</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line11_nonrefundable_credits)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-600">{fmtOrPlaceholder(report.lines.line11_nonrefundable_credits)}</td>
                       </tr>
                       <tr className="border-b font-medium">
-                        <td className="px-4 py-2 font-mono text-neutral-500">12</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">12</td>
                         <td className="px-4 py-2">Total taxes after adjustments and credits</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line12_total_after_credits)}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="px-4 py-2 font-mono text-neutral-500">13</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">13</td>
                         <td className="px-4 py-2">Total deposits for this quarter</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line13_total_deposits)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-600">{fmtOrPlaceholder(report.lines.line13_total_deposits)}</td>
                       </tr>
                       <tr className="bg-amber-50">
-                        <td className="px-4 py-2 font-mono text-neutral-500">14</td>
+                        <td className="px-4 py-2 font-mono text-neutral-600">14</td>
                         <td className="px-4 py-2 font-medium">Balance due / overpayment</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums text-neutral-400">{fmtOrPlaceholder(report.lines.line14_balance_due_or_overpayment)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-neutral-600">{fmtOrPlaceholder(report.lines.line14_balance_due_or_overpayment)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -4048,7 +4048,7 @@ function FavoriteButton({ active, onClick }: { active: boolean; onClick: () => v
       className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors sm:h-8 sm:w-8 ${
         active
           ? 'border-accent-200 bg-accent-50 text-accent-700'
-          : 'border-neutral-200 bg-white text-neutral-400 hover:border-accent-200 hover:text-accent-700'
+          : 'border-neutral-200 bg-white text-neutral-600 hover:border-accent-200 hover:text-accent-700'
       }`}
     >
       <svg className="h-4 w-4" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" aria-hidden="true">
@@ -4255,7 +4255,7 @@ function ReportsContent() {
             <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
               <label className="relative block">
                 <span className="sr-only">Search reports</span>
-                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-600">
                   {reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" />)}
                 </span>
                 <input

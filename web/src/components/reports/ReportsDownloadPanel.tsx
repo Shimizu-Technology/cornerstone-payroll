@@ -158,7 +158,7 @@ function SignoffEditorModal({
       <div className="relative z-50 min-w-0 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg bg-white shadow-xl">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
           <h3 className="text-lg font-semibold text-neutral-900">Edit Check Sign-Off Sheet</h3>
-          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-600 p-1">
+          <button onClick={onClose} className="text-neutral-600 hover:text-neutral-600 p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -302,7 +302,7 @@ function SignoffEditorModal({
             {/* Notes */}
             <div>
               <label className="block text-xs font-medium text-neutral-600 mb-2">
-                Notes <span className="font-normal text-neutral-400">(printed at bottom of sheet)</span>
+                Notes <span className="font-normal text-neutral-600">(printed at bottom of sheet)</span>
               </label>
               {notes.map((note, i) => (
                 <div key={i} className="flex items-start gap-2 mb-2">
@@ -368,6 +368,7 @@ export function TransmittalEditorModal({
   returnFocusRef,
   payPeriodId,
   onOpenForm500,
+  onAfterClose,
 }: {
   open: boolean;
   onClose: () => void;
@@ -377,6 +378,7 @@ export function TransmittalEditorModal({
   returnFocusRef?: RefObject<HTMLElement | null>;
   payPeriodId: number;
   onOpenForm500: () => void;
+  onAfterClose?: () => void;
 }) {
   const fieldId = useId();
   const [preparerName, setPreparerName] = useState('Cornerstone Tax Services');
@@ -566,7 +568,7 @@ export function TransmittalEditorModal({
   };
 
   return (
-    <Dialog returnFocusRef={returnFocusRef} open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+    <Dialog onAfterClose={onAfterClose} returnFocusRef={returnFocusRef} open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent className="dialog-wide dialog-center-mobile mx-auto! max-w-3xl max-h-[90dvh]! p-0!">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
           <DialogTitle className="text-lg font-semibold text-neutral-950">Edit {targetLabel}</DialogTitle>
@@ -943,7 +945,7 @@ export function TransmittalEditorModal({
                   </div>
                 ))}
                 {!fixedReports && <div className="flex items-center gap-2">
-                  <span className="text-sm text-neutral-400 w-6 text-right">{reportList.length + 1}.</span>
+                  <span className="text-sm text-neutral-600 w-6 text-right">{reportList.length + 1}.</span>
                   <input
                     type="text"
                     value={newReport}
@@ -1042,6 +1044,7 @@ function PdfPreviewModal({
   title,
   onDownload,
   onPrint,
+  returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1049,23 +1052,11 @@ function PdfPreviewModal({
   title: string;
   onDownload: () => void;
   onPrint: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
-
-      <div className="relative z-50 flex flex-col h-full m-3 sm:m-6">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }} returnFocusRef={returnFocusRef}>
+      <DialogContent aria-label={title} className="dialog-wide dialog-center-mobile flex h-[90dvh] flex-col p-0! overflow-hidden!">
         {/* Header */}
         <div className="flex items-center justify-between bg-neutral-900 text-white px-4 py-3 rounded-t-lg shrink-0">
           <h3 className="font-semibold text-sm sm:text-base truncate mr-4">{title}</h3>
@@ -1093,7 +1084,7 @@ function PdfPreviewModal({
             <button
               onClick={onClose}
               className="ml-2 p-1.5 hover:bg-white/20 rounded transition-colors"
-              title="Close (Esc)"
+              title="Close (Esc)" aria-label={`Close ${title} preview`}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1112,7 +1103,7 @@ function PdfPreviewModal({
             />
           ) : (
             <div className="flex items-center justify-center h-full">
-              <div className="flex flex-col items-center gap-3 text-neutral-500">
+              <div className="flex flex-col items-center gap-3 text-neutral-700">
                 <svg className="animate-spin h-8 w-8" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1122,14 +1113,15 @@ function PdfPreviewModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
   const navigate = useNavigate();
   const transmittalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingTransmittalPreview = useRef<(() => void) | null>(null);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [payrollPreviewState, setPayrollPreviewState] = useState<{
@@ -1182,7 +1174,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     if (previewState.pdfUrl) {
       URL.revokeObjectURL(previewState.pdfUrl);
     }
-    setPreviewState({ open: false, key: null, label: '', pdfUrl: null, blobData: null });
+    setPreviewState(current => ({ ...current, open: false }));
   }, [previewState.pdfUrl]);
 
   const cleanupPayrollPreview = useCallback(() => {
@@ -1327,7 +1319,9 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     if (!key) return;
 
     if (mode === 'preview') {
-      await handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      pendingTransmittalPreview.current = () => {
+        void handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      };
     } else {
       await handleDownload(key, options);
     }
@@ -1603,6 +1597,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
       <PdfPreviewModal
         open={previewState.open}
+        returnFocusRef={transmittalTriggerRef}
         onClose={cleanupPreview}
         pdfUrl={previewState.pdfUrl}
         title={previewState.label}
@@ -1640,6 +1635,11 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         open={transmittalEditor.open}
         onClose={() => setTransmittalEditor(current => ({ ...current, open: false }))}
         onGenerate={handleTransmittalGenerate}
+        onAfterClose={() => {
+          const next = pendingTransmittalPreview.current;
+          pendingTransmittalPreview.current = null;
+          next?.();
+        }}
         fixedReports={transmittalEditor.key === 'fullPrintPackage'}
         returnFocusRef={transmittalTriggerRef}
         targetLabel={transmittalEditor.label}

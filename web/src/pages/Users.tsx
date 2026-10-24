@@ -386,7 +386,7 @@ export function Users() {
                 />
                 <div className="min-w-0">
                   <p className="font-medium text-neutral-900 truncate">{company.name}</p>
-                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-500'}`}>
+                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>
                     {testWorkspace ? `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
                   </p>
                 </div>

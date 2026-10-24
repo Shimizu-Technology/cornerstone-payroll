@@ -21,3 +21,11 @@ it.each(['default', 'success', 'warning', 'danger', 'info', 'outline'] as const)
   const background = backgroundRole ? token(backgroundRole) : 1;
   expect((Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)).toBeGreaterThanOrEqual(4.5);
 });
+
+it('lets message badges wrap without also emitting the nowrap status utility', (): void => {
+  const message = renderToStaticMarkup(<Badge wrap variant="warning">A long warning message</Badge>);
+  expect(message).toContain('whitespace-normal');
+  expect(message).not.toContain('whitespace-nowrap');
+  const status = renderToStaticMarkup(<Badge variant="warning">Pending</Badge>);
+  expect(status).toContain('whitespace-nowrap');
+});

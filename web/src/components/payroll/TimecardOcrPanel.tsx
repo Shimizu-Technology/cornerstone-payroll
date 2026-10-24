@@ -592,7 +592,7 @@ function ZoomableImage({
 
   const handleMouseUp = () => setDragging(false);
 
-  if (!src) return <div className="bg-neutral-100 rounded border h-96 flex items-center justify-center text-neutral-400">No image</div>;
+  if (!src) return <div className="bg-neutral-100 rounded border h-96 flex items-center justify-center text-neutral-600">No image</div>;
 
   return (
     <div className="space-y-2">
@@ -1136,7 +1136,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                   : isBlank ? blankTone : rowTone;
 
                 return (
-                  <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-neutral-400' : ''}`}>
+                  <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-neutral-600' : ''}`}>
                     <td className="px-1 py-1 font-mono text-xs text-neutral-600">{entry.card_day}</td>
                     <td className="px-1 py-1">
                       <input
@@ -1560,7 +1560,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
             <Spinner size="sm" /> Loading timecards...
           </div>
         ) : timecards.length === 0 ? (
-          <p className="text-sm text-neutral-400 italic">
+          <p className="text-sm text-neutral-600 italic">
             {(activeSearch || statusFilter)
               ? 'No timecards match your filters.'
               : 'No timecards uploaded yet.'}

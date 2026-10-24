@@ -602,7 +602,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                                 <p className="min-w-0 break-words text-sm font-semibold text-neutral-900">{item.payee}</p>
                                 <p className="shrink-0 font-mono text-sm font-semibold text-neutral-950">{formatCurrency(item.amount)}</p>
                               </div>
-                              <p className="mt-1 text-xs text-neutral-500">{item.kind_label}</p>
+                              <p className="mt-1 text-xs text-neutral-600">{item.kind_label}</p>
                             </div>
                           </div>
                           <div className="flex min-w-0 flex-wrap items-end justify-between gap-3 pl-8">
@@ -621,7 +621,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                           <tr key={item.key} className={selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}>
                             <td className="p-3"><input type="checkbox" checked={selected.has(item.key)} disabled={!item.eligible || editingLocked} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} /></td>
                             <td className="p-3 text-neutral-900"><InlineCheckNumberField value={draftNumbers[item.key] ?? item.check_number ?? ''} ariaLabel={`Check number for ${item.payee}`} disabled={editingLocked || item.status === 'voided' || savingNumbers} allowBlank={item.source_type === 'non_employee_check'} dirty={numberChanges.some((changed) => changed.key === item.key)} error={numberErrors[item.key]} onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))} onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))} /></td>
-                            <td className="p-3"><div className="font-medium text-neutral-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
+                            <td className="p-3"><div className="font-medium text-neutral-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-danger-700">{item.disabled_reason}</div>}</td>
                             <td className="p-3 text-neutral-600">{item.kind_label}</td><td className="p-3">{statusBadge(item)}</td><td className="p-3 text-right font-mono font-semibold">{formatCurrency(item.amount)}</td>
                           </tr>
                         ))}
@@ -678,7 +678,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
                       <div className="border-b border-neutral-100 px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold text-neutral-900"><Clock3 className="h-4 w-4" />Saved package history</div><p className="mt-1 text-xs text-neutral-500">Every package is retained as an immutable payroll record.</p></div>
-                      <div className="divide-y divide-neutral-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-neutral-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-neutral-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-neutral-500">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
+                      <div className="divide-y divide-neutral-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-neutral-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-neutral-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-neutral-600">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
                     </section>
                   )}
                 </aside>

@@ -4,6 +4,7 @@ interface BadgeProps {
   children: React.ReactNode;
   variant?: 'default' | 'success' | 'warning' | 'danger' | 'info' | 'outline';
   className?: string;
+  wrap?: boolean;
 }
 
 const variants = {
@@ -15,11 +16,12 @@ const variants = {
   outline: 'border border-neutral-300 bg-white text-neutral-700',
 };
 
-export function Badge({ children, variant = 'default', className }: BadgeProps) {
+export function Badge({ children, variant = 'default', className, wrap = false }: BadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold flex-none whitespace-nowrap',
+        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold flex-none',
+        wrap ? 'max-w-full whitespace-normal break-words' : 'whitespace-nowrap',
         variants[variant],
         className
       )}

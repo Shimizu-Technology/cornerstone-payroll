@@ -2174,7 +2174,7 @@ export function PayPeriodDetail({
           {!payPeriod.includes_base_salary && <Badge variant="info">Base salary excluded</Badge>}
           {!payPeriod.includes_recurring_items && <Badge variant="info">Recurring setup excluded</Badge>}
           {isCommitted && payPeriod.committed_at && (
-            <span className="text-sm text-neutral-500">
+            <span className="text-sm text-neutral-600">
               Processed {formatGuamDateTime(payPeriod.committed_at)}
               {processedBy ? ` by ${processedBy}` : ''}
             </span>
@@ -2185,7 +2185,7 @@ export function PayPeriodDetail({
                 {syncConfig.label}
               </Badge>
               {syncStatus === 'synced' && payPeriod.tax_synced_at && (
-                <span className="text-sm text-neutral-500">
+                <span className="text-sm text-neutral-600">
                   Synced {formatGuamDateTime(payPeriod.tax_synced_at)}
                 </span>
               )}
@@ -2346,14 +2346,14 @@ export function PayPeriodDetail({
                   </Button>
                 </div>
               ) : comparisonLoading ? (
-                <p className="text-sm text-neutral-500">Loading comparison…</p>
+                <p className="text-sm text-neutral-600">Loading comparison…</p>
               ) : comparison?.previous_pay_period ? (
                 <>
                   <div className="overflow-x-auto pb-1">
                     <div className="grid min-w-[58rem] grid-cols-6 gap-3">
                       {comparisonHighlights.map((metric) => {
                       const isCount = metric.key === 'employee_count';
-                      const deltaClass = metric.delta > 0 ? 'text-emerald-700' : metric.delta < 0 ? 'text-danger-700' : 'text-neutral-500';
+                      const deltaClass = metric.delta > 0 ? 'text-emerald-700' : metric.delta < 0 ? 'text-danger-700' : 'text-neutral-600';
                       return (
                         <div key={metric.key} className="rounded-xl border border-white/70 bg-white px-3 py-3 shadow-sm">
                           <p className="text-xs font-semibold text-neutral-600">{comparisonMetricLabels[metric.key]}</p>
@@ -2524,7 +2524,7 @@ export function PayPeriodDetail({
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-center gap-2">
                   <svg
-                    className={`w-4 h-4 text-neutral-500 transition-transform ${hoursTableOpen ? 'rotate-90' : ''}`}
+                    className={`w-4 h-4 text-neutral-600 transition-transform ${hoursTableOpen ? 'rotate-90' : ''}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -2592,7 +2592,7 @@ export function PayPeriodDetail({
                       className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
                         showTipsLoans
                           ? 'bg-blue-100 text-blue-700 border-blue-300'
-                          : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'
+                          : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'
                       }`}
                     >
                       {showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'}
@@ -2608,7 +2608,7 @@ export function PayPeriodDetail({
                         className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           showPayrollFields
                             ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
-                            : 'border-neutral-200 bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                            : 'border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
                         }`}
                       >
                         {showPayrollFields ? `Payroll Fields (${worksheetPayrollFields.length}) ✓` : `+ Payroll Fields (${worksheetPayrollFields.length})`}
@@ -2623,7 +2623,7 @@ export function PayPeriodDetail({
                             onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full rounded-lg border border-neutral-300 py-2 pl-8 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 sm:w-48"
                       />
-                      <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                       </svg>
                     </div>
@@ -2673,7 +2673,7 @@ export function PayPeriodDetail({
                   {showPayrollFields && worksheetPayrollFields.length > 0 && <div className="space-y-3 border-t border-neutral-100 pt-3"><p className="text-xs font-semibold text-neutral-600">Payroll fields</p>{worksheetPayrollFields.map((field) => { const key = `${emp.id}:${field.id}`; const assignment = payrollFieldAssignmentLookup.get(key); if (!assignment) return null; const draft = payrollFieldDrafts[key]; return <div key={key}><label className="block text-xs font-medium text-neutral-600">{field.name}<NumericInput className="mt-1 min-h-11 w-full" value={draft?.mode !== 'override' && payPeriod.includes_recurring_items === false ? null : draft?.amount ?? null} onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)} emptyValue={null} notifyEmptyOnChange placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'} min={0} fixedDecimalsOnBlur={2} disabled={!assignment.editable} aria-invalid={draft?.mode === 'override' && draft.amount == null} /></label><PayrollFieldAppliedNotice assignment={assignment} />{assignment.editable && draft?.mode === 'override' && <button type="button" className="mt-1 text-xs font-medium text-primary-700 underline" onClick={() => resetPayrollFieldDraft(emp.id, field.id)}>{payPeriod.includes_recurring_items === false ? 'Clear this payroll amount' : 'Use employee default'}</button>}{assignment.editable && draft?.mode !== 'override' && payPeriod.includes_recurring_items === false && <p className="mt-1 text-xs text-neutral-600">Recurring setup excluded</p>}{!assignment.editable && <p className="mt-1 text-xs text-warning-700">{assignment.skipped_reason}</p>}</div>; })}</div>}
                 </section>;
               })}
-              {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
+              {displayEmployeesForHours.length === 0 && <p className="py-8 text-center text-sm text-neutral-600">No employees match these filters.</p>}
             </div>
             )}
             {hoursTableOpen && (
@@ -2812,7 +2812,7 @@ export function PayPeriodDetail({
                               {activeWageRates.map(({ rate }) => (
                                 <div key={`${emp.id}-${rate.source_bucket_key || rate.label}`} className="text-xs">
                                   <span className="font-medium text-neutral-900">{rate.label}</span>{' '}
-                                  <span className="text-neutral-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
+                                  <span className="text-neutral-600">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                   {capturedSourceContext(rate) && <p className="mt-1 text-neutral-600">{capturedSourceContext(rate)}</p>}
                                 </div>
                               ))}
@@ -2865,7 +2865,7 @@ export function PayPeriodDetail({
                               aria-label={payrollHoursInputLabel(emp, 'Regular')}
                               value={hours.regular}
                               onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)}
-                              className="w-20 text-center border border-neutral-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-neutral-100 disabled:text-neutral-400"
+                              className="w-20 text-center border border-neutral-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-neutral-100 disabled:text-neutral-600"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
                               disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
@@ -2902,7 +2902,7 @@ export function PayPeriodDetail({
                               aria-label={payrollHoursInputLabel(emp, 'Overtime')}
                               value={hours.overtime}
                               onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)}
-                              className="w-20 text-center border border-neutral-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-neutral-100 disabled:text-neutral-400"
+                              className="w-20 text-center border border-neutral-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-neutral-100 disabled:text-neutral-600"
                               min={0}
                               max={MAX_HOURS_PER_PERIOD}
                               disabled={noHoursType || sourceHoursLocked || Boolean(correctionHold)}
@@ -3000,7 +3000,7 @@ export function PayPeriodDetail({
                           const draft = payrollFieldDrafts[key];
                           if (!assignment) {
                             return (
-                              <TableCell key={key} className={`min-w-[180px] text-center text-neutral-300 ${rowTone}`}>
+                              <TableCell key={key} className={`min-w-[180px] text-center text-neutral-600 ${rowTone}`}>
                                 —
                               </TableCell>
                             );
@@ -3106,7 +3106,7 @@ export function PayPeriodDetail({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                   <h3 className="font-semibold text-neutral-900">Employee payroll</h3>
-                  <p className="mt-1 text-sm text-neutral-500">
+                  <p className="mt-1 text-sm text-neutral-600">
                     W-2 employees are listed alphabetically, with 1099 contractors grouped separately.
                   </p>
                 </div>
@@ -3165,7 +3165,7 @@ export function PayPeriodDetail({
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full rounded-lg border border-neutral-300 py-2.5 pl-8 pr-3 text-base sm:text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 lg:w-56"
                     />
-                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>
@@ -3200,7 +3200,7 @@ export function PayPeriodDetail({
                   </div>
                 </section>;
               })}
-              {sortPayrollItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
+              {sortPayrollItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-600">No employees match these filters.</p>}
             </div>
             <div className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
               <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1900px] text-neutral-950 tabular-nums">
@@ -3235,7 +3235,7 @@ export function PayPeriodDetail({
                     </TableHead>
                     <TableHead className={`min-w-[150px] bg-warning-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>
                       <div>Employer Medicare</div>
-                      <div className="text-xs font-normal normal-case tracking-normal text-warning-600">employer-paid</div>
+                      <div className="text-xs font-normal normal-case tracking-normal text-warning-800">employer-paid</div>
                     </TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Net pay</TableHead>
@@ -3355,17 +3355,17 @@ export function PayPeriodDetail({
                           <TableCell className={`text-right tabular-nums ${rowTone}`}>
                             {isSalary ? (
                               payPeriod.includes_base_salary === false && !hasSalaryTimekeeping ? (
-                                <span className="text-neutral-400" title="Salary hours do not apply to this run">—</span>
+                                <span className="text-neutral-600" title="Salary hours do not apply to this run">—</span>
                               ) : hasSalaryTimekeeping ? (
                                 <div
                                   className="inline-flex flex-col items-end leading-tight"
                                   title="Informational salary hours from the timekeeping ledger; base salary is not calculated from these hours"
                                 >
                                   <span className="font-medium text-neutral-900">
-                                    {regularHours} <span className="font-normal text-neutral-500">regular</span>
+                                    {regularHours} <span className="font-normal text-neutral-600">regular</span>
                                   </span>
                                   {overtimeHours > 0 && (
-                                    <span className="mt-1 font-medium text-orange-600">
+                                    <span className="mt-1 font-medium text-warning-800">
                                       +{overtimeHours} overtime
                                     </span>
                                   )}
@@ -3379,7 +3379,7 @@ export function PayPeriodDetail({
                                 </span>
                               )
                             ) : isContractorFlat ? (
-                              <span className="text-neutral-400">—</span>
+                              <span className="text-neutral-600">—</span>
                             ) : hasMultiRateResults ? (
                               <div className="space-y-1 text-left inline-block">
                                 {itemWageRates.map((rate) => {
@@ -3389,7 +3389,7 @@ export function PayPeriodDetail({
                                       <span className="font-medium text-neutral-900">{rate.label}</span>{' '}
                                       <span className="text-neutral-600">{totalHours}</span>
                                       {toNumber(rate.overtime_hours) > 0 && (
-                                        <span className="text-orange-600 ml-1">({toNumber(rate.overtime_hours)} OT)</span>
+                                        <span className="text-warning-800 ml-1">({toNumber(rate.overtime_hours)} OT)</span>
                                       )}
                                     </div>
                                   );
@@ -3399,7 +3399,7 @@ export function PayPeriodDetail({
                               <>
                                 {regularHours}
                                 {overtimeHours > 0 && (
-                                  <span className="text-orange-600 ml-1">+{overtimeHours} OT</span>
+                                  <span className="text-warning-800 ml-1">+{overtimeHours} OT</span>
                                 )}
                               </>
                             )}
@@ -3432,7 +3432,7 @@ export function PayPeriodDetail({
                                     {itemWageRates.map((rate) => (
                                       <div key={`${item.id}-${rate.source_bucket_key || rate.label}-rate`} className="text-xs">
                                         <span className="font-medium text-neutral-900">{rate.label}</span>{' '}
-                                        <span className="text-neutral-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
+                                        <span className="text-neutral-600">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                       </div>
                                     ))}
                                   </div>
@@ -3451,13 +3451,13 @@ export function PayPeriodDetail({
                               <div className="space-y-1">
                                 {(item.custom_earnings || []).filter((earning) => toNumber(earning.amount) > 0).map((earning, index) => (
                                   <div key={`${item.id}-custom-earning-${index}-${earning.label}-${earning.amount}`} className="text-xs">
-                                    <span className="text-neutral-500">{earning.label}</span>{' '}
+                                    <span className="text-neutral-600">{earning.label}</span>{' '}
                                     <span className="font-medium text-neutral-900">{formatCurrency(toNumber(earning.amount))}</span>
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
@@ -3467,13 +3467,13 @@ export function PayPeriodDetail({
                               <div className="space-y-1">
                                 {(item.custom_deductions || []).filter((deduction) => toNumber(deduction.amount) > 0).map((deduction, index) => (
                                   <div key={`${item.id}-custom-deduction-${index}-${deduction.label}-${deduction.amount}`} className="text-xs">
-                                    <span className="text-neutral-500">{deduction.label}</span>{' '}
+                                    <span className="text-neutral-600">{deduction.label}</span>{' '}
                                     <span className="font-medium text-neutral-950">{formatCurrency(toNumber(deduction.amount))}</span>
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
@@ -3485,7 +3485,7 @@ export function PayPeriodDetail({
                                   const isDeduction = adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction';
                                   return (
                                     <div key={`${item.id}-payroll-adjustment-${index}-${adjustment.label}-${adjustment.amount}`} className="text-xs">
-                                      <span className="text-neutral-500">{adjustment.label}</span>{' '}
+                                      <span className="text-neutral-600">{adjustment.label}</span>{' '}
                                       <span className="font-medium text-neutral-950">
                                         {isDeduction ? '-' : '+'}{formatCurrency(toNumber(adjustment.amount))}
                                       </span>
@@ -3495,7 +3495,7 @@ export function PayPeriodDetail({
                                 })}
                               </div>
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
@@ -3510,7 +3510,7 @@ export function PayPeriodDetail({
                                     {isDeduction ? '-' : '+'}{formatCurrency(amount)}
                                   </span>
                                 ) : (
-                                  <span className="text-neutral-300">—</span>
+                                  <span className="text-neutral-600">—</span>
                                 )}
                               </TableCell>
                             );
@@ -3523,7 +3523,7 @@ export function PayPeriodDetail({
                                 {item.tip_pool && (
                                   <span className={`ml-1 text-xs font-medium ${
                                     item.tip_pool === 'boh'
-                                      ? 'text-warning-600'
+                                      ? 'text-warning-800'
                                       : item.tip_pool === 'mixed'
                                       ? 'text-violet-600'
                                       : 'text-blue-600'
@@ -3533,7 +3533,7 @@ export function PayPeriodDetail({
                                 )}
                               </span>
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
@@ -3542,7 +3542,7 @@ export function PayPeriodDetail({
                             {toNumber(item.tips_paid_out) > 0 ? (
                               formatCurrency(toNumber(item.tips_paid_out))
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
@@ -3551,17 +3551,17 @@ export function PayPeriodDetail({
                             {effectiveLoanDeduction(item) > 0 ? (
                               formatCurrency(effectiveLoanDeduction(item))
                             ) : (
-                              <span className="text-neutral-300">—</span>
+                              <span className="text-neutral-600">—</span>
                             )}
                           </TableCell>
                           )}
                           <TableCell className={`text-right tabular-nums text-neutral-950 ${rowTone}`}>
                             {formatCurrency(toNumber(item.withholding_tax))}
                             {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
-                              <span className="ml-0.5 text-xs text-orange-600" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
+                              <span className="ml-0.5 text-xs text-warning-800" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
                             )}
                             {item.withholding_tax_override != null && (
-                              <span className="ml-0.5 text-xs text-warning-600" title="Final FIT manually overridden">*</span>
+                              <span className="ml-0.5 text-xs text-warning-800" title="Final FIT manually overridden">*</span>
                             )}
                           </TableCell>
                           <TableCell className={`text-right tabular-nums text-neutral-950 ${rowTone}`}>
@@ -3779,8 +3779,8 @@ export function PayPeriodDetail({
 
         {/* Empty state for draft */}
         {isDraft && payrollItems.length === 0 && employees.length === 0 && (
-          <div className="flex flex-col items-center p-12 text-center text-neutral-500">
-            <UserPlus className="mb-4 h-8 w-8 text-neutral-400" aria-hidden="true" />
+          <div className="flex flex-col items-center p-12 text-center text-neutral-600">
+            <UserPlus className="mb-4 h-8 w-8 text-neutral-600" aria-hidden="true" />
             <p>No employees are eligible for this pay period. Check hire and termination dates before running payroll.</p>
             <Link
               className="mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
@@ -3831,7 +3831,7 @@ export function PayPeriodDetail({
                         <div>
                           <span className="font-medium text-neutral-900">{it.employee_name}</span>
                           {it.check_number && (
-                            <span className="text-neutral-500"> · check #{it.check_number}</span>
+                            <span className="text-neutral-600"> · check #{it.check_number}</span>
                           )}
                         </div>
                         <div className="sm:text-right">
@@ -3949,7 +3949,7 @@ export function PayPeriodDetail({
         <Card>
           <div className="border-b px-4 py-3">
             <h3 className="text-base font-semibold text-neutral-900">Processing Timeline</h3>
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-neutral-600">
               Guam timestamps for payroll lifecycle and operator actions.
             </p>
           </div>
@@ -3964,7 +3964,7 @@ export function PayPeriodDetail({
                 <p className="text-sm font-medium text-neutral-900">
                   {item.timestamp ? formatGuamDateTime(item.timestamp) : 'Not recorded'}
                 </p>
-                <p className={`mt-1 text-xs ${item.timestamp ? 'text-neutral-500' : 'text-neutral-400'}`}>
+                <p className={`mt-1 text-xs ${item.timestamp ? 'text-neutral-600' : 'text-neutral-600'}`}>
                   {item.timestamp ? item.actor : 'No audit timestamp yet'}
                 </p>
               </div>
@@ -4031,7 +4031,7 @@ export function PayPeriodDetail({
           <Card>
             <div className="p-4 border-b">
               <h3 className="font-semibold text-neutral-900">Payroll Corrections</h3>
-              <p className="text-sm text-neutral-500 mt-0.5">
+              <p className="text-sm text-neutral-600 mt-0.5">
                 Void this period, create a correction re-run, or review correction history.
               </p>
             </div>

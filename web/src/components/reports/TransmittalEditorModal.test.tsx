@@ -59,7 +59,7 @@ it('gives the package editor the shared modal focus contract and restores its tr
   api.preview.mockResolvedValue(preview);
   vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function (this: HTMLElement) { return this.parentElement; });
   const user = userEvent.setup();
-  function Package() {
+  function Package(): React.ReactElement {
     const [open, setOpen] = useState(false);
     return <><button onClick={() => setOpen(true)}>Edit package</button><TransmittalEditorModal open={open} onClose={() => setOpen(false)} onGenerate={vi.fn()} targetLabel="Full Print Package" fixedReports payPeriodId={2} onOpenForm500={vi.fn()} /></>;
   }
