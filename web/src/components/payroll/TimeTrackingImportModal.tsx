@@ -922,7 +922,7 @@ export function TimeTrackingImportModal({
                       {categories.length > 0 && (
                         <div className="mt-4 border-t border-neutral-200 pt-4">
                           <div className="text-xs font-semibold text-neutral-600">
-                            Hours and pay rates
+                            {isHistoricalReconciliation ? 'Hours by pay type' : 'Hours and pay rates'}
                           </div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
                             {categories.map((category) => {

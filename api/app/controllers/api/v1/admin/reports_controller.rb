@@ -1857,11 +1857,18 @@ module Api
             status: pp.status,
             run_purpose: pp.run_purpose,
             next_action: dashboard_next_action(pp),
-            blocker: dashboard_source_missing?(pp) ? "Time tracking hours have not been added. Review and add hours before calculating, or explain a manual or salary-only run." : nil,
+            blocker: dashboard_source_blocker(pp),
             employee_count: pp.payroll_items.financially_reportable.reportable.count,
             total_gross: pp.payroll_items.financially_reportable.reportable.sum(:gross_pay),
             total_net: pp.payroll_items.financially_reportable.reportable.sum(:net_pay)
           }
+        end
+
+        def dashboard_source_blocker(period)
+          return unless dashboard_source_missing?(period)
+          return "Time tracking hours have not been added. Review and add hours before calculating, or explain a manual or salary-only run." if period.draft?
+
+          "No time tracking hours were imported for this run. Review the selected employees and manual hours."
         end
 
         def dashboard_source_missing?(period)

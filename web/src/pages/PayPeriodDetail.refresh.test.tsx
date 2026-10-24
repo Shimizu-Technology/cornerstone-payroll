@@ -1745,7 +1745,7 @@ it('keeps whole-period AIRE readiness out of a selected-only adjustment', async 
   expect(screen.getByTestId('source-reconciliation-revision')).toBeTruthy();
 });
 
-async function calculateWithCoverage() {
+async function calculateWithCoverage(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: 'Calculate Payroll' }));
   const reason = screen.queryByLabelText('Reason for calculating without imported hours');
   if (!reason) return;

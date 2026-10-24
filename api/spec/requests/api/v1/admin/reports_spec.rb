@@ -130,6 +130,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    %w[calculated approved].each do |status|
+      it "uses current-state coverage copy for an acknowledged manual #{status} run" do
+        period = create(:pay_period, company: company, status: status,
+          start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-10-31")
+        allow(AirePayrollCalendar::Presenter).to receive(:call).with(period).and_return(enabled: true, cutoff_at: "2026-10-22T07:00:00Z")
+        get "/api/v1/admin/reports/dashboard"
+        current = response.parsed_body.dig("stats", "current_pay_period")
+        expect(current.fetch("blocker")).to eq("No time tracking hours were imported for this run. Review the selected employees and manual hours.")
+        expect(current.fetch("blocker")).not_to include("before calculating")
+      end
+    end
+
     it "labels the latest regular and adjustment distinctly even after many adjustments" do
       6.times do |index|
         create(:pay_period, :committed, company: company, start_date: "2026-09-01", end_date: "2026-09-14",

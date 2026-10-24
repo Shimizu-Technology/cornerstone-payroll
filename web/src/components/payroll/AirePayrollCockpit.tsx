@@ -1055,12 +1055,12 @@ function AirePayrollCockpitWorkspace({
                                       <p className="mt-1 text-xs text-neutral-500">Action due {formatDate(settlementCase.routing.action_due_on)}</p>
                                     </div>
                                     <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                                      <p className="text-xs font-semibold text-neutral-500">{correctionCase ? 'Correction processing' : 'Latest payment fact'}</p>
-                                      <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || (correctionCase ? 'No processing acknowledgment for this correction yet' : 'Not imported into payroll')}</p>
+                                      <p className="text-xs font-semibold text-neutral-500">{correctionCase ? 'Correction processing' : 'Payroll and payment status'}</p>
+                                      <p className="mt-1 font-medium text-neutral-900">{settlementCase.processing?.status.replaceAll('_', ' ') || (settlementCase.included_payroll_batch_id ? 'Included in payroll batch' : correctionCase ? 'No processing acknowledgment for this correction yet' : 'Not imported into payroll')}</p>
                                       <p className="mt-1 text-xs text-neutral-500">
                                         {settlementCase.processing?.payment_reference
                                           ? `Reference ${settlementCase.processing.payment_reference}`
-                                          : settlementCase.included_payroll_batch_id ? 'Added to payroll' : correctionCase ? 'Review original payment evidence in the source history.' : 'No payment has been recorded'}
+                                          : correctionCase ? 'Review original payment evidence in the source history.' : 'No payment has been recorded'}
                                       </p>
                                     </div>
                                   </div>

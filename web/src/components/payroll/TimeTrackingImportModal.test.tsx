@@ -444,6 +444,8 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     const link = screen.getByRole('button', { name: 'Verify & Link time tracking Record' }) as HTMLButtonElement;
     expect(link.disabled).toBe(true);
     expect(screen.getByText('Link the committed payroll to this cutoff. Pay will stay unchanged.')).toBeTruthy();
+    expect(screen.getByText('Hours by pay type')).toBeTruthy();
+    expect(screen.queryByText('Hours and pay rates')).toBeNull();
     expect(screen.queryByText('$350.00')).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Payroll earning type' })).toBeNull();
     await userEvent.type(screen.getByRole('textbox', { name: 'Audit note' }), 'Compared committed hours');
