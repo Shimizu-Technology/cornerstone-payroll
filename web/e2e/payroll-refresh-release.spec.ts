@@ -117,8 +117,12 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
         await page.getByLabel(`Loan deduction this payroll for ${name}`, { exact: true }).filter({ visible: true }).fill('40');
       }
       await expect(page.getByText(/Clear the standalone one-time deduction/)).toHaveCount(0);
+      const calculation = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/pay_periods/${scenario.period_id}/run_payroll`), { timeout: 60_000 });
       await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).filter({ visible: true }).click();
-      await expect.poll(async () => (await period(scenario.period_id)).status).toBe('calculated');
+      const calculationResponse = await calculation;
+      expect(calculationResponse.ok(), await calculationResponse.text()).toBeTruthy();
+      expect((await calculationResponse.json()).results.errors).toHaveLength(0);
+      await expect.poll(async () => (await period(scenario.period_id)).status, { timeout: 30_000 }).toBe('calculated');
       const saved = await period(scenario.period_id);
       expect(saved.payroll_items).toHaveLength(1);
       expect(Number(saved.payroll_items[0].loan_payment)).toBe(phone ? 40 : 340);
