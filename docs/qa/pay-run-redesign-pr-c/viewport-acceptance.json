@@ -1,0 +1,420 @@
+[
+  {
+    "state": "connected-committed",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 499.71875,
+      "y": 460,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": [
+      {
+        "name": "Ben Hangar\n\nFlight Operations QA",
+        "net": "$849.40",
+        "top": 622,
+        "bottom": 690.5,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      },
+      {
+        "name": "Ari Jet\n\nFlight Operations QA",
+        "net": "$480.22",
+        "top": 690.5,
+        "bottom": 759.5,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      }
+    ]
+  },
+  {
+    "state": "connected-draft",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Review & add hours",
+    "primaryBounds": {
+      "x": 337,
+      "y": 389,
+      "width": 147.703125,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": []
+  },
+  {
+    "state": "adjustment",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 499.71875,
+      "y": 460,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": [
+      {
+        "name": "Eli Manual\n\nFlight Operations QA",
+        "net": "$92.35",
+        "top": 622,
+        "bottom": 690,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      }
+    ]
+  },
+  {
+    "state": "manual-committed",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 499.71875,
+      "y": 460,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": [
+      {
+        "name": "Maya Manual\n\nManual Payroll QA",
+        "net": "$461.75",
+        "top": 622,
+        "bottom": 690.5,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      },
+      {
+        "name": "Sam Salary\n\nManual Payroll QA",
+        "net": "$1,697.83",
+        "top": 690.5,
+        "bottom": 759,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      }
+    ]
+  },
+  {
+    "state": "fresh-draft",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Calculate Payroll",
+    "primaryBounds": {
+      "x": 337,
+      "y": 389,
+      "width": 130.59375,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": []
+  },
+  {
+    "state": "fresh-calculated",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Approve",
+    "primaryBounds": {
+      "x": 499.71875,
+      "y": 462,
+      "width": 81.265625,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": [
+      {
+        "name": "Maya Manual\n\nManual Payroll QA",
+        "net": "$952.34",
+        "top": 622,
+        "bottom": 690,
+        "netRight": 980.203125,
+        "flagsFit": true,
+        "flagsWrap": "normal"
+      }
+    ]
+  },
+  {
+    "state": "fresh-approved",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-commit",
+    "primary": "Commit",
+    "primaryBounds": {
+      "x": 337,
+      "y": 513,
+      "width": 79.234375,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": []
+  },
+  {
+    "state": "parallel-approved",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-commit",
+    "primary": "Commit",
+    "primaryBounds": {
+      "x": 337,
+      "y": 517,
+      "width": 79.234375,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": []
+  },
+  {
+    "state": "late-hours-navigation",
+    "width": 1280,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Calculate Payroll",
+    "primaryBounds": {
+      "x": 337,
+      "y": 389,
+      "width": 130.59375,
+      "height": 40
+    },
+    "horizontal": {
+      "document": 1280,
+      "viewport": 1280,
+      "main": 992,
+      "mainWidth": 992
+    },
+    "firstRows": []
+  },
+  {
+    "state": "connected-committed",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 187.71875,
+      "y": 759,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "connected-draft",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Review & add hours",
+    "primaryBounds": {
+      "x": 29,
+      "y": 644,
+      "width": 147.703125,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "adjustment",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 187.71875,
+      "y": 715,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "manual-committed",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Checks & payments",
+    "primaryBounds": {
+      "x": 187.71875,
+      "y": 695,
+      "width": 148.890625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "fresh-draft",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Calculate Payroll",
+    "primaryBounds": {
+      "x": 29,
+      "y": 624,
+      "width": 130.59375,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "fresh-calculated",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-results",
+    "primary": "Approve",
+    "primaryBounds": {
+      "x": 187.71875,
+      "y": 695,
+      "width": 81.265625,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "fresh-approved",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-commit",
+    "primary": "Commit",
+    "primaryBounds": {
+      "x": 29,
+      "y": 748,
+      "width": 79.234375,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "parallel-approved",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-commit",
+    "primary": "Commit",
+    "primaryBounds": {
+      "x": 29,
+      "y": 772,
+      "width": 79.234375,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  },
+  {
+    "state": "late-hours-navigation",
+    "width": 390,
+    "status": "passed",
+    "current": "payroll-hours",
+    "primary": "Calculate Payroll",
+    "primaryBounds": {
+      "x": 29,
+      "y": 644,
+      "width": 130.59375,
+      "height": 44
+    },
+    "horizontal": {
+      "document": 390,
+      "viewport": 390,
+      "main": 390,
+      "mainWidth": 390
+    },
+    "firstRows": []
+  }
+]

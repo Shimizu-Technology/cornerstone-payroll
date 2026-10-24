@@ -1,0 +1,44 @@
+{
+  "applicationHead": "e4640d1d53069e075123e7109764442a583bd0fe",
+  "integratedBase": "ce12d1da",
+  "webTree": "224508b797b9f2bb340af34563f80a1737b3c58d",
+  "unit": {
+    "files": 130,
+    "passed": 1230
+  },
+  "browser": {
+    "public": {
+      "startTime": "2026-10-24T12:48:25.101Z",
+      "duration": 286543.256,
+      "expected": 131,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "release": {
+      "startTime": "2026-10-24T12:41:04.821Z",
+      "duration": 150444.53600000002,
+      "expected": 45,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "refresh": {
+      "startTime": "2026-10-24T12:43:50.185Z",
+      "duration": 73385.50799999999,
+      "expected": 10,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "pay-items": {
+      "startTime": "2026-10-24T12:45:16.924Z",
+      "duration": 108734.321,
+      "expected": 24,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "apiTreeUnchanged": true
+}
