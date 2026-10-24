@@ -1,33 +1,22 @@
-import { Link, useLocation } from 'react-router';
-import { useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { useEffect, useMemo, useRef } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { payRunPath } from '@/lib/routes';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { PayRunRecordHeader } from './pay-periods/pay-run/PayRunRecordHeader';
 import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
 import type { PayPeriodDetailProps } from './pay-periods/pay-run/payRunSupport';
+import { PayRunSteps } from './pay-periods/pay-run/PayRunWorkflowSteps';
 import { SourceCoverageDialog } from './pay-periods/pay-run/SourceCoverageDialog';
 import { PayRunReviewDialogs } from './pay-periods/pay-run/PayRunReviewDialogs';
 import { PayRunSummary } from './pay-periods/pay-run/PayRunSummary';
 import { PayRunProcessingActions } from './pay-periods/pay-run/PayRunProcessingActions';
-import { PayRunFeedback } from './pay-periods/pay-run/PayRunFeedback';
-import { PayRunBlockers } from './pay-periods/pay-run/PayRunBlockers';
-import { PayRunSourceCheckpoint } from './pay-periods/pay-run/PayRunSourceCheckpoint';
 import { PayRunMetadata } from './pay-periods/pay-run/PayRunMetadata';
 import { RefreshSetupDialog } from './pay-periods/pay-run/RefreshSetupDialog';
-import { PayRunLoanInputs } from './pay-periods/pay-run/PayRunLoanInputs';
-import { PayRunComparison } from './pay-periods/pay-run/PayRunComparison';
-import { PayRunRoster } from './pay-periods/pay-run/PayRunRoster';
-import { PayRunHoursWorksheet } from './pay-periods/pay-run/PayRunHoursWorksheet';
-import { PayRunSavedRecords } from './pay-periods/pay-run/PayRunSavedRecords';
-import { PayRunEmployeeResults } from './pay-periods/pay-run/PayRunEmployeeResults';
-import { PayRunEmployerTaxes } from './pay-periods/pay-run/PayRunEmployerTaxes';
 import { PayRunLiabilities } from './pay-periods/pay-run/PayRunLiabilities';
-import { PayRunEmptyState } from './pay-periods/pay-run/PayRunEmptyState';
 import { PayRunLinkedCorrections } from './pay-periods/pay-run/PayRunLinkedCorrections';
 import { PayRunChecks } from './pay-periods/pay-run/PayRunChecks';
 import { PayRunSupportingDetails } from './pay-periods/pay-run/PayRunSupportingDetails';
-import { PayRunTimecardOcr } from './pay-periods/pay-run/PayRunTimecardOcr';
 import { PayRunNonEmployeeChecks } from './pay-periods/pay-run/PayRunNonEmployeeChecks';
 import { PayRunCheckPrintDialog } from './pay-periods/pay-run/PayRunCheckPrintDialog';
 import { PayRunReports } from './pay-periods/pay-run/PayRunReports';
@@ -39,12 +28,61 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const state = usePayRunController(props);
   const { activeCompany } = useCompany();
   const location = useLocation();
+  const navigate = useNavigate();
   const activeTab = props.activeTab ?? 'work';
+  const feedbackRoute = state.status === 'ready' ? payRunPath(state.sections.processing.companyId, state.sections.processing.payPeriod.id, 'work', { returnTo: state.sections.processing.returnTo }) : null;
+  const feedback = state.status === 'ready' ? state.sections.feedback : null;
+  const hasFeedback = Boolean(feedback && (feedback.error || feedback.calculationNotice || feedback.calendarRefreshError || feedback.worksheetRefreshWarning || feedback.savedImportReloadRequired || feedback.calculationFailures.length));
+  const failureOutcome = feedback?.calculationFailures.length ? JSON.stringify(feedback.calculationFailures) : null;
+  const feedbackOutcome = useMemo(() => [
+    feedback?.error ? `${feedback.errorFeedbackAttempt}:${feedback.error}` : null,
+    feedback?.calculationNotice || null,
+    feedback?.calendarRefreshError || null,
+    feedback?.worksheetRefreshWarning || null,
+    feedback?.savedImportReloadRequired ? 'saved-import-reload' : null,
+    failureOutcome,
+  ] as const, [feedback?.error, feedback?.errorFeedbackAttempt, feedback?.calculationNotice, feedback?.calendarRefreshError, feedback?.worksheetRefreshWarning, feedback?.savedImportReloadRequired, failureOutcome]);
+  const lastFeedback = useRef<{ route: string; outcome: typeof feedbackOutcome } | null>(null);
+  const feedbackFocusPending = useRef(false);
+  useEffect(() => {
+    if (!feedbackRoute) { lastFeedback.current = null; feedbackFocusPending.current = false; return; }
+    const previous = lastFeedback.current;
+    // Only newly published feedback is an outcome. Retained notices, tab changes
+    // and clearing a different message must not redirect or steal focus.
+    const newOutcome = feedbackOutcome.some((value, index) => value !== null
+      && (previous?.route !== feedbackRoute || previous.outcome[index] !== value));
+    lastFeedback.current = { route: feedbackRoute, outcome: feedbackOutcome };
+    if (!hasFeedback) { feedbackFocusPending.current = false; return; }
+    if (newOutcome) feedbackFocusPending.current = true;
+    if (activeTab !== 'work') {
+      if (newOutcome) void navigate(feedbackRoute);
+      return;
+    }
+    if (!feedbackFocusPending.current) return;
+    // A fast API rejection can arrive before the confirmation dialog finishes
+    // closing. Let its focus restoration finish before focusing the feedback.
+    const observer = new MutationObserver(focusFeedback);
+    function focusFeedback(): void {
+      if (document.querySelector('[role="dialog"]')) return;
+      const target = document.getElementById('payroll-feedback');
+      if (!target) return;
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+      target.scrollIntoView?.({ block: 'nearest' });
+      target.focus({ preventScroll: true });
+      feedbackFocusPending.current = false;
+      observer.disconnect();
+    }
+    observer.observe(document.body, { childList: true, subtree: true });
+    focusFeedback();
+    return () => observer.disconnect();
+  }, [activeTab, feedbackRoute, feedbackOutcome, hasFeedback, navigate]);
   useEffect(() => {
     if (!location.hash || state.status !== 'ready') return;
     let fragment: string;
     try { fragment = decodeURIComponent(location.hash.slice(1)); } catch { return; }
     const target = document.getElementById(fragment);
+    for (let parent = target?.parentElement; parent; parent = parent.parentElement) { if (parent instanceof HTMLDetailsElement) parent.open = true; }
+    if (target instanceof HTMLDetailsElement) target.open = true;
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
   }, [activeTab, location.hash, state.status]);
@@ -60,9 +98,9 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     ...(sections.summary.hasCorrectionPayBasisHold ? [{ text: 'Review retained correction pay setup', href: route('work', '#pay-basis-hold') }] : []),
     ...(payPeriod.correction_status === 'voided' ? [{ text: 'Review voided payroll and correction history', href: route('activity', '#payroll-corrections') }] : []),
     ...(sections.processing.hasPendingCalculationChanges ? [{ text: 'Recalculate to include your changes', href: route('work', '#payroll-blockers') }] : []),
-    ...(sections.feedback.calculationFailures.length ? [{ text: `${sections.feedback.calculationFailures.length} calculation errors`, href: route('work', '#payroll-calculation-issues') }] : []),
-    ...(payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? [{ text: 'Client approval pending', href: route('work', '#payroll-blockers') }] : []),
-    ...(held ? [{ text: `${held} held entries outside this payroll`, href: route('work', '#time-tracking-sync') }] : []),
+    ...(sections.feedback.calculationFailures.length ? [{ text: `${sections.feedback.calculationFailures.length} calculation error${sections.feedback.calculationFailures.length === 1 ? '' : 's'}`, href: route('work', '#payroll-calculation-issues') }] : []),
+    ...(payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.status !== 'approved' ? [{ text: 'Client approval pending', href: route('work', '#payroll-commit') }] : []),
+    ...(held ? [{ text: `${held} held entr${held === 1 ? 'y' : 'ies'} outside this payroll`, href: route('work', '#time-tracking-sync') }] : []),
     ...(payPeriod.status === 'committed' && payPeriod.correction_status !== 'voided' ? [{ text: preparedChecks ? `${preparedChecks} check${preparedChecks === 1 ? '' : 's'} prepared, not issued` : 'Review check preparation and payment delivery', href: route('checks') }] : []),
     ...(payPeriod.parallel_run ? [{ text: 'Parallel comparison · cannot commit', href: route('activity') }] : []),
   ];
@@ -76,20 +114,8 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     {props.navigation}
     <h2 className="sr-only">{activeTab === 'checks' ? 'Checks and payments' : activeTab === 'reports' ? 'Reports' : activeTab === 'activity' ? 'Activity' : 'Payroll'}</h2>
     <div className="min-h-[24rem] space-y-4 p-4 sm:p-6 lg:px-8">
-      <div id="payroll-feedback" tabIndex={-1} className="space-y-3 scroll-mt-4"><PayRunFeedback {...sections.feedback} /></div>
       <section hidden={activeTab !== 'work'} aria-label="Payroll workspace" className="space-y-6">
-        <div id="payroll-blockers" tabIndex={-1} className="space-y-3 scroll-mt-4"><PayRunBlockers {...sections.blockers} /></div>
-        {/* Hours owns source intake, including the late-hours entry point. */}
-        <PayRunSourceCheckpoint {...sections.source} />
-        <PayRunLoanInputs {...sections.loans} />
-        <PayRunComparison {...sections.comparison} />
-        <PayRunRoster {...sections.roster} />
-        <PayRunHoursWorksheet {...sections.hours} />
-        <PayRunSavedRecords {...sections.results} />
-        <div id="payroll-results" tabIndex={-1} className="scroll-mt-4"><PayRunEmployeeResults {...sections.results} /></div>
-        <PayRunEmployerTaxes {...sections.employerTaxes} />
-        <PayRunEmptyState {...sections.empty} />
-        <PayRunTimecardOcr {...sections.ocr} />
+        <PayRunSteps sections={sections} />
         {payPeriod.status === 'committed' && <p className="text-sm text-neutral-700">Check preparation, tax checks, payment holds and manual reconciliation: <Link className="font-semibold text-primary-700 underline" to={route('checks')}>Checks &amp; payments</Link></p>}
         {payPeriod.status !== 'draft' && <p className="text-sm text-neutral-700">Payroll reports, final record, sign-off and liabilities: <Link className="font-semibold text-primary-700 underline" to={route('reports')}>Reports</Link></p>}
         {(payPeriod.notes || payPeriod.correction_status || payPeriod.run_purpose === 'correction') && <p className="text-sm text-neutral-700">Run notes, history and corrections: <Link className="font-semibold text-primary-700 underline" to={route('activity')}>Activity</Link></p>}

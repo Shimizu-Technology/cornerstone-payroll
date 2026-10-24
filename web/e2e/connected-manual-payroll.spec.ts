@@ -35,9 +35,9 @@ test('assigned accountant enters manual hours, commits an existing check and lin
   await regularHours.press('Tab');
   await overtimeHours.fill('0');
   await overtimeHours.press('Tab');
-  await page.getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
-  await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  await page.getByRole('button', { name: 'Commit', exact: true }).click();
+  await page.locator('#payroll-hours').getByRole('button', { name: 'Calculate Payroll', exact: true }).click();
+  await page.locator('#payroll-results').getByRole('button', { name: 'Approve', exact: true }).click();
+  await page.locator('#payroll-commit').getByRole('button', { name: 'Commit', exact: true }).click();
   const commitDialog = page.getByRole('dialog', { name: 'Commit and finalize payroll?' });
   await expect(commitDialog).toBeVisible();
   await expect(commitDialog.getByText(`#${periodId}`, { exact: true })).toBeVisible();
