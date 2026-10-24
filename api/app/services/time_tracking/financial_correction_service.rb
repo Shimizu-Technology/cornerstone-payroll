@@ -69,14 +69,21 @@ module TimeTracking
         raise Error, "Instrumentless Source void requires the actual whole-payroll reversal audit"
       end
       pay_period.payroll_items.flat_map do |item|
-        next [] if item.voided? || !instrumentless?(item) || item.source_accounting_correction_linked?
+        next [] if item.source_accounting_correction_linked?
+        # The actual financial reversal above authorizes source release, even
+        # when an earlier legacy instrument void has no retained-obligation metadata.
+        # Exact linked-line ownership and receipt deduplication remain below.
+        next [] unless instrumentless?(item) || item.voided?
         original = item.time_tracking_entry_allocations.includes(:time_tracking_import).filter_map do |row|
           next unless row.time_tracking_import.finalized_batch? && row.time_tracking_import.contract_version == "2.0" && row.verified_source_user_uuid.present?
+          next if item.aire_payroll_entry_acknowledgements.where(time_tracking_import_id: row.time_tracking_import_id,
+            source_time_entry_id: row.source_time_entry_id, source_line_key: row.line_key, status: "payment_voided").exists?
           AirePayrollEntryAcknowledgement.record_from_rows!(rows: [ row ],
             source_event_key: "whole_payroll_void:#{void_event.id}:#{item.id}:#{row.source_time_entry_id}:#{row.line_key}",
             status: "payment_voided", occurred_at: void_event.created_at, payroll_item_id: item.id)
         end
-        original + links_for(item).map do |link|
+        original + links_for(item).filter_map do |link|
+          next if link.aire_payroll_entry_acknowledgements.where(status: "payment_voided").exists?
           AirePayrollEntryAcknowledgement.record_financial_payment!(link: link, key: "whole_payroll_void:#{void_event.id}",
             status: "payment_voided", occurred_at: void_event.created_at,
             payment_method: nil, payment_reference: nil, payment_effective_on: nil)
@@ -87,7 +94,7 @@ module TimeTracking
     def self.required_for?(period)
       return false unless period.correction_run? && period.source_pay_period_id.present?
       service = new(pay_period: period)
-      period.payroll_items.not_voided.any? do |item|
+      period.payroll_items.financially_reportable.any? do |item|
         origin = service.send(:origin_for, item)
         origin && (origin.time_tracking_entry_allocations.exists? || origin.time_tracking_financial_correction_links.exists? || service.send(:expected_frozen_source?, origin))
       end
@@ -152,7 +159,7 @@ module TimeTracking
       unless committing || @period.committed?
         raise Error, "Commit the correction before connecting corrected hours"
       end
-      items = @period.payroll_items.not_voided.order(:employee_id, :id)
+      items = @period.payroll_items.financially_reportable.order(:employee_id, :id)
       items = items.where(id: item.id) if item
       items.flat_map do |item|
         origin = origin_for(item)

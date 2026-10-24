@@ -533,7 +533,7 @@ class CheckGenerator
     employee.payroll_items
       .joins(:pay_period)
       .select(:id, :custom_deductions, :payroll_adjustments)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: {
         company_id: company.id,
         pay_date: Date.new(year, 1, 1)..pay_period.pay_date

@@ -76,7 +76,7 @@ class Form1099NecAggregator
     @aggregated_items ||= PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id, employment_type: "contractor")
-      .not_voided
+      .financially_reportable
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
           .where(company_id: company.id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))

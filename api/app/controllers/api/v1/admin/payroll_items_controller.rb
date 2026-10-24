@@ -12,7 +12,7 @@ module Api
         def index
           @payroll_items = @pay_period.payroll_items.includes(:payroll_item_field_entries, :employee)
           @payroll_items = @payroll_items.reportable if @pay_period.committed?
-          reportable_items = @payroll_items.not_voided
+          reportable_items = @payroll_items.financially_reportable
 
           render json: {
             payroll_items: @payroll_items.map { |item| payroll_item_json(item) },
@@ -335,6 +335,7 @@ module Api
         def payroll_item_json(item, detailed: false)
           json = {
             id: item.id,
+            payroll_included: item.payroll_included?,
             employee_id: item.employee_id,
             employee_name: item.employee_full_name,
             contractor_pay_type: item.employee&.contractor_pay_type,

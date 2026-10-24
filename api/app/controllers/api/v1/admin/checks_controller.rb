@@ -35,7 +35,7 @@ module Api
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
         before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reverse_paycheck, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -54,7 +54,7 @@ module Api
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
-          statement_items = @pay_period.payroll_items.not_voided.reportable
+          statement_items = @pay_period.payroll_items.financially_reportable.reportable
             .includes(:employee, :direct_deposit_payment_confirmation, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries, :check_events, :aire_payroll_entry_acknowledgements, :time_tracking_manual_allocations)
             .select { |item| EarningsStatementEligibility.printable?(item) }
             .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
@@ -386,6 +386,13 @@ module Api
           render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
+        def reverse_paycheck
+          ReversePaycheckService.call(payroll_item: @payroll_item, actor: User.find(current_user_id), reason: params[:reason])
+          render json: { payroll_item: check_item_json(@payroll_item.reload) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid, PayrollLiabilityPostingService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # -----------------------------------------------------------------------
         # POST /api/v1/admin/payroll_items/:payroll_item_id/reprint
         #
@@ -426,7 +433,12 @@ module Api
             period.lock!
             @payroll_item.lock!
             raise ArgumentError, "Check actions are only available for committed pay periods" unless period.committed?
-            raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reissue: paycheck has been reversed" unless @payroll_item.payroll_included?
+            raise ArgumentError, "Review the linked source accounting correction before reissuing" if @payroll_item.source_accounting_correction_linked?
+            raise ArgumentError, "Review the duplicate check reconciliation before reissuing" if @payroll_item.duplicate_check_linked?
+            if (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(@payroll_item))
+              raise ArgumentError, blocker
+            end
             if CheckReconciliationStatus.for(@payroll_item) == "cleared"
               raise ArgumentError, "Reverse the clearing evidence before reissuing this check"
             end
@@ -434,14 +446,17 @@ module Api
 
             original_check_number = @payroll_item.check_number
 
+            cancel_payment = PayrollPaymentMethodEligibility.new(@payroll_item).check_has_activity?
             # Step 1: Void the old physical check (audit trail only — item itself stays active)
             @payroll_item.check_events.create!(
               user: user,
               event_type: "voided",
               check_number: original_check_number,
               reason: reason,
+              evidence_reference: reason.first(200),
+              details: { payroll_obligation_retained: true, payment_delivery_change: cancel_payment, original_check_cancelled: cancel_payment },
               ip_address: request.remote_ip
-            )
+            ) unless @payroll_item.voided?
 
             # Step 2: Reserve or validate the replacement check number
             new_check_number = requested_check_number.present? ? reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number) : company.next_check_number!
@@ -451,7 +466,9 @@ module Api
               reprint_of_check_number: original_check_number,
               check_number:    new_check_number,
               check_printed_at: nil,
-              check_print_count: 0
+              check_print_count: 0,
+              voided: false, voided_at: nil, voided_by_user_id: nil, void_reason: nil,
+              check_prepared_at: nil, check_prepared_source_updated_at: nil
             )
 
             # Step 6: Log the reprint event
@@ -887,6 +904,8 @@ module Api
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
+            payroll_included: item.payroll_included?,
+            payroll_reversed_at: item.payroll_reversed_at,
             voided: item.voided,
             voided_at: item.voided_at,
             void_reason: item.void_reason,

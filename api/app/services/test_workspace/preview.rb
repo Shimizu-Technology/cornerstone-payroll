@@ -145,7 +145,7 @@ module TestWorkspace
         end_date: period.end_date,
         pay_date: period.pay_date,
         status: period.status,
-        employee_count: period.payroll_items.not_voided.distinct.count(:employee_id)
+        employee_count: period.payroll_items.financially_reportable.distinct.count(:employee_id)
       }
     end
   end
