@@ -14,10 +14,6 @@ class PayrollRetirementCatchUp
       delta = BigDecimal(context["catch_up_classification_delta"].to_s, exception: false)
       return delta if delta&.finite?
     end
-    original = item.correction_for_payroll_item
-    original_absolute = original&.retirement_rule_snapshot.to_h.dig("annual_additions", "current_catch_up").to_d
-    return 0.to_d if absolute.zero? && original_absolute.zero?
-
     raise UnprovedHistoryError, "An active correction lacks a proved signed catch-up classification; arrange a reviewed annual retirement reconciliation before processing payroll"
   end
 end
