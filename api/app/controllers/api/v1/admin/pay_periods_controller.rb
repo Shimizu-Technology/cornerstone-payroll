@@ -765,7 +765,7 @@ module Api
                   redacted_fields: changes[:redacted_fields].presence,
                   reason: reason,
                   voided_at: event.created_at,
-                  business_summary: pay_period_business_summary(@pay_period)
+                  business_summary: pay_period_business_summary(@pay_period, include_voided_period: true)
                 }.compact,
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent,
@@ -1047,8 +1047,11 @@ module Api
           metadata
         end
 
-        def pay_period_business_summary(record)
-          aggregates = record.payroll_items.financially_reportable.reportable.pick(
+        def pay_period_business_summary(record, include_voided_period: false)
+          # A void audit describes the wages reversed, even after the parent
+          # period has left financial reports. Individually reversed rows stay excluded.
+          items = include_voided_period ? record.payroll_items.where(payroll_reversed_at: nil) : record.payroll_items.financially_reportable
+          aggregates = items.reportable.pick(
             Arel.sql("COUNT(*)"),
             Arel.sql("COALESCE(SUM(gross_pay), 0)"),
             Arel.sql("COALESCE(SUM(total_deductions), 0)"),

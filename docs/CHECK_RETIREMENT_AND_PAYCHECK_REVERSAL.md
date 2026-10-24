@@ -19,7 +19,7 @@ Baseline is staging-v2 `5e5e7253`. Every baseline `not_voided` occurrence is acc
 | Reader | Baseline lines | New semantics |
 |---|---|---|
 | `api/app/controllers/api/v1/admin/checks_controller.rb` | 57, 112 | Earnings statements use payroll inclusion (57); check rehearsal selection remains instrument-only (112). |
-| `api/app/controllers/api/v1/admin/pay_periods_controller.rb` | 979, 1051, 1194, 1908, 1918 | Financial inclusion; existing reportability, company, date and historical restrictions retained. |
+| `api/app/controllers/api/v1/admin/pay_periods_controller.rb` | 979, 1051, 1194, 1908, 1918 | Financial inclusion; existing reportability, company, date and historical restrictions retained. The completed whole-period void audit deliberately retains the reversed period totals, excluding earlier individual reversals. |
 | `api/app/controllers/api/v1/admin/pay_stubs_controller.rb` | 90, 194, 240 | Financial inclusion; existing reportability, company, date and historical restrictions retained. |
 | `api/app/controllers/api/v1/admin/payroll_intake_imports_controller.rb` | 280, 281 | Financial inclusion; existing reportability, company, date and historical restrictions retained. |
 | `api/app/controllers/api/v1/admin/payroll_items_controller.rb` | 15 | Financial inclusion; existing reportability, company, date and historical restrictions retained. |

@@ -147,7 +147,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       ))
       expect(json.fetch("checks").map { |row| row.fetch("id") }).not_to include(zero_item.id, zero_deposit.id, blank.id)
       expect(json.fetch("direct_deposit_items")).to be_empty
-      expect(json.dig("meta", "earnings_statement_count")).to eq(3)
+      expect(json.dig("meta", "earnings_statement_count")).to eq(4)
       expect(json.dig("meta", "statement_only_count")).to eq(2)
       expect(json.dig("meta", "direct_deposit_count")).to eq(0)
       expect(zero_item.reload.check_number).to be_nil
