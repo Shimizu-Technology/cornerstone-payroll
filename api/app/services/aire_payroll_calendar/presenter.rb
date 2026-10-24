@@ -38,7 +38,9 @@ module AirePayrollCalendar
         cutoff_at: cutoff_at,
         lock_mode: @lock_mode,
         cutoff_enforcement_starts_on: @source.cutoff_enforcement_starts_on&.iso8601,
-        next_scheduled_cutoff_at: publication&.source_state&.fetch("next_scheduled_cutoff_at", nil) || next_local_scheduled_cutoff,
+        next_scheduled_cutoff_at: current_source_state["next_scheduled_cutoff_at"],
+        next_scheduled_cutoff_status: current_source_state.fetch("status", "unavailable"),
+        next_scheduled_cutoff_refreshed_at: current_source_state["refreshed_at"],
         cutoff_state: cutoff_state(publication, event, cutoff_at, needs_revision),
         needs_revision: needs_revision,
         can_publish: desired.present? && !missed_unpublished_cutoff && can_publish?(publication, cutoff_at),
@@ -93,16 +95,8 @@ module AirePayrollCalendar
       "scheduled"
     end
 
-    def next_local_scheduled_cutoff
-      return nil unless @source.source_type == "aire_services"
-
-      @source.aire_payroll_calendar_periods.includes(:publications, :payroll_events).filter_map do |period|
-        next if period.payroll_events.exists?
-        publication = period.latest_publication
-        next unless publication && publication.payload.fetch("lock_mode", "scheduled") == "scheduled"
-
-        publication.payload["cutoff_at"]
-      end.min
+    def current_source_state
+      @current_source_state ||= @source.reload.payroll_calendar_source_state
     end
 
     def eligibility_error(missed_unpublished_cutoff)

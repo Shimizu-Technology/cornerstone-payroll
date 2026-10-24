@@ -25,11 +25,23 @@ module AirePayrollEvents
       checksum = TimeTracking::CanonicalPayload.checksum(@payload)
 
       result = persist!(calendar_period, publication, checksum)
+      reconcile_source_state(calendar_period.time_tracking_source)
       queue_verification(result.event.id) if result.created
       result
     end
 
     private
+
+    def reconcile_source_state(source)
+      # Clear stale cutoff information before acknowledging the callback, even
+      # when the follow-up authenticated source read is unavailable.
+      AirePayrollCalendar::SourceState.new(source).invalidate
+      begin
+        AirePayrollCalendarSourceRefreshJob.perform_later(source.id)
+      rescue StandardError => e
+        Rails.logger.error("AIRE source refresh could not be queued: #{e.class}: #{e.message}")
+      end
+    end
 
     def queue_verification(event_id)
       AirePayrollEvent.dispatch_one!(event_id, now: @now)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_25_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3728,6 +3728,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
     t.uuid "connection_uuid", default: -> { "gen_random_uuid()" }, null: false
     t.datetime "created_at", null: false
     t.date "cutoff_enforcement_starts_on", default: "2026-10-16"
+    t.jsonb "payroll_calendar_source_state", default: {}, null: false
     t.string "expected_source_instance_id"
     t.boolean "historical_reconciliation_required", default: false, null: false
     t.datetime "identity_verified_at"
