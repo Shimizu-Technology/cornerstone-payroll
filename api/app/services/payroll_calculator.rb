@@ -387,7 +387,11 @@ class PayrollCalculator
     if historical_calculation? && identity&.fetch("version", nil) == 1
       return (payroll_item.company || pay_period.company).deduction_types.find(identity.fetch("deduction_type_id"))
     end
-    find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
+    source_id = entry.payroll_field_definition_id || Digest::SHA256.hexdigest(
+      entry.attributes.slice("label", "kind", "tax_treatment", "category", "employee_paid", "employer_paid", "reporting_group", "source").to_json
+    ).first(12)
+    find_or_create_payroll_field_deduction_type("#{entry.label} [field #{source_id}]", category: category,
+      sub_category: entry.category, reporting_group: entry.reporting_group)
   end
 
   def apply_named_loan_repayments!
