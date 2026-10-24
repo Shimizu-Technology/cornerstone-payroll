@@ -104,6 +104,9 @@ RSpec.describe PayrollLiabilityPostingService do
         category: "employer_contribution", reporting_group: "401k_pre_tax", amount: 30)
       independent = payroll_item.payroll_item_deductions.create!(deduction_type: independent_type, label: "401(k) Employer Match",
         category: "employer_contribution", reporting_group: "401k_after_tax", amount: 30)
+      payroll_item.update!(calculation_context_snapshot: {
+        "built_in_employer_match_mirrors" => { "version" => 1, "sources" => { "employer_retirement_match" => builtin_type.id } }
+      })
       expect(PayrollRetirementTotals.additions_for_item(payroll_item.reload)[:employer]).to eq(70)
       posting = described_class.post!(pay_period: pay_period, actor: actor)
       expect(posting.entries.where(category: %w[retirement_employer roth_retirement_employer]).sum(:amount)).to eq(70)
