@@ -344,16 +344,31 @@ jobs:
           tags: |
             ghcr.io/shimizu-technology/${{ matrix.image }}:${{ github.sha }}
             ghcr.io/shimizu-technology/${{ matrix.image }}:staging-v2
-      # A contained staging web build needs its exact origins and snapshot
-      # time. Until those repository variables exist, skip only the web image
-      # instead of failing the run; the API image still publishes.
-      - name: Skip unconfigured staging web image
-        if: matrix.image == 'cornerstone-payroll-web' && (vars.STAGING_API_URL == '' || vars.STAGING_SNAPSHOT_AT == '' || vars.STAGING_AIRE_FRONTEND_ORIGIN == '')
-        run: >-
-          echo "::notice title=Staging web image skipped::Set repository variables STAGING_API_URL, STAGING_SNAPSHOT_AT, STAGING_AIRE_FRONTEND_ORIGIN
-          and secret STAGING_CLERK_PUBLISHABLE_KEY to publish a contained staging web image."
+      # A contained staging web build needs its exact origins, snapshot time and
+      # publishable key. Until all exist, skip only the web image instead of
+      # failing the run; the API image still publishes. Secrets cannot be read
+      # in `if:`, so a preflight step reports whether everything is configured.
+      - name: Check staging web configuration
+        id: staging_web
+        if: matrix.image == 'cornerstone-payroll-web'
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_SNAPSHOT_AT: ${{ vars.STAGING_SNAPSHOT_AT }}
+          STAGING_AIRE_FRONTEND_ORIGIN: ${{ vars.STAGING_AIRE_FRONTEND_ORIGIN }}
+          STAGING_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          missing=""
+          for name in STAGING_API_URL STAGING_SNAPSHOT_AT STAGING_AIRE_FRONTEND_ORIGIN STAGING_CLERK_PUBLISHABLE_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Staging web image skipped::Missing:$missing. Set these repository variables/secret to publish a contained staging web image."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and publish web image
-        if: matrix.image == 'cornerstone-payroll-web' && vars.STAGING_API_URL != '' && vars.STAGING_SNAPSHOT_AT != '' && vars.STAGING_AIRE_FRONTEND_ORIGIN != ''
+        if: matrix.image == 'cornerstone-payroll-web' && steps.staging_web.outputs.configured == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
