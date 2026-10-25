@@ -30,6 +30,7 @@ const apiMocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   publish: vi.fn(),
   retry: vi.fn(),
+  refreshCalendar: vi.fn(),
   confirmEmployeeMapping: vi.fn(),
 }));
 
@@ -73,6 +74,7 @@ vi.mock('@/services/api', () => ({
     finalizeAirePayrollPeriod: apiMocks.finalize,
     publishAireCalendar: apiMocks.publish,
     retryAireCalendarDelivery: apiMocks.retry,
+    refreshAireCalendar: apiMocks.refreshCalendar,
     confirmAireEmployeeMapping: apiMocks.confirmEmployeeMapping,
   },
 }));
@@ -275,6 +277,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   routerMocks.locationState = null;
   mockLoads();
+  apiMocks.refreshCalendar.mockResolvedValue({ aire_payroll_calendar: calendar });
   apiMocks.review.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, approval_status: 'approved', payable_now: true } } });
   apiMocks.reviewOvertime.mockResolvedValue({ time_entry: { ...timeEntry, state: { ...timeEntry.state, overtime_status: 'approved', payable_now: true } } });
   apiMocks.correct.mockResolvedValue({ time_entry: { ...timeEntry, version: 4 } });
@@ -291,7 +294,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('AirePayrollCockpit', () => {
   it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
@@ -1609,6 +1612,30 @@ it('keeps source failures visible outside a collapsed verified timecard disclosu
   expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
 });
 
+it('allows a manual Lock before nominal cutoff and explains the as-of-now freeze', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-18T16:00:00+10:00'));
+  expect(Date.now()).toBeLessThan(new Date(period.cutoff_at).getTime());
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', cutoff_state: 'manual' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual' }} onRefresh={vi.fn()} />);
+  const button = await screen.findByRole('button', { name: /lock time tracking cutoff/i });
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  await user.click(button);
+  expect(within(screen.getByRole('dialog')).getByText(/freezes the approved hours as they are now/)).toBeTruthy();
+});
+
+it('labels the completed manual lock plainly', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', status: 'finalized', cutoff_state: 'finalized' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual' }} onRefresh={vi.fn()} />);
+  expect(await screen.findByText('Locked manually')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /lock time tracking cutoff/i })).toBeNull();
+});
+
 const checkpointBatch: NonNullable<AirePayrollCalendarState['finalized_batch']> = {
   event_id: 'checkpoint-event', verification_status: 'verified', verification_attempts: 1,
   occurred_at: '2026-10-22T17:00:00+10:00', payroll_batch_id: 'checkpoint-batch',
@@ -1704,4 +1731,58 @@ it('keeps compact batch-only setup reachable without calling optional live APIs'
   for (const api of [apiMocks.manualReview, apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
     expect(api).not.toHaveBeenCalled();
   }
+});
+
+it('offers the manual Lock directly inside the Hours checkpoint as an outlined action', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', cutoff_state: 'manual' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'manual' }} onRefresh={vi.fn()} />);
+  const checkpoint = screen.getByRole('region', { name: 'Source checkpoint' });
+  const lock = await within(checkpoint).findByRole('button', { name: 'Lock time tracking cutoff' });
+  expect((lock as HTMLButtonElement).disabled).toBe(false);
+  expect(lock.className).not.toContain('bg-primary-700');
+  expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
+  await user.click(lock);
+  expect(within(screen.getByRole('dialog')).getByText(/freezes the approved hours as they are now/)).toBeTruthy();
+});
+
+it('shows a completed manual Lock in the Hours checkpoint even before calendar verification refreshes', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'manual', status: 'finalized', cutoff_state: 'finalized' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'manual' }} onRefresh={vi.fn()} />);
+  const checkpoint = screen.getByRole('region', { name: 'Source checkpoint' });
+  expect(await within(checkpoint).findByText('Locked manually')).toBeTruthy();
+  expect(within(checkpoint).queryByRole('button', { name: 'Lock time tracking cutoff' })).toBeNull();
+});
+
+
+it('reconciles the shared calendar before explicitly refreshing time tracking', async () => {
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  let finish!: () => void;
+  apiMocks.refreshCalendar.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  expect(apiMocks.refreshCalendar).toHaveBeenCalledExactlyOnceWith(17);
+  expect(apiMocks.overview).toHaveBeenCalledOnce();
+  expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(true);
+  await act(async () => finish());
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalledTimes(2));
+});
+
+it('keeps commands fenced when explicit calendar refresh fails', async () => {
+  const user = userEvent.setup();
+  render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Approve time' });
+  apiMocks.refreshCalendar.mockRejectedValueOnce(new Error('Calendar refresh failed'));
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  expect(await screen.findByText('Calendar refresh failed')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(true);
+  expect(apiMocks.overview).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Approve time' }).hasAttribute('disabled')).toBe(false));
+  expect(screen.queryByText('Calendar refresh failed')).toBeNull();
 });

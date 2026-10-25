@@ -624,3 +624,35 @@ FOR EACH ROW EXECUTE FUNCTION prevent_fica_basis_proof_mutation();
 DROP TRIGGER IF EXISTS fica_basis_proofs_no_truncate ON payroll_item_fica_basis_proofs;
 CREATE TRIGGER fica_basis_proofs_no_truncate BEFORE TRUNCATE ON payroll_item_fica_basis_proofs
 FOR EACH STATEMENT EXECUTE FUNCTION prevent_fica_basis_proof_mutation();
+
+-- Audited, configure-once automatic-lock rollout boundary.
+CREATE OR REPLACE FUNCTION protect_time_tracking_lock_rollout() RETURNS trigger AS $$
+BEGIN
+  IF NEW.cutoff_enforcement_starts_on IS DISTINCT FROM OLD.cutoff_enforcement_starts_on THEN
+    RAISE EXCEPTION 'the configured payroll lock rollout boundary is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS time_tracking_lock_rollout_immutable ON time_tracking_sources;
+CREATE TRIGGER time_tracking_lock_rollout_immutable BEFORE UPDATE ON time_tracking_sources
+FOR EACH ROW EXECUTE FUNCTION protect_time_tracking_lock_rollout();
+
+CREATE OR REPLACE FUNCTION audit_time_tracking_lock_rollout() RETURNS trigger AS $$
+BEGIN
+  IF NEW.source_type = 'aire_services' THEN
+    INSERT INTO audit_logs (action, actor_name, actor_role, company_id, organization_id,
+      record_type, record_id, event_category, metadata, created_at)
+    SELECT 'time_tracking_source#lock_rollout_configured', 'Approved lock rollout', 'system',
+      NEW.company_id, companies.organization_id, 'TimeTrackingSource', NEW.id, 'integration',
+      jsonb_build_object('cutoff_enforcement_starts_on', NEW.cutoff_enforcement_starts_on,
+        'reason', 'Approved rollout: periods before October 16, 2026 lock only on explicit operator request'),
+      CURRENT_TIMESTAMP
+    FROM companies WHERE companies.id = NEW.company_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS time_tracking_lock_rollout_audit ON time_tracking_sources;
+CREATE TRIGGER time_tracking_lock_rollout_audit AFTER INSERT ON time_tracking_sources
+FOR EACH ROW EXECUTE FUNCTION audit_time_tracking_lock_rollout();

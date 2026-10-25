@@ -11,6 +11,7 @@ module TimeTracking
   class Client
     OPEN_TIMEOUT_SECONDS = 5
     READ_TIMEOUT_SECONDS = 15
+    TOTAL_RESPONSE_TIMEOUT_SECONDS = 60
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
     MAX_REMOTE_ERROR_BYTES = 300
@@ -931,14 +932,19 @@ module TimeTracking
     def read_response(http, request)
       response = nil
       body = +""
-      http.request(request) do |streamed_response|
-        response = streamed_response
-        declared_size = streamed_response["Content-Length"].presence&.to_i
-        raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared_size&.>(MAX_RESPONSE_BYTES)
+      # Per-read timeouts reset on each chunk; cap the whole request/body while
+      # calendar callers hold the source lock. Timeout is translated to the same
+      # retryable transport error, and perform_request always closes the socket.
+      Timeout.timeout(TOTAL_RESPONSE_TIMEOUT_SECONDS, Net::ReadTimeout) do
+        http.request(request) do |streamed_response|
+          response = streamed_response
+          declared_size = streamed_response["Content-Length"].presence&.to_i
+          raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared_size&.>(MAX_RESPONSE_BYTES)
 
-        streamed_response.read_body do |chunk|
-          body << chunk
-          raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if body.bytesize > MAX_RESPONSE_BYTES
+          streamed_response.read_body do |chunk|
+            body << chunk
+            raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if body.bytesize > MAX_RESPONSE_BYTES
+          end
         end
       end
 

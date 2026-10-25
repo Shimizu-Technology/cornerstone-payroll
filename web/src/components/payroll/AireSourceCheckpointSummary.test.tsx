@@ -86,3 +86,20 @@ it('uses person for a one-person locked batch', () => {
   render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, finalized_batch: { ...batch, summary: { ...batch.summary!, employee_count: 1 } } }} />);
   expect(screen.getByText(/1 person$/)).toBeTruthy();
 });
+
+it('explains manual mode in the compact Hours checkpoint without a nominal-cutoff deadline', () => {
+  render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'manual' }} />);
+  const checkpoint = screen.getByRole('region', { name: 'Source checkpoint' });
+  expect(within(checkpoint).getByText('Lock manually when you are ready')).toBeTruthy();
+  expect(within(checkpoint).queryByText(/Oct 22/)).toBeNull();
+});
+
+it('labels a manually locked batch while its verification is still pending', () => {
+  render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, lock_mode: 'manual', cutoff_state: 'batch_verifying', finalized_batch: { ...batch, verification_status: 'pending' } }} />);
+  expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByText('Locked manually')).toBeTruthy();
+});
+
+it('names the scheduled November cutoff plainly inside the compact checkpoint', () => {
+  render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, lock_mode: 'scheduled', cutoff_at: '2026-11-07T17:00:00+10:00' }} />);
+  expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByText('Locks automatically Nov 7, 5:00 p.m. ChST')).toBeTruthy();
+});

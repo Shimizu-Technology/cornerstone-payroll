@@ -286,10 +286,12 @@ Rails.application.routes.draw do
           resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
             post :retry_delivery
+            post :refresh
           end
           resource :time_tracking_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
             post :retry_delivery
+            post :refresh
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :manual_review

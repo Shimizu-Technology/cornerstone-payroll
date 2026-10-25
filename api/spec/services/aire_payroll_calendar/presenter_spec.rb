@@ -12,7 +12,8 @@ RSpec.describe AirePayrollCalendar::Presenter do
 
   let(:company) { create(:company, pay_frequency: "semimonthly") }
   let(:actor) { create(:user, company: company) }
-  let!(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:activation_date) { Date.new(2026, 10, 1) }
+  let!(:source) { create(:time_tracking_source, company: company, source_type: "aire_services", cutoff_enforcement_starts_on: activation_date) }
   let!(:schedule) do
     CompanyPaySchedule.create!(
       company: company,
@@ -90,19 +91,17 @@ RSpec.describe AirePayrollCalendar::Presenter do
     expect(source.connector.capabilities).to include("payroll_cockpit")
   end
 
-  it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
-    state = described_class.call(
-      pay_period,
-      now: Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
-    )
+  context "with the October 16 rollout boundary" do
+    let(:activation_date) { Date.new(2026, 10, 16) }
 
-    expect(state).to include(
-      eligible: false,
-      can_publish: false,
-      cutoff_state: "cutoff_due"
-    )
-    expect(state.fetch(:eligibility_error)).to include("passed before it was published")
-    expect(state.fetch(:eligibility_code)).to eq("cutoff_passed")
+    it "keeps the manual period publishable before, at, and after its nominal cutoff" do
+      cutoff = Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
+      [ cutoff - 1.second, cutoff, cutoff + 2.days ].each do |now|
+        expect(described_class.call(pay_period, now: now)).to include(
+          eligible: true, can_publish: true, cutoff_state: "unpublished", lock_mode: "manual",
+          cutoff_enforcement_starts_on: "2026-10-16", next_scheduled_cutoff_at: nil)
+      end
+    end
   end
 
   it "explains when confirmed AIRE setup starts after an older pay period" do

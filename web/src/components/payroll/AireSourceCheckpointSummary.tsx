@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { formatGuamDateTime } from '@/lib/utils';
+import { lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import type { AirePayrollCalendarState, AirePayrollCockpitOverview, AirePayrollRecord, PayPeriodStatus } from '@/types';
 
 type Props = {
@@ -10,6 +11,7 @@ type Props = {
   payPeriodStatus: PayPeriodStatus;
   sourceCoverageRequired: boolean;
   sourceCoverageAction?: ReactNode;
+  lockAction?: ReactNode;
   canReviewTimecards: boolean;
   loading: boolean;
   onReview: () => void;
@@ -18,6 +20,7 @@ type Props = {
 };
 
 const cutoffLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
+  manual: 'Manual lock',
   unpublished: 'Cutoff not published',
   publishing: 'Publishing cutoff',
   publication_failed: 'Cutoff sync needs attention',
@@ -37,7 +40,7 @@ const hours = (value: unknown) => value != null && Number.isFinite(Number(value)
 
 export function AireSourceCheckpointSummary({
   calendar, overview, aireRecord, payPeriodStatus, sourceCoverageRequired, sourceCoverageAction,
-  canReviewTimecards, loading, onReview, onReviewTimecards, onReviewSource,
+  canReviewTimecards, loading, onReview, onReviewTimecards, onReviewSource, lockAction,
 }: Props) {
   const batch = calendar.finalized_batch?.verification_status === 'verified' ? calendar.finalized_batch : null;
   const summary = batch?.summary;
@@ -62,7 +65,14 @@ export function AireSourceCheckpointSummary({
   const attention = Number(lineStatus?.needs_attention.line_count || 0) > 0;
   const paymentPending = committed && Number(lineStatus?.in_payroll.line_count || 0) + Number(lineStatus?.payment_pending.line_count || 0) > 0;
   const allPaid = committed && lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count;
+  const manualLock = (overview?.payroll_period.lock_mode ?? calendar.lock_mode) === 'manual';
+  const locked = overview?.payroll_period.status === 'finalized' || Boolean(calendar.finalized_batch)
+    || ['finalized', 'batch_verifying', 'batch_verification_failed', 'batch_rejected', 'batch_verified'].includes(calendar.cutoff_state);
   const cutoffLabel = batch ? 'Locked' : cutoffLabels[calendar.cutoff_state];
+  const cutoffCopy = manualLock ? lockScheduleCopy({ lock_mode: 'manual' }, locked)
+    : calendar.lock_mode === 'scheduled' && ['scheduled', 'upcoming'].includes(calendar.cutoff_state)
+      ? lockScheduleCopy(calendar)
+      : `${cutoffLabel}${calendar.cutoff_at ? ` · ${formatGuamDateTime(calendar.cutoff_at, { second: undefined })}` : ' · cutoff time unavailable'}`;
 
   return (
     <section aria-label="Source checkpoint" className="space-y-3 p-4 sm:p-5">
@@ -70,18 +80,21 @@ export function AireSourceCheckpointSummary({
         <div className="min-w-0">
           <h3 className="font-display text-base font-bold text-neutral-950">Source checkpoint</h3>
           <p className="mt-1 text-sm text-neutral-700">
-            {cutoffLabel}{calendar.cutoff_at ? ` · ${formatGuamDateTime(calendar.cutoff_at, { second: undefined })}` : ' · cutoff time unavailable'}
+            {cutoffCopy}
           </p>
         </div>
-        {batch && !aireRecord ? (
-          <Button type="button" variant="outline" onClick={onReview} className="max-sm:w-full sm:shrink-0">
-            {committed ? 'Review and link time tracking record' : corrections ? 'Review time tracking corrections' : 'Review and add time tracking hours'}
-          </Button>
-        ) : canReviewTimecards ? (
-          <Button type="button" variant="outline" onClick={onReviewTimecards} className="max-sm:w-full sm:shrink-0">Review timecards</Button>
-        ) : (
-          <Button type="button" variant="outline" onClick={onReviewSource} className="max-sm:w-full sm:shrink-0">Review source details</Button>
-        )}
+        <div className="flex flex-wrap gap-2 max-sm:w-full">
+          {lockAction}
+          {batch && !aireRecord ? (
+            <Button type="button" variant="outline" onClick={onReview} className="max-sm:w-full sm:shrink-0">
+              {committed ? 'Review and link time tracking record' : corrections ? 'Review time tracking corrections' : 'Review and add time tracking hours'}
+            </Button>
+          ) : canReviewTimecards ? (
+            <Button type="button" variant="outline" onClick={onReviewTimecards} className="max-sm:w-full sm:shrink-0">Review timecards</Button>
+          ) : (
+            <Button type="button" variant="outline" onClick={onReviewSource} className="max-sm:w-full sm:shrink-0">Review source details</Button>
+          )}
+        </div>
       </div>
       <div className="grid gap-3 border-t border-neutral-200 pt-3 sm:grid-cols-2">
         <div>

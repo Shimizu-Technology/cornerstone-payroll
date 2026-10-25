@@ -38,6 +38,8 @@ class TimeTrackingSource < ApplicationRecord
   validate :base_url_must_be_http_url
   validate :source_type_must_not_change, on: :update
 
+  validate :valid_lock_rollout
+
   scope :active, -> { where(active: true) }
 
   def connector
@@ -76,6 +78,17 @@ class TimeTrackingSource < ApplicationRecord
   end
 
   private
+
+  def valid_lock_rollout
+    if source_type == "aire_services" && cutoff_enforcement_starts_on.blank?
+      errors.add(:cutoff_enforcement_starts_on, "must be configured before publishing AIRE payroll calendars")
+    elsif cutoff_enforcement_starts_on && ![ 1, 16 ].include?(cutoff_enforcement_starts_on.day)
+      errors.add(:cutoff_enforcement_starts_on, "must be a semimonthly period start (1st or 16th)")
+    end
+    if persisted? && will_save_change_to_cutoff_enforcement_starts_on?
+      errors.add(:cutoff_enforcement_starts_on, "is immutable after configuration")
+    end
+  end
 
   def require_existing_payroll_history
     return unless company
