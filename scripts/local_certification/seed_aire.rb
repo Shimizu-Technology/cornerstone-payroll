@@ -29,6 +29,17 @@ start_date = Date.iso8601(policy.fetch("start_date"))
 end_date = Date.iso8601(policy.fetch("end_date"))
 abort "Certification must begin before its fixed cutoff" unless (cutoff_at - Time.current).to_i == 120
 
+# Lock-rollout AIRE refuses calendar publication until its installation
+# boundary is configured, exactly as the release runbook requires. Use the
+# approved production boundary; certification periods start on or after it.
+if defined?(PayrollLockRollout)
+  PayrollLockRollout.configure!(
+    starts_on: "2026-10-16",
+    actor: "connected certification harness",
+    reason: "Exact-pair certification uses the approved production lock rollout boundary"
+  )
+end
+
 fixture = ApplicationRecord.transaction do
   admin = User.create!(
     email: "aire-certification-admin@example.test",
