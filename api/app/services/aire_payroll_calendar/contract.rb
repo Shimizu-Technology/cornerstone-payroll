@@ -24,8 +24,9 @@ module AirePayrollCalendar
 
     attr_reader :pay_period
 
-    def initialize(pay_period)
+    def initialize(pay_period, source: nil)
       @pay_period = pay_period
+      @source = source
     end
 
     def payload
@@ -55,6 +56,10 @@ module AirePayrollCalendar
         "time_zone" => TIME_ZONE,
         "overtime_policy" => OVERTIME_POLICY.dup
       }
+      unless retained_legacy_scheduled_calendar?
+        fields["lock_mode"] = lock_mode
+        fields["cutoff_enforcement_starts_on"] = rollout_source.cutoff_enforcement_starts_on.iso8601
+      end
       if legacy_policy
         fields["cutoff_days_before"] = CUTOFF_DAYS_BEFORE
       else
@@ -87,6 +92,9 @@ module AirePayrollCalendar
       unless pay_period.pay_date == pay_schedule.scheduled_pay_date_for(pay_period.end_date)
         fail_contract!("Use the fixed regular scheduled payday before publishing to AIRE.", "pay_date_invalid")
       end
+      unless rollout_source&.cutoff_enforcement_starts_on
+        fail_contract!("Configure the AIRE payroll lock rollout boundary before publishing.", "lock_rollout_required")
+      end
       previous_regular_pay_date if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
       if pay_schedule.time_tracking_cutoff_rule == "after_previous_regular_payday" &&
          previous_regular_pay_date + pay_schedule.time_tracking_cutoff_days >= pay_period.pay_date
@@ -103,6 +111,24 @@ module AirePayrollCalendar
     end
 
     private
+
+    def rollout_source
+      @source ||= pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+    end
+
+    def lock_mode
+      pay_period.start_date < rollout_source.cutoff_enforcement_starts_on ? "manual" : "scheduled"
+    end
+
+    # Retained scheduled calendars keep their original wire contract. AIRE
+    # preserves their null per-period activation even on legitimate revisions.
+    def retained_legacy_scheduled_calendar?
+      return false unless lock_mode == "scheduled"
+
+      calendar = AirePayrollCalendarPeriod.find_by(pay_period_id: pay_period.id, time_tracking_source_id: rollout_source.id)
+      publication = calendar&.latest_publication
+      publication && !publication.payload.key?("lock_mode") && !publication.payload.key?("cutoff_enforcement_starts_on")
+    end
 
     def previous_regular_pay_date
       return @previous_regular_pay_date if defined?(@previous_regular_pay_date)

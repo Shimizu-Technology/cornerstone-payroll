@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_25_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3727,6 +3727,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
     t.bigint "company_id", null: false
     t.uuid "connection_uuid", default: -> { "gen_random_uuid()" }, null: false
     t.datetime "created_at", null: false
+    t.date "cutoff_enforcement_starts_on", default: "2026-10-16"
+    t.jsonb "payroll_calendar_source_state", default: {}, null: false
     t.string "expected_source_instance_id"
     t.boolean "historical_reconciliation_required", default: false, null: false
     t.datetime "identity_verified_at"
@@ -3748,6 +3750,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_24_100000) do
     t.index [ "id", "company_id" ], name: "idx_time_tracking_sources_tenant_key", unique: true
     t.check_constraint "expected_source_instance_id IS NULL AND source_protocol IS NULL AND source_protocol_version IS NULL AND identity_verified_at IS NULL OR expected_source_instance_id IS NOT NULL AND source_protocol IS NOT NULL AND source_protocol_version IS NOT NULL AND identity_verified_at IS NOT NULL", name: "time_tracking_sources_identity_complete"
     t.check_constraint "jsonb_typeof(source_capabilities) = 'array'::text", name: "time_tracking_sources_capabilities_array"
+    t.check_constraint "(source_type::text <> 'aire_services'::text OR cutoff_enforcement_starts_on IS NOT NULL) AND (cutoff_enforcement_starts_on IS NULL OR (EXTRACT(day FROM cutoff_enforcement_starts_on) = ANY (ARRAY[1::numeric, 16::numeric])))", name: "time_tracking_lock_rollout_period_start"
   end
 
   create_table "timecards", force: :cascade do |t|

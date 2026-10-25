@@ -42,6 +42,22 @@ RSpec.describe AirePayrollEvents::Receiver do
     expect(AuditLog.find_by!(action: "aire_payroll_event#received").company_id).to eq(company.id)
   end
 
+  it "accepts the latest delivered revision and rejects a superseded legacy revision" do
+    original = publication
+    latest = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+      schedule_version: 2, delivery_status: "delivered")
+    payload = build_aire_finalized_event(calendar_period: calendar_period, publication: latest, batch_payload: batch_payload)
+
+    result = described_class.new(payload: payload, shared_secret: "integration-secret", idempotency_key: payload.fetch("event_id")).call
+    expect(result.event.aire_payroll_calendar_publication).to eq(latest)
+    expect(calendar_period.latest_delivered_publication).to eq(latest)
+
+    stale = build_aire_finalized_event(calendar_period: calendar_period, publication: original, batch_payload: batch_payload)
+    expect do
+      described_class.new(payload: stale, shared_secret: "integration-secret", idempotency_key: stale.fetch("event_id")).call
+    end.to raise_error(described_class::ConflictError, /did not confirm as delivered/)
+  end
+
   it "returns an idempotent replay without another event or queue dispatch" do
     first = described_class.new(
       payload: event_payload,
@@ -168,5 +184,38 @@ RSpec.describe AirePayrollEvents::Receiver do
         idempotency_key: event_payload.fetch("event_id")
       ).call
     end.to raise_error(described_class::Error, /occurred_at must be a valid ISO timestamp/)
+  end
+  context "with an explicit manual lock publication" do
+    let(:publication) do
+      record = build(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, delivery_status: "delivered")
+      record.payload = record.payload.merge("lock_mode" => "manual", "cutoff_enforcement_starts_on" => "2026-10-16")
+      record.payload_checksum = TimeTracking::CanonicalPayload.checksum(record.payload)
+      record.save!
+      record
+    end
+    let(:batch_payload) { build_aire_batch_payload(cutoff_at: "2026-10-24T02:00:00.123456Z") }
+    let(:event_payload) do
+      build_aire_finalized_event(calendar_period: calendar_period, publication: publication, batch_payload: batch_payload).tap do |payload|
+        payload["payroll_period"]["locked_at"] = batch_payload.fetch("cutoff_at")
+      end
+    end
+
+    it "accepts the as-of-lock snapshot while retaining the nominal published cutoff" do
+      result = described_class.new(payload: event_payload, shared_secret: "integration-secret", idempotency_key: event_payload.fetch("event_id")).call
+      expect(result.created).to be(true)
+      expect(result.event.payload.dig("payroll_period", "cutoff_at")).to eq(publication.payload.fetch("cutoff_at"))
+      expect(result.event.payload.dig("payroll_batch", "cutoff_at")).to eq("2026-10-24T02:00:00.123456Z")
+    end
+
+    it "rejects a manual batch with a different lock instant or mode" do
+      [ { "locked_at" => "2026-10-24T02:00:01Z" }, { "lock_mode" => "scheduled" } ].each do |change|
+        payload = event_payload.deep_dup
+        payload["payroll_period"].merge!(change)
+        expect do
+          described_class.new(payload: payload, shared_secret: "integration-secret", idempotency_key: payload.fetch("event_id")).call
+        end.to raise_error(described_class::ConflictError)
+      end
+      expect(AirePayrollEvent.count).to eq(0)
+    end
   end
 end
