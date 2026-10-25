@@ -47,6 +47,7 @@ class R2StorageService
   # @return [String] The object URL
   def upload(key, data, content_type: "application/pdf")
     validate_staging_storage!
+    StagingStoragePolicy.write!(key)
     return upload_locally(key, data) unless configured?
 
     client.put_object(
@@ -124,6 +125,7 @@ class R2StorageService
   # @param key [String] The object key
   def delete(key)
     validate_staging_storage!
+    return unless StagingStoragePolicy.delete_allowed?(key)
     return delete_locally(key) unless configured?
 
     client.delete_object(bucket: bucket_name, key: key)

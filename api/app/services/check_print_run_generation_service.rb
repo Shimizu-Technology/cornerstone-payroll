@@ -291,7 +291,7 @@ class CheckPrintRunGenerationService
   end
 
   def storage_key(artifact_id)
-    "check-print-runs/company-#{pay_period.company_id}/pay-period-#{pay_period.id}/#{artifact_id}.pdf"
+    StagingStoragePolicy.new_key("check-print-runs/company-#{pay_period.company_id}/pay-period-#{pay_period.id}/#{artifact_id}.pdf")
   end
 
   def print_run_filename(artifact_id)

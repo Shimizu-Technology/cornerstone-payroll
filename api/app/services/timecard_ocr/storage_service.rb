@@ -6,13 +6,14 @@ module TimecardOcr
     class << self
       def upload(file_path, key, content_type: "application/octet-stream")
         data = File.binread(file_path)
-        r2.upload("timecards/#{key}", data, content_type: content_type)
-        key
+        stored_key = StagingStoragePolicy.new_key("timecards/#{key}")
+        r2.upload(stored_key, data, content_type: content_type)
+        StagingStoragePolicy.shared? ? stored_key : key
       end
 
       def download_to_tempfile(reference)
         key = normalize_key(reference)
-        data = r2.download("timecards/#{key}")
+        data = r2.download(StagingStoragePolicy.shared? && key.start_with?("staging/") ? key : "timecards/#{key}")
         raise Errno::ENOENT, "File not found in R2: #{key}" unless data
 
         tmp = Tempfile.new([ "timecard", File.extname(key).presence || ".jpg" ])

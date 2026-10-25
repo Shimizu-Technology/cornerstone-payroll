@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "date"
 require "digest"
 require "json"
 require "mail"
@@ -22,6 +23,31 @@ class StagingOutboundPolicy
       value = env["DEPLOYMENT_ENV"]
       raise ConfigurationError, "Invalid DEPLOYMENT_ENV" if value && !value.empty? && !%w[staging production test development].include?(value)
       value == "staging"
+    end
+
+    # Both exceptions form one explicit staging-only contract. Empty/false values
+    # are not opt-outs: remove all three settings to use isolated credentials.
+    def shared_production_credentials?(env = ENV)
+      return false unless staging?(env)
+
+      names = %w[STAGING_SHARES_PRODUCTION_CLERK STAGING_SHARES_PRODUCTION_STORAGE]
+      if env.keys.any? { |key| key.start_with?("STAGING_SHARES_PRODUCTION_") && !names.include?(key) }
+        raise ConfigurationError, "Unknown STAGING_SHARES_PRODUCTION setting"
+      end
+      flags = env.values_at(*names)
+      return false if flags.all?(&:nil?) && !env.key?("STAGING_STORAGE_WRITE_PREFIX")
+      unless flags == [ "true", "true" ]
+        raise ConfigurationError, "STAGING_SHARES_PRODUCTION_CLERK / STAGING_SHARES_PRODUCTION_STORAGE must both be exactly true"
+      end
+      prefix = env["STAGING_STORAGE_WRITE_PREFIX"].to_s
+      valid = prefix.match?(%r{\Astaging/\d{4}-\d{2}-\d{2}/\z}) && !prefix.start_with?("staging/0000-")
+      begin
+        valid &&= Date.iso8601(prefix.split("/")[1]).iso8601 == prefix.split("/")[1]
+      rescue Date::Error
+        valid = false
+      end
+      raise ConfigurationError, "Invalid STAGING_STORAGE_WRITE_PREFIX: require staging/YYYY-MM-DD/" unless valid
+      true
     end
 
     def validate_deployment!(env: ENV, environment: Rails.env)
@@ -70,6 +96,7 @@ class StagingOutboundPolicy
 
     def clerk_target!(email: nil, id: nil, env: ENV)
       return true unless staging?(env)
+      raise Blocked, "Clerk mutations are disabled with shared production credentials" if shared_production_credentials?(env)
       testers = bindings(env)
       allowed = email ? testers.key?(email.to_s.downcase) : testers.value?(id)
       raise Blocked, "Clerk mutation blocked in staging: target is not a named tester" unless allowed
@@ -116,17 +143,18 @@ class StagingOutboundPolicy
     def validate!(env: ENV)
       validate_deployment!(env: env)
       return true unless staging?(env)
+      shared = shared_production_credentials?(env)
       validate_database!(env: env)
       validate_storage!(env: env)
       issuer = require_setting!("CLERK_ISSUER", env)
       expected = require_setting!("STAGING_CLERK_ISSUER", env)
       production = require_setting!("PRODUCTION_CLERK_ISSUER", env)
       uri = URI.parse(issuer)
-      valid = issuer == expected && issuer != production && uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && [ "", "/" ].include?(uri.path) && uri.query.nil? && uri.fragment.nil?
+      valid = issuer == expected && (shared || issuer != production) && uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && [ "", "/" ].include?(uri.path) && uri.query.nil? && uri.fragment.nil?
       raise ConfigurationError, "Unsafe CLERK_ISSUER / STAGING_CLERK_ISSUER" unless valid
       jwks = env["CLERK_JWKS_URL"]
       raise ConfigurationError, "Unsafe CLERK_JWKS_URL" if jwks && jwks != "#{issuer.delete_suffix('/')}/.well-known/jwks.json"
-      raise ConfigurationError, "Staging requires a separate CLERK_SECRET_KEY (sk_test_)" unless env["CLERK_SECRET_KEY"].to_s.start_with?("sk_test_")
+      raise ConfigurationError, "Staging requires CLERK_SECRET_KEY (sk_test_)" unless env["CLERK_SECRET_KEY"].to_s.start_with?("sk_test_")
       require_setting!("STAGING_INTEGRATION_HOSTS", env)
       require_setting!("PRODUCTION_INTEGRATION_HOSTS", env)
       list("STAGING_INTEGRATION_HOSTS", env).each { |host| integration!("https://#{host}", env: env) }
@@ -225,6 +253,10 @@ class StagingOutboundPolicy
         unless host.start_with?("#{bucket}.s3.") || path == "/#{bucket}" || path.start_with?("/#{bucket}/")
           raise Blocked, "Storage request is outside STAGING_STORAGE_BUCKET"
         end
+        if StagingStoragePolicy.shared?(env: env) && !%w[GET HEAD].include?(request.method)
+          key = host.start_with?("#{bucket}.s3.") ? path.delete_prefix("/") : path.delete_prefix("/#{bucket}/")
+          StagingStoragePolicy.write!(URI::DEFAULT_PARSER.unescape(key), env: env)
+        end
       else
         integration!("https://#{host}#{request.path}", env: env)
       end
@@ -233,6 +265,7 @@ class StagingOutboundPolicy
 
     def clerk_request!(request, path, env)
       return true if request.method == "GET" && path.match?(%r{\A/v1/(?:users(?:/[^/]+)?|instance)\z})
+      raise Blocked, "Clerk mutations are disabled with shared production credentials" if shared_production_credentials?(env)
       if request.method == "POST" && path == "/v1/invitations"
         clerk_target!(email: JSON.parse(request.body.to_s)["email_address"], env: env)
       elsif request.method == "PATCH" && (match = path.match(%r{\A/v1/users/([^/]+)\z}))

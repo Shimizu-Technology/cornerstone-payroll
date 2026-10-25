@@ -98,6 +98,27 @@ RSpec.describe StagingCloneContainment do
     expect(StagingQuarantine.complete?).to eq(true)
   end
 
+  it "verifies and rebinds existing production subjects after clearing cloned identities" do
+    ENV["STAGING_SHARES_PRODUCTION_CLERK"] = "true"
+    ENV["STAGING_SHARES_PRODUCTION_STORAGE"] = "true"
+    ENV["STAGING_STORAGE_WRITE_PREFIX"] = "staging/2026-10-25/"
+    ENV["CLERK_SECRET_KEY"] = "sk_test_synthetic"
+    leon = create(:user, email: "leon@example.test", clerk_id: "user_leonproduction")
+    outsider = create(:user, clerk_id: "user_outsiderproduction")
+    ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: leon.id, email: leon.email, clerk_subject: leon.clerk_id } ].to_json
+    allow(HTTParty).to receive(:get).with("https://api.clerk.com/v1/users/user_leonproduction", anything).and_return(double(success?: true, parsed_response: {
+      "id" => leon.clerk_id, "primary_email_address_id" => "primary",
+      "email_addresses" => [ { "id" => "primary", "email_address" => leon.email, "verification" => { "status" => "verified" } } ]
+    }))
+    service = described_class.new
+    service.quarantine(apply: true)
+    expect { service.configure }.not_to change { leon.reload.clerk_id }
+    service.configure(apply: true)
+    expect(leon.reload.clerk_id).to eq("user_leonproduction")
+    expect(outsider.reload.clerk_id).to be_nil
+    expect(StagingQuarantine.complete?).to eq(true)
+  end
+
   it "holds configuration until the quarantined production schema has been migrated" do
     create(:user, email: "leon@example.test")
     create(:user, email: "chels@example.test")

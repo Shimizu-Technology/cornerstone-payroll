@@ -106,7 +106,7 @@ module QuickbooksHistory
 
     def storage_key(bundle_key, position, filename)
       extension = File.extname(filename.to_s).downcase
-      "historical-payroll/company-#{company.id}/#{bundle_key}/source-#{position.to_s.rjust(2, '0')}#{extension}"
+      StagingStoragePolicy.new_key("historical-payroll/company-#{company.id}/#{bundle_key}/source-#{position.to_s.rjust(2, '0')}#{extension}")
     end
 
     def content_type_for(filename)

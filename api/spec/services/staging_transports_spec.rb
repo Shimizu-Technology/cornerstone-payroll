@@ -28,7 +28,7 @@ RSpec.describe "staging transport boundaries" do
   end
 
   it "rejects storage construction and presigning with copied bucket credentials" do
-    expect { ActiveStorage::Service::S3Service.new(bucket: "production", access_key_id: "copied", secret_access_key: "copied", region: "us-east-1") }.to raise_error(StagingOutboundPolicy::ConfigurationError)
+    expect { ActiveStorage::Service::StagingS3Service.new(bucket: "production", access_key_id: "copied", secret_access_key: "copied", region: "us-east-1") }.to raise_error(StagingOutboundPolicy::ConfigurationError)
   end
 
   it "blocks every AI entry point before processing files or sending requests" do
