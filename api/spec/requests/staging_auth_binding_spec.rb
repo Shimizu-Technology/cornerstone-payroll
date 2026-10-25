@@ -7,6 +7,7 @@ RSpec.describe "staging authenticated tester binding", type: :request do
     old = ENV.to_h
     ENV["AUTH_ENABLED"] = "true"
     ENV["DEPLOYMENT_ENV"] = "staging"
+
     example.run
   ensure
     ENV.replace(old)
@@ -44,5 +45,22 @@ RSpec.describe "staging authenticated tester binding", type: :request do
     get "/api/v1/auth/me", headers: { "Authorization" => "Bearer synthetic" }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("user", "id")).to eq(user.id)
+  end
+  context "with shared production identities" do
+    before do
+      ENV["STAGING_SHARES_PRODUCTION_CLERK"] = "true"
+      ENV["STAGING_SHARES_PRODUCTION_STORAGE"] = "true"
+      ENV["STAGING_STORAGE_WRITE_PREFIX"] = "staging/2026-10-25/"
+      ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: user.id, email: user.email, clerk_subject: user.clerk_id } ].to_json
+    end
+
+    it "accepts the bound production subject and refuses any other production user" do
+      verify_subject(user.clerk_id)
+      get "/api/v1/auth/me", headers: { "Authorization" => "Bearer synthetic" }
+      expect(response).to have_http_status(:ok)
+      verify_subject("user_otherproduction")
+      get "/api/v1/auth/me", headers: { "Authorization" => "Bearer synthetic" }
+      expect(response).to have_http_status(:forbidden)
+    end
   end
 end

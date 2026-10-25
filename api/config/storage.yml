@@ -9,7 +9,7 @@ local:
 # Cloudflare R2 uses the S3 API. Required production values are verified by
 # `bin/rails production:readiness`; nil values here keep development/test bootable.
 r2:
-  service: S3
+  service: <%= ENV["DEPLOYMENT_ENV"] == "staging" ? "StagingS3" : "S3" %>
   access_key_id: <%= ENV["R2_ACCESS_KEY_ID"] %>
   secret_access_key: <%= ENV["R2_SECRET_ACCESS_KEY"] %>
   region: auto

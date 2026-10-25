@@ -49,22 +49,22 @@ RSpec.describe "staging storage isolation" do
   it "checks explicit Active Storage constructor endpoint and credentials before SDK construction" do
     ENV.update(safe)
     options = { bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true }
-    expect { ActiveStorage::Service::S3Service.new(**options) }.not_to raise_error
-    expect { ActiveStorage::Service::S3Service.new(**options.merge(endpoint: "https://collector.example.test")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /ENDPOINT/)
-    expect { ActiveStorage::Service::S3Service.new(**options.merge(bucket: "synthetic-live-bucket")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /BUCKET/)
-    expect { ActiveStorage::Service::S3Service.new(**options.merge(access_key_id: "synthetic-live-key")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /ACCESS_KEY/)
+    expect { ActiveStorage::Service::StagingS3Service.new(**options) }.not_to raise_error
+    expect { ActiveStorage::Service::StagingS3Service.new(**options.merge(endpoint: "https://collector.example.test")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /ENDPOINT/)
+    expect { ActiveStorage::Service::StagingS3Service.new(**options.merge(bucket: "synthetic-live-bucket")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /BUCKET/)
+    expect { ActiveStorage::Service::StagingS3Service.new(**options.merge(access_key_id: "synthetic-live-key")) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /ACCESS_KEY/)
   end
 
   it "blocks S3 read and direct upload URLs without invoking a presigner" do
     ENV.update(safe)
-    service = ActiveStorage::Service::S3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
+    service = ActiveStorage::Service::StagingS3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
     expect { service.url("private.pdf", expires_in: 60, disposition: :inline, filename: ActiveStorage::Filename.new("private.pdf"), content_type: "application/pdf") }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING/)
     expect { service.url_for_direct_upload("private.pdf", expires_in: 60, content_type: "application/pdf", content_length: 1, checksum: "x") }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING/)
   end
 
   it "revalidates already-constructed storage before reads and writes" do
     ENV.update(safe)
-    service = ActiveStorage::Service::S3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
+    service = ActiveStorage::Service::StagingS3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
     ENV["R2_ENDPOINT"] = "https://collector.example.test"
     expect(service.client.client).not_to receive(:get_object)
     expect(service.client.client).not_to receive(:put_object)
@@ -97,7 +97,7 @@ RSpec.describe "staging storage isolation" do
 
   it "allows server byte reads and writes with the approved SDK configuration" do
     ENV.update(safe)
-    service = ActiveStorage::Service::S3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
+    service = ActiveStorage::Service::StagingS3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
     allow(service.client.client).to receive(:get_object).and_return(double(data: Aws::S3::Types::GetObjectOutput.new(body: StringIO.new(+"synthetic bytes"))))
     allow(service.client.client).to receive(:put_object).and_return(double(data: Aws::S3::Types::PutObjectOutput.new))
     expect(service.download("private.pdf")).to eq("synthetic bytes")
@@ -106,14 +106,14 @@ RSpec.describe "staging storage isolation" do
 
   it "blocks private and public service URL generation entrypoints" do
     ENV.update(safe)
-    service = ActiveStorage::Service::S3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
+    service = ActiveStorage::Service::StagingS3Service.new(bucket: safe.fetch("STAGING_STORAGE_BUCKET"), access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "auto", endpoint: safe.fetch("STAGING_STORAGE_ENDPOINT"), force_path_style: true)
     expect { service.send(:public_url, "private.pdf") }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING/)
     expect { service.send(:private_url, "private.pdf", expires_in: 60, filename: ActiveStorage::Filename.new("private.pdf"), disposition: :inline, content_type: "application/pdf") }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING/)
   end
   it "pins AWS construction to the independent endpoint despite an ambient SDK override" do
     ENV.update(staging_storage_env(provider: :aws))
     ENV["AWS_ENDPOINT_URL_S3"] = "https://collector.example.test"
-    service = ActiveStorage::Service::S3Service.new(bucket: "synthetic-staging-bucket", access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "us-east-1")
+    service = ActiveStorage::Service::StagingS3Service.new(bucket: "synthetic-staging-bucket", access_key_id: "synthetic-staging-key", secret_access_key: "synthetic-only", region: "us-east-1")
     expect(service.client.client.config.endpoint.to_s).to eq("https://s3.us-east-1.amazonaws.com")
   end
 end

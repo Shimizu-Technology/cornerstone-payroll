@@ -51,6 +51,19 @@ RSpec.describe "Staging mail outcomes" do
     expect { SendUserInviteEmailJob.new.perform(user.id) }.to raise_error(RuntimeError, "Failed to send invite email for user_id=#{user.id}")
   end
 
+  it "runs the daily reminder job in shared mode with capture and no provider send" do
+    ENV["STAGING_SHARES_PRODUCTION_CLERK"] = "true"
+    ENV["STAGING_SHARES_PRODUCTION_STORAGE"] = "true"
+    ENV["STAGING_STORAGE_WRITE_PREFIX"] = "staging/2026-10-25/"
+    config
+    company.update!(payroll_environment: "live")
+    period
+    expect(Resend::Emails).not_to receive(:send)
+    SendPayrollRemindersJob.perform_now
+    expect(PayrollReminderLog.where(company: company)).to be_empty
+    expect(@output.string).to include("captured", "company=#{company.id}")
+  end
+
   it "records captured period reminders without a false sent log" do
     expect(Resend::Emails).not_to receive(:send)
     PayrollReminderService.send(:send_period_reminder, config, period, "upcoming")
