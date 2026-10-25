@@ -144,9 +144,11 @@ RSpec.describe "shared production credential containment" do
     client = service.client.client
     allow(client).to receive(:put_object).and_return(double(data: Aws::S3::Types::PutObjectOutput.new))
     allow(client).to receive(:delete_object).and_return(double(data: Aws::S3::Types::DeleteObjectOutput.new))
-    # Payroll has no app attachment model; exercise Rails attachment lifecycle on a synthetic user association.
-    User.has_one_attached(:shared_mode_fixture) unless User.reflect_on_attachment(:shared_mode_fixture)
-    user = create(:user)
+    # Payroll has no app attachment model; keep this association scoped to the example.
+    fixture_model = stub_const("SharedModeAttachmentFixture", Class.new(ApplicationRecord))
+    fixture_model.table_name = "users"
+    fixture_model.has_one_attached(:shared_mode_fixture)
+    user = fixture_model.find(create(:user).id)
     cloned = ActiveStorage::Blob.create!(key: "production/photo.jpg", filename: "photo.jpg", content_type: "image/jpeg", byte_size: 1, checksum: "x", metadata: { identified: true, analyzed: true }, service_name: "r2")
     user.shared_mode_fixture.attach(cloned)
     expect(client).not_to receive(:delete_object).with(hash_including(key: cloned.key))
@@ -160,6 +162,7 @@ RSpec.describe "shared production credential containment" do
     expect(client).to receive(:delete_object).with(hash_including(key: fresh.key)).and_return(double(data: Aws::S3::Types::DeleteObjectOutput.new))
     user.shared_mode_fixture.purge
     expect(user.reload.shared_mode_fixture).not_to be_attached
+    expect(User.reflect_on_attachment(:shared_mode_fixture)).to be_nil
   end
 
   it "deletes an allowed sub-prefix through individually checked HTTP destinations" do
