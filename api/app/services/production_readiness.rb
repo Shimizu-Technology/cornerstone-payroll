@@ -257,7 +257,7 @@ class ProductionReadiness
 
   def r2_round_trip
     storage = storage_factory.call
-    key = "production-readiness/#{SecureRandom.uuid}.txt"
+    key = StagingStoragePolicy.new_key("production-readiness/#{SecureRandom.uuid}.txt")
     payload = "cornerstone-payroll-readiness-#{SecureRandom.hex(24)}"
 
     storage.upload(key, StringIO.new(payload), content_type: "text/plain")

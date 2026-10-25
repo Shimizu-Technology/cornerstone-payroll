@@ -128,7 +128,7 @@ class ClientDocumentUploadService
 
   def build_file_key(original_filename)
     sanitized_name = File.basename(original_filename.to_s).gsub(/[^A-Za-z0-9.\-_]/, "_")
-    "client_documents/company_#{@company_id}/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{sanitized_name}"
+    StagingStoragePolicy.new_key("client_documents/company_#{@company_id}/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{sanitized_name}")
   end
 
   def document_title_for(file, total_files)

@@ -90,6 +90,39 @@ RSpec.describe StagingOutboundPolicy do
       )
     end
 
+    context "shared production Clerk" do
+      before do
+        safe.merge!("STAGING_SHARES_PRODUCTION_CLERK" => "true", "STAGING_SHARES_PRODUCTION_STORAGE" => "true", "STAGING_STORAGE_WRITE_PREFIX" => "staging/2026-10-25/")
+        safe["CLERK_ISSUER"] = safe["STAGING_CLERK_ISSUER"] = safe["PRODUCTION_CLERK_ISSUER"]
+        safe["CLERK_JWKS_URL"] = "#{safe.fetch('CLERK_ISSUER')}/.well-known/jwks.json"
+      end
+
+      it "accepts the exact shared issuer and JWKS only when explicitly enabled" do
+        expect(described_class.validate!(env: safe)).to eq(true)
+        safe.delete("STAGING_SHARES_PRODUCTION_CLERK")
+        safe.delete("STAGING_SHARES_PRODUCTION_STORAGE")
+        safe.delete("STAGING_STORAGE_WRITE_PREFIX")
+        expect { described_class.validate!(env: safe) }.to raise_error(described_class::ConfigurationError, /CLERK_ISSUER/)
+      end
+
+      it "still rejects a different JWKS authority" do
+        safe["CLERK_JWKS_URL"] = "https://other.example.test/.well-known/jwks.json"
+        expect { described_class.validate!(env: safe) }.to raise_error(described_class::ConfigurationError, /JWKS/)
+      end
+
+      it "blocks named tester mutations at both application and final HTTP boundaries" do
+        expect { described_class.clerk_target!(email: "chels@example.test", env: safe) }.to raise_error(described_class::Blocked)
+        http = Net::HTTP.new("api.clerk.com", 443)
+        http.use_ssl = true
+        patch = Net::HTTP::Patch.new("/v1/users/user_chels")
+        expect { described_class.http_request!(http, patch, env: safe) }.to raise_error(described_class::Blocked)
+        invite = Net::HTTP::Post.new("/v1/invitations")
+        invite.body = { email_address: "chels@example.test" }.to_json
+        expect { described_class.http_request!(http, invite, env: safe) }.to raise_error(described_class::Blocked)
+        expect(described_class.http_request!(http, Net::HTTP::Get.new("/v1/users/user_chels"), env: safe)).to eq(true)
+      end
+    end
+
     it "accepts isolated staging settings without a mail or AI key" do
       expect(described_class.validate!(env: safe)).to eq(true)
     end
