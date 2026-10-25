@@ -229,8 +229,13 @@ puts "PASS: two exact partial checks issued once over real HTTP; lost-response r
 void_source = source_adjustment.call(api.call("get", review_path.call(periods.last), 200), aire.fetch("manual_void_entry_id"))
 void_allocation = api.call("post", allocation_path.call(periods.last), 201,
   request_for.call(items.last, void_source, "2.00", "0.00")).fetch("manual_allocation")
-api.call("post", "/api/v1/admin/payroll_items/#{items.last}/void", 200,
-  { reason: "Synthetic undelivered check cancelled before any payment" })
+# Retiring only the check keeps earned payroll and source hours reserved.
+# This isolated one-item run must be financially voided before releasing its
+# undelivered manual reservation; the two issued runs remain untouched.
+voided_period = api.call("post", "/api/v1/admin/pay_periods/#{periods.last}/void", 200,
+  { unpaid_acknowledgement: true, reason: "Synthetic undelivered manual payroll cancelled before any payment" })
+assert.call(voided_period.dig("pay_period", "correction_status") == "voided",
+  "undelivered manual payroll obligation was not reversed")
 checkpoint.call("payroll", "sync", "MANUAL_ALLOCATION_ID" => void_allocation.fetch("id").to_s)
 remote_void = checkpoint.call("aire", "remote_state").fetch("allocations").last
 assert.call(remote_void["status"] == "voided" && remote_void["payment_reference"].nil? && remote_void["events"] == %w[committed voided],

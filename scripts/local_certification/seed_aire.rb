@@ -140,12 +140,6 @@ fixture = ApplicationRecord.transaction do
       entry_method: "clock", clock_source: "kiosk", approval_status: nil,
       description: "Synthetic six-and-a-half-hour weekly overtime context")
   end
-  manual_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
-    work_date: manual_date, start_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 8),
-    end_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 18),
-    entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
-    approved_at: cutoff_at - 2.days, overtime_status: "approved", overtime_approved_by: manual_admin,
-    overtime_approved_at: cutoff_at - 2.days, description: "Synthetic unbatched manual reconciliation source")
   # The two regular sources below add six hours to the 26-hour context.
   # Keep every source inside even February’s short second half.
   void_date = manual_week_start
@@ -160,6 +154,15 @@ fixture = ApplicationRecord.transaction do
     end_time: guam.local(browser_date.year, browser_date.month, browser_date.day, 18, 30),
     entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
     approved_at: cutoff_at - 2.days, description: "Untouched approved four-hour source reserved for browser acceptance")
+  # Approve the ten-hour source only after its complete 32-hour context
+  # exists. Adding earlier time afterward correctly invalidates OT approval
+  # when its reviewed split changes from 10 REG to 8 REG / 2 OT.
+  manual_entry = TimeEntry.create!(**entry_attributes, **timestamps, user: manual_employee,
+    work_date: manual_date, start_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 8),
+    end_time: guam.local(manual_date.year, manual_date.month, manual_date.day, 18),
+    entry_method: "manual", clock_source: "admin", approval_status: "approved", approved_by: manual_admin,
+    approved_at: cutoff_at - 2.days, overtime_status: "approved", overtime_approved_by: manual_admin,
+    overtime_approved_at: cutoff_at - 2.days, description: "Synthetic unbatched manual reconciliation source")
   manual_grant = PayrollIntegrationGrant.issue!(user: manual_admin, capabilities: ["settlement_case_management"])
 
   {
