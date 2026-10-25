@@ -344,8 +344,16 @@ jobs:
           tags: |
             ghcr.io/shimizu-technology/${{ matrix.image }}:${{ github.sha }}
             ghcr.io/shimizu-technology/${{ matrix.image }}:staging-v2
+      # A contained staging web build needs its exact origins and snapshot
+      # time. Until those repository variables exist, skip only the web image
+      # instead of failing the run; the API image still publishes.
+      - name: Skip unconfigured staging web image
+        if: matrix.image == 'cornerstone-payroll-web' && (vars.STAGING_API_URL == '' || vars.STAGING_SNAPSHOT_AT == '' || vars.STAGING_AIRE_FRONTEND_ORIGIN == '')
+        run: >-
+          echo "::notice title=Staging web image skipped::Set repository variables STAGING_API_URL, STAGING_SNAPSHOT_AT, STAGING_AIRE_FRONTEND_ORIGIN
+          and secret STAGING_CLERK_PUBLISHABLE_KEY to publish a contained staging web image."
       - name: Build and publish web image
-        if: matrix.image == 'cornerstone-payroll-web'
+        if: matrix.image == 'cornerstone-payroll-web' && vars.STAGING_API_URL != '' && vars.STAGING_SNAPSHOT_AT != '' && vars.STAGING_AIRE_FRONTEND_ORIGIN != ''
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
