@@ -286,6 +286,10 @@ module Api
         end
 
         def pay_stub_key(item)
+          StagingStoragePolicy.new_key(production_pay_stub_key(item))
+        end
+
+        def production_pay_stub_key(item)
           year = item.pay_period.pay_date.year
           pay_date = item.pay_period.pay_date.strftime("%Y%m%d")
           "paystubs/#{year}/company_#{item.company_id}/employee_#{item.employee_id}/payroll_item_#{item.id}_#{pay_date}.pdf"
@@ -301,7 +305,7 @@ module Api
           return nil unless r2_configured?
 
           storage ||= R2StorageService.new
-          [ pay_stub_key(item), legacy_pay_stub_key(item) ].uniq.find do |key|
+          [ pay_stub_key(item), production_pay_stub_key(item), legacy_pay_stub_key(item) ].uniq.find do |key|
             storage.exists?(key)
           end
         rescue StandardError

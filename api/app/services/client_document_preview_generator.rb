@@ -123,7 +123,7 @@ class ClientDocumentPreviewGenerator
 
   def build_preview_key(original_filename)
     base_name = File.basename(original_filename.to_s, ".*").gsub(/[^A-Za-z0-9.\-_]/, "_")
-    "client_documents/company_#{document.company_id}/previews/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{base_name}.pdf"
+    StagingStoragePolicy.new_key("client_documents/company_#{document.company_id}/previews/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{base_name}.pdf")
   end
 
   def libreoffice_binary

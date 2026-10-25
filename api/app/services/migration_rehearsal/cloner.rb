@@ -318,7 +318,7 @@ module MigrationRehearsal
     end
 
     def storage_prefix
-      @storage_prefix ||= "historical-payroll/company-#{company.id}/migration-rehearsal/batch-#{source_batch.id}"
+      @storage_prefix ||= StagingStoragePolicy.new_key("historical-payroll/company-#{company.id}/migration-rehearsal/batch-#{source_batch.id}")
     end
 
     def cleanup_existing_uploads!

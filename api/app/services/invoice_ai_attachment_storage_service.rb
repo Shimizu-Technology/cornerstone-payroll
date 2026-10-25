@@ -18,7 +18,7 @@ class InvoiceAiAttachmentStorageService
   def upload
     raise ArgumentError, "Unsupported attachment type" unless ALLOWED_CONTENT_TYPES.include?(detected_content_type)
 
-    key = "invoice-assistant/organization-#{@organization_id}/session-#{@session_id}/#{SecureRandom.uuid}#{extension}"
+    key = StagingStoragePolicy.new_key("invoice-assistant/organization-#{@organization_id}/session-#{@session_id}/#{SecureRandom.uuid}#{extension}")
     R2StorageService.new.upload(key, @file.tempfile, content_type: detected_content_type)
     key
   end
