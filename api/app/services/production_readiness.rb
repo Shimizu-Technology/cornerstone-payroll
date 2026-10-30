@@ -45,9 +45,9 @@ class ProductionReadiness
       {
         generated_at: generated_at.iso8601,
         revision: revision,
-        connected_payroll: @connected_payroll,
         passed: passed?,
-        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } }
+        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } },
+        connected_payroll: @connected_payroll
       }
     end
   end

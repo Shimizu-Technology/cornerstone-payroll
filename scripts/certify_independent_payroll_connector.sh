@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export CONNECTED_PAYROLL_MODE=enabled
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PAYROLL_REPO_PATH="${PAYROLL_REPO_PATH:-$ROOT_DIR}"
@@ -72,7 +73,7 @@ createdb "$CERT_DATABASE"
 (
   cd "$PAYROLL_REPO_PATH/api"
   export RAILS_ENV=test E2E_TEST_MODE=true AUTH_ENABLED=false
-  export CONNECTOR_CERTIFICATION=disposable_test_only TEST_DATABASE_URL="postgresql:///$CERT_DATABASE"
+  export CONNECTOR_CERTIFICATION=disposable_test_only TEST_DATABASE_URL="postgresql://127.0.0.1/$CERT_DATABASE"
   export NEUTRAL_PRODUCER_CONFIG="$TEMP_DIR/config.json" NEUTRAL_PRODUCER_URL="http://localhost:$PRODUCER_PORT"
   export NEUTRAL_CERTIFICATION_RESULT="$RESULT_PATH"
   bundle exec rails db:schema:load db:seed >"$TEMP_DIR/database.log" 2>&1 || { cat "$TEMP_DIR/database.log" >&2; exit 1; }
