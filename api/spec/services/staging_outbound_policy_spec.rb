@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe StagingOutboundPolicy do
-  let(:env) { { "DEPLOYMENT_ENV" => "staging", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test", "STAGING_TESTER_BINDINGS" => '[{"user_id":1,"email":"leon@example.test","clerk_subject":"user_leon"},{"user_id":2,"email":"chels@example.test","clerk_subject":"user_chels"}]' } }
+  let(:env) { { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test", "STAGING_TESTER_BINDINGS" => '[{"user_id":1,"email":"leon@example.test","clerk_subject":"user_leon"},{"user_id":2,"email":"chels@example.test","clerk_subject":"user_chels"}]' } }
 
   it "denies unknown, AI, tax, geocoding and production integration destinations" do
     %w[https://openrouter.ai/api/v1/chat/completions https://nominatim.openstreetmap.org/search https://maps.googleapis.com/maps/api/place https://tax.example.test/ingest https://aire.example.test/api].each do |url|

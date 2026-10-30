@@ -17,14 +17,14 @@ RSpec.describe "staging identity and deployment selection" do
   end
 
   it "requires explicit unique local-ID, email and subject triples" do
-    env = { "DEPLOYMENT_ENV" => "staging", "STAGING_TESTER_BINDINGS" => '{"leon@example.test":"user_unrelated"}' }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_TESTER_BINDINGS" => '{"leon@example.test":"user_unrelated"}' }
     expect { StagingOutboundPolicy.bindings(env) }.to raise_error(StagingOutboundPolicy::ConfigurationError)
   end
 
   it "requires verified provider primary email and refuses another local subject owner before writes" do
     user = create(:user, email: "leon@example.test")
     original_subject = user.clerk_id
-    env = { "DEPLOYMENT_ENV" => "staging", "STAGING_TESTER_BINDINGS" => [ { user_id: user.id, email: user.email, clerk_subject: "user_newstaging" } ].to_json, "CLERK_SECRET_KEY" => "sk_test_synthetic" }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_TESTER_BINDINGS" => [ { user_id: user.id, email: user.email, clerk_subject: "user_newstaging" } ].to_json, "CLERK_SECRET_KEY" => "sk_test_synthetic" }
     allow(HTTParty).to receive(:get).and_return(double(success?: true, parsed_response: { "id" => "user_newstaging", "primary_email_address_id" => "email_1", "email_addresses" => [ { "id" => "email_1", "email_address" => "outsider@example.test", "verification" => { "status" => "verified" } } ] }))
     expect { StagingTesterIdentity.verify!(env: env) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /verified primary/)
     expect(user.reload.clerk_id).to eq(original_subject)
@@ -36,7 +36,7 @@ RSpec.describe "staging identity and deployment selection" do
   it "requires a verified primary address, then accepts its exact owner" do
     user = create(:user, email: "chels@example.test")
     records = [ { user_id: user.id, email: user.email, clerk_subject: "user_chelsstaging" } ]
-    env = { "DEPLOYMENT_ENV" => "staging", "STAGING_TESTER_BINDINGS" => records.to_json, "CLERK_SECRET_KEY" => "sk_test_synthetic" }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_TESTER_BINDINGS" => records.to_json, "CLERK_SECRET_KEY" => "sk_test_synthetic" }
     data = { "id" => "user_chelsstaging", "primary_email_address_id" => "primary", "email_addresses" => [ { "id" => "primary", "email_address" => user.email, "verification" => { "status" => "unverified" } } ] }
     allow(HTTParty).to receive(:get).and_return(double(success?: true, parsed_response: data))
     expect { StagingTesterIdentity.verify!(env: env) }.to raise_error(StagingOutboundPolicy::ConfigurationError, /verified primary/)
@@ -47,7 +47,7 @@ RSpec.describe "staging identity and deployment selection" do
   end
 
   it "accepts only an exact bound local user at runtime" do
-    env = { "DEPLOYMENT_ENV" => "staging", "STAGING_TESTER_BINDINGS" => [ { user_id: 123, email: "leon@example.test", clerk_subject: "user_leon" } ].to_json }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_TESTER_BINDINGS" => [ { user_id: 123, email: "leon@example.test", clerk_subject: "user_leon" } ].to_json }
     expect(StagingOutboundPolicy.tester?(user_id: 123, email: "leon@example.test", id: "user_leon", env: env)).to eq(true)
     expect(StagingOutboundPolicy.tester?(user_id: 456, email: "leon@example.test", id: "user_leon", env: env)).to eq(false)
   end

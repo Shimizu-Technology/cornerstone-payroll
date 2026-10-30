@@ -606,6 +606,7 @@ module TimeTracking
 
     def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false,
                      historical_manual_issue: false)
+      ConnectedPayrollMode.require_enabled!
       StagingOutboundPolicy.integration!(uri.to_s)
       request = case method
       when :get then Net::HTTP::Get.new(uri)

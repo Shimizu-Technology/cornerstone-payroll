@@ -31,6 +31,7 @@ class AirePayrollCalendarPublication < ApplicationRecord
   }
 
   def self.dispatch_due!(now: Time.current, enqueue: nil)
+    return unless ConnectedPayrollMode.enabled?
     StagingQuarantine.excluding(due_for_delivery(now)).order(:created_at, :id).limit(BATCH_SIZE).pluck(:id).filter_map do |id|
       begin
         id if dispatch_one!(id, now: now, enqueue: enqueue)
@@ -42,6 +43,7 @@ class AirePayrollCalendarPublication < ApplicationRecord
   end
 
   def self.dispatch_one!(id, now: Time.current, enqueue: nil)
+    return unless ConnectedPayrollMode.enabled?
     return false if StagingQuarantine.suppressed?(table_name, id)
     enqueue ||= ->(publication_id) { AirePayrollCalendarDeliveryJob.perform_later(publication_id) }
     reservation = reserve_for_enqueue(id, now)

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class AireManualAllocationSyncJob < ApplicationJob
+class AireManualAllocationSyncJob < ConnectedPayrollJob
   queue_as :default
 
   retry_on TimeTracking::Client::Error, wait: :polynomially_longer, attempts: 8
