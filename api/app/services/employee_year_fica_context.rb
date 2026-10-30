@@ -66,7 +66,7 @@ class EmployeeYearFicaContext
       .order(:employee_id, :id).to_a.group_by(&:employee_id)
     balances = opening_balances(employee_ids: ids, year: year, company: company).to_a.group_by(&:employee_id)
     employees.to_h do |employee|
-      [ employee.id, new(employee: employee, company: company, year: year, rows: rows.fetch(employee.id, []),
+      [ employee.id, new(employee: employee, company: company, year: year, excluding_pay_period_id: excluding_pay_period_id, rows: rows.fetch(employee.id, []),
         opening_balance: balances[employee.id]&.first) ]
     end
   end
@@ -81,7 +81,16 @@ class EmployeeYearFicaContext
   end
 
   def snapshot
+    return @below_threshold_snapshot if @below_threshold_snapshot
+
     { "version" => VERSION, "year" => year, "employee_id" => employee.id, "fingerprint" => fingerprint }
+  end
+
+  def snapshot_for(item, lock_rules: false)
+    stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
+    return snapshot unless stored.is_a?(Hash) && stored["mode"] == BelowThresholdFicaContext::MODE
+
+    below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules)
   end
 
   def fingerprint
@@ -98,7 +107,28 @@ class EmployeeYearFicaContext
   # Monetary amounts use decimal arithmetic and round half up at the stored
   # paycheck component boundary, matching the existing tax calculators.
   # Allocate wages before tips within this check, preserving committed buckets.
-  def increment(wages_delta:, tips_delta:, rules:, correcting_bases: nil)
+  def increment(wages_delta:, tips_delta:, rules:, correcting_bases: nil, current_item: nil)
+    @below_threshold_snapshot = nil
+    ordinary = begin
+      recorded_increment(wages_delta: wages_delta, tips_delta: tips_delta, rules: rules, correcting_bases: correcting_bases)
+    rescue UnreconciledLedgerError
+      raise unless current_item && correcting_bases.nil? && below_threshold_context.applicable?
+
+      return below_threshold_increment(current_item, rules)
+    end
+    # An already verified annual calculation remains authoritative. Where the
+    # independent bound is also provable, retain the unresolved review notice.
+    if current_item && correcting_bases.nil? && below_threshold_context.applicable?
+      begin
+        return below_threshold_increment(current_item, rules)
+      rescue UnreconciledLedgerError
+        # No new relaxation is needed; preserve the established annual path.
+      end
+    end
+    ordinary
+  end
+
+  def recorded_increment(wages_delta:, tips_delta:, rules:, correcting_bases: nil)
     delta = wages_delta.to_d.round(2)
     tips_delta = tips_delta.to_d.round(2)
     cap = rules.fetch("social_security_wage_base").to_d
@@ -147,6 +177,19 @@ class EmployeeYearFicaContext
   private
 
   attr_reader :employee, :year, :excluding_pay_period_id, :company
+
+  def below_threshold_increment(item, rules)
+    @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true)
+    current = @below_threshold_snapshot.fetch("current_wages")
+    FicaBasisEvidence.components({ social_security_taxable_wages: current.fetch("ss_wages").to_d,
+      social_security_taxable_tips: current.fetch("ss_tips").to_d, medicare_taxable_wages: current.fetch("medicare").to_d,
+      additional_medicare_taxable_wages: 0.to_d }, rules)
+  end
+
+  def below_threshold_context
+    BelowThresholdFicaContext.new(employee: employee, company: company, year: year,
+      excluding_pay_period_id: excluding_pay_period_id)
+  end
 
   def rows
     @rows ||= self.class.ledger_rows(self.class.reportable_items(employee: employee, company: company, year: year,

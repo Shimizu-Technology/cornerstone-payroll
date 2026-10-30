@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_25_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_31_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1078,6 +1078,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_25_010000) do
   end
 
   add_check_constraint "employee_work_profiles", "pay_basis::text <> 'salary'::text OR overtime_status::text <> 'nonexempt'::text OR salary_covers_weekly_hours IS NOT NULL AND salary_coverage_reason IS NOT NULL", name: "employee_work_profiles_nonexempt_basis_check", validate: false
+
+  create_table "employee_year_fica_source_reviews", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "external_medicare_wage_bound", precision: 15, scale: 2, null: false
+    t.decimal "external_ss_wage_bound", precision: 15, scale: 2, null: false
+    t.string "review_reference", null: false
+    t.integer "tax_year", null: false
+    t.date "through_pay_date", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_employee_year_fica_source_reviews_on_company_id"
+    t.index [ "created_by_id" ], name: "index_employee_year_fica_source_reviews_on_created_by_id"
+    t.index [ "employee_id", "tax_year", "id" ], name: "idx_fica_source_reviews_employee_year"
+    t.index [ "employee_id" ], name: "index_employee_year_fica_source_reviews_on_employee_id"
+    t.check_constraint "external_ss_wage_bound >= 0::numeric AND external_medicare_wage_bound >= external_ss_wage_bound AND external_medicare_wage_bound < 'Infinity'::numeric", name: "fica_source_review_bounds"
+  end
 
   create_table "employee_ytd_totals", force: :cascade do |t|
     t.decimal "bonus", precision: 14, scale: 2, default: "0.0"
@@ -4042,6 +4060,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_25_010000) do
   add_foreign_key "employee_work_profiles", "companies"
   add_foreign_key "employee_work_profiles", "employees"
   add_foreign_key "employee_work_profiles", "users", column: "confirmed_by_id"
+  add_foreign_key "employee_year_fica_source_reviews", "companies"
+  add_foreign_key "employee_year_fica_source_reviews", "employees"
+  add_foreign_key "employee_year_fica_source_reviews", "users", column: "created_by_id"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
