@@ -400,8 +400,10 @@ class Employee < ApplicationRecord
     restore_cached_ytd_ivar(:@cached_ytd_before_pay_period_id, snapshot[:before_pay_period_id])
   end
 
-  def ytd_totals_before(year:, pay_date:, pay_period_id:)
-    if cached_ytd_matches?(year, pay_date, pay_period_id) &&
+  def ytd_totals_before(year:, pay_date:, pay_period_id:, for_reporting: false)
+    # Display reads must neither consume nor populate the strict calculation
+    # cache, including values restored around a calculation preview.
+    if !for_reporting && cached_ytd_matches?(year, pay_date, pay_period_id) &&
        defined?(@cached_ytd_before_totals) && @cached_ytd_before_totals.present?
       return @cached_ytd_before_totals.dup
     end
@@ -410,7 +412,8 @@ class Employee < ApplicationRecord
       year: year,
       pay_date: pay_date,
       pay_period_id: pay_period_id,
-      include_current_period: false
+      include_current_period: false,
+      for_reporting: for_reporting
     )
   end
 
@@ -422,7 +425,8 @@ class Employee < ApplicationRecord
       year: year,
       pay_date: pay_date,
       pay_period_id: pay_period_id,
-      include_current_period: true
+      include_current_period: true,
+      for_reporting: true
     )
   end
 
@@ -715,7 +719,7 @@ class Employee < ApplicationRecord
     end
   end
 
-  def ytd_aggregate_totals(year:, pay_date:, pay_period_id:, include_current_period:)
+  def ytd_aggregate_totals(year:, pay_date:, pay_period_id:, include_current_period:, for_reporting:)
     scope = payroll_items
       .joins(:pay_period)
       .financially_reportable
@@ -731,7 +735,7 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    ytd_totals_for_scope(scope, tax_year: year, for_reporting: include_current_period)
+    ytd_totals_for_scope(scope, tax_year: year, for_reporting: for_reporting)
   end
 
   def historical_ytd_value(year, field)

@@ -4,6 +4,10 @@ module Api
   module V1
     module Admin
       class PayStubsController < BaseController
+        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
         before_action :set_payroll_item, only: [ :show, :generate, :download ]
         before_action :require_statement_activity, only: [ :generate, :download ]
 
