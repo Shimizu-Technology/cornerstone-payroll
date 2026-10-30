@@ -56,13 +56,17 @@ The new path only relaxes an existing annual-context hold. Already verified annu
 An empty import table cannot establish that external or predecessor wages are zero. Before using the new path, an authorized payroll administrator must review **all same-employer wage sources**, including predecessor obligations, source systems not imported here, and any missing/deleted historical source records. Record conservative upper bounds for all wages outside the enumerated local candidates/opening balances, through at least the intended payday. Use explicit zero only when the retained evidence establishes no such wages:
 
 ```sh
-RAILS_ENV=production COMPANY_ID=123 EMPLOYEE_ID=789 ACTOR_ID=456 TAX_YEAR=2026 \
-  THROUGH_PAY_DATE=2026-11-15 EXTERNAL_SS_WAGE_BOUND=0 EXTERNAL_MEDICARE_WAGE_BOUND=0 \
+RAILS_ENV=production COMPANY_ID=123 EMPLOYEE_IDS=789,790,791 ACTOR_ID=456 TAX_YEAR=2026 \
+  THROUGH_PAY_DATE=2026-12-31 EXTERNAL_SS_WAGE_BOUND=0 EXTERNAL_MEDICARE_WAGE_BOUND=0 \
   REVIEW_REFERENCE='Retained source-completeness workpaper covering all employer/predecessor wages' \
   bin/rake payroll:fica_legacy:review_sources
 ```
 
-This command is an attributable source review, **not** a historical tax/basis attestation. It appends an `EmployeeYearFicaSourceReview` under the Company financial lock. Later reviews supersede earlier ones by ID; expired or absent coverage leaves existing holds in place. Re-review when outside wages change or coverage expires. No production review was recorded by this implementation.
+The command defaults to a **dry-run** and prints each selected employee, the proposed review and their current employee-year inventory. `DRY_RUN=1` explicitly selects the same preview. Add `APPLY=1` to write; combining it with `DRY_RUN=1` is rejected. Use either `EMPLOYEE_ID` for one employee or comma-separated `EMPLOYEE_IDS` for a batch, all within `COMPANY_ID`. All employees receive the same explicit bounds, reference and through date. The entire batch is validated and recorded in one transaction under the Company lock; one invalid or out-of-company employee means no reviews are written.
+
+`THROUGH_PAY_DATE` may be the tax year's last day, such as `2026-12-31`, so one completeness review covers the rest of the year. The reviewed bounds must cover that period. **Redo the review if outside/predecessor wages change**, even before the through date; the date does not make changed bounds valid.
+
+An applied command is an attributable source review, **not** a historical tax/basis attestation. It appends an `EmployeeYearFicaSourceReview` under the Company financial lock. Later reviews supersede earlier ones by ID; expired or absent coverage leaves existing holds in place. Re-review when outside wages change or coverage expires. No production review was recorded by this implementation.
 
 ### Eligibility and saved evidence
 
@@ -76,4 +80,4 @@ The versioned snapshot binds the complete enumerated candidate/period/void/dispo
 
 Inventory remains read-only. Its employee-year `calculable_below_thresholds` status and conservative history bounds describe capacity **before adding the next check**; they do not clear a paycheck of arbitrary size. Rows with unresolved history remain visible, including employee-years with only excluded candidates. `recover --apply` never creates old basis proofs for this status. Accounting and filing review must proceed separately.
 
-Deployment adds one small, reversible table with no financial backfill. Existing calculations and tax data are untouched. Deploy the migration before calculation code; gather source-completeness reviews and recalculate affected unfinished runs. Historical holds without the required evidence remain held.
+Deployment adds one small, reversible table and a reversible append-only guard migration with no financial backfill. Existing calculations and tax data are untouched. Deploy the migration before calculation code; gather source-completeness reviews and recalculate affected unfinished runs. Historical holds without the required evidence remain held.

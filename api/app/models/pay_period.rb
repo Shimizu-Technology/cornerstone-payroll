@@ -390,7 +390,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def annual_fica_review_note
-    if payroll_items.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
+    if payroll_items.financially_reportable.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
       BelowThresholdFicaContext::NOTE
     end
   end
