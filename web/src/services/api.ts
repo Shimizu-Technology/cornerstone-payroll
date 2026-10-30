@@ -5824,6 +5824,7 @@ export interface PayrollHistoryRecord {
   test_workspace_role?: 'baseline' | 'practice' | null;
   notes?: string | null;
   compliance_warnings?: string[];
+  annual_fica_review_note?: string | null;
   employee_count: number;
   total_gross: number;
   total_net: number;

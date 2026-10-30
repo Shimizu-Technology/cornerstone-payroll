@@ -45,6 +45,8 @@ module PayrollReview
       end
 
       review_package
+    rescue EmployeeYearFicaContext::UnreconciledLedgerError
+      raise Error, EmployeeYearFicaContext::STALE_MESSAGE
     end
 
     def approve!(approver:, recorded_by:, method:, acknowledgement:, notes: nil, evidence_reference: nil)
@@ -95,6 +97,8 @@ module PayrollReview
       return true if ActiveSupport::SecurityUtils.secure_compare(review_package.calculation_checksum, current_checksum)
 
       raise Error, "Payroll changed after client review revision #{review_package.revision}. Recalculate and request approval for the new revision."
+    rescue EmployeeYearFicaContext::UnreconciledLedgerError
+      raise Error, EmployeeYearFicaContext::STALE_MESSAGE
     end
 
     private

@@ -656,3 +656,18 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS time_tracking_lock_rollout_audit ON time_tracking_sources;
 CREATE TRIGGER time_tracking_lock_rollout_audit AFTER INSERT ON time_tracking_sources
 FOR EACH ROW EXECUTE FUNCTION audit_time_tracking_lock_rollout();
+
+-- 20261031100000_protect_employee_year_fica_source_reviews.rb
+CREATE OR REPLACE FUNCTION prevent_fica_source_review_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'employee_year_fica_source_reviews are append-only';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS fica_source_reviews_append_only ON employee_year_fica_source_reviews;
+CREATE TRIGGER fica_source_reviews_append_only
+BEFORE UPDATE OR DELETE ON employee_year_fica_source_reviews
+FOR EACH ROW EXECUTE FUNCTION prevent_fica_source_review_mutation();
+DROP TRIGGER IF EXISTS fica_source_reviews_no_truncate ON employee_year_fica_source_reviews;
+CREATE TRIGGER fica_source_reviews_no_truncate BEFORE TRUNCATE ON employee_year_fica_source_reviews
+FOR EACH STATEMENT EXECUTE FUNCTION prevent_fica_source_review_mutation();
