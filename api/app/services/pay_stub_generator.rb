@@ -146,8 +146,20 @@ class PayStubGenerator
     # net pay but are intentionally excluded from gross pay.
     item_earnings = payroll_item.payroll_item_earnings.reject { |earning| earning.category.to_s == "non_taxable" }
     correction_earnings = SignedCorrectionEarnings.call(payroll_item)
+    # Calculators materialize each taxable field as an `other` earning. Prefer
+    # the field row below, which also carries its field-specific YTD. Consume
+    # one matching mirror per field; equal labels alone are not identity.
+    payroll_field_entries_for("taxable_addition").each do |entry|
+      next unless entry.amount.to_d.positive?
 
-    if item_earnings.any?
+      index = item_earnings.rindex do |earning|
+        earning.category == "other" && earning.label.to_s.strip.casecmp?(entry.label.to_s.strip) &&
+          earning.amount.to_d.round(2) == entry.amount.to_d.round(2)
+      end
+      item_earnings.delete_at(index) if index
+    end
+
+    if payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
       item_earnings.each do |earning|
         earnings_data << [
           earning.label.presence || earning.category.to_s.titleize,
@@ -164,7 +176,8 @@ class PayStubGenerator
           earning.rate.nil? ? "—" : format_currency(earning.rate),
           format_currency(earning.amount), "—" ]
       end
-    elsif payroll_item.hourly?
+    elsif payroll_item.hourly? || (payroll_item.employee.contractor_hourly? &&
+        payroll_item.salary_override.to_d <= 0 && payroll_item.total_hours.to_d.positive?)
       # Regular pay
       if payroll_item.hours_worked.to_f > 0
         earnings_data << [
@@ -209,13 +222,14 @@ class PayStubGenerator
         ]
       end
     else
-      # Salary — subtract bonus, tips, and taxable adjustment earnings so they appear as separate lines
+      # Subtract separately displayed taxable additions from the legacy base pay.
       ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
       earnings_data << [
-        "Salary",
+        payroll_item.employee.contractor? ? "Contract Fee" : "Salary",
         "—",
-        "#{format_currency(payroll_item.pay_rate)}/yr",
-        format_currency(payroll_item.gross_pay - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total),
+        payroll_item.employee.contractor? ? format_currency(payroll_item.pay_rate) : "#{format_currency(payroll_item.pay_rate)}/yr",
+        format_currency(payroll_item.gross_pay - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f -
+          payroll_item.service_charge_wages.to_f - ce_total - payroll_item.taxable_payroll_field_entries_total.to_f),
         "—"
       ]
     end
@@ -234,6 +248,10 @@ class PayStubGenerator
       # Tips
       if payroll_item.reported_tips.to_f > 0 && !existing_earning_categories.include?("tips")
         earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
+      end
+
+      if payroll_item.service_charge_wages.to_f.nonzero? && !existing_earning_categories.include?("service_charge")
+        earnings_data << [ "Service Charges", "—", "—", format_currency(payroll_item.service_charge_wages), "—" ]
       end
 
       # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
