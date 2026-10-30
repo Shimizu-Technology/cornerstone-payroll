@@ -77,6 +77,28 @@ RSpec.describe QuarterlyComplianceOfficialForms::W1 do
     }
   end
 
+  it "places the balance due inside Text1423 and leaves credit and receipts blank" do
+    source = PDF::Reader.new(described_class::TEMPLATE_PATH.to_s)
+    widgets = source.objects[source.pages.first.attributes.fetch(:Annots)].map { |ref| source.objects[ref] }
+    named = lambda do |widget|
+      widget[:T] || source.objects[widget.fetch(:Parent)][:T]
+    end
+    balance_widget = widgets.find { |widget| named.call(widget) == "Text1423" }
+    page = PDF::Reader.new(StringIO.new(described_class.new(report: report,
+      fields: { total_guam_withholding: 1234.56 }).generate)).pages.first
+    text_at = lambda do |rect|
+      left, bottom, right, top = rect
+      page.runs.select { |run| run.x.between?(left, right) && run.y.between?(bottom, top) }
+        .sort_by(&:x).map(&:text).join
+    end
+
+    expect(described_class::TOTALS.fetch(:line5)).to eq(balance_widget.fetch(:Rect))
+    expect(text_at.call(balance_widget.fetch(:Rect))).to eq("1234.56")
+    %w[Text1420 Text1422].each do |name|
+      expect(text_at.call(widgets.find { |widget| named.call(widget) == name }.fetch(:Rect))).to eq("")
+    end
+  end
+
   describe "#generate" do
     it "derives liability months from pay dates when reviewed rows omit month" do
       report = {

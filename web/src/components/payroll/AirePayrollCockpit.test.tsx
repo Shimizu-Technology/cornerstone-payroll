@@ -363,7 +363,7 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
 
     expect(await screen.findByText('Time tracking payroll workspace')).toBeTruthy();
-    expect(screen.getByText('16.08 hrs')).toBeTruthy();
+    expect(await screen.findByText('16.08 hrs')).toBeTruthy();
     expect(screen.getAllByText('8.08 hrs').length).toBe(2);
     expect(screen.getByText('08:04 AM – 05:09 PM')).toBeTruthy();
     expect(screen.getAllByText('Mapped').length).toBeGreaterThan(0);
