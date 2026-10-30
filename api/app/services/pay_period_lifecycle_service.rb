@@ -140,10 +140,12 @@ class PayPeriodLifecycleService
     items.each do |item|
       stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
       raise InvalidTransitionError, EmployeeYearFicaContext::MISSING_MESSAGE unless stored
-      next if stored == contexts.fetch(item.employee_id).snapshot
+      next if stored == contexts.fetch(item.employee_id).snapshot_for(item, lock_rules: true)
 
       raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
     end
+  rescue EmployeeYearFicaContext::UnreconciledLedgerError
+    raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
   end
 
   def validate_source_earnings!

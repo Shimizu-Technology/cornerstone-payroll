@@ -136,7 +136,7 @@ class PayrollCalculator
     unless historical_calculation?
       taxes.merge!(annual_fica_context.increment(
         wages_delta: payroll_item.gross_pay, tips_delta: payroll_item.cash_tips_reported,
-        rules: tax_calculator.rule_snapshot
+        rules: tax_calculator.rule_snapshot, current_item: payroll_item
       ).transform_keys { |key| { social_security_tax: :social_security,
         employer_social_security_tax: :employer_social_security, medicare_tax: :medicare,
         employer_medicare_tax: :employer_medicare, additional_medicare_tax: :additional_medicare }.fetch(key, key) })
