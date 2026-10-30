@@ -90,7 +90,12 @@ class EmployeeYearFicaContext
     stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
     return snapshot unless stored.is_a?(Hash) && stored["mode"] == BelowThresholdFicaContext::MODE
 
-    below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules)
+    evidence = below_threshold_context.snapshot(current_item: item, rules: item.tax_rule_snapshot, lock_rules: lock_rules)
+    expected = below_threshold_components(evidence, item.tax_rule_snapshot)
+    unless expected.all? { |field, value| item.public_send(field) == value }
+      raise UnreconciledLedgerError, "Current FICA amounts changed; recalculate before approval or commit."
+    end
+    evidence
   end
 
   def fingerprint
@@ -180,7 +185,11 @@ class EmployeeYearFicaContext
 
   def below_threshold_increment(item, rules)
     @below_threshold_snapshot = below_threshold_context.snapshot(current_item: item, rules: rules, lock_rules: true)
-    current = @below_threshold_snapshot.fetch("current_wages")
+    below_threshold_components(@below_threshold_snapshot, rules)
+  end
+
+  def below_threshold_components(evidence, rules)
+    current = evidence.fetch("current_wages")
     FicaBasisEvidence.components({ social_security_taxable_wages: current.fetch("ss_wages").to_d,
       social_security_taxable_tips: current.fetch("ss_tips").to_d, medicare_taxable_wages: current.fetch("medicare").to_d,
       additional_medicare_taxable_wages: 0.to_d }, rules)
