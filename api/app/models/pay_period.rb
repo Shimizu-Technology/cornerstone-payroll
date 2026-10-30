@@ -389,11 +389,16 @@ class PayPeriod < ApplicationRecord
     company_workweek || CompanyWorkweek.for_date(company_id, start_date)
   end
 
+  def annual_fica_review_note
+    if payroll_items.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
+      BelowThresholdFicaContext::NOTE
+    end
+  end
+
   def compliance_warnings
     warnings = []
-    if payroll_items.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
-      warnings << BelowThresholdFicaContext::NOTE
-    end
+    note = annual_fica_review_note
+    warnings << note if note
     workweek = resolved_company_workweek
     if workweek.nil?
       warnings << "No legal overtime workweek is configured for this pay period. Confirm the employer's workweek before relying on overtime results."

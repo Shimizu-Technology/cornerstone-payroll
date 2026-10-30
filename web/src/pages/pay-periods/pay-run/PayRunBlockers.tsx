@@ -21,12 +21,7 @@ export function PayRunBlockers({
   setImportModalOpen,
   setPayrollIntakeImportOpen
 }: PayRunSectionProps<'blockers'> & { part?: 'all' | 'hours' | 'approval' }) {
-  const ficaNote = payPeriod.payroll_items?.map((item) => {
-    const context = item.tax_rule_snapshot?.annual_fica_context;
-    if (!context || typeof context !== 'object' || Array.isArray(context)) return null;
-    const review = context as Record<string, unknown>;
-    return review.history_review_open === true && typeof review.note === 'string' ? review.note : null;
-  }).find((note) => note != null);
+  const ficaNote = payPeriod.annual_fica_review_note;
   return (<>
 {part !== 'approval' && hasPendingCalculationChanges && (
           <Alert>
