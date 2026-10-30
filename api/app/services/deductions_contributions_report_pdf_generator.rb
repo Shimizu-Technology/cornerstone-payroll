@@ -24,6 +24,10 @@ class DeductionsContributionsReportPdfGenerator
   def generate
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 36, 46, 36 ])
     render_header(pdf)
+    data.review_warnings.map { |warning| warning[:message] }.uniq.each do |message|
+      pdf.text "Review required: #{message}", size: 10
+      pdf.move_down 8
+    end
 
     if data.items.empty?
       pdf.text "No payroll items found.", style: :italic, color: MUTED

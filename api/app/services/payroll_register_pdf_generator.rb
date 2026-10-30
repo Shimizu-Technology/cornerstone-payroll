@@ -51,6 +51,10 @@ class PayrollRegisterPdfGenerator
   def render_document(pdf)
     render_header(pdf)
     render_pay_period_block(pdf)
+    Array(report[:review_warnings]).map { |warning| warning[:message] }.uniq.each do |message|
+      pdf.text "Review required: #{message}", size: 10
+      pdf.move_down 8
+    end
     render_summary_block(pdf)
     render_employee_table(pdf)
     render_payroll_adjustment_matrix(pdf)
