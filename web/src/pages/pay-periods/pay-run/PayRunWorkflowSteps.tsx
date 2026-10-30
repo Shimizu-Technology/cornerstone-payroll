@@ -5,7 +5,7 @@ import type { PayRunSections } from './usePayRunController';
 import { payRunSteps } from './payRunWorkflow';
 import { PayRunStepAction } from './PayRunProcessingActions';
 import { PayRunSourceCheckpoint } from './PayRunSourceCheckpoint';
-import { PayRunBlockers } from './PayRunBlockers';
+import { FicaHistoryReviewNotice, PayRunBlockers } from './PayRunBlockers';
 import { PayRunFeedback } from './PayRunFeedback';
 import { PayRunLoanInputs } from './PayRunLoanInputs';
 import { PayRunRoster } from './PayRunRoster';
@@ -36,6 +36,7 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
   const hasFeedback = Boolean(sections.feedback.error || sections.feedback.calculationNotice || sections.feedback.calendarRefreshError || sections.feedback.worksheetRefreshWarning || sections.feedback.savedImportReloadRequired || sections.feedback.calculationFailures.length);
   const committedSummary = state.committed ? `Committed${committedAt ? ` ${formatGuamDateTime(committedAt)}` : ''}${sections.metadata.processedBy ? ` by ${sections.metadata.processedBy}` : ''}` : state.commitReason || 'Ready to commit the approved payroll';
   return <div className="space-y-3" aria-label="Payroll steps">
+    <FicaHistoryReviewNotice note={payPeriod.annual_fica_review_note} />
 
     <Step id="payroll-hours" title="Hours" number={1} current={state.current === 'hours'} summary={payPeriod.status === 'draft' ? state.hoursReason : `${hours.toFixed(2)} h saved${held ? ` · ${held} held` : ''} · View source and inputs`} savedStatus={`${payPeriod.id}:${payPeriod.status}`}>
       <PayRunStepAction {...sections.processing} step="hours" />
