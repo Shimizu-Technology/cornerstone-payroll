@@ -311,4 +311,13 @@ RSpec.describe BelowThresholdFicaContext do
     item.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Synthetic reversal for disclosure regression")
     expect(item.pay_period.annual_fica_review_note).to be_nil
   end
+  it "names source-review payday coverage alongside inventory wage-bound capacity" do
+    history(voided: true)
+    history
+    source_review(through: "2026-02-01")
+    result = inventory.fetch(:employee_years).first
+    expect(result[:status]).to eq("calculable_below_thresholds")
+    expect(result[:rows].map { |row| row[:reason] }).to include(a_string_including("pay date is covered by the latest source review"))
+    expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /source review/)
+  end
 end

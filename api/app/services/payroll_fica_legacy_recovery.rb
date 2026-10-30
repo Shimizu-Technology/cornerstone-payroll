@@ -128,7 +128,7 @@ class PayrollFicaLegacyRecovery
         reports.each do |report|
           if report[:status] == "held"
             report[:status] = "calculable_below_thresholds"
-            report[:reason] = "Current ordinary checks may calculate only while their added wages keep both bounds within limits; history review remains open"
+            report[:reason] = "Current ordinary checks may calculate only while their added wages keep both bounds within limits and their pay date is covered by the latest source review; history review remains open"
           end
         end
         # Capacity at zero new wages, not clearance for a check of any size.

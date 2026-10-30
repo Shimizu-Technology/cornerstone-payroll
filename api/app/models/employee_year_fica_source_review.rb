@@ -33,7 +33,8 @@ class EmployeeYearFicaSourceReview < ApplicationRecord
     authorize_actor!(actor, company_id)
     transaction do
       Company.lock.find(company_id)
-      authorize_actor!(actor&.reload, company_id)
+      actor = User.lock.find_by(id: actor&.id)
+      authorize_actor!(actor, company_id)
       employees = employee_ids.uniq.map { |id| Employee.where(company_id: company_id).find(id) }
       raise ArgumentError, "At least one employee is required" if employees.empty?
       reviews = employees.map do |employee|
