@@ -287,6 +287,7 @@ export function TimeTrackingImportModal({
     () => sources.find((source) => source.id === sourceId) || null,
     [sources, sourceId]
   );
+  const connectedPaused = selectedSource?.connected_payroll?.enabled === false;
   const selectedSourceSupportsFinalizedBatch = supportsSourceOperation(selectedSource, 'finalized_batch_v2');
   const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
@@ -397,7 +398,7 @@ export function TimeTrackingImportModal({
     : mappedIncludedRows.length > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
 
   const handlePreview = async () => {
-    if (loading || correctionBusy) return;
+    if (loading || correctionBusy || connectedPaused) return;
     if (!selectedSource) {
       setError('Configure an active time tracking source for this client first.');
       return;
@@ -625,6 +626,7 @@ export function TimeTrackingImportModal({
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </header>
+        {connectedPaused && <p role="status" className="px-4 py-3 sm:px-8">Connected payroll is paused. You can continue manual payroll.</p>}
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
           {error && (
@@ -1157,13 +1159,13 @@ export function TimeTrackingImportModal({
           {step === 'select' && (
             <>
               <Button variant="outline" onClick={closeModal}>Cancel</Button>
-              <Button onClick={handlePreview} disabled={loading || correctionBusy || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
+              <Button onClick={handlePreview} disabled={connectedPaused || loading || correctionBusy || !sourceId || sources.length === 0}>{loading ? 'Retrieving…' : selectedSourceSupportsFinalizedBatch ? 'Retrieve Finalized Batch' : 'Fetch Hours'}</Button>
             </>
           )}
           {step === 'review' && (
             <>
               <Button variant="outline" disabled={loading || correctionBusy} onClick={() => { if (!loading && !correctionBusy) { requestGenerationRef.current += 1; setCorrection(null); setCorrectionReason(''); setCorrectionAcknowledged(false); setStep('select'); } }}>Back</Button>
-              <Button onClick={handleApply} disabled={loading || correctionBusy || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
+              <Button onClick={handleApply} disabled={connectedPaused || loading || correctionBusy || !canApply}>{loading ? 'Saving…' : isHistoricalReconciliation ? 'Verify & Link time tracking Record' : isFinalizedBatch ? 'Add time tracking Hours to Payroll' : 'Apply Import'}</Button>
             </>
           )}
           {step === 'done' && <Button onClick={closeModal}>Close</Button>}

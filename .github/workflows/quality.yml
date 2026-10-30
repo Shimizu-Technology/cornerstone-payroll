@@ -71,7 +71,7 @@ jobs:
       - run: bundle exec bundler-audit check --update
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
@@ -198,7 +198,7 @@ jobs:
   staging-v2-configuration:
     name: Staging v2 configuration
     if: github.event_name == 'push' || github.base_ref == 'staging-v2' || (github.event_name == 'workflow_dispatch' && (inputs.payroll_sha != '' || inputs.aire_sha != ''))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:

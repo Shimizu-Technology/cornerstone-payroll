@@ -7,7 +7,7 @@ module StagingStorageHelpers
     endpoint = provider == :r2 ? "https://#{staging_account}.r2.cloudflarestorage.com" : "https://s3.us-east-1.amazonaws.com"
     production_endpoint = provider == :r2 ? "https://#{production_account}.r2.cloudflarestorage.com" : "https://s3.us-west-2.amazonaws.com"
     common = {
-      "DEPLOYMENT_ENV" => "staging",
+      "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled",
       "STAGING_STORAGE_BUCKET" => "synthetic-staging-bucket",
       "PRODUCTION_STORAGE_BUCKET" => "synthetic-live-bucket",
       "STAGING_STORAGE_ACCESS_KEY_SHA256" => Digest::SHA256.hexdigest("synthetic-staging-key"),
