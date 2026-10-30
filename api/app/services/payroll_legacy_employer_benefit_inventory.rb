@@ -21,6 +21,8 @@ class PayrollLegacyEmployerBenefitInventory
     groups = {}
     PayrollItem.joins(:pay_period).where(pay_periods: { status: "committed" })
       .includes(:pay_period, :company, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type).find_each do |item|
+      context = item.calculation_context_snapshot.to_h
+      next if context.key?("built_in_employer_match_mirrors") || context.key?("corrective_paycheck")
       next if PayrollReportComponentReview.qualifying_postings?(item.pay_period)
 
       fields = item.payroll_item_field_entries.select do |field|

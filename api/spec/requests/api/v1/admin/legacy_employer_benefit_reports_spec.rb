@@ -172,6 +172,7 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
 
   it "does not permit report fallback for a modern or explicitly identified conflicting mirror" do
     item.update_columns(calculation_context_snapshot: { "built_in_employer_match_mirrors" => {} })
+    expect(PayrollLegacyEmployerBenefitInventory.send(:inventory)[:company_years]).not_to include(include(company_id: company.id))
     expect { QuickbooksPayrollReportData.new(period).deduction_contribution_entries_for_item(item.reload) }
       .to raise_error(PayrollComponentMirrors::AmbiguousHistoryError)
     item.update_columns(calculation_context_snapshot: {})
