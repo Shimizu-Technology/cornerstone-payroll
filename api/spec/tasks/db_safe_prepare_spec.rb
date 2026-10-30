@@ -192,7 +192,7 @@ RSpec.describe DatabasePredeploy do
   end
 
   it "keeps its generated timeouts compatible with staging connection containment" do
-    env = { "RAILS_ENV" => "production", "DEPLOYMENT_ENV" => "staging", "DATABASE_URL" => direct_url,
+    env = { "RAILS_ENV" => "production", "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "DATABASE_URL" => direct_url,
       "MIGRATION_DATABASE_URL" => direct_url, "STAGING_DATABASE_HOSTS" => "example.us-east-2.aws.neon.tech",
       "PRODUCTION_DATABASE_HOSTS" => "production.example.test" }
     predeploy = described_class.new(env: env)

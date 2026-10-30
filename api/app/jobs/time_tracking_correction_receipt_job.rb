@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class TimeTrackingCorrectionReceiptJob < ApplicationJob
+class TimeTrackingCorrectionReceiptJob < ConnectedPayrollJob
   queue_as :default
   retry_on TimeTracking::Client::Error, wait: :polynomially_longer, attempts: 8
 

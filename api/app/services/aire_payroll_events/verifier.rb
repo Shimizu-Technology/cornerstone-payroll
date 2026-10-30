@@ -11,6 +11,7 @@ module AirePayrollEvents
     end
 
     def call
+      return { status: "paused" } unless ConnectedPayrollMode.enabled?
       return { event_id: @event_id, status: "quarantined" } if StagingQuarantine.suppressed?("aire_payroll_events", @event_id)
       event = claim!
       return event if event.is_a?(Hash)

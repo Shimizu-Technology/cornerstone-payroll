@@ -10,6 +10,7 @@ class PayPeriodTimeTrackingSummary
                         .includes(:time_tracking_source, :time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements)
                         .order(:id)
     summary = {
+      connected_payroll: ConnectedPayrollMode.capability,
       active_source_types: pay_period.company.time_tracking_sources.active.distinct.pluck(:source_type),
       linked_aire_records: imports.select(&:finalized_batch?).map do |import|
         coverage = TimeTracking::CorrectionCoverage.new(import)

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class AirePayrollEventVerificationJob < ApplicationJob
+class AirePayrollEventVerificationJob < ConnectedPayrollJob
   queue_as :default
 
   discard_on ActiveRecord::RecordNotFound

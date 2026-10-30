@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class AirePayrollCalendarsController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!, except: :show
         before_action :set_pay_period
 
         def show

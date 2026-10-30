@@ -21,7 +21,7 @@ class StagingReadiness
         check("Solid Queue worker has a recent heartbeat") { SolidQueue::Process.where(kind: "Worker", last_heartbeat_at: 5.minutes.ago..).exists? }
       ])
     end
-    ProductionReadiness::Report.new(checks: checks)
+    ProductionReadiness::Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: @env))
   end
 
   private
