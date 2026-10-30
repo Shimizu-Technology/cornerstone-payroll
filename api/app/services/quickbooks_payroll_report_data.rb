@@ -30,8 +30,8 @@ class QuickbooksPayrollReportData
     @company = pay_period.company
   end
 
-  def review_warnings
-    PayrollReportComponentReview.for_items(items)
+  def review_warnings(include_voided: false)
+    PayrollReportComponentReview.for_items(items(include_voided: include_voided))
   end
 
   def review_warnings_for_item(item)

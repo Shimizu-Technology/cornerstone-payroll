@@ -11,10 +11,18 @@ class PayrollReportComponentReview
     item.persisted? && item.pay_period.committed? && field.employer_contribution? &&
       deduction.employer_contribution? && deduction.deduction_type&.company_id == item.company_id &&
       field.metadata.to_h[PayrollComponentMirrors::IDENTITY_KEY].nil? &&
-      !context.key?("built_in_employer_match_mirrors") && !context.key?("corrective_paycheck")
+      !context.key?("built_in_employer_match_mirrors") && !context.key?("corrective_paycheck") &&
+      !qualifying_postings?(item.pay_period)
     # The resolver has already required one matching label, amount, treatment
     # and reporting group, excluded frozen independent sources, and enforced
     # one field per deduction. No current employee default is consulted.
+  end
+
+  def self.qualifying_postings?(period)
+    postings = period.payroll_liability_postings.order(:id).to_a
+    postings.any? && postings.none? do |posting|
+      PayrollLegacyEmployerComponents::INELIGIBLE_POSTING_KEYS.any? { |key| posting.metadata.to_h.key?(key) }
+    end
   end
 
   def self.for_item(item)

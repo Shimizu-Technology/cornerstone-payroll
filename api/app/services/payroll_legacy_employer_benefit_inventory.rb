@@ -21,7 +21,7 @@ class PayrollLegacyEmployerBenefitInventory
     groups = {}
     PayrollItem.joins(:pay_period).where(pay_periods: { status: "committed" })
       .includes(:pay_period, :company, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type).find_each do |item|
-      next if qualifying_postings?(item.pay_period)
+      next if PayrollReportComponentReview.qualifying_postings?(item.pay_period)
 
       fields = item.payroll_item_field_entries.select do |field|
         field.active? && field.employer_contribution? && field.amount.to_d.nonzero? &&
@@ -57,12 +57,4 @@ class PayrollLegacyEmployerBenefitInventory
       company_years: rows }
   end
   private_class_method :inventory
-
-  def self.qualifying_postings?(period)
-    postings = period.payroll_liability_postings.order(:id).to_a
-    postings.any? && postings.none? do |posting|
-      PayrollLegacyEmployerComponents::INELIGIBLE_POSTING_KEYS.any? { |key| posting.metadata.to_h.key?(key) }
-    end
-  end
-  private_class_method :qualifying_postings?
 end
