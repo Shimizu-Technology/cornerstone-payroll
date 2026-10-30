@@ -8,11 +8,16 @@ class PayrollFicaLegacyRecovery
     @year = Integer(year)
   end
 
+  def verified_year_rules
+    year_rules
+  end
+
   def inventory
     plans = employee_plans
     counts = plans.flat_map { |plan| plan[:rows] }.group_by { |row| row[:status] }.transform_values(&:size)
-    counts = %i[complete proven recoverable held].to_h { |key| [ key, counts.fetch(key.to_s, 0) ] }
+    counts = %i[complete proven recoverable held calculable_below_thresholds].to_h { |key| [ key, counts.fetch(key.to_s, 0) ] }
     data = { company_id: company.id, tax_year: year, counts: counts,
+      employee_year_counts: plans.group_by { |plan| plan[:status] }.transform_values(&:size),
       employee_years: plans.map { |plan| plan.except(:proofs) } }
     data.merge(plan_digest: FicaBasisEvidence.digest(data))
   end
@@ -59,10 +64,12 @@ class PayrollFicaLegacyRecovery
       rows = EmployeeYearFicaContext.ledger_rows(scope).order(:employee_id, :id).to_a
       balances = EmployeeYearFicaContext.opening_balances(company: company, year: year,
         employee_ids: rows.map(&:employee_id).uniq).to_a.group_by(&:employee_id)
-      historical = PayrollItem.reportable.where(company_id: company.id, employment_type: %w[hourly salary],
+      historical = PayrollItem.where(company_id: company.id, employment_type: %w[hourly salary],
         pay_period_id: PayPeriod.where(company_id: company.id, status: "committed", parallel_run: false, pay_date: year_range).select(:id))
         .pluck(:employee_id, :id, :correction_for_payroll_item_id, :gross_pay).group_by(&:first)
-      rows.group_by(&:employee_id).map do |employee_id, ledger|
+      ledgers = rows.group_by(&:employee_id)
+      (ledgers.keys | historical.keys).sort.map do |employee_id|
+        ledger = ledgers.fetch(employee_id, [])
         opening = balances[employee_id]&.first
         plan_employee(employee_id, ledger, opening, historical.fetch(employee_id, []))
       end
@@ -108,9 +115,31 @@ class PayrollFicaLegacyRecovery
       end
       state.merge(payroll_item_id: row.id)
     end
-    { employee_id: employee_id, tax_year: year,
+    result = { employee_id: employee_id, tax_year: year,
       status: reports.any? { |row| row[:status] == "held" } ? "held" : "ready",
       rows: reports, proofs: proofs }
+    if history_reason || ledger.any? { |row| row[:recorded_annual_fica_context].is_a?(Hash) && row[:recorded_annual_fica_context]["history_review_open"] }
+      begin
+        employee = Employee.find(employee_id)
+        probe = PayrollItem.new(employee: employee, company: company, employment_type: "hourly", gross_pay: 0,
+          cash_tips_reported: 0, reported_tips: 0, pay_period: PayPeriod.new(pay_date: Date.new(year, 1, 1)))
+        context = BelowThresholdFicaContext.new(employee: employee, company: company, year: year)
+        evidence = context.snapshot(current_item: probe, rules: year_rules)
+        reports.each do |report|
+          if report[:status] == "held"
+            report[:status] = "calculable_below_thresholds"
+            report[:reason] = "Current ordinary checks may calculate only while their added wages keep both bounds within limits; history review remains open"
+          end
+        end
+        # Capacity at zero new wages, not clearance for a check of any size.
+        result.merge!(status: "calculable_below_thresholds", history_review_open: true, filing_review_open: true,
+          conservative_history_bounds: evidence.fetch("bounds"), source_digest: evidence.fetch("source_digest"))
+        result[:proofs] = {}
+      rescue EmployeeYearFicaContext::UnreconciledLedgerError => error
+        result.merge!(status: "held", history_review_open: true, filing_review_open: true, reason: error.message)
+      end
+    end
+    result
   end
 
   def classify(row, ledger, opening, upper_bound, history_reason)
@@ -220,7 +249,7 @@ class PayrollFicaLegacyRecovery
       candidate = normalized.sole if normalized.size == 1
       valid = candidate && candidate.values.all? { |value| value.present? && FicaBasisEvidence.amount(value) >= 0 } &&
         FicaBasisEvidence.amount(candidate["social_security_wage_base"]).positive? &&
-        FicaBasisEvidence.amount(candidate["additional_medicare_threshold"]) == 200_000
+        FicaBasisEvidence.amount(candidate["additional_medicare_threshold"]).positive?
       candidate.merge("source_records" => sources) if valid
     rescue ArgumentError, TypeError
       nil

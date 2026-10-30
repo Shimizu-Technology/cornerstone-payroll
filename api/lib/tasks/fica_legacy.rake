@@ -7,6 +7,17 @@ namespace :payroll do
       puts JSON.pretty_generate(FicaLegacyTaskInventory.call)
     end
 
+    desc "Record reviewed external/predecessor wage upper bounds; does not reconcile history or filings"
+    task review_sources: :environment do
+      employee = Employee.where(company_id: Integer(ENV.fetch("COMPANY_ID"))).find(Integer(ENV.fetch("EMPLOYEE_ID")))
+      review = EmployeeYearFicaSourceReview.record!(employee: employee, actor: User.find(Integer(ENV.fetch("ACTOR_ID"))),
+        tax_year: Integer(ENV.fetch("TAX_YEAR")), through_pay_date: Date.iso8601(ENV.fetch("THROUGH_PAY_DATE")),
+        external_ss_wage_bound: FicaBasisEvidence.amount(ENV.fetch("EXTERNAL_SS_WAGE_BOUND")),
+        external_medicare_wage_bound: FicaBasisEvidence.amount(ENV.fetch("EXTERNAL_MEDICARE_WAGE_BOUND")),
+        review_reference: ENV.fetch("REVIEW_REFERENCE"))
+      puts JSON.pretty_generate(review.attributes)
+    end
+
     desc "Review legacy FICA recovery (dry-run by default); use bin/rake ... --apply with a reviewed plan"
     task :recover, [ :mode ] => :environment do |_task, args|
       mode = args[:mode] || "dry-run"

@@ -46,7 +46,7 @@ module PayrollReview
         year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
       items.map do |item|
         stable_attributes(item).merge(
-          "annual_fica_context" => contexts.fetch(item.employee_id).snapshot,
+          "annual_fica_context" => contexts.fetch(item.employee_id).snapshot_for(item),
           "employee" => item.employee.attributes.slice("id", "first_name", "last_name"),
           "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row) },
           "payroll_item_field_entries" => item.payroll_item_field_entries.sort_by(&:id).map { |row| stable_attributes(row) },
