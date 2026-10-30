@@ -24,7 +24,7 @@ RSpec.describe "Per-client time tracking settings", type: :request do
 
   it "keeps integration actions off for a client with no source, even if another client uses AIRE" do
     create(:time_tracking_source, source_type: "aire_services", company: create(:company))
-    expect(summary).to eq("active_source_types" => [], "active_source_capabilities" => [], "linked_aire_records" => [], "linked_source_records" => [])
+    expect(summary).to eq("connected_payroll" => { "mode" => "enabled", "enabled" => true, "message" => nil }, "active_source_types" => [], "active_source_capabilities" => [], "linked_aire_records" => [], "linked_source_records" => [])
   end
 
   it "uses the saved client source enable/disable setting without a second feature flag" do
