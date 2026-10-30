@@ -24,6 +24,17 @@ RSpec.describe "Api::V1::Integrations::Aire::Events", type: :request do
     allow(AirePayrollEvent).to receive(:dispatch_one!)
   end
 
+  it "returns a retryable response before parsing or persisting an event when paused" do
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    expect(AirePayrollEvents::Receiver).not_to receive(:new)
+    expect do
+      post "/api/v1/integrations/aire/events", params: "{broken json", headers: { "CONTENT_TYPE" => "application/json" }
+    end.not_to change(AirePayrollEvent, :count)
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.headers["Retry-After"]).to eq("60")
+    expect(response.parsed_body).to include("error" => "Connected payroll is paused")
+  end
+
   it "accepts and idempotently acknowledges a valid event without Clerk authentication" do
     post "/api/v1/integrations/aire/events", params: event_payload.to_json, headers: headers
 

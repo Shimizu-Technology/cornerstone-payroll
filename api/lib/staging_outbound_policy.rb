@@ -7,6 +7,7 @@ require "mail"
 require "net/http"
 require "uri"
 require_relative "staging_database_policy"
+require_relative "connected_payroll_mode"
 require_relative "staging_storage_policy"
 
 # Deployment containment is independent of Rails.env and company payroll mode.
@@ -146,6 +147,7 @@ class StagingOutboundPolicy
       shared = shared_production_credentials?(env)
       validate_database!(env: env)
       validate_storage!(env: env)
+      ConnectedPayrollMode.validate!(env: env)
       issuer = require_setting!("CLERK_ISSUER", env)
       expected = require_setting!("STAGING_CLERK_ISSUER", env)
       production = require_setting!("PRODUCTION_CLERK_ISSUER", env)

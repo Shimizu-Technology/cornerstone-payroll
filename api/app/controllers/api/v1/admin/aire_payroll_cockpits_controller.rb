@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class AirePayrollCockpitsController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!
         before_action :set_pay_period_and_source
         before_action :disable_http_caching
         before_action :require_payment_evidence_access!, only: %i[payment_evidence create_payment_attestation retract_payment_attestation resolve_payment_attestation retry_payment_resolution]

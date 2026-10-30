@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -euo pipefail
+export CONNECTED_PAYROLL_MODE=enabled
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 AIRE_REPO_PATH="${AIRE_REPO_PATH:-}"
@@ -78,8 +79,8 @@ for port in "$AIRE_PORT" "$CORNERSTONE_PORT"; do
 done
 
 SHARED_SECRET="local-certification-$(ruby -rsecurerandom -e 'print SecureRandom.hex(24)')"
-AIRE_DATABASE_URL="postgresql:///$AIRE_DATABASE"
-CORNERSTONE_DATABASE_URL="postgresql:///$CORNERSTONE_DATABASE"
+AIRE_DATABASE_URL="postgresql://127.0.0.1/$AIRE_DATABASE"
+CORNERSTONE_DATABASE_URL="postgresql://127.0.0.1/$CORNERSTONE_DATABASE"
 AIRE_BASE_URL="http://localhost:$AIRE_PORT"
 CORNERSTONE_BASE_URL="http://localhost:$CORNERSTONE_PORT"
 

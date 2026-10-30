@@ -26,7 +26,8 @@ class ProductionReadiness
   class Report
     attr_reader :checks, :generated_at, :revision
 
-    def initialize(checks:, generated_at: Time.current, revision: ENV.fetch("RENDER_GIT_COMMIT", ENV.fetch("GIT_COMMIT", "unknown")))
+    def initialize(checks:, connected_payroll: ConnectedPayrollMode.capability, generated_at: Time.current, revision: ENV.fetch("RENDER_GIT_COMMIT", ENV.fetch("GIT_COMMIT", "unknown")))
+      @connected_payroll = connected_payroll
       @checks = checks
       @generated_at = generated_at
       @revision = revision
@@ -44,6 +45,7 @@ class ProductionReadiness
       {
         generated_at: generated_at.iso8601,
         revision: revision,
+        connected_payroll: @connected_payroll,
         passed: passed?,
         checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } }
       }
@@ -95,7 +97,7 @@ class ProductionReadiness
 
     checks = configuration_checks
     checks.concat(live_dependency_checks) if live
-    Report.new(checks: checks)
+    Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: env, environment: environment))
   end
 
   private
