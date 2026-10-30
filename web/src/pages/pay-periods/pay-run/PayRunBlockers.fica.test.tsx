@@ -7,7 +7,7 @@ import { PayRunBlockers } from './PayRunBlockers';
 const note = "Prior-period void history needs accountant review; this paycheck's Social Security/Medicare is unaffected. Historical tax and filing review remains open.";
 const props = {
   payPeriod: {
-    payroll_items: [{ tax_rule_snapshot: { annual_fica_context: { history_review_open: true, note } } }],
+    annual_fica_review_note: note,
     compliance_warnings: [note],
   },
 } as ComponentProps<typeof PayRunBlockers>;

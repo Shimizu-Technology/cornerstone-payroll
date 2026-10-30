@@ -1326,6 +1326,7 @@ module Api
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,
+            annual_fica_review_note: pay_period.annual_fica_review_note,
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             intake_stale_at: pay_period.intake_stale_at,

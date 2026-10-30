@@ -249,7 +249,7 @@ class PayrollFicaLegacyRecovery
       candidate = normalized.sole if normalized.size == 1
       valid = candidate && candidate.values.all? { |value| value.present? && FicaBasisEvidence.amount(value) >= 0 } &&
         FicaBasisEvidence.amount(candidate["social_security_wage_base"]).positive? &&
-        FicaBasisEvidence.amount(candidate["additional_medicare_threshold"]).positive?
+        FicaBasisEvidence.amount(candidate["additional_medicare_threshold"]) == 200_000
       candidate.merge("source_records" => sources) if valid
     rescue ArgumentError, TypeError
       nil

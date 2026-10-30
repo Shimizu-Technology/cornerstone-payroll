@@ -1244,6 +1244,7 @@ export interface PayPeriod {
   company_pay_schedule_id?: number | null;
   company_workweek_id?: number | null;
   compliance_warnings?: string[];
+  annual_fica_review_note?: string | null;
   confirmed_workweek_adoption?: {
     available: boolean;
     workweek?: {
