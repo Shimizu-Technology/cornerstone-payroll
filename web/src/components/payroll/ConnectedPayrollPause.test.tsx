@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { AirePayrollCockpit } from './AirePayrollCockpit';
@@ -22,4 +22,13 @@ it('holds publication without displaying a cutoff countdown', () => {
   render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={calendar} onRefresh={vi.fn()} /></MemoryRouter>);
   expect(screen.getByRole('status').textContent).toBe('Connected payroll is paused');
   expect((screen.getByRole('button', { name: 'Publish to time tracking' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('preserves the local manual source coverage review while connected controls are paused', () => {
+  const review = vi.fn();
+  render(<MemoryRouter><AirePayrollCockpit payPeriodId={1} calendar={calendar} onRefresh={vi.fn()}
+    sourceCoverageRequired sourceCoverageAction={<button onClick={review}>Review source coverage</button>} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: 'Review source coverage' }));
+  expect(review).toHaveBeenCalledOnce();
+  expect((screen.getByRole('button', { name: 'Lock eligible time' }) as HTMLButtonElement).disabled).toBe(true);
 });
