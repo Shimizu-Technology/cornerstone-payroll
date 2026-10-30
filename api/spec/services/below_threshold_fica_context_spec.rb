@@ -302,4 +302,13 @@ RSpec.describe BelowThresholdFicaContext do
     expect { EmployeeYearFicaSourceReview.record!(employee: employee, actor: stranger, tax_year: 2026) }.to raise_error(ArgumentError, /authorized/)
     expect { source_review(ss: -1) }.to raise_error(ActiveRecord::RecordInvalid)
   end
+  it "omits the paycheck-specific review note once the paycheck is reversed" do
+    history(voided: true)
+    history
+    source_review
+    item = calculate
+    expect(item.pay_period.annual_fica_review_note).to be_present
+    item.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Synthetic reversal for disclosure regression")
+    expect(item.pay_period.annual_fica_review_note).to be_nil
+  end
 end

@@ -24,12 +24,30 @@ class EmployeeYearFicaSourceReview < ApplicationRecord
   before_destroy { raise ActiveRecord::ReadOnlyRecord, "FICA source reviews are append-only" }
 
   def self.record!(employee:, actor:, **attributes)
-    unless actor&.payroll_access_allowed? && actor.organization_admin? && actor.can_access_company?(employee.company_id)
-      raise ArgumentError, "An authorized payroll administrator is required"
-    end
+    record_batch!(company_id: employee.company_id, employee_ids: [ employee.id ], actor: actor, **attributes).first
+  end
+
+  # Resolve and validate the complete batch under the same lock used by payroll.
+  # Preview follows the same authorization and validation path without inserting.
+  def self.record_batch!(company_id:, employee_ids:, actor:, apply: true, **attributes)
+    authorize_actor!(actor, company_id)
     transaction do
-      Company.lock.find(employee.company_id)
-      create!(**attributes, company_id: employee.company_id, employee: employee, created_by: actor)
+      Company.lock.find(company_id)
+      authorize_actor!(actor&.reload, company_id)
+      employees = employee_ids.uniq.map { |id| Employee.where(company_id: company_id).find(id) }
+      raise ArgumentError, "At least one employee is required" if employees.empty?
+      reviews = employees.map do |employee|
+        new(**attributes, company_id: company_id, employee: employee, created_by: actor).tap(&:validate!)
+      end
+      reviews.each(&:save!) if apply
+      reviews
     end
   end
+
+  def self.authorize_actor!(actor, company_id)
+    unless actor&.payroll_access_allowed? && actor.organization_admin? && actor.can_access_company?(company_id)
+      raise ArgumentError, "An authorized payroll administrator is required"
+    end
+  end
+  private_class_method :authorize_actor!
 end
