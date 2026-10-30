@@ -8,6 +8,14 @@ import { Alert } from '@/components/ui/alert';
 
 import type { PayRunSectionProps } from './usePayRunController';
 
+export function FicaHistoryReviewNotice({ note }: { note?: string | null }) {
+  if (!note) return null;
+  return <Alert>
+    <p className="font-semibold">Prior-period payroll review remains open</p>
+    <p className="mt-1 text-sm leading-6">{note}</p>
+  </Alert>;
+}
+
 export function PayRunBlockers({
   part = 'all',
   adoptingConfirmedWorkweek,
@@ -84,12 +92,6 @@ export function PayRunBlockers({
                 </Button>
               )}
             </div>
-          </Alert>
-        )}
-{part !== 'hours' && ficaNote && (
-          <Alert>
-            <p className="font-semibold">Prior-period payroll review remains open</p>
-            <p className="mt-1 text-sm leading-6">{ficaNote}</p>
           </Alert>
         )}
 {part !== 'approval' && payPeriod.compliance_warnings?.filter((warning) => warning !== ficaNote).map((warning) => (
