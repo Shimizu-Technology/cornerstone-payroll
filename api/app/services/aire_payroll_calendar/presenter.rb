@@ -27,6 +27,7 @@ module AirePayrollCalendar
       missed_unpublished_cutoff = @lock_mode != "manual" && publication.nil? && cutoff_at.present? && Time.iso8601(cutoff_at) <= @now
 
       {
+        connected_payroll: ConnectedPayrollMode.capability,
         enabled: true,
         source_id: @source.id,
         source_name: @source.name,
@@ -43,8 +44,8 @@ module AirePayrollCalendar
         next_scheduled_cutoff_refreshed_at: current_source_state["refreshed_at"],
         cutoff_state: cutoff_state(publication, event, cutoff_at, needs_revision),
         needs_revision: needs_revision,
-        can_publish: desired.present? && !missed_unpublished_cutoff && can_publish?(publication, cutoff_at),
-        can_retry: publication.present? && publication.delivery_status == "failed",
+        can_publish: ConnectedPayrollMode.enabled? && desired.present? && !missed_unpublished_cutoff && can_publish?(publication, cutoff_at),
+        can_retry: ConnectedPayrollMode.enabled? && publication.present? && publication.delivery_status == "failed",
         publication: serialize_publication(publication),
         finalized_batch: serialize_event(event)
       }

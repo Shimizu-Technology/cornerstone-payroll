@@ -9,6 +9,7 @@ x-logging: &default-logging
 x-aire-environment: &aire-environment
   RAILS_ENV: production
   DEPLOYMENT_ENV: staging
+  CONNECTED_PAYROLL_MODE: enabled
   STAGING_SEED_ALLOWED: "true"
   STAGING_FIXTURE_NAMESPACE: staging-v2
   RAILS_LOG_TO_STDOUT: "true"
@@ -42,6 +43,7 @@ x-aire-environment: &aire-environment
 x-payroll-environment: &payroll-environment
   RAILS_ENV: production
   DEPLOYMENT_ENV: staging
+  CONNECTED_PAYROLL_MODE: enabled
   STAGING_SEED_ALLOWED: "true"
   STAGING_FIXTURE_NAMESPACE: staging-v2
   RAILS_LOG_TO_STDOUT: "true"
