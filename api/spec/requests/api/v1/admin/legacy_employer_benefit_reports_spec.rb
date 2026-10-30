@@ -137,6 +137,22 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
     end
   end
 
+  [ {}, { "lifecycle_legacy_capture" => true } ].each do |metadata|
+    it "requires strict proof for qualifying posted history (posting metadata #{metadata.inspect})" do
+      period.payroll_liability_postings.create!(company: company, posting_type: "commit",
+        liability_date: period.pay_date, posted_at: Time.current,
+        idempotency_key: "legacy-review-#{period.id}", metadata: metadata)
+      if metadata.empty?
+        expect { QuickbooksPayrollReportData.new(period).deduction_contribution_entries_for_item(item) }
+          .to raise_error(PayrollComponentMirrors::AmbiguousHistoryError)
+      else
+        expect(QuickbooksPayrollReportData.new(period).employer_contribution_total(item)).to eq(25)
+        expect(PayrollReportComponentReview.for_item(item)).to include(include(payroll_item_id: item.id))
+      end
+      expect { PayrollComponentMirrors.resolution(item) }.to raise_error(PayrollComponentMirrors::AmbiguousHistoryError)
+    end
+  end
+
   it "counts local legacy candidates by company/year without changing them and rejects an outer write transaction" do
     snapshot = [ item.reload.attributes, field.reload.attributes, deduction.reload.attributes ]
     inventory = PayrollLegacyEmployerBenefitInventory.send(:inventory)
