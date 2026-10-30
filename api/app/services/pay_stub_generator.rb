@@ -176,7 +176,8 @@ class PayStubGenerator
           earning.rate.nil? ? "—" : format_currency(earning.rate),
           format_currency(earning.amount), "—" ]
       end
-    elsif payroll_item.hourly? || payroll_item.employee.contractor_hourly?
+    elsif payroll_item.hourly? || (payroll_item.employee.contractor_hourly? &&
+        payroll_item.salary_override.to_d <= 0 && payroll_item.total_hours.to_d.positive?)
       # Regular pay
       if payroll_item.hours_worked.to_f > 0
         earnings_data << [
@@ -249,7 +250,7 @@ class PayStubGenerator
         earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
       end
 
-      if payroll_item.service_charge_wages.to_f > 0 && !existing_earning_categories.include?("service_charge")
+      if payroll_item.service_charge_wages.to_f.nonzero? && !existing_earning_categories.include?("service_charge")
         earnings_data << [ "Service Charges", "—", "—", format_currency(payroll_item.service_charge_wages), "—" ]
       end
 

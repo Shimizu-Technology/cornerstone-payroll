@@ -31,7 +31,8 @@ jobs:
       aire_sha: ${{ inputs.aire_sha }}
 
   backend:
-    runs-on: ubuntu-latest
+    # Ruby3.3.7 is available on24.04, but not the newer ubuntu-latest image.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -94,7 +95,7 @@ jobs:
           VITE_CLERK_PUBLISHABLE_KEY: ""
 
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
