@@ -9,12 +9,14 @@ RSpec.describe EmployeeYearFicaSourceReview do
   before(:context) do
     @organization = FactoryBot.create(:organization, name: "FICA source review lock #{SecureRandom.hex(6)}")
     @company = FactoryBot.create(:company, organization: @organization)
-    @employee = FactoryBot.create(:employee, company: @company)
+    @department = FactoryBot.create(:department, company: @company)
+    @employee = FactoryBot.create(:employee, company: @company, department: @department)
     @actor = FactoryBot.create(:user, company: @company, role: "admin")
   end
 
   after(:context) do
     @employee.destroy!
+    @department.destroy!
     @actor.destroy!
     @company.destroy!
     @organization.finance_books.each(&:destroy!)
