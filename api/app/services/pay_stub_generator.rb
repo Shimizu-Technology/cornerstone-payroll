@@ -54,6 +54,11 @@ class PayStubGenerator
     # YTD Summary
     render_ytd_summary(pdf)
 
+    statement_ytd_breakdown.review_warnings.map { |warning| warning[:message] }.uniq.each do |message|
+      pdf.move_down 6
+      pdf.text message, size: 8, color: "92400E"
+    end
+
     render_with_footer(
       pdf,
       "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
@@ -488,7 +493,8 @@ class PayStubGenerator
       totals = employee.ytd_totals_before(
         year: pay_period.pay_date.year,
         pay_date: pay_period.pay_date,
-        pay_period_id: pay_period.id
+        pay_period_id: pay_period.id,
+        for_reporting: true
       )
       gross = totals.fetch(:gross_pay).to_d + payroll_item.gross_pay.to_d
       PayrollEarningsYtdBreakdown.new(payroll_item).pay_ytd_total(gross)

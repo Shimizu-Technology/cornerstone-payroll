@@ -2240,8 +2240,16 @@ export interface DashboardResponse {
   };
 }
 
+export interface PayrollReportReviewWarning {
+  code: string;
+  message: string;
+  payroll_item_id: number;
+  employee_id: number;
+}
+
 export interface PayrollRegisterReport {
   report: {
+    review_warnings?: PayrollReportReviewWarning[];
     type: string;
     simple_payroll_register_enabled: boolean;
     meta: {
@@ -2519,6 +2527,7 @@ export interface EmployeePayrollSummary {
 }
 
 export interface EmployeePayHistoryReport {
+  review_warnings?: PayrollReportReviewWarning[];
   period: PayrollReportPeriod;
   employee: { id: number; name: string; employment_type: string; pay_rate: number };
   history: EmployeePayHistoryRecord[];
@@ -2559,6 +2568,7 @@ export interface TaxSummaryReport {
 
 export interface YtdSummaryReport {
   report: {
+    review_warnings?: PayrollReportReviewWarning[];
     type: string;
     meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
