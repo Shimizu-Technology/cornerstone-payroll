@@ -95,7 +95,7 @@ RSpec.describe "Legacy FICA release tasks" do
       Rake::Task.define_task(:environment)
       values = { "COMPANY_ID" => company.id.to_s, "EMPLOYEE_IDS" => employees.map(&:id).join(","),
         "ACTOR_ID" => actor.id.to_s, "TAX_YEAR" => "2026", "THROUGH_PAY_DATE" => "2026-12-31",
-        "EXTERNAL_SS_WAGE_BOUND" => "0", "EXTERNAL_MEDICARE_WAGE_BOUND" => "0",
+        "EXTERNAL_SS_WAGE_BOUND" => "1234.50", "EXTERNAL_MEDICARE_WAGE_BOUND" => "5678.25",
         "REVIEW_REFERENCE" => options[:review_reference] }
       keys = values.keys + %w[EMPLOYEE_ID APPLY DRY_RUN]
       original = ENV.to_h.slice(*keys)
@@ -112,6 +112,8 @@ RSpec.describe "Legacy FICA release tasks" do
       ENV["APPLY"] = "1"
       task.reenable
       expect { expect { task.invoke }.to output(/apply/).to_stdout }.to change(EmployeeYearFicaSourceReview, :count).by(2)
+      saved = EmployeeYearFicaSourceReview.where(company: company).pluck(:external_ss_wage_bound, :external_medicare_wage_bound)
+      expect(saved).to all(eq([ BigDecimal("1234.50"), BigDecimal("5678.25") ]))
     ensure
       keys&.each { |key| ENV.delete(key) }
       ENV.update(original || {})
