@@ -179,8 +179,12 @@ RSpec.describe PayStubGenerator do
     payroll_item.payroll_item_earnings.create!(category: "bonus", label: "Bonus", amount: 50)
     payroll_item.payroll_item_earnings.create!(category: "other", label: "Bonus", amount: 50)
 
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item, company: company, employee: employee, pay_period: prior_period, gross_pay: 50)
+    taxable_bonus_field(prior_item)
     rows = earnings_table(payroll_item)
     expect(rows.count { |row| row.first == "Bonus" }).to eq(2)
+    expect(rows).to include([ "Bonus", "—", "—", "$50.00", "$100.00" ])
     expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
   end
 
@@ -218,6 +222,25 @@ RSpec.describe PayStubGenerator do
       expect(PayrollEarningsYtdBreakdown.new(item).call.sum(&:current)).to eq(item.gross_pay)
       expect(PayrollItemDisclosure.new(item).as_json[:earnings].sum { |row| row[:amount].to_d }).to eq(item.gross_pay)
     end
+  end
+
+  it "retains the residual contract fee for a legacy zero-hour hourly contractor" do
+    worker = create(:employee, :contractor, company: company, contractor_pay_type: "hourly")
+    payroll_item.update!(employee: worker, employment_type: "contractor", hours_worked: 0,
+      bonus: 0, reported_tips: 0, custom_earnings: [], gross_pay: 1000)
+
+    rows = earnings_table(payroll_item)
+    expect(rows.first.first).to eq("Contract Fee")
+    expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
+  end
+
+  it "shows negative saved service charges rather than inflating legacy salary" do
+    payroll_item.update!(employment_type: "salary", bonus: 0, reported_tips: 0,
+      custom_earnings: [], service_charge_wages: -25, gross_pay: 975)
+
+    rows = earnings_table(payroll_item)
+    expect(rows).to include([ "Service Charges", "—", "—", "$-25.00", "—" ])
+    expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
   end
 
   it "prints legacy insurance and loan YTD values when those rows are visible" do
