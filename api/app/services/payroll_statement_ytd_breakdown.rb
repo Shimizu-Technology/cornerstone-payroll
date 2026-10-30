@@ -36,6 +36,10 @@ class PayrollStatementYtdBreakdown
     rows_for(:employer_contribution)
   end
 
+  def review_warnings
+    @review_warnings ||= PayrollReportComponentReview.for_items(ytd_source_items)
+  end
+
   private
 
   attr_reader :payroll_item, :employee, :pay_period, :company

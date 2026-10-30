@@ -45,6 +45,9 @@ module Api
           line10_total_taxes_after_adj line12_total_after_credits
         ].freeze
 
+        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError,
+          with: :render_component_history_error
+
         # GET /api/v1/admin/reports/dashboard
         # Dashboard stats and metrics
         def dashboard
@@ -773,6 +776,8 @@ module Api
             filename: generator.filename,
             type: "application/pdf",
             disposition: "attachment"
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def payroll_summary_by_employee_xlsx
@@ -1142,6 +1147,10 @@ module Api
 
         private
 
+        def render_component_history_error(error)
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
         # Report routes use several target contracts, including pay_period_id
         # and pay_run_key. Builders retain the resolved target so document
         # access stays understandable without trusting a raw numeric :id.
@@ -1438,6 +1447,7 @@ module Api
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           report_data = {
             type: "payroll_register",
+            review_warnings: PayrollReportComponentReview.for_items(items),
             simple_payroll_register_enabled: company.simple_payroll_register_enabled?,
             meta: report_meta(company, :payroll_register),
             source: {
@@ -1975,6 +1985,7 @@ module Api
 
           {
             type: "ytd_summary",
+            review_warnings: PayrollReportComponentReview.for_items(items),
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: period.year,
             period: period.payload,
@@ -2486,6 +2497,7 @@ module Api
 
           {
             type: "employee_pay_history",
+            review_warnings: PayrollReportComponentReview.for_items(selected_items),
             meta: report_meta(employee.company, :employee_pay_history),
             period: period.payload,
             employee: {
@@ -2548,6 +2560,7 @@ module Api
           adjustment_disclosure = PayrollAdjustmentDisclosure.new(items)
           {
             type: "payroll_summary_by_employee",
+            review_warnings: PayrollReportComponentReview.for_items(items),
             meta: report_meta(pay_period.company, :payroll_summary_by_employee),
             pay_period: {
               id: pay_period.id,
@@ -2777,7 +2790,7 @@ module Api
 
         def payroll_summary_retirement_totals(items)
           items.each_with_object({ retirement: BigDecimal("0"), roth_retirement: BigDecimal("0") }) do |item, totals|
-            PayrollRetirementTotals.for_item(item).each { |key, amount| totals[key] += amount }
+            PayrollRetirementTotals.for_item(item, for_reporting: true).each { |key, amount| totals[key] += amount }
           end
         end
 
@@ -2935,6 +2948,9 @@ module Api
             [ "Generated At", report_value(meta, :generated_at) ]
           ].reject { |_, value| value.blank? }
 
+          Array(report_value(report, :review_warnings)).map { |warning| report_value(warning, :message) }.uniq.each do |message|
+            rows << [ "Review required", message ]
+          end
           { name: "Report Info", rows: rows }
         end
 

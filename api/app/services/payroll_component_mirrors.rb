@@ -31,7 +31,7 @@ class PayrollComponentMirrors
     end.to_set
   end
 
-  def self.resolution(item)
+  def self.resolution(item, for_reporting: false)
     result = {}
     independent = independent_type_ids(item)
     rows = item.payroll_item_deductions.to_a
@@ -50,7 +50,8 @@ class PayrollComponentMirrors
       else
         candidates.reject! { |row| independent.include?(row.deduction_type_id) }
         next if candidates.empty?
-        ambiguous! unless candidates.one? && historical_identity?(item, entry, candidates.first)
+        ambiguous! unless candidates.one? && (historical_identity?(item, entry, candidates.first) ||
+          (for_reporting && PayrollReportComponentReview.compatible_mirror?(item, entry, candidates.first)))
       end
       deduction = candidates.first
       ambiguous! if result.key?(deduction.deduction_type_id)

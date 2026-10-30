@@ -104,6 +104,12 @@ RSpec.describe 'R3 independent saved employer identity conservation' do
       allow(PayrollComponentMirrors).to receive(:field_for).and_call_original
       allow(PayrollComponentMirrors).to receive(:field_for).with(item, item.payroll_item_deductions.find_by!(deduction_type: type))
         .and_return(item.payroll_item_field_entries.find_by!(payroll_field_definition: field))
+      # Inject the same incorrect suppression into the explicit report reader;
+      # strict financial source resolution must still preserve both sources.
+      report_mirrors = PayrollComponentMirrors.resolution(item, for_reporting: true)
+        .merge(type.id => item.payroll_item_field_entries.find_by!(payroll_field_definition: field))
+      allow(PayrollComponentMirrors).to receive(:resolution).and_call_original
+      allow(PayrollComponentMirrors).to receive(:resolution).with(item, for_reporting: true).and_return(report_mirrors)
       expect(QuickbooksPayrollReportData.new(period).employer_contribution_total(item)).to eq(45)
       expect(PayrollEmployerContributions.total(item)).to eq(90)
       expect { PayrollLiabilityPostingService.post!(pay_period: period, actor: actor) }

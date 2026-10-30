@@ -24,9 +24,18 @@ class QuickbooksPayrollReportData
 
   attr_reader :pay_period, :company
 
-  def initialize(pay_period)
+  def initialize(pay_period, for_reporting: true)
+    @for_reporting = for_reporting
     @pay_period = pay_period
     @company = pay_period.company
+  end
+
+  def review_warnings(include_voided: false)
+    PayrollReportComponentReview.for_items(items(include_voided: include_voided))
+  end
+
+  def review_warnings_for_item(item)
+    PayrollReportComponentReview.for_item(item)
   end
 
   def items(include_voided: false)
@@ -294,6 +303,7 @@ class QuickbooksPayrollReportData
   end
 
   def build_deduction_contribution_entries(item)
+    mirrors = PayrollComponentMirrors.resolution(item, for_reporting: @for_reporting)
     entries = []
     field_entries_by_treatment = {
       "pre_tax" => payroll_field_entries_for(item, "pre_tax_deduction"),
@@ -303,7 +313,7 @@ class QuickbooksPayrollReportData
 
     item.payroll_item_deductions.each do |deduction|
       next if PayrollRetirementTotals.built_in_employer_match_deduction?(item, deduction)
-      next if PayrollComponentMirrors.field_for(item, deduction)
+      next if mirrors.key?(deduction.deduction_type_id)
 
       group = reporting_group_for_deduction(deduction)
       description = group ? PayrollReportingGroups.label(group) : deduction.label

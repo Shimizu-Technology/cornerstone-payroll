@@ -379,6 +379,11 @@ class CheckGenerator
       stub_cfg: stub_cfg
     )
 
+    statement_ytd_breakdown.review_warnings.map { |warning| warning[:message] }.uniq.each do |message|
+      pdf.text_box message, at: [ lx, sect_bot + 12 + oy ], width: usable, height: 10,
+        size: 6, color: "92400E"
+    end
+
     draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
   end
 
