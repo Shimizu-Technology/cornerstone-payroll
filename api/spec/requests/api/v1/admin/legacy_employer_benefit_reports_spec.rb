@@ -42,6 +42,42 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
     PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n")
   end
 
+  context "when legacy benefits are in a prior committed period" do
+    let(:later_period) { create(:pay_period, :committed, company: company, pay_date: period.pay_date + 14) }
+    let(:later_item) { create(:payroll_item, :with_check, employee: employee, pay_period: later_period) }
+
+    before do
+      [ Api::V1::Admin::PayStubsController, Api::V1::Admin::ChecksController ].each do |controller|
+        allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+        allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+      end
+      allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
+    end
+
+    it "downloads the current earnings statement and check with the historical review note" do
+      get "/api/v1/admin/pay_stubs/#{later_item.id}/download"
+      expect(response).to have_http_status(:ok)
+      expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE, "Saved employer health", "$25.00")
+      get "/api/v1/admin/payroll_items/#{later_item.id}/check"
+      expect(response).to have_http_status(:ok)
+      expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE)
+    end
+
+    it "returns 422 for genuinely ambiguous prior history in statement and check downloads" do
+      type = company.deduction_types.create!(name: "Another employer health", category: "employer_contribution", sub_category: "benefit")
+      item.payroll_item_deductions.create!(deduction_type: type, label: definition.name, category: "employer_contribution", amount: 25)
+      [ "/api/v1/admin/pay_stubs/#{later_item.id}/download", "/api/v1/admin/payroll_items/#{later_item.id}/check" ].each do |path|
+        get path
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("ambiguous", "reviewed component reconciliation")
+      end
+      post "/api/v1/admin/pay_stubs/#{later_item.id}/generate"
+      expect(response).to have_http_status(:unprocessable_entity)
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: later_period.id }
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
   [ false, true ].each do |instrument_voided|
     context "with instrument voided=#{instrument_voided}, without a wage reversal" do
       before { item.update_columns(voided: instrument_voided) }
