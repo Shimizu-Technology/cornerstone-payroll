@@ -170,7 +170,7 @@ RSpec.describe TimeTracking::Client do
       policy = TimeTracking::DestinationPolicy.new(
         environment: "production",
         env: {
-          "DEPLOYMENT_ENV" => "staging",
+          "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled",
           "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
           "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
         },

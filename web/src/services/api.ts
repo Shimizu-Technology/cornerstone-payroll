@@ -1039,6 +1039,7 @@ export const taxConfigsApi = {
 export type TimeTrackingSourceType = 'aire_services' | 'cornerstone_tax' | 'custom';
 
 export interface TimeTrackingSource {
+  connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
   id: number;
   company_id: number;
   name: string;

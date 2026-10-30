@@ -70,6 +70,20 @@ RSpec.describe "Api::V1::Admin::AirePayrollCalendars", type: :request do
     allow(AirePayrollCalendarPublication).to receive(:dispatch_one!)
   end
 
+  it "exposes the pause capability locally and refuses publication before creating evidence" do
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar"
+    expect(response).to have_http_status(:ok)
+    state = response.parsed_body.fetch("aire_payroll_calendar")
+    expect(state.fetch("connected_payroll")).to include("enabled" => false, "message" => "Connected payroll is paused")
+    expect(state).to include("can_publish" => false, "can_retry" => false)
+    expect do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar/publish"
+    end.not_to change(AirePayrollCalendarPublication, :count)
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.headers["Retry-After"]).to eq("60")
+  end
+
   it "shows eligibility and publishes the active client's pay period" do
     get "/api/v1/admin/pay_periods/#{pay_period.id}/aire_payroll_calendar"
 

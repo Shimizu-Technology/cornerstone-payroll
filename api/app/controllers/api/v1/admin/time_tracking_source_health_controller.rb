@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourceHealthController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!
         def show
           source = TimeTrackingSource.find_by!(id: params[:source_id], company_id: current_company_id)
           response.headers["Cache-Control"] = "no-store"

@@ -10,7 +10,7 @@ RSpec.describe "staging database routing" do
     expect(encryption).to be < containment
   end
 
-  let(:env) { { "DEPLOYMENT_ENV" => "staging", "DATABASE_URL" => "postgresql://staging-db.example.test/synthetic?sslmode=require", "STAGING_DATABASE_HOSTS" => "staging-db.example.test", "PRODUCTION_DATABASE_HOSTS" => "production-db.example.test,192.0.2.10" } }
+  let(:env) { { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "DATABASE_URL" => "postgresql://staging-db.example.test/synthetic?sslmode=require", "STAGING_DATABASE_HOSTS" => "staging-db.example.test", "PRODUCTION_DATABASE_HOSTS" => "production-db.example.test,192.0.2.10" } }
 
   %w[hostaddr host port service servicefile options dbname load_balance_hosts target_session_attrs].each do |key|
     it "rejects URL routing override #{key} before a connection opens" do

@@ -31,6 +31,7 @@ class AirePayrollEvent < ApplicationRecord
   }
 
   def self.dispatch_due!(now: Time.current, enqueue: nil)
+    return unless ConnectedPayrollMode.enabled?
     StagingQuarantine.excluding(due_for_verification(now)).order(:occurred_at, :id).limit(BATCH_SIZE).pluck(:id).filter_map do |id|
       begin
         id if dispatch_one!(id, now: now, enqueue: enqueue)
@@ -42,6 +43,7 @@ class AirePayrollEvent < ApplicationRecord
   end
 
   def self.dispatch_one!(id, now: Time.current, enqueue: nil)
+    return unless ConnectedPayrollMode.enabled?
     return false if StagingQuarantine.suppressed?(table_name, id)
     enqueue ||= ->(event_id) { AirePayrollEventVerificationJob.perform_later(event_id) }
     reservation = reserve_for_enqueue(id, now)

@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourcesController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!, except: %i[index show]
         before_action :require_admin!, except: [
           :index,
           :show,
@@ -210,6 +212,7 @@ module Api
 
         def source_json(source)
           {
+            connected_payroll: ConnectedPayrollMode.capability,
             id: source.id,
             company_id: source.company_id,
             name: source.name,

@@ -6,7 +6,7 @@ require_relative "../../../scripts/staging_acceptance/manual_fixture"
 RSpec.describe StagingAcceptance::ManualFixture do
   let(:environment) do
     {
-      "DEPLOYMENT_ENV" => "staging", "STAGING_SEED_ALLOWED" => "true", "STAGING_FIXTURE_NAMESPACE" => "staging-v2",
+      "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "STAGING_SEED_ALLOWED" => "true", "STAGING_FIXTURE_NAMESPACE" => "staging-v2",
       "STAGING_ACCEPTANCE_FIXTURE" => described_class::FIXTURE, "STAGING_ACCEPTANCE_MODE" => "dry_run",
       "STAGING_SOURCE_INSTANCE_ID" => "10000000-0000-4000-8000-000000000001",
       "STAGING_ACTUAL_CLERK_ID" => "user_existingAcceptanceSubject", "STAGING_ACTUAL_EMAIL" => "operator@example.test",

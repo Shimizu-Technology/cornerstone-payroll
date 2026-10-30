@@ -79,6 +79,7 @@ RSpec.describe AirePayrollCalendar::SourceState do
     original = publication.attributes.slice("payload", "payload_checksum", "source_state")
     previous = ENV.to_h
     ENV["DEPLOYMENT_ENV"] = "staging"
+    ENV["CONNECTED_PAYROLL_MODE"] = "enabled"
     ENV["STAGING_INTEGRATION_HOSTS"] = "other-staging.example.test"
     expect(Net::HTTP).not_to receive(:new)
 

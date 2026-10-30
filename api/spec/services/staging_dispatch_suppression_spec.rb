@@ -8,6 +8,7 @@ RSpec.describe "durable staging dispatch suppression" do
     StagingDatabasePolicy::ROUTING_ENV.each { |name| ENV.delete(name) }
     database = ActiveRecord::Base.connection_db_config.configuration_hash
     ENV["DEPLOYMENT_ENV"] = "staging"
+    ENV["CONNECTED_PAYROLL_MODE"] = "enabled"
     StagingOutboundPolicy::DATABASE_SETTINGS.each { |name| ENV.delete(name) }
     ENV["DATABASE_URL"] = URI::Generic.build(scheme: "postgresql", host: database.fetch(:host), port: database[:port], path: "/#{database.fetch(:database)}").to_s
     ENV["STAGING_DATABASE_HOSTS"] = database.fetch(:host)

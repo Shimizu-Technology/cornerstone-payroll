@@ -93,13 +93,13 @@ RSpec.describe TimeTracking::DestinationPolicy do
   end
 
   it "refuses legacy private Docker HTTP even when its old staging switch is set" do
-    env = { "DEPLOYMENT_ENV" => "staging", "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true", "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api" }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true", "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api" }
     policy = described_class.new(environment: "production", env: env, resolver: ->(*) { [ "172.24.0.8" ] })
     expect { policy.validate_configuration!(uri("http://aire-api:3000/api")) }.to raise_error(StagingOutboundPolicy::Blocked, /STAGING_INTEGRATION_HOSTS/)
   end
 
   it "requires the staging allowlist as well as the ordinary destination allowlist" do
-    env = { "DEPLOYMENT_ENV" => "staging", "TIME_TRACKING_ALLOWED_HOSTS" => "aire.example.test", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test" }
+    env = { "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled", "TIME_TRACKING_ALLOWED_HOSTS" => "aire.example.test", "STAGING_INTEGRATION_HOSTS" => "aire-staging.example.test", "PRODUCTION_INTEGRATION_HOSTS" => "aire.example.test" }
     policy = described_class.new(environment: "production", env: env)
     expect { policy.validate_configuration!(uri("https://aire.example.test/api")) }.to raise_error(StagingOutboundPolicy::Blocked)
   end

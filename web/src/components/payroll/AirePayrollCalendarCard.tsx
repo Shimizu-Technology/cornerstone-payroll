@@ -99,6 +99,12 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
     'workweek_confirmation_required',
   ].includes(calendar.eligibility_code || '');
 
+  if (calendar.connected_payroll?.enabled === false) return <Card><CardContent className="p-4">
+    <p role="status" className="font-semibold">Connected payroll is paused</p>
+    <p className="mt-2 text-sm">Calendar delivery and automatic locking are on hold. You can continue manual payroll.</p>
+    <Button className="mt-3" disabled>Publish to time tracking</Button>
+  </CardContent></Card>;
+
   return (
     <Card className="overflow-hidden border-primary-200 bg-white">
       <CardContent className="p-0">
