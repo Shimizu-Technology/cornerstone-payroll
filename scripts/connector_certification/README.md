@@ -2,6 +2,8 @@
 
 This fixture proves that a compatible time-tracking application can use the same Cornerstone workflow as AIRE. It runs a separate Python HTTP producer with a Monday-start weekly UTC policy, rather than reusing AIRE code or mocking Cornerstone's HTTP client.
 
+Both local certification scripts require PostgreSQL TCP access on `127.0.0.1`. Creation, Rails access and cleanup use that same loopback server; inherited host-address/service overrides are cleared. Set `PGUSER`, `PGPASSWORD` and, if needed, `PGPORT` for the local instance. Socket-only authentication is intentionally outside this local-only verification path.
+
 Run `scripts/certify_independent_payroll_connector.sh` with the repository's pinned Ruby and local PostgreSQL available. Set `NEUTRAL_CERTIFICATION_RESULT` to a new private JSON path outside a Git checkout to retain the certificate. The script refuses an occupied producer port, an existing output, a dirty tracked application checkout, or a nonempty application database. `PAYROLL_REPO_PATH` can select the immutable application checkout being certified.
 
 The test publishes a confirmed company calendar, freezes an immutable checksum-backed batch, imports 45 original hours as 40 regular and 5 overtime hours, calculates $1,187.50 gross, commits payroll, and records synthetic check delivery. Every issued receipt must match exactly one immutable source line and its original employee UUID, hours, company, payroll run, payroll item, check reference, and delivery date. A second company with an overlapping numeric source employee ID must remain unaffected.
