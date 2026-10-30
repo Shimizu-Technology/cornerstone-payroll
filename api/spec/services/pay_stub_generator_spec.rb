@@ -135,6 +135,91 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Chief Stipend")
   end
 
+  def taxable_bonus_field(item, amount: 50, source: "manual")
+    definition = item.company.payroll_field_definitions.find_or_create_by!(name: "Bonus") do |field|
+      field.kind = "addition"
+      field.tax_treatment = "taxable_addition"
+      field.category = "other"
+    end
+    item.payroll_item_field_entries.create!(payroll_field_definition: definition,
+      label: "Bonus", kind: "addition", tax_treatment: "taxable_addition", category: "other",
+      amount: amount, source: source, active: true)
+  end
+
+  def earnings_table(item)
+    generator = described_class.new(item)
+    pdf = Prawn::Document.new
+    rows = nil
+    allow(pdf).to receive(:table) { |data, **_options| rows = data }
+    generator.send(:render_earnings, pdf)
+    rows.drop(1).take(rows.length - 2)
+  end
+
+  it "prints a calculated salary field bonus once with its YTD, preserving gross" do
+    payroll_item.update!(employment_type: "salary", bonus: 0, reported_tips: 0,
+      custom_earnings: [], gross_pay: 1050)
+    taxable_bonus_field(payroll_item)
+    payroll_item.payroll_item_earnings.create!(category: "salary", label: "Salary", amount: 1000)
+    payroll_item.payroll_item_earnings.create!(category: "other", label: "Bonus", amount: 50)
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item, company: company, employee: employee, pay_period: prior_period, gross_pay: 50)
+    taxable_bonus_field(prior_item)
+
+    rows = earnings_table(payroll_item)
+    expect(rows.select { |row| row.first == "Bonus" }).to eq([ [ "Bonus", "—", "—", "$50.00", "$100.00" ] ])
+    expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+    expect(text.scan(/\bBonus\b/).length).to eq(1)
+  end
+
+  it "preserves a separate one-time bonus beside the same-label field mirror" do
+    payroll_item.update!(reported_tips: 0, custom_earnings: [], gross_pay: 260)
+    taxable_bonus_field(payroll_item)
+    payroll_item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", amount: 160)
+    payroll_item.payroll_item_earnings.create!(category: "bonus", label: "Bonus", amount: 50)
+    payroll_item.payroll_item_earnings.create!(category: "other", label: "Bonus", amount: 50)
+
+    rows = earnings_table(payroll_item)
+    expect(rows.count { |row| row.first == "Bonus" }).to eq(2)
+    expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
+  end
+
+  [ "salary", "hourly", "contractor" ].each do |type|
+    it "keeps legacy #{type} earnings and imported fields equal to gross" do
+      payroll_item.update!(employee: create(:employee, :contractor, company: company)) if type == "contractor"
+      payroll_item.update!(employment_type: type, bonus: 50, reported_tips: 0,
+        custom_earnings: [], service_charge_wages: 25, gross_pay: type == "hourly" ? 285 : 1125)
+      taxable_bonus_field(payroll_item, source: "import")
+
+      rows = earnings_table(payroll_item)
+      expect(rows.count { |row| row.first == "Bonus" }).to eq(2)
+      expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
+    end
+  end
+
+  [ SalaryPayrollCalculator, HourlyPayrollCalculator, ContractorPayrollCalculator ].each do |calculator_class|
+    it "does not duplicate taxable fields materialized by #{calculator_class}" do
+      type = { SalaryPayrollCalculator => "salary", HourlyPayrollCalculator => "hourly",
+        ContractorPayrollCalculator => "contractor" }.fetch(calculator_class)
+      worker = create(:employee, type.to_sym, company: company)
+      item = create(:payroll_item, employee: worker, company: company, pay_period: pay_period,
+        employment_type: type, pay_rate: type == "salary" ? 26_000 : 20, hours_worked: 8)
+      taxable_bonus_field(item)
+      calculator = calculator_class.new(worker, item)
+      calculator.send(:calculate_gross_pay)
+      calculator.send(:record_earnings_breakdown)
+      item.save!
+
+      expect(item.bonus).to be_zero
+      expect(item.payroll_item_earnings.select { |earning| earning.label == "Bonus" }.map(&:category)).to eq([ "other" ])
+      rows = earnings_table(item)
+      expect(rows.count { |row| row.first == "Bonus" }).to eq(1)
+      expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(item.gross_pay)
+      expect(PayrollEarningsYtdBreakdown.new(item).call.sum(&:current)).to eq(item.gross_pay)
+      expect(PayrollItemDisclosure.new(item).as_json[:earnings].sum { |row| row[:amount].to_d }).to eq(item.gross_pay)
+    end
+  end
+
   it "prints legacy insurance and loan YTD values when those rows are visible" do
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
     create(
