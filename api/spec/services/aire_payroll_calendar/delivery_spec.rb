@@ -22,6 +22,20 @@ RSpec.describe AirePayrollCalendar::Delivery do
     )
   end
 
+  it "holds pending delivery without claiming attempts, then delivers once after resuming" do
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => source_state)
+    original = publication.attributes
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    expect(described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call[:status]).to eq("paused")
+    expect(publication.reload.attributes).to eq(original)
+    expect(client).not_to have_received(:publish_payroll_calendar_period)
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(true)
+    2.times { described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call }
+    expect(client).to have_received(:publish_payroll_calendar_period).once
+    expect(publication.reload.delivery_status).to eq("delivered")
+  end
+
   it "holds an already queued calendar before its PUT until historical approval is complete" do
     source = calendar_period.time_tracking_source
     source.update!(historical_reconciliation_required: true)

@@ -32,7 +32,7 @@ concurrency:
 jobs:
   gate-tests:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -55,7 +55,7 @@ jobs:
   certify:
     # Reusable workflows inherit the caller's workflow_dispatch event.
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:

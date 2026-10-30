@@ -742,6 +742,7 @@ export type AirePayrollCutoffState =
   | 'batch_verified';
 
 export interface AirePayrollCalendarState {
+  connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
   enabled: boolean;
   source_id: number;
   source_name: string;
@@ -1266,6 +1267,7 @@ export interface PayPeriod {
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
   time_tracking?: {
+    connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
     active_source_types: string[];
     active_source_capabilities?: string[];
     aire_calendar?: AirePayrollCalendarState | null;

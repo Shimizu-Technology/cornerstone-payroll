@@ -5,6 +5,8 @@ module Api
     module Integrations
       module Aire
         class EventsController < ActionController::API
+          include ConnectedPayrollControl
+          before_action :require_connected_payroll!
           wrap_parameters false
 
           rescue_from ActionController::ParameterMissing,
