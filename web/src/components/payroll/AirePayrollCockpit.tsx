@@ -398,6 +398,10 @@ export function AirePayrollCockpit(props: Props) {
     <p className="font-semibold">Connected payroll is paused</p>
     <p className="mt-2 text-sm">Source hours, imports and locks will be available when the connection resumes. You can continue manual payroll.</p>
     <Button className="mt-3" disabled>Lock eligible time</Button>
+    {props.sourceCoverageRequired && <div className="mt-3 space-y-2">
+      <p className="text-sm">Manually entered hours still require source coverage acknowledgement and a reason.</p>
+      {props.sourceCoverageAction}
+    </div>}
   </section>;
   const liveScope = props.calendar.source_capabilities?.includes('payroll_cockpit') ?? true;
   // A source change is a new workspace, even when it retains the payroll ID.
