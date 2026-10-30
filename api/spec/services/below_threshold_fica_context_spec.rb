@@ -146,6 +146,30 @@ RSpec.describe BelowThresholdFicaContext do
     end
   end
 
+  it "treats a legacy null Additional Medicare tax as zero only with a complete bound and exact paired Medicare totals" do
+    [ history(voided: true), history ].each { |row| row.update_columns(additional_medicare_tax: nil) }
+    source_review
+    item = calculate
+    expect(item).to have_attributes(medicare_tax: "7.25".to_d, employer_medicare_tax: "7.25".to_d,
+      additional_medicare_tax: 0.to_d, additional_medicare_taxable_wages: 0.to_d)
+    expect(context(item)).to include("history_review_open" => true, "filing_review_open" => true)
+    expect(PayrollItemFicaBasisProof.count).to eq(0)
+  end
+
+  it "holds a null historical Additional Medicare tax when saved Medicare totals do not exactly reconcile" do
+    row = history(voided: true)
+    row.update_columns(additional_medicare_tax: nil, medicare_tax: "14.51")
+    history
+    source_review
+    expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /FICA taxes contradict/)
+  end
+
+  it "holds null historical Additional Medicare taxes when the conservative Medicare bound is over the threshold" do
+    [ history(voided: true), history ].each { |row| row.update_columns(additional_medicare_tax: nil) }
+    source_review(ss: 0, medicare: "197500.01")
+    expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /threshold/)
+  end
+
   it "holds a current signed correction and tip reclassification" do
     row = history(voided: true)
     source_review
