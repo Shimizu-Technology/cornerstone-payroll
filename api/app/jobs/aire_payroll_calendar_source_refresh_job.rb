@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class AirePayrollCalendarSourceRefreshJob < ApplicationJob
+class AirePayrollCalendarSourceRefreshJob < ConnectedPayrollJob
   queue_as :default
 
   def perform(source_id)

@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe StagingReadiness do
   it "keeps provider round trips out of the staging profile" do
-    env = ENV.to_h.merge("DEPLOYMENT_ENV" => "staging")
+    env = ENV.to_h.merge("DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled")
     allow(StagingOutboundPolicy).to receive(:validate!).with(env: env).and_return(true)
     env["USE_SOLID_QUEUE"] = "true"
     env["SOLID_QUEUE_IN_PUMA"] = "false"

@@ -49,10 +49,11 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, []);
+  const connectedPaused = payPeriod.time_tracking?.connected_payroll?.enabled === false;
   const needsHours = isDraft && canImportTimeTracking && needsSourceCoverageAcknowledgement(payPeriod);
   const openHours = () => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); };
   const route = (tab: 'work' | 'checks' | 'activity', hash = '') => `${payRunPath(companyId, payRunId, tab, { returnTo })}${hash}`;
-  return <section className="flex w-full items-start gap-2 sm:w-auto" aria-label="Payroll processing actions">
+  return <section title={connectedPaused ? 'Connected payroll is paused' : undefined} className="flex w-full items-start gap-2 sm:w-auto" aria-label="Payroll processing actions">
     <div className="min-w-0 flex-1 [&_button]:w-full [&>div]:w-full">{isVoided ? <Link className="inline-flex min-h-11 items-center justify-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={route('activity', '#payroll-corrections')}>Review corrections</Link> : <PayRunStepAction {...props} step={isDraft ? 'hours' : isCalculated || isCommitted ? 'results' : 'commit'} header />}</div>
     <details ref={menu} className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); menu.current?.removeAttribute('open'); menu.current?.querySelector('summary')?.focus(); } }}>
       <summary aria-label="More payroll actions" className="flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-full border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary-700 [&::-webkit-details-marker]:hidden"><MoreHorizontal className="h-5 w-5" aria-hidden="true" /></summary>
@@ -65,7 +66,7 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
         {!isCommitted && !isVoided && <>
           {canImportMosa && <Button variant="outline" onClick={() => setImportModalOpen(true)}>Import (MoSa)</Button>}
           {canImportSpikeIntake && <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>Import Spike Email</Button>}
-          {canImportTimeTracking && !needsHours && <Button variant="outline" onClick={openHours}>Import time tracking</Button>}
+          {canImportTimeTracking && !needsHours && <Button variant="outline" disabled={connectedPaused} onClick={openHours}>Import time tracking</Button>}
         </>}
         {canEditPayPeriod && payrollItems.length > 0 && <div>
           <Button className="w-full" variant="outline" disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges} title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined} onClick={() => { setRefreshRecurring(payPeriod.includes_recurring_items); setRefreshBaseSalary(payPeriod.includes_base_salary); setRefreshSetupOpen(true); }}>Refresh current setup</Button>
@@ -96,7 +97,8 @@ export function PayRunStepAction({ step, header = false, ...props }: PayRunSecti
     target?.scrollIntoView?.({ block: 'start' }); target?.focus({ preventScroll: true });
   }}>Review loan inputs</Link>;
   if (step === 'hours') return <div className="flex flex-wrap items-start gap-2">
-    {needsHours && <Button variant={variant} onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }} disabled={processing || savedImportReloadRequired}>Review &amp; add hours</Button>}
+    {needsHours && <Button variant={variant} onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }} disabled={processing || savedImportReloadRequired || payPeriod.time_tracking?.connected_payroll?.enabled === false} title={payPeriod.time_tracking?.connected_payroll?.enabled === false ? 'Connected payroll is paused' : undefined}>Review &amp; add hours</Button>}
+    {payPeriod.time_tracking?.connected_payroll?.enabled === false && <p role="status" className="text-sm">Connected payroll is paused. You can enter manual hours and calculate payroll.</p>}
     {(!header || !needsHours) && (isDraft || isCalculated) && <div><Button variant={header && !needsHours ? 'primary' : 'outline'} onClick={() => void handleRunPayroll()} disabled={processing || financialActionsHeld || missingInputs} title={hoursReason} aria-describedby={!header && hoursReason ? 'hours-required-reason' : undefined}>{processing ? 'Calculating...' : isDraft ? 'Calculate Payroll' : 'Recalculate'}</Button>{!header && hoursReason && <p id="hours-required-reason" className="mt-1 max-w-xl text-sm text-neutral-600">{hoursReason}</p>}</div>}
   </div>;
   if (step === 'results') return isCalculated ? <div><Button variant={variant} onClick={handleApprove} disabled={processing || financialActionsHeld || !!standaloneLoanConflicts.length || !!reason} title={reason} aria-describedby={!header && reason ? 'approval-required-reason' : undefined}>Approve</Button>{!header && reason && <p id="approval-required-reason" className="mt-1 text-sm text-neutral-600">{reason}{standaloneLoanConflicts.length > 0 && loanLink}</p>}</div> : isCommitted ? <Link className={`inline-flex min-h-11 items-center justify-center rounded-full px-4 text-sm font-semibold ${header ? 'bg-primary-700 text-white' : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-50'}`} to={payRunPath(props.companyId, payPeriod.id, 'checks', { returnTo: props.returnTo })}>Checks &amp; payments</Link> : isDraft ? <Button disabled variant="outline" title="Calculate payroll before reviewing employee results">Review results</Button> : null;

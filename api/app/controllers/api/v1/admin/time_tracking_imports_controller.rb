@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class TimeTrackingImportsController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!
         before_action :set_pay_period
 
         def preview
