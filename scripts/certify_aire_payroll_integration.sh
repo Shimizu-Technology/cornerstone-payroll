@@ -2,6 +2,9 @@
 
 set -euo pipefail
 export CONNECTED_PAYROLL_MODE=enabled
+# Keep creation, Rails access and cleanup on the same explicit local server.
+export PGHOST=127.0.0.1
+unset PGHOSTADDR PGSERVICE PGSERVICEFILE
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 AIRE_REPO_PATH="${AIRE_REPO_PATH:-}"
@@ -47,8 +50,8 @@ cleanup() {
     wait "$AIRE_PID" 2>/dev/null || true
   fi
 
-  dropdb --if-exists "$CORNERSTONE_DATABASE" >/dev/null 2>&1 || true
-  dropdb --if-exists "$AIRE_DATABASE" >/dev/null 2>&1 || true
+  dropdb --host 127.0.0.1 --if-exists "$CORNERSTONE_DATABASE" >/dev/null 2>&1 || true
+  dropdb --host 127.0.0.1 --if-exists "$AIRE_DATABASE" >/dev/null 2>&1 || true
   if [[ -d "$TEMP_DIR" ]] && ! /usr/bin/trash "$TEMP_DIR" 2>/dev/null; then
     if [[ "$TEMP_DIR" == "$TEMP_PARENT"/cornerstone-aire-certification.* ]]; then
       /bin/rm -rf -- "$TEMP_DIR"
@@ -88,8 +91,8 @@ ruby "$ROOT_DIR/scripts/local_certification/policy_fixture.rb" prepare \
   "$CERTIFICATION_POLICY_FIXTURE_PATH" "$CERTIFICATION_CLOCK_FILE"
 
 echo "Preparing isolated local databases..."
-createdb "$AIRE_DATABASE"
-createdb "$CORNERSTONE_DATABASE"
+createdb --host 127.0.0.1 "$AIRE_DATABASE"
+createdb --host 127.0.0.1 "$CORNERSTONE_DATABASE"
 
 (
   cd "$AIRE_REPO_PATH/backend"

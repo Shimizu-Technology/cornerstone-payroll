@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export CONNECTED_PAYROLL_MODE=enabled
+# Keep creation, Rails access and cleanup on the same explicit local server.
+export PGHOST=127.0.0.1
+unset PGHOSTADDR PGSERVICE PGSERVICEFILE
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PAYROLL_REPO_PATH="${PAYROLL_REPO_PATH:-$ROOT_DIR}"
@@ -29,7 +32,7 @@ cleanup() {
     fi
   fi
   if [[ "$CERT_DATABASE" == cornerstone_neutral_certification_* ]]; then
-    dropdb --if-exists "$CERT_DATABASE" >/dev/null 2>&1 || {
+    dropdb --host 127.0.0.1 --if-exists "$CERT_DATABASE" >/dev/null 2>&1 || {
       echo "Owned database cleanup failed: $CERT_DATABASE" >&2; cleanup_failed=1;
     }
   fi
@@ -69,7 +72,7 @@ if [[ -n "${LIFECYCLE_SESSION_ID:-}" && -x "$LIFECYCLE_TOOL" ]]; then
   "$LIFECYCLE_TOOL" claim process "$PRODUCER_PID" --session "$LIFECYCLE_SESSION_ID" --owner root \
     --reason "Independent disposable payroll connector certification" --url "http://localhost:$PRODUCER_PORT"
 fi
-createdb "$CERT_DATABASE"
+createdb --host 127.0.0.1 "$CERT_DATABASE"
 (
   cd "$PAYROLL_REPO_PATH/api"
   export RAILS_ENV=test E2E_TEST_MODE=true AUTH_ENABLED=false
