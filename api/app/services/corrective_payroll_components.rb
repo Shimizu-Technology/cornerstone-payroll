@@ -181,7 +181,7 @@ class CorrectivePayrollComponents
         PayrollInsuranceComponents.total(item) == PayrollInsuranceComponents.total(@corrected) - @recorded.sum { |record| PayrollInsuranceComponents.total(record) }
       raise Error, "Corrective insurance classification does not reconcile with its liability components"
     end
-    data = QuickbooksPayrollReportData.new(item.pay_period)
+    data = QuickbooksPayrollReportData.new(item.pay_period, for_reporting: false)
     employer = employer_contributions(item)
     expected_employer = employer_contributions(@corrected) - @recorded.sum { |record| employer_contributions(record) }
     unless employer.round(2) == expected_employer.round(2)

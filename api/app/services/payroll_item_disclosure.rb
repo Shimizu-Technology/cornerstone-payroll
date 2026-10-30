@@ -27,6 +27,7 @@ class PayrollItemDisclosure
 
         { label: entry.description, amount: entry.company_amount, source: entry.source }
       end,
+      review_warnings: @report.review_warnings_for_item(@item),
       w4_provenance: PayrollItemW4Provenance.call(@item),
       reconciliation: {
         gross_pay: @item.gross_pay.to_f,

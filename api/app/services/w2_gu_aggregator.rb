@@ -73,7 +73,8 @@ class W2GuAggregator
         box12_code_tt_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "TT" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
         retirement_plan_participants: rows.count { |r| r[:box13_retirement_plan] }
       },
-      compliance_issues: compliance_issues(rows),
+      review_warnings: component_review_warnings,
+      compliance_issues: compliance_issues(rows) + component_review_warnings.map { |warning| warning[:message] }.uniq,
       employees: rows
     }
     serialize_money(report)
@@ -134,8 +135,14 @@ class W2GuAggregator
       .index_by(&:employee_id)
   end
 
+  def component_review_warnings
+    @component_review_warnings ||= PayrollReportComponentReview.for_items(live_items.includes(
+      :pay_period, { payroll_item_field_entries: :payroll_field_definition }, payroll_item_deductions: :deduction_type
+    ))
+  end
+
   def aggregated_retirement
-    @aggregated_retirement ||= PayrollRetirementTotals.for_scope_by_employee(live_items)
+    @aggregated_retirement ||= PayrollRetirementTotals.for_scope_by_employee(live_items, for_reporting: true)
   end
 
   def employees

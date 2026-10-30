@@ -33,12 +33,12 @@ class PayrollRetirementTotals
     group == expected_group
   end
 
-  def self.for_item(item)
+  def self.for_item(item, for_reporting: false)
     totals = {
       retirement: item.retirement_payment.to_d,
       roth_retirement: item.roth_retirement_payment.to_d
     }
-    QuickbooksPayrollReportData.new(item.pay_period).deduction_contribution_entries_for_item(item).each do |entry|
+    QuickbooksPayrollReportData.new(item.pay_period, for_reporting: for_reporting).deduction_contribution_entries_for_item(item).each do |entry|
       next if BUILT_IN_SOURCES.include?(entry.source)
 
       key = GROUP_KEYS[entry.reporting_group]
@@ -47,8 +47,8 @@ class PayrollRetirementTotals
     totals.transform_values { |amount| amount.round(2) }
   end
 
-  def self.additions_for_item(item)
-    entries = QuickbooksPayrollReportData.new(item.pay_period).deduction_contribution_entries_for_item(item)
+  def self.additions_for_item(item, for_reporting: false)
+    entries = QuickbooksPayrollReportData.new(item.pay_period, for_reporting: for_reporting).deduction_contribution_entries_for_item(item)
     groups = GROUP_KEYS.keys + [ PayrollReportingGroups::GROUP_401K_NON_ROTH_AFTER_TAX ]
     {
       employer: entries.sum { |entry| groups.include?(entry.reporting_group) ? entry.company_amount.to_d : 0.to_d },
@@ -72,18 +72,18 @@ class PayrollRetirementTotals
     GROUP_KEYS.key?(group)
   end
 
-  def self.for_scope(scope)
-    for_scope_by_employee(scope).values.each_with_object({ retirement: 0.to_d, roth_retirement: 0.to_d }) do |values, totals|
+  def self.for_scope(scope, for_reporting: false)
+    for_scope_by_employee(scope, for_reporting: for_reporting).values.each_with_object({ retirement: 0.to_d, roth_retirement: 0.to_d }) do |values, totals|
       totals.each_key { |key| totals[key] += values.fetch(key) }
     end
   end
 
-  def self.for_scope_by_employee(scope)
+  def self.for_scope_by_employee(scope, for_reporting: false)
     totals = {}
     scope.includes(:employee, { pay_period: :company }, { payroll_item_field_entries: :payroll_field_definition },
                    payroll_item_deductions: :deduction_type).find_each do |item|
       employee_totals = totals[item.employee_id] ||= { retirement: 0.to_d, roth_retirement: 0.to_d }
-      for_item(item).each { |key, value| employee_totals[key] += value }
+      for_item(item, for_reporting: for_reporting).each { |key, value| employee_totals[key] += value }
     end
     totals
   end

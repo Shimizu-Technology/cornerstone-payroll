@@ -1,3 +1,4 @@
+import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
@@ -1328,6 +1329,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <PayrollReportReviewWarnings warnings={report.review_warnings} />
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
@@ -1773,6 +1775,7 @@ export function YtdSummaryPanel() {
                   </Link>
                 </div>
               ) : <>
+              <PayrollReportReviewWarnings warnings={report.review_warnings} />
               <PayrollSourceNotice summary={report.source_summary} mentionFieldScope />
               {(report.included_payroll_runs?.length ?? 0) > 0 && (
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3" aria-label="Included payroll runs">
