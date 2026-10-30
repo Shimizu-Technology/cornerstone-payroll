@@ -12,6 +12,8 @@ Set `DEPLOYMENT_ENV=production` and `CONNECTED_PAYROLL_MODE=paused` on both apps
 
 While paused, AIRE still records outbox evidence but does not reserve or deliver it, consume delivery attempts, or mark it failed. Automatic cutoff finalization and Payroll-initiated manual locks are held, even for existing calendars without a rollout singleton. Employee/kiosk notices suppress automatic-lock countdowns. Payroll holds calendar delivery, event verification, receipts, manual-allocation sync and calendar source refresh; one-shot jobs recheck in one minute without incrementing exception retry budgets, while recurring dispatchers wait for their next scheduled run. Connected endpoints return 503 with `Retry-After: 60` before partial writes, and Payroll exposes capability flags that disable connected imports/locks with “Connected payroll is paused.” Ordinary manual payroll and ordinary AIRE time tracking remain available. Pending evidence and ordering/idempotency rules survive a restart and resume; pre-existing failures still require their normal recovery.
 
+A scheduled calendar that AIRE never accepted before its cutoff remains subject to the existing late-publication rejection after resume. The switch does not backdate an unpublished schedule or waive history/cutoff guards. Retain that pending evidence and resolve it through the approved operator recovery path; ordinary eligible pending deliveries still drain automatically.
+
 No schema migration, secret rotation, hosted setting write or deployment is included in these PRs. This switch controls new processes; it cannot cancel a request already in flight or stop an old binary. Re-pause and restart both fleets before investigating a release problem, and retain all financial/source evidence.
 
 
