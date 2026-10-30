@@ -381,7 +381,9 @@ module QuarterlyComplianceOfficialForms
     }.freeze
     TOTALS = {
       line1: [ 481.40329, 226.503357, 554.996582, 236.347046 ],
-      line3: [ 483.278259, 203.065994, 555.465332, 213.378433 ]
+      line3: [ 483.278259, 203.065994, 555.465332, 213.378433 ],
+      # Text1423's first widget in the official template (the field has two kids).
+      line5: [ 482.809509, 181.503632, 554.059082, 190.878571 ]
     }.freeze
     MONTH_TOTAL_RECTS = {
       1 => [ 487.028259, 465.564362, 557.340332, 476.345551 ],
@@ -524,6 +526,9 @@ module QuarterlyComplianceOfficialForms
       draw_text_box(pdf, QUARTER_TOTAL_RECT, money_string(total), size: 7, align: :right)
       draw_text_box(pdf, TOTALS[:line1], money_string(total), size: 7, align: :right)
       draw_text_box(pdf, TOTALS[:line3], money_string(total), size: 7, align: :right)
+      # Depository receipts are not collected by this form workflow. Leave item4
+      # blank and carry item3 to the balance due; item2 remains unchanged.
+      draw_text_box(pdf, TOTALS[:line5], money_string(total), size: 7, align: :right)
     end
 
     def quarter_months
