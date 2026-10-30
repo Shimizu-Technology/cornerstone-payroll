@@ -160,7 +160,7 @@ RSpec.describe BelowThresholdFicaContext do
     expect { helper.snapshot(current_item: item, rules: rules) }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /reclassification/)
   end
 
-  %i[committed voided disposed current rules exclusion source_review].each do |change|
+  %i[committed voided disposed current current_tax current_basis rules exclusion source_review].each do |change|
     [ :approve!, :commit! ].each do |operation|
       it "stales #{operation} when #{change} evidence changes after calculation" do
         voided = history(voided: true)
@@ -177,6 +177,8 @@ RSpec.describe BelowThresholdFicaContext do
         when :voided then voided.update_columns(net_pay: 900)
         when :disposed then disposed.update_columns(gross_pay: 1)
         when :current then item.update_columns(gross_pay: 501)
+        when :current_tax then item.update_columns(social_security_tax: 30)
+        when :current_basis then item.update_columns(social_security_taxable_wages: nil)
         when :rules then tax_table.update_columns(ss_wage_base: 184501)
         when :exclusion then voided.pay_period.update_columns(correction_status: nil)
         when :source_review then source_review(ss: 1)
