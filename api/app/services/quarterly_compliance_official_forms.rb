@@ -678,8 +678,8 @@ module QuarterlyComplianceOfficialForms
       street_rect, city_rect = ADDRESS_RECTS.fetch(index)
       street = employee.address_line1.to_s.squish
       unit = employee.address_line2.to_s.squish
-      city_state = [ employee.city, employee.state ].compact_blank.join(", ")
-      city_line = [ city_state, employee.zip ].compact_blank.join(" ")
+      # The SW-2 has its own ZIP column, so the city-state line stops at the state.
+      city_line = [ employee.city, employee.state ].compact_blank.join(", ")
       combined_street = [ street, unit ].compact_blank.join(" ")
       if pdf.width_of(combined_street, size: 6) <= street_rect[2] - street_rect[0] - 3
         street = combined_street
