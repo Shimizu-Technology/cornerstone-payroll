@@ -92,19 +92,21 @@ export function PayRunHoursWorksheet({
         </section>}
 {(isDraft || isCalculated) && (
           <Card>
-            <div
-              role="button"
-              tabIndex={0}
-              className="w-full border-b p-4 text-left transition-colors hover:bg-neutral-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
-              onClick={() => setHoursTableOpen(prev => !prev)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  setHoursTableOpen(prev => !prev);
-                }
-              }}
-            >
+            <div className="w-full border-b p-4 text-left">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={hoursTableOpen}
+                  className="shrink-0 rounded-sm transition-colors hover:bg-neutral-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
+                  onClick={() => setHoursTableOpen(prev => !prev)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setHoursTableOpen(prev => !prev);
+                    }
+                  }}
+                >
                 <div className="flex items-center gap-2">
                   <svg
                     className={`w-4 h-4 text-neutral-600 transition-transform ${hoursTableOpen ? 'rotate-90' : ''}`}
@@ -120,6 +122,7 @@ export function PayRunHoursWorksheet({
                       <p className="text-xs text-neutral-600 mt-0.5">Click to expand</p>
                     )}
                   </div>
+                </div>
                 </div>
                 {hoursTableOpen && (
                   <div className="grid min-w-0 w-full grid-cols-1 gap-3 sm:w-auto sm:flex-1 sm:grid-cols-none sm:flex sm:flex-wrap sm:items-center" onClick={(e) => e.stopPropagation()}>

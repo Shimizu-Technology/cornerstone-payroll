@@ -1,6 +1,6 @@
 import { PayrollReportReviewWarnings } from './PayrollReportReviewWarnings';
-import { Fragment, useEffect, type ReactElement } from 'react';
-import { createPortal } from 'react-dom';
+import { Fragment, type ReactElement } from 'react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { PayrollRegisterReport } from '@/services/api';
@@ -288,7 +288,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
           </div>
         </div>
 
-        <div className="max-h-[58vh] overflow-auto">
+        <div tabIndex={0} role="region" aria-label="Scrollable payroll report" className="max-h-[58vh] overflow-auto">
           <table className="min-w-[2100px] border-separate border-spacing-0 text-xs">
             <thead className="sticky top-0 z-30">
               <tr>
@@ -351,7 +351,7 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
               Informational contractor payments are shown separately and are not included in the employee register totals.
             </p>
           </div>
-          <div className="overflow-x-auto">
+          <div tabIndex={0} role="region" aria-label="Scrollable payroll report" className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-neutral-100 text-left text-xs text-neutral-600">
                 <tr>
@@ -479,7 +479,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
             </p>
           )}
         </div>
-        <div className="max-h-[60vh] overflow-auto">
+        <div tabIndex={0} role="region" aria-label="Scrollable payroll report" className="max-h-[60vh] overflow-auto">
           <table className="text-xs" style={{ minWidth: `${2050 + (fieldColumns.length * 144) + (adjustmentColumns.length * 160)}px` }}>
             <thead className="sticky top-0 z-10 bg-neutral-100 text-left text-neutral-700">
               <tr>
@@ -656,7 +656,7 @@ function PayrollComponentsDisclosure({ report }: PayrollComponentsDisclosureProp
         ))}
       </div>
 
-      <div className="max-h-[45vh] overflow-auto">
+      <div tabIndex={0} role="region" aria-label="Scrollable payroll report" className="max-h-[45vh] overflow-auto">
         <table className="min-w-[1080px] w-full text-sm">
           <thead className="sticky top-0 z-10 bg-neutral-100 text-left text-xs text-neutral-600">
             <tr>
@@ -734,20 +734,9 @@ export function PayrollRegisterPreviewModal({
   onClose,
   downloadFormats,
 }: PayrollRegisterPreviewModalProps) {
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
-
-  if (!open || typeof document === 'undefined') return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[110] flex flex-col bg-neutral-950/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Payroll Register preview">
-      <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-neutral-100 shadow-2xl sm:m-5">
+  return (
+    <Dialog open={open} onOpenChange={(value) => { if (!value) onClose(); }} placement="fullscreen">
+      <DialogContent variant="fullscreen" aria-label="Payroll Register preview">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950 px-4 py-3 text-white sm:px-5">
           <div className="min-w-0">
             <p className="truncate text-sm font-bold sm:text-base">Payroll Register</p>
@@ -763,7 +752,7 @@ export function PayrollRegisterPreviewModal({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+        <div tabIndex={0} role="region" aria-label="Payroll register report" className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {loading && (
             <div className="flex min-h-[420px] items-center justify-center">
               <div className="flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-5 py-3 text-sm font-semibold text-neutral-600 shadow-sm">
@@ -780,8 +769,7 @@ export function PayrollRegisterPreviewModal({
           )}
           {!loading && !error && report && <PayrollRegisterPreviewContent report={report} />}
         </div>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
