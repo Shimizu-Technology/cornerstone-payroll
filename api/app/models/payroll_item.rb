@@ -664,6 +664,8 @@ class PayrollItem < ApplicationRecord
       save!
       TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)
     end
+  rescue *PayrollCalculationHistory::ERRORS => e
+    raise PayrollCalculationHistory::HoldError, PayrollCalculationHistory.message(e)
   end
 
   def wage_rate_hours
