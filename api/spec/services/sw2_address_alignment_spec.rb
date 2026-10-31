@@ -56,6 +56,17 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
     end
   end
 
+  it "truncates only an overflowing unit and preserves city, state and ZIP" do
+    employee.update!(address_line1: "123 Marine Corps Drive", address_line2: "ExtremelyLongUnitDescription" * 10)
+    page = generated_pages.first
+    street, city = described_class::ADDRESS_RECTS.first
+    city_text = runs_inside(page, city).map(&:text).join
+    expect(city_text).to end_with("...; Tamuning, GU 96913")
+    expect(runs_inside(page, street).map(&:text).join).to eq(employee.address_line1)
+    expect(runs_inside(page, described_class::ZIP_RECTS.first).map(&:text).join).to eq("96913")
+    runs_inside(page, city).each { |run| expect(run.x + run.width).to be <= city[2] }
+  end
+
   it "keeps exceptionally long values readable with an ellipsis" do
     employee.update!(address_line1: "ExtraordinarilyLongUnbrokenStreet" * 8)
     run = runs_inside(generated_pages.first, described_class::ADDRESS_RECTS.first.first).first

@@ -688,7 +688,7 @@ module Api
           filing = W2FilingReadiness.find_by(company_id: company.id, year: year)
           render json: {
             filing: filing ? filing_readiness_payload(filing) : nil,
-            employee_completeness: W2GuPreflightValidator.new(company: company, year: year).run[:employee_completeness],
+            employee_completeness: FilingEmployeeCompleteness.for(W2GuFilingPopulation.employees(company: company, year: year)),
             filing_gate: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year)
           }
         end

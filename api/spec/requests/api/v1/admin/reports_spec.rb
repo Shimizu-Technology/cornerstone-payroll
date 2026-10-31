@@ -1386,6 +1386,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.fetch("employee_completeness")).to include("employees" => [], "missing_ssn_count" => 0, "missing_address_count" => 0)
     end
 
+    it "loads employee details without running preflight or validating historical ledgers" do
+      expect(W2GuPreflightValidator).not_to receive(:new)
+      expect_any_instance_of(HistoricalPayrollFilingSource).not_to receive(:validate!)
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("employee_completeness").fetch("employees")).to be_empty
+    end
+
     it "returns nil when no readiness row exists for year" do
       get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
 
