@@ -367,7 +367,7 @@ module Api
                                      .includes(:company, :employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
 
-          preload_ytd_caches!(employees_by_id.values, @pay_period)
+          history_errors = preload_ytd_caches!(employees_by_id.values, @pay_period)
           annual_fica_contexts = EmployeeYearFicaContext.batch(company: current_company, employees: employees_by_id.values,
             year: @pay_period.pay_date.year, excluding_pay_period_id: @pay_period.id)
           payroll_field_input_applier = PayrollFieldInputApplier.new(
@@ -378,6 +378,10 @@ module Api
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             next unless employee
+            if history_errors[employee.id]
+              results[:errors] << { employee_id: employee.id, name: employee.full_name, error: history_errors[employee.id] }
+              next
+            end
 
             begin
               # Find or create payroll item for this employee
@@ -525,6 +529,8 @@ module Api
                   results[:success] << { employee_id: employee.id, name: employee.full_name }
                 end
               end
+            rescue *PayrollCalculationHistory::ERRORS => e
+              results[:errors] << { employee_id: employee.id, name: employee.full_name, error: PayrollCalculationHistory.message(e) }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: e.message }
             end
@@ -1924,7 +1930,8 @@ module Api
         # and cache the results on the Employee instances so PayrollCalculator
         # can reuse them during run_payroll without N per-employee aggregate reads.
         def preload_ytd_caches!(employees, pay_period)
-          return if employees.empty?
+          history_errors = {}
+          return history_errors if employees.empty?
 
           year = pay_period.pay_date.year
           eids = employees.map(&:id)
@@ -1947,9 +1954,18 @@ module Api
             ytd_map = rows.each_with_object({}) do |(employee_id, *values), map|
               map[employee_id] = aggregate_columns.keys.zip(values.map(&:to_f)).to_h
             end
-            retirement_totals = PayrollRetirementTotals.for_scope_by_employee(
-              PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).financially_reportable
-            )
+            retirement_scope = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).financially_reportable
+            retirement_totals = begin
+              PayrollRetirementTotals.for_scope_by_employee(retirement_scope)
+            rescue *PayrollCalculationHistory::ERRORS
+              # Keep the fast batch path for healthy history. On a known hold,
+              # isolate strict reads by employee; never cache partial totals.
+              employees.each_with_object({}) do |employee, totals|
+                totals.merge!(PayrollRetirementTotals.for_scope_by_employee(retirement_scope.where(employee_id: employee.id)))
+              rescue *PayrollCalculationHistory::ERRORS => e
+                history_errors[employee.id] = PayrollCalculationHistory.message(e)
+              end
+            end
             retirement_totals.each { |employee_id, totals| ytd_map.fetch(employee_id).merge!(totals) }
           else
             ytd_map = {}
@@ -1973,6 +1989,8 @@ module Api
           end
 
           employees.each do |emp|
+            next if history_errors[emp.id]
+
             data = ytd_map[emp.id] || Employee::YTD_AGGREGATE_COLUMNS.keys.index_with { 0.0 }
             data = emp.merge_historical_ytd(
               data,
@@ -1987,6 +2005,7 @@ module Api
               totals: data
             )
           end
+          history_errors
         end
       end
     end

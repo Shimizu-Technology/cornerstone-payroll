@@ -180,6 +180,13 @@ module Api
             # save too, so failed recalculation cannot leave old totals behind.
             raise ActiveRecord::Rollback if response.status >= 400
           end
+          if @history_calculation_failed
+            # Input changes roll back above, but the prior calculation must no
+            # longer be approvable after a strict history hold was discovered.
+            @pay_period.reload.with_lock do
+              invalidate_prior_calculation!("Benefit or retirement history needs administrator or accountant review before calculation.")
+            end
+          end
         end
 
         def calculate_with_timekeeping!(payroll_item)
@@ -187,6 +194,9 @@ module Api
             PayrollTimeAllocationService.call!(payroll_item: payroll_item) unless payroll_item.timekeeping_source == "correction_reference"
             payroll_item.calculate!
           end
+        rescue PayrollCalculationHistory::HoldError
+          @history_calculation_failed = true
+          raise
         end
 
         def invalidate_prior_calculation!(reason)
