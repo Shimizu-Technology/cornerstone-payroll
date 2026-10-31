@@ -28,6 +28,16 @@
   --color-neutral-900: #0f172a;
   --color-neutral-950: #020617;
 
+  /* Operational roles. Keep brand/status colors separate from neutral surfaces. */
+  --color-ink-strong: var(--color-neutral-950);
+  --color-ink-default: var(--color-neutral-900);
+  --color-ink-muted: var(--color-neutral-600);
+  --color-surface-page: var(--color-neutral-50);
+  --color-surface-panel: #ffffff;
+  --color-surface-subtle: var(--color-neutral-50);
+  --color-border-subtle: var(--color-neutral-200);
+  --color-border-control: var(--color-neutral-300);
+
   /* Accent - warm operational highlight */
   --color-accent-50: #fff8eb;
   --color-accent-100: #ffedc6;
@@ -97,8 +107,8 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  color: #0f172a;
-  background: #f8fafc;
+  color: var(--color-ink-default);
+  background: var(--color-surface-page);
 }
 
 * {

@@ -13,7 +13,7 @@ const variants = {
   warning: 'bg-warning-50 text-warning-800',
   danger: 'bg-danger-50 text-danger-700',
   info: 'bg-primary-50 text-primary-700',
-  outline: 'border border-neutral-300 bg-white text-neutral-700',
+  outline: 'border border-border-control bg-surface-panel text-neutral-700',
 };
 
 export function Badge({ children, variant = 'default', className, wrap = false }: BadgeProps) {

@@ -189,7 +189,7 @@ function SignoffEditorModal({
             </div>
           )}
 
-          <div className="px-6 py-4 space-y-6">
+          <div className="px-6 py-4 space-y-6 text-sm">
             {/* Company / period header */}
             {companyName && (
               <div className="bg-neutral-50 border rounded-lg p-3">
@@ -607,7 +607,7 @@ export function TransmittalEditorModal({
               </span>
             </div>
           )}
-          <div className="px-6 py-4 space-y-6">
+          <div className="px-6 py-4 space-y-6 text-sm">
             {/* Preparer name */}
             <div>
               <label htmlFor={`${fieldId}-preparer`} className="block text-xs font-medium text-neutral-600 mb-1">Preparer name</label>

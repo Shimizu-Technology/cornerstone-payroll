@@ -22,11 +22,11 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       primary:
         'bg-primary-700 text-white hover:bg-primary-800',
       secondary:
-        'border border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300 hover:bg-neutral-50',
+        'border border-border-subtle bg-surface-panel text-neutral-800 hover:border-border-control hover:bg-surface-subtle',
       outline:
-        'border border-neutral-300 bg-white/80 text-neutral-700 hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800',
+        'border border-border-control bg-surface-panel text-neutral-700 hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800',
       ghost:
-        'text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950',
+        'text-neutral-700 hover:bg-neutral-100 hover:text-ink-strong',
       danger: 'bg-danger-600 text-white hover:bg-danger-700',
     };
 

@@ -4076,7 +4076,7 @@ function ReportLibraryRow({
 }) {
   return (
     <Card
-      className={`cursor-pointer overflow-hidden transition-all hover:-translate-y-0.5 hover:border-primary-200 ${active ? 'border-primary-300 bg-primary-50/45' : ''}`}
+      className={`cursor-pointer overflow-hidden transition-[border-color,background-color,color] duration-120 ease-out hover:border-primary-200 ${active ? 'border-primary-300 bg-primary-50/45' : ''}`}
       onClick={onOpen}
     >
       <CardContent className="p-5">

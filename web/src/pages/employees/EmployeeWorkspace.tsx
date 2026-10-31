@@ -248,7 +248,7 @@ export function EmployeeWorkspace(): ReactElement {
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mx-auto max-w-2xl border-danger-200 bg-danger-50">
           <CardContent className="p-6">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-danger-700">Employee unavailable</p>
+            <p className="text-xs font-medium tracking-normal text-danger-700">Employee unavailable</p>
             <h1 className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">
               This employee workspace could not be opened
             </h1>
@@ -279,16 +279,16 @@ export function EmployeeWorkspace(): ReactElement {
   ].join(' · ');
 
   return (
-    <div>
+    <div className="text-sm">
       <Header
         title={employeeName}
         description={employeeDescription}
         actions={
           <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-            <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}>
+            <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition-[background-color,border-color,color] duration-120 ease-out hover:border-primary-300 hover:text-primary-800" to={returnTo}>
               <ArrowLeft className="h-4 w-4" />Back
             </Link>
-            {!readOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
+            {!readOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition-[background-color,border-color,color] duration-120 ease-out hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
               <Pencil className="h-4 w-4" />Edit employee
             </Link>}
           </div>
@@ -483,7 +483,7 @@ function PaySetup({ readOnly, employee, editHref, reviewNotes, reviewSourceRefer
               return (
                 <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
                   <p className="font-semibold text-neutral-950">{item.message}</p>
-                  {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
+                  {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold tracking-normal text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
                   {!readOnly && requiresCertificationEvidence && (
                     <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50/60 p-4">
                       <p className="text-sm font-semibold text-primary-950">Certification evidence</p>
@@ -523,7 +523,7 @@ function PaySetup({ readOnly, employee, editHref, reviewNotes, reviewSourceRefer
             </div>
             {(employee.configuration_review_resolutions || []).length > 0 && (
               <div className="border-t border-neutral-200 pt-4">
-                <p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">Completed review record</p>
+                <p className="text-xs font-medium tracking-normal text-neutral-500">Completed review record</p>
                 <div className="mt-3 space-y-3">
                   {(employee.configuration_review_resolutions || []).map((resolution) => (
                     <div key={resolution.id} className="rounded-xl border border-neutral-200 bg-white px-4 py-4 text-sm">
@@ -586,7 +586,7 @@ function PaySetup({ readOnly, employee, editHref, reviewNotes, reviewSourceRefer
             {currentW4 ? (
               <div className="grid gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                 <div className="rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Current election</p>
+                  <p className="text-xs font-medium tracking-normal text-primary-700">Current election</p>
                   <p className="mt-2 font-display text-xl font-extrabold text-neutral-950">{filingStatusLabels[currentW4.filing_status] || currentW4.filing_status}</p>
                   <p className="mt-2 text-sm text-neutral-600">Effective {formatDate(currentW4.effective_on)} · Form {currentW4.w4_form_version}</p>
                   <p className="mt-1 text-sm text-neutral-600">{formatCurrency(Number(currentW4.additional_withholding) || 0)} extra withholding per pay period</p>
@@ -813,7 +813,7 @@ interface ClassificationLinkProps {
 
 function ClassificationLink({ label, companyId, employee, returnTo }: ClassificationLinkProps): ReactElement | null {
   if (!employee) return null;
-  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-bold uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-2 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-2 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
+  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition-[background-color,border-color,color] duration-120 ease-out hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-2 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
 }
 
 interface MetricProps {
@@ -824,7 +824,7 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
@@ -833,5 +833,5 @@ interface ContextRowProps {
 }
 
 function ContextRow({ label, value }: ContextRowProps): ReactElement {
-  return <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
+  return <div><p className="text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
 }
