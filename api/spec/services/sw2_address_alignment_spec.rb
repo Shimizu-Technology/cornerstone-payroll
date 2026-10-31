@@ -33,7 +33,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
       (page_index.zero? ? 11 : 1).times do |index|
         street, city = described_class::ADDRESS_RECTS[index]
         expect(runs_inside(page, street).map(&:text).join).to eq("123 Marine Corps Drive Unit 7")
-        expect(runs_inside(page, city).map(&:text).join).to eq("Tamuning, GU 96913")
+        expect(runs_inside(page, city).map(&:text).join).to eq("Tamuning, GU")
         expect(runs_inside(page, described_class::ZIP_RECTS[index]).map(&:text).join).to eq("96913")
       end
     end
@@ -47,7 +47,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
     expect(street_runs.map(&:text).join).to eq(employee.address_line1)
     expect(street_runs.map(&:font_size).max).to be < 7.5
     expect(street_runs.map(&:font_size).min).to be >= 6
-    expect(runs_inside(page, city).map(&:text).join).to eq("Suite 456; Tamuning, GU 96913")
+    expect(runs_inside(page, city).map(&:text).join).to eq("Suite 456; Tamuning, GU")
     [ street, city ].each do |rect|
       runs_inside(page, rect).each do |run|
         expect(run.x + run.width).to be <= rect[2]
@@ -56,12 +56,12 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
     end
   end
 
-  it "truncates only an overflowing unit and preserves city, state and ZIP" do
+  it "truncates only an overflowing unit and preserves city, state and the separate ZIP" do
     employee.update!(address_line1: "123 Marine Corps Drive", address_line2: "ExtremelyLongUnitDescription" * 10)
     page = generated_pages.first
     street, city = described_class::ADDRESS_RECTS.first
     city_text = runs_inside(page, city).map(&:text).join
-    expect(city_text).to end_with("...; Tamuning, GU 96913")
+    expect(city_text).to end_with("...; Tamuning, GU")
     expect(runs_inside(page, street).map(&:text).join).to eq(employee.address_line1)
     expect(runs_inside(page, described_class::ZIP_RECTS.first).map(&:text).join).to eq("96913")
     runs_inside(page, city).each { |run| expect(run.x + run.width).to be <= city[2] }
