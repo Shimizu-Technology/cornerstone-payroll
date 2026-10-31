@@ -1,3 +1,4 @@
+import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ArrowLeft,
@@ -264,6 +265,7 @@ export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetai
           </Card>
         )}
 
+        <PayrollReportReviewWarnings warnings={disclosure?.review_warnings} />
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
         {payrollItem.employment_type !== 'contractor' && <details open={!embedded}>
           <summary className="cursor-pointer py-2 font-semibold text-primary-800">Withholding and retirement setup</summary>

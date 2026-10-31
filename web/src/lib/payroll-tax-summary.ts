@@ -1,3 +1,4 @@
+import type { PayrollReportReviewWarning } from '@/services/api';
 import type { PayrollItem } from '../types';
 
 // medicare_tax is the saved employee total, including Additional Medicare.
@@ -27,6 +28,7 @@ export interface PayrollComponentLine {
 }
 
 export interface PayrollComponentDisclosure {
+  review_warnings?: PayrollReportReviewWarning[];
   earnings: PayrollComponentLine[];
   other_pay: PayrollComponentLine[];
   taxes: PayrollComponentLine[];
