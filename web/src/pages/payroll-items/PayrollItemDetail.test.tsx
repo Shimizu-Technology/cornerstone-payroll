@@ -24,11 +24,11 @@ vi.mock('@/components/payroll/PayrollResultBreakdown', () => ({
 const employee = { id: 7, company_id: 1, first_name: 'Casey', last_name: 'Employee', payment_delivery_method: 'paper_check' } as Employee;
 const baseItem = { id: 3, employee_id: 7, employment_type: 'hourly', pay_rate: 25, hours_worked: 4, total_hours: 4, gross_pay: 100, net_pay: 92.35, total_deductions: 7.65, effective_payment_delivery_method: 'paper_check', earnings_statement_eligible: true } as PayrollItem;
 
-function renderDetail(item: PayrollItem, status: PayPeriod['status'] = 'committed') {
+function renderDetail(item: PayrollItem, status: PayPeriod['status'] = 'committed', detailItem: PayrollItem = item) {
   apiMocks.payPeriod.mockResolvedValue({ pay_period: { id: 2, company_id: 1, start_date: '2026-11-01', end_date: '2026-11-15', pay_date: '2026-11-30', status, payroll_items: [item] } });
   // The detail serializer omits check_status/voided; the page retains them from
   // the pay-period summary instead of inferring history from today's employee.
-  const detail = { ...item };
+  const detail = { ...detailItem };
   delete detail.check_status;
   delete detail.voided;
   apiMocks.payrollItem.mockResolvedValue({ payroll_item: detail });
@@ -42,7 +42,7 @@ describe('PayrollItemDetail payment labels', () => {
   it('shows the accountant review note from an affected item disclosure', async () => {
     const message = 'Legacy employer benefit history not yet classified — saved amounts are shown; accountant review needed.';
     const component_disclosure = { review_warnings: [{ code: 'legacy_employer_benefit_unclassified', message, payroll_item_id: 3, employee_id: 7 }] };
-    renderDetail({ ...baseItem, component_disclosure } as PayrollItem);
+    renderDetail(baseItem, 'committed', { ...baseItem, component_disclosure } as PayrollItem);
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.getByRole('note', { name: 'Payroll history review required' })).toBeTruthy();
   });
