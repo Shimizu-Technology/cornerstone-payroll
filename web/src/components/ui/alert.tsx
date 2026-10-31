@@ -5,7 +5,7 @@ const tones = {
   warning: 'border-warning-200 bg-warning-50 text-warning-950',
   error: 'border-danger-200 bg-danger-50 text-danger-950',
   success: 'border-success-200 bg-success-50 text-success-950',
-  info: 'border-primary-200 bg-primary-50 text-neutral-950',
+  info: 'border-primary-200 bg-primary-50 text-ink-strong',
 };
 
 /** Inline record feedback. Keep the complete message and its recovery action together. */

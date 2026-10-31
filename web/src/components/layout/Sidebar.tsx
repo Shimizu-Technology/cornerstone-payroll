@@ -179,7 +179,7 @@ function CollapsedNavLink({
         onBlur={() => setTooltipVisible(false)}
         className={({ isActive }) =>
           cn(
-            'group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
+            'group relative flex items-center rounded-xl text-sm font-medium transition-[background-color,color,border-color] duration-120 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
             collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
             isActive
               ? collapsed
@@ -296,12 +296,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
 
   return (
     <aside className={cn(
-      'relative z-30 flex flex-col border-r border-neutral-200/80 bg-white/90 backdrop-blur-sm transition-[width] duration-150 ease-in-out overflow-visible',
+      'relative z-30 flex flex-col border-r border-border-subtle bg-surface-panel overflow-visible',
       collapsed ? 'w-16' : 'w-72',
       className
     )}>
       {/* Logo */}
-      <div className="border-b border-neutral-200/70 px-3 py-5">
+      <div className="border-b border-border-subtle px-3 py-5">
         <NavLink
           to="/"
           onClick={onNavigate}
@@ -405,7 +405,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       </nav>
 
       {/* Collapse toggle + user */}
-      <div className="border-t border-neutral-200/70 p-3 space-y-2">
+      <div className="border-t border-border-subtle p-3 space-y-2">
         {onOpenCommandPalette && (
           <button
             ref={commandButtonRef}
@@ -495,7 +495,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             type="button"
             onClick={() => setUserMenuOpen((open) => !open)}
             className={cn(
-              'flex w-full items-center rounded-xl border border-neutral-200/80 bg-neutral-50/70 hover:bg-neutral-100 transition-colors',
+              'flex w-full items-center rounded-xl border border-border-subtle bg-neutral-50/70 hover:bg-neutral-100 transition-colors',
               collapsed ? 'justify-center px-1.5 py-2' : 'gap-3 px-3 py-2.5'
             )}
             aria-label="Open account menu"
