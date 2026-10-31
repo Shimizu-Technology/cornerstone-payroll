@@ -89,3 +89,13 @@ it.each([
   // Display rules must not change the saved register totals.
   expect(screen.getByRole('row', { name: /Totals \(1\)/ }).textContent).toContain('42.00');
 });
+
+it.each([0, -12345678.90, 12345678.90])('retains exact money and cents in both result projections (%s)', (amount): void => {
+  const item = { ...props.sortPayrollItems[0], gross_pay: amount, total_deductions: amount, net_pay: amount };
+  render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} /></MemoryRouter>);
+  const expected = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  const row = screen.getByRole('row', { name: /Maya Manual/ });
+  const phone = screen.getByRole('region', { name: 'Payroll result for Maya Manual' });
+  expect(within(row).getAllByText(expected)).toHaveLength(3);
+  expect(within(phone).getAllByText(expected)).toHaveLength(3);
+});
