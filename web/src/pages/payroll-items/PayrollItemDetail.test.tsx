@@ -39,6 +39,20 @@ describe('PayrollItemDetail payment labels', () => {
   afterEach(cleanup);
   beforeEach(() => { apiMocks.activeCompany = { id: 1, name: 'Synthetic Payroll' }; vi.clearAllMocks(); apiMocks.employee.mockResolvedValue({ data: employee }); });
 
+  it('shows the accountant review note from an affected item disclosure', async () => {
+    const message = 'Legacy employer benefit history not yet classified — saved amounts are shown; accountant review needed.';
+    const component_disclosure = { review_warnings: [{ code: 'legacy_employer_benefit_unclassified', message, payroll_item_id: 3, employee_id: 7 }] };
+    renderDetail({ ...baseItem, component_disclosure } as PayrollItem);
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByRole('note', { name: 'Payroll history review required' })).toBeTruthy();
+  });
+
+  it('shows no review note for an item without unresolved history', async () => {
+    renderDetail(baseItem);
+    await screen.findByText('Payment context');
+    expect(screen.queryByRole('note', { name: 'Payroll history review required' })).toBeNull();
+  });
+
   it('keeps the direct payroll-item route readable for a workspace reviewer', async () => {
     apiMocks.activeCompany = { id: 1, name: 'Synthetic Payroll', payroll_environment: 'migration_rehearsal', workspace_can_write: false };
     renderDetail({ ...baseItem, check_number: '8111', check_status: 'delivered' });
