@@ -270,7 +270,7 @@ export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetai
           <div className="mt-4 space-y-4"><PaycheckWithholdingContext item={payrollItem} provenance={disclosure?.w4_provenance} /><PaycheckRetirementContext item={payrollItem} /></div>
         </details>}
 
-        <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
+        <p className="text-xs leading-5 text-neutral-600">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
       </div>
     </div>
   );
@@ -285,7 +285,7 @@ interface RelationshipLinkProps {
 }
 
 function RelationshipLink({ icon: Icon, eyebrow, title, detail, href }: RelationshipLinkProps): ReactElement {
-  return <Link to={href} className="group grid min-h-24 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[1.35rem] border border-neutral-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><span><span className="block text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{eyebrow}</span><span className="mt-2 block font-display text-lg font-bold text-neutral-950 group-hover:text-primary-800">{title}</span><span className="mt-2 block text-sm text-neutral-500">{detail}</span></span><ArrowRight className="h-5 w-5 text-neutral-300 transition group-hover:translate-x-1 group-hover:text-primary-700" /></Link>;
+  return <Link to={href} className="group grid min-h-24 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[1.35rem] border border-neutral-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><span><span className="block text-xs font-bold uppercase tracking-[0.12em] text-neutral-600">{eyebrow}</span><span className="mt-2 block font-display text-lg font-bold text-neutral-950 group-hover:text-primary-800">{title}</span><span className="mt-2 block text-sm text-neutral-500">{detail}</span></span><ArrowRight className="h-5 w-5 text-neutral-300 transition group-hover:translate-x-1 group-hover:text-primary-700" /></Link>;
 }
 
 interface MetricProps {
@@ -296,7 +296,7 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500" style={{ overflowWrap: 'anywhere' }}>{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-600">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500" style={{ overflowWrap: 'anywhere' }}>{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
@@ -307,5 +307,5 @@ interface ContextRowProps {
 }
 
 function ContextRow({ icon: Icon, label, value, verbatim = false }: ContextRowProps): ReactElement {
-  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800" style={verbatim ? { textTransform: 'none', overflowWrap: 'anywhere' } : undefined}>{value}</p></div></div>;
+  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-600">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800" style={verbatim ? { textTransform: 'none', overflowWrap: 'anywhere' } : undefined}>{value}</p></div></div>;
 }

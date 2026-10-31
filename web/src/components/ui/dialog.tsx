@@ -107,7 +107,7 @@ interface DialogProps {
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
   dismissOnEscape?: boolean;
-  placement?: 'center' | 'left';
+  placement?: 'center' | 'left' | 'fullscreen';
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   onAfterClose?: () => void;
 }
@@ -249,16 +249,16 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
 
   return createPortal(
     <DialogContext.Provider value={{ generatedTitleId, titleId, registerTitleId }}>
-    <div ref={portalRef} data-dialog-portal data-state={open ? 'open' : 'closed'} className="fixed inset-0 z-[100]">
+    <div ref={portalRef} data-dialog-portal data-state={open ? 'open' : 'closed'} className={cn("fixed inset-0", placement === 'fullscreen' ? 'z-[110]' : 'z-[100]')}>
       <div
         data-dialog-backdrop
-        className="dialog-backdrop absolute inset-0 bg-black/55"
+        className={cn("dialog-backdrop absolute inset-0", placement === 'fullscreen' ? 'bg-neutral-950/70 backdrop-blur-sm' : 'bg-black/55')}
         onClick={() => onOpenChange(false)}
       />
 
-      <div className={cn('relative z-10 h-full', placement === 'left' ? 'pointer-events-none flex items-stretch' : 'overflow-y-auto p-4 sm:p-6')}
+      <div className={cn('relative z-10 h-full', placement === 'left' ? 'pointer-events-none flex items-stretch' : placement === 'fullscreen' ? 'flex flex-col p-2 sm:p-5' : 'overflow-y-auto p-4 sm:p-6')}
         onClick={(event) => { if (event.target === event.currentTarget) onOpenChange(false); }}>
-        {placement === 'left' ? <div className="pointer-events-auto h-full w-[86vw] max-w-[320px]">{children}</div> : (
+        {placement === 'fullscreen' ? children : placement === 'left' ? <div className="pointer-events-auto h-full w-[86vw] max-w-[320px]">{children}</div> : (
           <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-center-mobile)]:items-center [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12"
             onClick={(event) => { if (event.target === event.currentTarget) onOpenChange(false); }}>
             <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
@@ -273,7 +273,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
 
 interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
-  variant?: 'default' | 'drawer';
+  variant?: 'default' | 'drawer' | 'fullscreen';
 }
 
 export function DialogContent({
@@ -293,8 +293,9 @@ export function DialogContent({
       aria-labelledby={props['aria-labelledby'] || (props['aria-label'] ? undefined : context?.titleId)}
       tabIndex={-1}
       className={cn(
-        'dialog-panel bg-white',
-        variant === 'drawer'
+        'dialog-panel',
+        variant === 'fullscreen' ? 'bg-neutral-100' : 'bg-white',
+        variant === 'fullscreen' ? 'flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl shadow-2xl' : variant === 'drawer'
           ? 'relative flex h-full w-full overflow-y-auto'
           : cn('mx-0 max-h-[92dvh] overflow-y-auto p-4 shadow-lg sm:mx-4 sm:p-6', isFullyRoundedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg'),
         className
@@ -338,11 +339,12 @@ export function DialogTitle({
 
 export function DialogDescription({
   className,
+  tone = 'default',
   ...props
-}: React.HTMLAttributes<HTMLParagraphElement>) {
+}: React.HTMLAttributes<HTMLParagraphElement> & { tone?: 'default' | 'inverse' }) {
   return (
     <p
-      className={cn('text-sm text-neutral-600', className)}
+      className={cn('text-sm', tone === 'inverse' ? 'text-neutral-300' : 'text-neutral-600', className)}
       {...props}
     />
   );
