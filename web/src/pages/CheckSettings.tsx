@@ -867,7 +867,7 @@ export function CheckSettingsPage() {
             )}
 
             {profiles.length === 0 && !showAddProfile && (
-              <p className="text-sm text-gray-400 italic">No printer profiles saved yet. Save your current settings as a profile to get started.</p>
+              <p className="text-sm text-neutral-600 italic">No printer profiles saved yet. Save your current settings as a profile to get started.</p>
             )}
 
             {profiles.map((profile) => {
@@ -923,7 +923,7 @@ export function CheckSettingsPage() {
                       {profile.description && (
                         <p className="text-sm text-gray-500 mt-0.5">{profile.description}</p>
                       )}
-                      <p className="text-xs text-gray-400 mt-1 font-mono">
+                      <p className="text-xs text-neutral-600 mt-1 font-mono">
                         X: {Number(profile.check_offset_x).toFixed(3)} &nbsp; Y: {Number(profile.check_offset_y).toFixed(3)} &nbsp; Stock: {profile.check_stock_type === 'first_hawaiian_4up' ? 'FHB 4-Up' : profile.check_stock_type === 'top_check' ? 'Top' : 'Bottom'}
                       </p>
                       <p className="text-xs text-gray-500 mt-1">

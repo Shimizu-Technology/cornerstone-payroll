@@ -545,7 +545,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
             <div className="flex items-start justify-between gap-5 pr-8">
               <div>
                 <DialogTitle className="text-xl text-white">Print checks</DialogTitle>
-                <DialogDescription className="mt-1 max-w-3xl text-neutral-300">Generate and save an exact package. That prepares the selected checks; print the saved PDF when ready.</DialogDescription>
+                <DialogDescription tone="inverse" className="mt-1 max-w-3xl">Generate and save an exact package. That prepares the selected checks; print the saved PDF when ready.</DialogDescription>
               </div>
               {queue && <div className="hidden shrink-0 font-mono text-xs text-neutral-400 sm:block">{queue.meta.check_stock_type.replaceAll('_', ' ').toUpperCase()}</div>}
             </div>
@@ -701,7 +701,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
 
       <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded} dismissOnEscape={busyAction !== 'download'}>
         <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
-          <DialogHeader className="border-b border-neutral-800 bg-neutral-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-neutral-300"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-neutral-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
+          <DialogHeader className="border-b border-neutral-800 bg-neutral-950 px-6 py-4 text-white"><div className="flex items-center justify-between gap-6 pr-8"><div className="min-w-0"><DialogTitle className="text-lg text-white">Inspect package #{run?.id}</DialogTitle><DialogDescription tone="inverse" className="mt-1 flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />Saved package verified · Print this PDF when ready.</DialogDescription></div><div className="hidden shrink-0 items-center gap-2 text-xs text-neutral-400 sm:flex"><CheckCircle2 className="h-4 w-4 text-emerald-400" />{run?.selected_count} CHECK{run?.selected_count === 1 ? '' : 'S'}</div></div></DialogHeader>
           {open && previewBlob && <PdfDocumentView blob={previewBlob} />}
           <DialogFooter className="border-t border-neutral-200 bg-white px-6 py-4"><Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button><Button variant="outline" onClick={print} disabled={!previewUrl || !artifactVerified || !run || !['prepared', 'confirmed'].includes(run.confirmation_state)} className="gap-2"><Printer className="h-4 w-4" />Open saved PDF to print</Button><Button variant="outline" loading={busyAction === 'download'} loadingLabel="Preparing…" onClick={() => void download()} className="gap-2"><Download className="h-4 w-4" />Download</Button></DialogFooter>
         </DialogContent>

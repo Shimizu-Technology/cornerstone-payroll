@@ -725,7 +725,8 @@ export function TransmittalEditorModal({
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
-                        value={entry.title}
+                        aria-label={`Manual entry ${idx + 1} title`}
+                      value={entry.title}
                         onChange={(e) => {
                           const updated = [...customEntries];
                           updated[idx] = { ...updated[idx], title: e.target.value };
@@ -748,7 +749,8 @@ export function TransmittalEditorModal({
                       <div key={dIdx} className="flex items-center gap-2 ml-4">
                         <input
                           type="text"
-                          value={detail}
+                          aria-label={`Manual entry ${idx + 1} detail ${dIdx + 1}`}
+                      value={detail}
                           onChange={(e) => {
                             const updated = [...customEntries];
                             const details = [...updated[idx].details];
@@ -883,6 +885,7 @@ export function TransmittalEditorModal({
                   <div key={idx} className="flex items-center gap-2 group">
                     <input
                       type="text"
+                      aria-label={`Note ${idx + 1}`}
                       value={note}
                       onChange={(e) => {
                         const updated = [...notes];
