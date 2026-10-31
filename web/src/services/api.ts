@@ -2260,7 +2260,7 @@ export interface PayrollRegisterReport {
       payroll_status_note?: string | null;
     };
     source?: {
-      system: 'cornerstone' | 'quickbooks_online';
+      system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
       label: string;
       locked: boolean;
       statement: string;
@@ -2488,7 +2488,7 @@ export interface EmployeePayHistoryRecord {
   payment_method?: string | null;
   reason?: string;
   source: {
-    system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider' | 'historical_adjustment';
     label: string;
     locked: boolean;
   };
@@ -2883,7 +2883,7 @@ export interface QuarterlyCompliancePacketReport {
   } | null;
   pay_periods: {
     id: number | string;
-    source: 'cornerstone' | 'quickbooks';
+    source: 'cornerstone' | 'quickbooks' | 'prior_provider';
     read_only: boolean;
     payment_status?: 'paid_before_cornerstone';
     record_type?: string;
@@ -5832,7 +5832,7 @@ export interface PayrollHistoryRecord {
   processed_at?: string | null;
   processed_by_name?: string | null;
   source: {
-    system: 'cornerstone' | 'quickbooks_online';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
     label: string;
     detail: string;
     locked: boolean;
@@ -5861,7 +5861,7 @@ export interface ClientPayrollHistoryResponse {
 
 export const payrollHistoryApi = {
   list: (
-    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks'; register_eligible?: boolean },
+    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
   ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
     api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),

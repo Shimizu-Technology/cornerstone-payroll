@@ -45,7 +45,7 @@ class ImportedPayPeriodQuery
     batch = period.historical_import_batch
     source = {
       system: batch.source_system,
-      label: "QuickBooks import",
+      label: batch.source_system == "prior_provider" ? "Prior-provider history" : "QuickBooks import",
       detail: period.source_label,
       locked: true,
       locked_at: batch.locked_at

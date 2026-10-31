@@ -51,6 +51,7 @@ const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const AireAccountConnection = lazy(() => import('@/pages/AireAccountConnection').then((module) => ({ default: module.AireAccountConnection })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
+const PriorProviderHistory = lazy(() => import('@/pages/PriorProviderHistory').then(module => ({ default: module.PriorProviderHistory })));
 const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
 const PayrollGoLive = lazy(() => import('@/pages/PayrollGoLive').then((module) => ({ default: module.PayrollGoLive })));
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
@@ -332,6 +333,7 @@ function AppRoutes() {
           <Route path="pay-runs/imported/:id" element={<ImportedPayRunDetail audience={isClient ? 'client' : 'staff'} />} />
           <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
           <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
+          <Route path="prior-provider-history" element={<StaffOnlyRoute><PriorProviderHistory /></StaffOnlyRoute>} />
           <Route path="payroll-go-live" element={<StaffOnlyRoute><PayrollGoLive /></StaffOnlyRoute>} />
           <Route path="payroll-fields" element={<CapabilityRoute capability="manage_payroll_fields"><PayrollFields /></CapabilityRoute>} />
         </Route>

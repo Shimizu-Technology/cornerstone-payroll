@@ -235,6 +235,9 @@ class PayrollItem < ApplicationRecord
   end
 
   validate :pending_payment_resolution_cannot_change, on: :update
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
+  before_create :prevent_retired_history_mutation
   before_update :guard_pending_payment_resolution
 
   def pending_payment_resolution_cannot_change
@@ -641,6 +644,13 @@ class PayrollItem < ApplicationRecord
   end
 
   # Calculate and store all values
+  def prevent_retired_history_mutation
+    return unless PayPeriod.where(id: pay_period_id, status: "retired_history").exists?
+
+    errors.add(:base, "Retired prior-provider payroll is read-only evidence")
+    throw :abort
+  end
+
   def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
       PayrollCorrectionPayBasisGuard.validate!(self)

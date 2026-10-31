@@ -85,7 +85,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
         title={record ? formatDateRange(record.start_date, record.end_date) : 'Imported pay run'}
         description={audience === 'client'
           ? 'Review this finalized payroll from your imported history. It is read-only and shown here for continuity.'
-          : 'Review the payroll records accepted from QuickBooks. This source-backed pay run is locked and cannot be recalculated or edited here.'}
+          : 'Review the payroll records accepted from the prior provider. This source-backed pay run is locked and cannot be recalculated or edited here.'}
         actions={<Button variant="outline" onClick={() => navigate(returnTo)}><ArrowLeft className="mr-2 h-4 w-4" />Back to Payroll</Button>}
       />
 
@@ -105,11 +105,11 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                 <div>
                   <p className="font-semibold">Locked source record</p>
                   <p className="mt-1 text-sm leading-6 text-amber-800">{audience === 'client'
-                    ? 'This finalized payroll came from QuickBooks. You can review it here, but it cannot be changed or recalculated in Cornerstone.'
-                    : 'These values were accepted from QuickBooks and are shown alongside Cornerstone payroll for continuity. Corrections use the migration workflow, not native payroll actions.'}</p>
+                    ? (record.source.system === 'prior_provider' ? 'This finalized payroll came from the prior provider. You can review it here, but it cannot be changed or recalculated in Cornerstone.' : 'This finalized payroll came from QuickBooks. You can review it here, but it cannot be changed or recalculated in Cornerstone.')
+                    : 'These values were accepted from the prior provider and are shown alongside Cornerstone payroll for continuity. Corrections use the migration workflow, not native payroll actions.'}</p>
                 </div>
               </div>
-              <Badge variant="warning" className="shrink-0">QuickBooks import</Badge>
+              <Badge variant="warning" className="shrink-0">{record.source.label || 'Historical import'}</Badge>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -146,7 +146,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                       <TableRow key={paycheck.id}>
                         <TableCell>
                           <p className="font-medium text-neutral-950">{paycheck.employee_name || paycheck.source_employee_name}</p>
-                          {paycheck.employee_name && paycheck.employee_name !== paycheck.source_employee_name && <p className="mt-1 text-xs text-neutral-500">QuickBooks: {paycheck.source_employee_name}</p>}
+                          {paycheck.employee_name && paycheck.employee_name !== paycheck.source_employee_name && <p className="mt-1 text-xs text-neutral-500">Source: {paycheck.source_employee_name}</p>}
                         </TableCell>
                         <TableCell>{audience === 'client' ? (paycheck.payment_method || '—') : (paycheck.check_number || paycheck.payment_method || '—')}</TableCell>
                         <TableCell className="text-right tabular-nums">{Number(paycheck.hours_total).toFixed(2)}</TableCell>
@@ -189,7 +189,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
             {audience === 'staff' && <Card>
               <CardHeader><CardTitle>Import provenance</CardTitle></CardHeader>
               <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <Metric label="Source" value="QuickBooks Online" />
+                <Metric label="Source" value={record.source.label || 'Historical import'} />
                 <Metric label="Source batch" value={`#${record.source.import_batch_id ?? '—'}`} />
                 <Metric label="Locked by" value={record.source.locked_by_name || 'Operator not recorded'} />
                 <Metric label="Importer version" value={record.source.importer_version || 'Not recorded'} />

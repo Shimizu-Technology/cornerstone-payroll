@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1552,8 +1552,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.index [ "id", "company_id" ], name: "idx_historical_import_batches_tenant_key", unique: true
     t.index [ "locked_by_id" ], name: "index_historical_import_batches_on_locked_by_id"
     t.check_constraint "jsonb_typeof(tax_wage_reconciliation) = 'object'::text", name: "historical_import_batches_tax_wage_object"
-    t.check_constraint "source_system::text = 'quickbooks_online'::text", name: "historical_import_batches_source"
-    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text, 'locked'::character varying::text, 'failed'::character varying::text])", name: "historical_import_batches_status"
+    t.check_constraint "source_system::text = ANY (ARRAY['quickbooks_online'::character varying, 'prior_provider'::character varying]::text[])", name: "historical_import_batches_source"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'applied'::character varying, 'locked'::character varying, 'failed'::character varying, 'reversed'::character varying]::text[])", name: "historical_import_batches_status"
   end
 
   create_table "historical_import_cutover_reviews", force: :cascade do |t|
@@ -1801,10 +1801,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
-    t.bigint "historical_client_bootstrap_id", null: false
+    t.bigint "historical_client_bootstrap_id"
     t.bigint "historical_import_batch_id", null: false
     t.string "plan_digest", null: false
     t.jsonb "preview_summary", default: {}, null: false
+    t.bigint "prior_provider_history_onboarding_id"
     t.jsonb "reconciliation_summary", default: {}, null: false
     t.integer "revision", default: 1, null: false
     t.string "status", default: "previewed", null: false
@@ -1818,13 +1819,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.index [ "historical_client_bootstrap_id" ], name: "idx_historical_ytd_bridges_bootstrap"
     t.index [ "historical_import_batch_id", "revision" ], name: "idx_historical_ytd_bridges_batch_revision", unique: true
     t.index [ "id", "company_id" ], name: "idx_historical_ytd_bridges_tenant_key", unique: true
+    t.index [ "prior_provider_history_onboarding_id" ], name: "idx_historical_bridge_existing_roster"
     t.index [ "supersedes_historical_ytd_bridge_id" ], name: "idx_historical_ytd_bridges_one_successor", unique: true, where: "(supersedes_historical_ytd_bridge_id IS NOT NULL)"
+    t.check_constraint "(status::text = ANY (ARRAY['applied'::character varying, 'reversed'::character varying]::text[])) AND applied_at IS NOT NULL AND applied_by_id IS NOT NULL AND apply_acknowledgement IS NOT NULL OR status::text = 'previewed'::text AND applied_at IS NULL AND applied_by_id IS NULL AND apply_acknowledgement IS NULL", name: "historical_ytd_bridges_status_audit_fields"
     t.check_constraint "jsonb_typeof(preview_summary) = 'object'::text AND jsonb_typeof(reconciliation_summary) = 'object'::text", name: "historical_ytd_bridges_summary_objects"
     t.check_constraint "jsonb_typeof(warnings) = 'array'::text AND jsonb_typeof(validation_errors) = 'array'::text", name: "historical_ytd_bridges_arrays"
+    t.check_constraint "num_nonnulls(historical_client_bootstrap_id, prior_provider_history_onboarding_id) = 1", name: "historical_bridge_roster_contract"
     t.check_constraint "preview_summary ? 'through_period_end'::text AND preview_summary ? 'through_pay_date'::text AND (preview_summary ->> 'through_period_end'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'::text AND (preview_summary ->> 'through_pay_date'::text) >= (preview_summary ->> 'through_period_end'::text)", name: "historical_ytd_bridges_boundary_order"
     t.check_constraint "revision > 0", name: "historical_ytd_bridges_revision_positive"
-    t.check_constraint "status::text = 'applied'::text AND applied_at IS NOT NULL AND applied_by_id IS NOT NULL AND apply_acknowledgement IS NOT NULL OR status::text = 'previewed'::text AND applied_at IS NULL AND applied_by_id IS NULL AND apply_acknowledgement IS NULL", name: "historical_ytd_bridges_status_audit_fields"
-    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying::text, 'applied'::character varying::text])", name: "historical_ytd_bridges_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['previewed'::character varying, 'applied'::character varying, 'reversed'::character varying]::text[])", name: "historical_ytd_bridges_status_check"
   end
 
   create_table "information_return_thresholds", force: :cascade do |t|
@@ -2429,6 +2432,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.bigint "promoted_payment_prepared_by_id"
     t.string "promotion_payment_disposition"
     t.bigint "promotion_source_pay_period_id"
+    t.bigint "retired_to_historical_import_batch_id"
     t.string "run_purpose", default: "regular", null: false
     t.string "run_purpose_source", default: "legacy_system_default", null: false
     t.bigint "source_pay_period_id"
@@ -2468,6 +2472,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.index [ "intake_stale_session_id" ], name: "idx_pay_periods_intake_stale_session"
     t.index [ "promoted_payment_prepared_by_id" ], name: "index_pay_periods_on_promoted_payment_prepared_by_id"
     t.index [ "promotion_source_pay_period_id" ], name: "idx_pay_periods_promotion_source", where: "(promotion_source_pay_period_id IS NOT NULL)"
+    t.index [ "retired_to_historical_import_batch_id" ], name: "idx_pay_periods_retired_history"
     t.index [ "source_pay_period_id" ], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index [ "status" ], name: "index_pay_periods_on_status"
     t.index [ "superseded_by_id" ], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
@@ -2477,6 +2482,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.index [ "unapproved_by_id" ], name: "index_pay_periods_on_unapproved_by_id"
     t.index [ "voided_by_id" ], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "(promoted_payment_prepared_at IS NULL) = (promoted_payment_prepared_by_id IS NULL)", name: "pay_periods_promoted_payment_preparer_complete"
+    t.check_constraint "(status::text = 'retired_history'::text) = (retired_to_historical_import_batch_id IS NOT NULL)", name: "pay_periods_history_retirement"
     t.check_constraint "(test_workspace_role IS NULL) = (test_workspace_source_pay_period_id IS NULL)", name: "pay_periods_training_lineage_complete"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
     t.check_constraint "intake_stale_at IS NULL AND intake_stale_reason IS NULL AND intake_stale_session_id IS NULL OR intake_stale_at IS NOT NULL AND NULLIF(btrim(intake_stale_reason), ''::text) IS NOT NULL AND intake_stale_session_id IS NOT NULL", name: "pay_periods_intake_stale_complete"
@@ -3216,6 +3222,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.bigint "timecard_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
+  end
+
+  create_table "prior_provider_history_onboardings", force: :cascade do |t|
+    t.datetime "activated_at"
+    t.bigint "activated_by_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.jsonb "evidence", default: {}, null: false
+    t.jsonb "filing_after", default: [], null: false
+    t.jsonb "filing_before", default: [], null: false
+    t.bigint "historical_import_batch_id", null: false
+    t.string "idempotency_key", null: false
+    t.string "preview_digest", null: false
+    t.text "reversal_reason"
+    t.datetime "reversed_at"
+    t.bigint "reversed_by_id"
+    t.string "status", default: "converted", null: false
+    t.date "takeover_on", null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "activated_by_id" ], name: "index_prior_provider_history_onboardings_on_activated_by_id"
+    t.index [ "company_id", "idempotency_key" ], name: "idx_prior_provider_idempotency", unique: true
+    t.index [ "company_id", "tax_year" ], name: "idx_prior_provider_one_active_year", unique: true, where: "((status)::text <> 'reversed'::text)"
+    t.index [ "company_id" ], name: "index_prior_provider_history_onboardings_on_company_id"
+    t.index [ "created_by_id" ], name: "index_prior_provider_history_onboardings_on_created_by_id"
+    t.index [ "historical_import_batch_id" ], name: "idx_prior_provider_batch", unique: true
+    t.index [ "id", "company_id" ], name: "idx_prior_provider_tenant_key", unique: true
+    t.index [ "reversed_by_id" ], name: "index_prior_provider_history_onboardings_on_reversed_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['converted'::character varying, 'active'::character varying, 'reversed'::character varying]::text[])", name: "prior_provider_status"
+    t.check_constraint "tax_year >= 2000 AND tax_year <= 2200 AND EXTRACT(year FROM takeover_on) = tax_year::numeric", name: "prior_provider_year"
   end
 
   create_table "quarterly_compliance_packets", force: :cascade do |t|
@@ -4447,4 +4484,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
   add_foreign_key "time_tracking_financial_correction_links", "payroll_items", column: "predecessor_payroll_item_id", on_delete: :restrict
   add_foreign_key "time_tracking_financial_correction_links", "payroll_items", on_delete: :restrict
   add_foreign_key "time_tracking_financial_correction_links", "time_tracking_entry_allocations", column: "original_allocation_id", on_delete: :restrict
+  add_foreign_key "historical_ytd_bridges", "prior_provider_history_onboardings"
+  add_foreign_key "historical_ytd_bridges", "prior_provider_history_onboardings", column: [ "prior_provider_history_onboarding_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_bridge_prior_provider_tenant"
+  add_foreign_key "pay_periods", "historical_import_batches", column: "retired_to_historical_import_batch_id"
+  add_foreign_key "pay_periods", "historical_import_batches", column: [ "retired_to_historical_import_batch_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_retired_history_tenant"
+  add_foreign_key "prior_provider_history_onboardings", "companies"
+  add_foreign_key "prior_provider_history_onboardings", "historical_import_batches"
+  add_foreign_key "prior_provider_history_onboardings", "historical_import_batches", column: [ "historical_import_batch_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_prior_provider_batch_tenant"
+  add_foreign_key "prior_provider_history_onboardings", "users", column: "activated_by_id"
+  add_foreign_key "prior_provider_history_onboardings", "users", column: "created_by_id"
+  add_foreign_key "prior_provider_history_onboardings", "users", column: "reversed_by_id"
 end

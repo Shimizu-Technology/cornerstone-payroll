@@ -176,6 +176,14 @@ export function PayRunWorkspace(): ReactElement {
     );
   }
 
+  if (payRun.status === 'retired_history') return <div className="p-4 sm:p-6 lg:p-8">
+    <Card><CardContent className="space-y-4 p-6">
+      <h1 className="text-xl font-semibold">Retired to prior-provider history</h1>
+      <p className="text-sm leading-6">Run #{payRun.id} is retained as source evidence for payroll already paid by the previous provider. It cannot be calculated, approved, committed or issued again. Review its replacement history and opening balances in the client’s onboarding record.</p>
+      <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline" to={`/companies/${companyId}/prior-provider-history`}>Review prior-provider history</Link>
+    </CardContent></Card>
+  </div>;
+
   const isTrainingBaseline = payRun.test_workspace_role === 'baseline';
   const readOnlyWorkspace = activeCompany?.id === companyId && !canWriteCompany(activeCompany);
   const readOnlyMode: 'training_baseline' | 'backup_snapshot' | 'workspace_access' | null = isTrainingBaseline

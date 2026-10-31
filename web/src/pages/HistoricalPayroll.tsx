@@ -353,7 +353,7 @@ export function HistoricalPayroll(): ReactElement {
     const currentPreferredBatchId = selectedBatchIdRef.current !== selectionAtRequestStart
       ? selectedBatchIdRef.current
       : preferredBatchId;
-    const providers = response.meta.import_providers || [];
+    const providers = (response.meta.import_providers || []).filter(provider => provider.key !== 'prior_provider');
     setBatches(response.data);
     setArchive(response.meta.archive);
     setImportProviders(providers);
