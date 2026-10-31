@@ -94,24 +94,13 @@ class W2GuPreflightValidator
   end
 
   def filing_employee_ids
-    native_ids = PayrollItem
-      .joins(:pay_period)
-      .where(company_id: company.id)
-      .financially_reportable.reportable
-      .where.not(employment_type: "contractor")
-      .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company.id, pay_date: year_range)
-          .select(:id)
-      })
-      .distinct
-      .pluck(:employee_id)
+    native_ids = W2GuFilingPopulation.native_employee_ids(company: company, year: year)
 
     return [ native_ids, [] ] unless locked_historical_payroll?
 
     source = HistoricalPayrollFilingSource.new(company)
     source.validate!(range: year_range)
-    historical_ids = source.annual_balances(year).filter_map(&:employee_id)
+    historical_ids = source.annual_employee_ids(year)
     [ (native_ids + historical_ids).uniq, [] ]
   rescue ArgumentError => e
     finding = Finding.new(

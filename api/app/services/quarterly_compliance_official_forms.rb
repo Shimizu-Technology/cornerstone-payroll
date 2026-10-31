@@ -684,7 +684,10 @@ module QuarterlyComplianceOfficialForms
       if pdf.width_of(combined_street, size: 6) <= street_rect[2] - street_rect[0] - 3
         street = combined_street
       else
-        city_line = [ unit, city_line ].compact_blank.join("; ")
+        # Reserve locality first; only the optional unit may lose text.
+        available = city_rect[2] - city_rect[0] - 3 - pdf.width_of("; #{city_line}", size: 6)
+        unit = fit_address_text(pdf, unit, available)
+        city_line = [ unit.presence, city_line.presence ].compact.join("; ")
       end
       draw_address_line(pdf, street_rect, street)
       draw_address_line(pdf, city_rect, city_line)
@@ -695,14 +698,19 @@ module QuarterlyComplianceOfficialForms
       # Keep a readable floor and one line per widget. Exceptionally long
       # values get an ellipsis rather than disappearing or crossing a border.
       width = rect[2] - rect[0] - 3
-      if pdf.width_of(text, size: 6) > width
-        text = text.dup
-        text.chop! while text.present? && pdf.width_of("#{text}...", size: 6) > width
-        text = "#{text}..."
-      end
+      text = fit_address_text(pdf, text, width)
       size = 7.5
       size = [ size - 0.1, 6 ].max while size > 6 && pdf.width_of(text, size: size) > width
       draw_text_box(pdf, rect, text, size: size, min_font_size: 6)
+    end
+
+    def fit_address_text(pdf, text, width)
+      return text if pdf.width_of(text, size: 6) <= width
+      return "" if width < pdf.width_of("...", size: 6)
+
+      text = text.dup
+      text.chop! while text.present? && pdf.width_of("#{text}...", size: 6) > width
+      "#{text}..."
     end
 
     def employee_ssn(employee)

@@ -629,7 +629,7 @@ function TaxSummaryPanel() {
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
 export function W2GuPanel() {
-  const { activeCompany } = useCompany();
+  const { activeCompany, activeCompanyId } = useCompany();
   const hasClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const workspaceCanAdminister = canWriteCompany(activeCompany, 'manage_client_administration');
   const canMarkFilingReady = hasClientAdministration && workspaceCanAdminister;
@@ -659,66 +659,88 @@ export function W2GuPanel() {
   const [filingGate, setFilingGate] = useState<PayrollFilingGateGroup | null>(null);
   const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    setEmployeeCompleteness(null);
-    void loadPersistedFilingReadiness(() => active);
-    return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year]);
+  const employeeReadinessSequence = useRef(0);
+  const filingContextSequence = useRef(0);
+  const [employeeReadinessError, setEmployeeReadinessError] = useState(false);
 
-  async function loadPersistedFilingReadiness(isCurrent = () => true) {
-    try {
-      const res = await reportsApi.w2GuFilingReadiness(year);
-      if (!isCurrent()) return;
+  useEffect(() => {
+    setEmployeeCompleteness(null);
+    setEmployeeReadinessError(false);
+    setReport(null);
+    setPreflight(null);
+    setFiling(null);
+    setFilingGate(null);
+    setLoading(false);
+    setPreflightLoading(false);
+    void loadPersistedFilingReadiness();
+    return () => { employeeReadinessSequence.current += 1; filingContextSequence.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, activeCompanyId]);
+
+  async function loadPersistedFilingReadiness() {
+    const sequence = ++employeeReadinessSequence.current;
+    const context = filingContextSequence.current;
+    const [readiness, responsibilities] = await Promise.allSettled([
+      reportsApi.w2GuFilingReadiness(year),
+      reportsApi.payrollFilingResponsibilities(year),
+    ]);
+    if (context !== filingContextSequence.current) return;
+
+    // Permission loading belongs to the selected company/year even if a newer
+    // report or preflight superseded this request's employee details.
+    setCanRecordFilingResponsibility(responsibilities.status === 'fulfilled' && responsibilities.value.permissions.can_record);
+    if (sequence !== employeeReadinessSequence.current) return;
+    if (readiness.status === 'fulfilled') {
+      const res = readiness.value;
       setEmployeeCompleteness(res.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       setFiling(res.filing);
       setFilingGate(res.filing_gate);
-    } catch {
-      if (!isCurrent()) return;
-      // Non-blocking: filing readiness can be absent or temporarily unavailable.
+    } else {
+      setEmployeeCompleteness(null);
+      setEmployeeReadinessError(true);
       setFiling(null);
     }
-
-    try {
-      const response = await reportsApi.payrollFilingResponsibilities(year);
-      if (!isCurrent()) return;
-      if ('filings' in response.data) setFilingGate(response.data);
-      setCanRecordFilingResponsibility(response.permissions.can_record);
-    } catch {
-      if (isCurrent()) setCanRecordFilingResponsibility(false);
+    if (responsibilities.status === 'fulfilled' && 'filings' in responsibilities.value.data) {
+      setFilingGate(responsibilities.value.data);
     }
   }
 
   async function loadReport() {
+    const sequence = ++employeeReadinessSequence.current;
     setLoading(true);
     setError(null);
     setReport(null);
     try {
       const res = await reportsApi.w2Gu(year);
+      if (sequence !== employeeReadinessSequence.current) return;
       setReport(res.report);
       setEmployeeCompleteness(res.report.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       if (res.report.filing_readiness !== undefined) setFiling(res.report.filing_readiness);
       setFilingGate(res.report.filing_gate);
     } catch (err: unknown) {
-      setError(extractErrorMessage(err));
+      if (sequence === employeeReadinessSequence.current) setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
   async function runPreflight() {
+    const sequence = ++employeeReadinessSequence.current;
     setPreflightLoading(true);
     setPreflightError(null);
     setMarkReadyError(null);
     try {
       const res = await reportsApi.w2GuPreflight(year);
+      if (sequence !== employeeReadinessSequence.current) return;
       setPreflight(res.preflight);
       setEmployeeCompleteness(res.preflight.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       setFiling(res.filing);
       setFilingGate(res.filing_gate);
     } catch (err: unknown) {
-      setPreflightError(extractErrorMessage(err));
+      if (sequence === employeeReadinessSequence.current) setPreflightError(extractErrorMessage(err));
     } finally {
       setPreflightLoading(false);
     }
@@ -756,6 +778,7 @@ export function W2GuPanel() {
         if (revalidatedPreflight) {
           setPreflight(revalidatedPreflight);
           revalidated = true;
+          void loadPersistedFilingReadiness();
         }
       }
       if (!revalidated) {
@@ -938,6 +961,12 @@ export function W2GuPanel() {
         />
       )}
 
+      {employeeReadinessError && (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          Employee filing details could not be refreshed. Review them before filing.
+          <Button variant="outline" className="ml-3" onClick={() => void loadPersistedFilingReadiness()}>Retry employee readiness</Button>
+        </div>
+      )}
       <FilingEmployeeWarnings completeness={employeeCompleteness} />
 
       {preflightError && (
@@ -3075,7 +3104,7 @@ function QuarterlyOfficialFormModal({
     <>
       <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
       <div className="fixed inset-0 z-[61] flex items-center justify-center p-3 xl:p-5">
-        <div role="dialog" aria-modal="true" aria-label="Government form review" className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div role="dialog" aria-label="Government form review" className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
             <div>
               <h2 className="text-2xl font-semibold text-neutral-900">{fields?.title || 'Government Form'} — Draft</h2>
