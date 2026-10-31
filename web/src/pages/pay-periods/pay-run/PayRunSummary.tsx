@@ -20,7 +20,7 @@ export function PayRunSummary({ payRunId, contractorItems, hasCorrectionPayBasis
       for (const item of values) if (previous.current.values.get(item.label) !== item.value) {
         const element = highlights.current.get(item.label);
         element?.getAnimations?.().forEach(animation => animation.cancel());
-        element?.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? 150 : 600, easing: 'ease-out' });
+        element?.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: reduced ? 150 : 250, easing: 'ease-out' });
       }
     }
     previous.current = { id: payRunId, values: new Map(values.map(item => [item.label, item.value])) };

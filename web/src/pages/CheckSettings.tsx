@@ -735,7 +735,7 @@ export function CheckSettingsPage() {
           : 'Choose and calibrate the printer profile you use. Client-wide check controls stay protected.'}
       />
 
-      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-6xl space-y-6 p-4 text-sm sm:p-6 lg:p-8">
 
         {/* Feedback */}
         {error && (
@@ -764,7 +764,7 @@ export function CheckSettingsPage() {
 
         <Card className="overflow-hidden border-slate-200 bg-white">
           <div className="border-b bg-gradient-to-r from-slate-900 to-slate-700 px-5 py-4 text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Your printer for this stock</p>
+            <p className="text-xs font-semibold tracking-normal text-slate-300">Your printer for this stock</p>
             <h2 className="mt-1 text-lg font-semibold">
               {activeProfile ? activeProfile.name : 'No printer profile selected'}
             </h2>
@@ -776,15 +776,15 @@ export function CheckSettingsPage() {
           </div>
           <CardContent className="grid gap-3 p-4 text-sm md:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Stock</p>
+              <p className="text-xs font-medium tracking-normal text-slate-500">Stock</p>
               <p className="mt-1 font-semibold text-slate-900">{stockType === 'first_hawaiian_4up' ? 'First Hawaiian 4-Up' : stockType === 'top_check' ? 'Top Check' : 'Bottom Check'}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alignment</p>
+              <p className="text-xs font-medium tracking-normal text-slate-500">Alignment</p>
               <p className="mt-1 font-mono font-semibold text-slate-900">X {offsetX || '0.000'} / Y {offsetY || '0.000'}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Selection scope</p>
+              <p className="text-xs font-medium tracking-normal text-slate-500">Selection scope</p>
               <p className="mt-1 font-semibold text-slate-900">Only your account</p>
             </div>
           </CardContent>
@@ -1276,7 +1276,7 @@ export function CheckSettingsPage() {
                 }`}
               >
                 <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform duration-150 ease-out motion-reduce:transition-none ${
                     autoCreateFitCheck ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
