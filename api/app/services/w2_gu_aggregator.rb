@@ -186,7 +186,10 @@ class W2GuAggregator
     end
     # Box 1: Wages minus pre-tax retirement (401k) contributions
     # Classification evidence does not authorize a historical wage/FIT rewrite.
-    box1 = (gross_pay - retirement[:retirement].to_d - historical_sum(historical, :retirement)).round(2)
+    historical_box1 = historical.sum(0.to_d) do |balance|
+      balance.source_breakdown.to_h["prior_provider_verified"] ? balance.fit_taxable_wages.to_d : balance.gross_pay.to_d - balance.retirement.to_d
+    end
+    box1 = (sums&.gross_pay.to_d - retirement[:retirement].to_d + historical_box1).round(2)
 
     # W-2 convention: allocate SS wage base to Box 3 (wages) first,
     # then Box 7 (tips) gets any remaining SS wage-base room.
@@ -370,7 +373,7 @@ class W2GuAggregator
     return [] unless include_historical
 
     [
-      "QuickBooks values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
+      "Prior-provider values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
       "Historical opening summaries and reviewed adjustments are included through the bridge exactly once; raw historical paychecks are not added again.",
       "QuickBooks history does not classify 2026 cash tips or qualified overtime for W-2 Box 12; affected employees remain flagged for review."
     ]

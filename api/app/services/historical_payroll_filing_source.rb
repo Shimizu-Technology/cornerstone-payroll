@@ -18,7 +18,7 @@ class HistoricalPayrollFilingSource
   end
 
   HistoricalRecord = Data.define(
-    :key, :record_type, :record_id, :historical_pay_period_id,
+    :key, :record_type, :record_id, :historical_pay_period_id, :source_system, :fit_taxable_wages,
     :employee_id, :pay_date, :period_start, :period_end,
     :gross_pay, :net_pay, :pretax_deductions, :after_tax_deductions,
     :non_taxable_pay, :reported_tips, :withholding_tax, :additional_withholding,
@@ -162,8 +162,11 @@ class HistoricalPayrollFilingSource
       [ reported_tips, fica_wages ].min
     end
 
+    verified = entry.verified_amounts.to_h
     HistoricalRecord.new(
-      key: "quickbooks:#{entry.record_type}:#{entry.record_id}",
+      source_system: entry.source_system,
+      fit_taxable_wages: verified["fit_taxable_wages"]&.to_d,
+      key: "#{entry.source_system == 'prior_provider' ? 'prior_provider' : 'quickbooks'}:#{entry.record_type}:#{entry.record_id}",
       record_type: entry.record_type,
       record_id: entry.record_id,
       historical_pay_period_id: entry.historical_pay_period.id,
@@ -175,18 +178,18 @@ class HistoricalPayrollFilingSource
       net_pay: entry.net_pay.to_d,
       pretax_deductions: entry.pretax_deductions.to_d,
       after_tax_deductions: entry.after_tax_deductions.to_d,
-      non_taxable_pay: non_taxable,
-      reported_tips: reported_tips,
+      non_taxable_pay: verified["non_taxable_pay"]&.to_d || non_taxable,
+      reported_tips: verified["reported_tips"]&.to_d || reported_tips,
       withholding_tax: entry.federal_income_tax.to_d,
       additional_withholding: 0.to_d,
       social_security_tax: entry.social_security_tax.to_d,
       employer_social_security_tax: component_sum(entry.employer_tax_breakdown, /\A(?:SS|Social Security(?: Employer)?)\z/i),
       medicare_tax: entry.medicare_tax.to_d,
       employer_medicare_tax: component_sum(entry.employer_tax_breakdown, /\A(?:Med|Medicare(?: Employer)?)\z/i),
-      social_security_taxable_wages: (fica_wages - taxable_tips).round(2),
-      social_security_taxable_tips: taxable_tips.round(2),
-      medicare_taxable_wages: fica_wages,
-      additional_medicare_taxable_wages: nil
+      social_security_taxable_wages: verified["social_security_taxable_wages"]&.to_d || (fica_wages - taxable_tips).round(2),
+      social_security_taxable_tips: verified["social_security_taxable_tips"]&.to_d || taxable_tips.round(2),
+      medicare_taxable_wages: verified["medicare_taxable_wages"]&.to_d || fica_wages,
+      additional_medicare_taxable_wages: verified["additional_medicare_taxable_wages"]&.to_d
     )
   end
 

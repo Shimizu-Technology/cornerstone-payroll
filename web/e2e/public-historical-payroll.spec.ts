@@ -1339,7 +1339,7 @@ test('keeps checking verification status after a temporary refresh failure', asy
   await expect(page.getByRole('alert')).toContainText('Temporary status refresh failed. Retrying automatically.');
 
   await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(detailRequestCount).toBeGreaterThanOrEqual(3);
 });
@@ -1381,7 +1381,7 @@ test('shows a completed verification even when the batch-list refresh fails', as
 
   await page.goto('/historical-payroll');
   await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   expect(listRequestCount).toBeGreaterThanOrEqual(2);
 });
 
@@ -1940,7 +1940,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
   await page.getByRole('button', { name: 'Run final verification' }).click();
   await expect(page.getByText('Final verification started. This page will update automatically')).toBeVisible();
   await expect(page.getByText('Comparing the retained source with the archive')).toBeVisible();
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   await expect(page.getByText('Checklist needed')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve cutover' })).toBeDisabled();
 

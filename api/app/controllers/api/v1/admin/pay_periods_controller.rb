@@ -157,8 +157,8 @@ module Api
           @pay_period.status = "draft"
 
           ActiveRecord::Base.transaction do
+            locked_company = Company.lock.find(current_company_id)
             if starting_check_number.present?
-              locked_company = Company.lock.find(current_company_id)
               apply_starting_check_number!(starting_check_number, company: locked_company)
             end
             @pay_period.save!

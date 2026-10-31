@@ -22,6 +22,7 @@ class PayPeriod < ApplicationRecord
   PROMOTION_PAYMENT_DISPOSITIONS = %w[record_only process_in_cornerstone].freeze
 
   belongs_to :company
+  belongs_to :retired_to_historical_import_batch, class_name: "HistoricalImportBatch", optional: true
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
@@ -114,7 +115,7 @@ class PayPeriod < ApplicationRecord
   validates :start_date, presence: true
   validates :end_date, presence: true
   validates :pay_date, presence: true
-  validates :status, inclusion: { in: %w[draft calculated approved committed] }
+  validates :status, inclusion: { in: %w[draft calculated approved committed retired_history] }
   validates :tax_sync_status, inclusion: { in: TAX_SYNC_STATUSES }, allow_nil: true
   validates :correction_status,
             inclusion: { in: CORRECTION_STATUSES },
@@ -210,6 +211,8 @@ class PayPeriod < ApplicationRecord
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
   before_update :guard_pending_payment_resolution
   before_update :prevent_training_baseline_mutation
 
@@ -293,8 +296,10 @@ class PayPeriod < ApplicationRecord
     test_workspace_role == "practice"
   end
 
+  def retired_history? = status == "retired_history"
+
   def can_edit?
-    !committed? && !voided? && !training_baseline?
+    !committed? && !voided? && !training_baseline? && !retired_history?
   end
 
   def intake_stale?
@@ -619,7 +624,19 @@ class PayPeriod < ApplicationRecord
     end
   end
 
+  def prevent_retired_history_mutation
+    return unless self.class.where(id: id, status: "retired_history").exists?
+
+    errors.add(:base, "Prior-provider source runs are retired read-only evidence; use the history reversal workflow")
+    throw :abort
+  end
+
   def starts_after_historical_ytd_boundary
+    return if retired_history?
+    if PriorProviderHistoryOnboarding.where(company_id: company_id, status: "converted").exists?
+      errors.add(:base, "Activate or reverse the converted prior-provider history before starting live payroll")
+      return
+    end
     return if company_id.blank?
     return if test_workspace? && validation_context != :payroll_calculation && draft?
 
@@ -638,7 +655,7 @@ class PayPeriod < ApplicationRecord
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end
-    if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
+    if unbridged_batch && !PayPeriod.where(company_id: company_id).where.not(status: "retired_history").exists?
       errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return
     end

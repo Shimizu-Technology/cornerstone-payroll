@@ -173,8 +173,8 @@ class UnifiedPayrollReporting
       payroll_field_entries: [],
       payroll_field_totals: {},
       source: {
-        system: "quickbooks_online",
-        label: "QuickBooks import",
+        system: paycheck.historical_import_batch.source_system,
+        label: paycheck.historical_import_batch.source_system == "prior_provider" ? "Prior-provider history" : "QuickBooks import",
         locked: true
       },
       capabilities: { view: true, edit: false }

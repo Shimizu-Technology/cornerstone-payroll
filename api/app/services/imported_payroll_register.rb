@@ -23,13 +23,13 @@ class ImportedPayrollRegister
         company_id: period.company_id,
         company_name: period.company.name,
         generated_at: Time.current.iso8601,
-        report_description: "Locked QuickBooks payroll register retained from the source system."
+        report_description: "Locked #{period.historical_import_batch.source_label} payroll register retained from the source system."
       },
       source: {
-        system: "quickbooks_online",
-        label: "QuickBooks import",
+        system: period.historical_import_batch.source_system,
+        label: period.historical_import_batch.source_system == "prior_provider" ? "Prior-provider history" : "QuickBooks import",
         locked: true,
-        statement: SOURCE_STATEMENT,
+        statement: period.historical_import_batch.source_system == "prior_provider" ? "Verified payroll already paid by the prior provider. These locked records do not create Cornerstone checks, payment obligations or deposits." : SOURCE_STATEMENT,
         import_batch_id: period.historical_import_batch_id,
         locked_at: period.historical_import_batch.locked_at,
         locked_by_name: period.historical_import_batch.locked_by&.name
@@ -93,10 +93,10 @@ class ImportedPayrollRegister
       overtime_hours: component_amount(paycheck.hours_breakdown, /overtime|\bot\b/i),
       holiday_hours: component_amount(paycheck.hours_breakdown, /holiday/i),
       pto_hours: component_amount(paycheck.hours_breakdown, /pto|paid time/i),
-      reported_tips: component_amount(paycheck.earnings_breakdown, /tip/i),
-      tips_paid_out: 0.0,
+      reported_tips: paycheck.source_metadata.to_h.dig("verified_amounts", "reported_tips")&.to_d || component_amount(paycheck.earnings_breakdown, /tip/i),
+      tips_paid_out: paycheck.source_metadata.to_h.dig("verified_amounts", "tips_paid_out").to_d,
       bonus: component_amount(paycheck.earnings_breakdown, /bonus/i),
-      non_taxable_pay: 0.0,
+      non_taxable_pay: paycheck.source_metadata.to_h.dig("verified_amounts", "non_taxable_pay").to_d,
       total_additions: money(paycheck.gross_pay),
       custom_earnings: [],
       custom_earnings_total: 0.0,

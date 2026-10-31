@@ -155,7 +155,7 @@ class QuarterlyCompliancePacketBuilder
       federal_track: "Federal Form 941 reports Social Security, Medicare, Additional Medicare, deposits, and liability schedule.",
       form_941_guam_lines_2_3: "Skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
       schedule_b: "Schedule B is a liability schedule by pay date, not a payment list.",
-      imported_payroll: "Locked QuickBooks wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
+      imported_payroll: "Locked prior-provider wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
     }
   end
 
@@ -194,7 +194,7 @@ class QuarterlyCompliancePacketBuilder
         first = records.first
         {
           id: key,
-          source: "quickbooks",
+          source: first.source_system == "prior_provider" ? "prior_provider" : "quickbooks",
           read_only: true,
           payment_status: "paid_before_cornerstone",
           record_type: first.record_type,
@@ -255,7 +255,7 @@ class QuarterlyCompliancePacketBuilder
         total_guam_withholding: money(total_income_tax_withheld(payroll_items)),
         historical_payroll_excluded: true,
         excluded_historical_withholding: money(total_income_tax_withheld(historical_records)),
-        historical_exclusion_note: "QuickBooks payroll was paid before Cornerstone and does not create a second Form 500 deposit or payment task.",
+        historical_exclusion_note: "Historical payroll was paid before Cornerstone and does not create a second Form 500 deposit or payment task.",
         total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
         unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
         unreconciled_balance: money(total_income_tax_withheld(payroll_items).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
@@ -391,7 +391,7 @@ class QuarterlyCompliancePacketBuilder
         social_security_tips: money(records.sum { |record| social_security_tips_for_record(record) }),
         medicare_wages_tips: money(records.sum { |record| medicare_wages_for_record(record) }),
         pay_dates: records.map { |record| pay_date_for_record(record).iso8601 }.uniq.sort,
-        sources: records.map { |record| historical_record?(record) ? "quickbooks" : "cornerstone" }.uniq.sort
+        sources: records.map { |record| historical_record?(record) ? (record.source_system == "prior_provider" ? "prior_provider" : "quickbooks") : "cornerstone" }.uniq.sort
       }
     end
   end
@@ -464,7 +464,7 @@ class QuarterlyCompliancePacketBuilder
     checks << review_check(
       "form_500_payments_reconciled",
       form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
-      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported QuickBooks payments are not recreated.",
+      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported prior-provider payments are not recreated.",
       details: {
         expected_withholding: form_500_section[:total_guam_withholding],
         imported_withholding_excluded: form_500_section[:excluded_historical_withholding],
@@ -657,7 +657,7 @@ class QuarterlyCompliancePacketBuilder
 
   def historical_period_group_key(record)
     if record.record_type == "source_snapshot"
-      "quickbooks:period:#{record.historical_pay_period_id}"
+      "#{record.source_system == 'prior_provider' ? 'prior_provider' : 'quickbooks'}:period:#{record.historical_pay_period_id}"
     else
       record.key
     end
@@ -734,7 +734,7 @@ class QuarterlyCompliancePacketBuilder
       social_security_tips: category == "tips",
       medicare_wages_tips: taxable_earning_category?(category),
       non_taxable: non_taxable_category?(category),
-      source: "quickbooks"
+      source: historical_records.any? { |record| record.source_system == "prior_provider" } ? "prior_provider" : "quickbooks"
     }
   end
 

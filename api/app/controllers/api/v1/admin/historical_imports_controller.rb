@@ -22,6 +22,8 @@ module Api
           require_provider_capability!(:ytd_bridge)
         end
 
+        before_action :use_prior_provider_workflow
+
         def index
           page = [ params.fetch(:page, 1).to_i, 1 ].max
           per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
@@ -325,6 +327,12 @@ module Api
         end
 
         private
+
+        def use_prior_provider_workflow
+          return unless @batch&.source_system == "prior_provider" && request.request_method != "GET"
+
+          render json: { error: "Use Client Management → Prior-provider history for this archive" }, status: :unprocessable_entity
+        end
 
         def cutover_exception_dispositions(review)
           allowed_keys = Array(review.evidence.to_h["exceptions"]).pluck("key")

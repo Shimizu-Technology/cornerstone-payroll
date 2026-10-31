@@ -13,7 +13,7 @@ class PayrollHistoryQuery
     "status" => "status",
     "source" => "source_system"
   }.freeze
-  SOURCES = %w[all cornerstone quickbooks].freeze
+  SOURCES = %w[all cornerstone quickbooks prior_provider].freeze
   STATUSES = %w[draft calculated approved committed locked].freeze
 
   Result = Data.define(:data, :meta)
@@ -98,7 +98,7 @@ class PayrollHistoryQuery
           WHERE disposition.payroll_item_id = pi.id
         )
       LEFT JOIN users committed_user ON committed_user.id = pp.committed_by_id
-      WHERE pp.company_id = #{company}
+      WHERE pp.company_id = #{company} AND pp.status != 'retired_history'
         #{client_native_visibility_sql}
       GROUP BY pp.id, committed_user.name
       UNION ALL
@@ -121,7 +121,7 @@ class PayrollHistoryQuery
         COALESCE(NULLIF(historical_period.totals ->> 'net_pay', '')::numeric, 0) AS total_net,
         historical_batch.locked_at AT TIME ZONE 'UTC' AS processed_at,
         locked_user.name::text AS processed_by_name,
-        'quickbooks_online'::text AS source_system,
+        historical_batch.source_system::text AS source_system,
         historical_period.source_label::text AS source_label,
         TRUE AS source_locked
       FROM historical_pay_periods historical_period
@@ -150,6 +150,7 @@ class PayrollHistoryQuery
     clauses << "EXTRACT(YEAR FROM pay_date)::integer = #{@year}" if @year
     clauses << "source_system = 'cornerstone'" if @source == "cornerstone"
     clauses << "source_system = 'quickbooks_online'" if @source == "quickbooks"
+    clauses << "source_system = 'prior_provider'" if @source == "prior_provider"
     if @search
       query = connection.quote("%#{ActiveRecord::Base.sanitize_sql_like(@search)}%")
       clauses << <<~SQL.squish
@@ -279,7 +280,7 @@ class PayrollHistoryQuery
       processed_by_name: row["processed_by_name"],
       source: {
         system: row.fetch("source_system"),
-        label: imported ? "QuickBooks import" : row.fetch("source_label"),
+        label: imported ? (row.fetch("source_system") == "prior_provider" ? "Prior-provider history" : "QuickBooks import") : row.fetch("source_label"),
         detail: row.fetch("source_label"),
         locked: ActiveModel::Type::Boolean.new.cast(row.fetch("source_locked"))
       },

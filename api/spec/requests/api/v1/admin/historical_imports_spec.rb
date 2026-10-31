@@ -144,7 +144,7 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
       "net_pay" => "2325.0"
     )
     expect(index_body.fetch("meta")).to include("total_count" => 1, "current_page" => 1)
-    expect(index_body.dig("meta", "import_providers").sole).to include(
+    expect(index_body.dig("meta", "import_providers").find { |provider| provider["key"] == "quickbooks_online" }).to include(
       "key" => "quickbooks_online",
       "label" => "QuickBooks Online Payroll",
       "importer_version" => QuickbooksHistory::BundleParser::IMPORTER_VERSION,

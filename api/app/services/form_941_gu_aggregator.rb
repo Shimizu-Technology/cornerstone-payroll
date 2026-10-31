@@ -583,11 +583,11 @@ class Form941GuAggregator
     return [] unless include_historical
 
     caveats = [
-      "QuickBooks values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
+      "Prior-provider values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
       "Historical YTD bridge balances are used only for source eligibility and annual carry-forward; they are not added to quarterly lines, avoiding duplicate wages and taxes."
     ]
     if historical_source.opening_summary_count(range: quarter_start_date..quarter_end_date).positive?
-      caveats << "QuickBooks opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
+      caveats << "Historical opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
     end
     caveats
   end
