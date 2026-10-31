@@ -54,11 +54,6 @@ class PayStubGenerator
     # YTD Summary
     render_ytd_summary(pdf)
 
-    statement_ytd_breakdown.review_warnings.map { |warning| warning[:message] }.uniq.each do |message|
-      pdf.move_down 6
-      pdf.text message, size: 8, color: "92400E"
-    end
-
     render_with_footer(
       pdf,
       "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
