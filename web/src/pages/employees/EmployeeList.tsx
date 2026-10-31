@@ -329,6 +329,7 @@ export function EmployeeList() {
           
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
             <Select
+              aria-label="Employee status"
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
               className="w-full sm:w-36"
@@ -340,6 +341,7 @@ export function EmployeeList() {
             </Select>
 
             <Select
+              aria-label="Employment type"
               value={employmentType}
               onChange={(e) => updateFilter('employment_type', e.target.value)}
               className="w-full sm:w-36"
@@ -351,6 +353,7 @@ export function EmployeeList() {
             </Select>
 
             <Select
+              aria-label="Department"
               value={departmentId}
               onChange={(e) => updateFilter('department_id', e.target.value)}
               className="w-full sm:w-44"
