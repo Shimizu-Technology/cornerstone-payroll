@@ -2310,7 +2310,20 @@ export interface W2GuEmployeeRow {
   has_missing_address: boolean;
 }
 
+export interface FilingEmployeeCompleteness {
+  missing_ssn_count: number;
+  missing_address_count: number;
+  message: string | null;
+  employees: {
+    employee_id: number;
+    name: string;
+    missing_fields: ('ssn' | 'address')[];
+    edit_path: string;
+  }[];
+}
+
 export interface W2GuReport {
+  employee_completeness?: FilingEmployeeCompleteness;
   filing_readiness?: W2GuFilingReadiness | null;
   meta: {
     report_type: string;
@@ -2353,6 +2366,7 @@ export interface W2GuPreflightFinding {
 }
 
 export interface W2GuPreflightResult {
+  employee_completeness?: FilingEmployeeCompleteness;
   year: number;
   company_id: number;
   company_name: string;
@@ -2398,6 +2412,7 @@ export interface W2GuRevalidationResult {
 }
 
 export interface W2GuFilingReadinessResponse {
+  employee_completeness?: FilingEmployeeCompleteness;
   filing: W2GuFilingReadiness | null;
   filing_gate: PayrollFilingGateGroup;
 }

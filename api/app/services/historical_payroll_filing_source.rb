@@ -68,12 +68,13 @@ class HistoricalPayrollFilingSource
   end
 
   def annual_balances(year)
-    range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
-    HistoricalEmployeeYtdBalance
-      .includes(:employee)
-      .where(historical_ytd_bridge_id: bridge_ids(range: range), company_id: company.id, tax_year: year)
-      .where.not(employee_id: nil)
-      .to_a
+    annual_balance_scope(year).includes(:employee).to_a
+  end
+
+  # Identity-only readiness needs the same population without ledger validation
+  # or materializing balances and their employee associations.
+  def annual_employee_ids(year)
+    annual_balance_scope(year).distinct.pluck(:employee_id)
   end
 
   def records(range:, include_opening_summaries: false)
@@ -113,6 +114,13 @@ class HistoricalPayrollFilingSource
   end
 
   private
+
+  def annual_balance_scope(year)
+    range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
+    HistoricalEmployeeYtdBalance
+      .where(historical_ytd_bridge_id: bridge_ids(range: range), company_id: company.id, tax_year: year)
+      .where.not(employee_id: nil)
+  end
 
   def locked_batches(range:)
     HistoricalImportBatch

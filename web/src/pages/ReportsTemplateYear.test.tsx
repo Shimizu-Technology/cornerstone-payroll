@@ -7,10 +7,10 @@ import { PdfPreviewProvider } from '@/components/documents/PdfPreview';
 import type { ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { Form941GuPanel, QuarterlyCompliancePacketPanel } from './Reports';
 
-const mocks = vi.hoisted(() => ({ worksheet: vi.fn(), packet: vi.fn(), pdf: vi.fn(), packetPdf: vi.fn(), xlsx: vi.fn() }));
+const mocks = vi.hoisted(() => ({ worksheet: vi.fn(), packet: vi.fn(), pdf: vi.fn(), packetPdf: vi.fn(), xlsx: vi.fn(), defaults: vi.fn() }));
 vi.mock('@/services/api', () => ({
   reportsApi: { form941Gu: mocks.worksheet, quarterlyCompliancePacket: mocks.packet, form941GuPdf: mocks.pdf,
-    quarterlyCompliancePacketPdf: mocks.packetPdf, form941GuXlsx: mocks.xlsx },
+    quarterlyCompliancePacketPdf: mocks.packetPdf, form941GuXlsx: mocks.xlsx, quarterlyCompliancePacketOfficialFormDefaults: mocks.defaults },
   ApiError: class extends Error {},
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 42 }) }));
@@ -83,4 +83,29 @@ describe('Official Form 941 tax-year availability', () => {
     expect(screen.queryByRole('button', { name: 'Preview draft PDF packet' })).toBeNull();
     expect(mocks.packetPdf).not.toHaveBeenCalled();
   });
+});
+
+it('shows missing employee details in the packet and preserves draft preview actions', async () => {
+  mocks.packet.mockResolvedValue({ report: { ...packet(2026, true), employee_completeness: {
+    missing_ssn_count: 1, missing_address_count: 1, message: 'Missing details print blank. Drafts can still be generated.',
+    employees: [{ employee_id: 7, name: 'Synthetic Worker', missing_fields: ['ssn', 'address'], edit_path: '/companies/42/employees/7/edit' }],
+  } } });
+  mount(<QuarterlyCompliancePacketPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+  expect(await screen.findByText('Synthetic Worker — missing 9-digit SSN and complete address')).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Edit profile for Synthetic Worker/ }).getAttribute('href')).toBe('/companies/42/employees/7/edit');
+  expect(screen.getByRole('button', { name: /Review.*SW-2/i })).toBeTruthy();
+});
+
+it('keeps the government-form review layout without asserting unsupported modal focus behavior', async () => {
+  mocks.packet.mockResolvedValue({ report: packet(2026, true) });
+  mocks.defaults.mockResolvedValue({ data: { title: 'SW-2', employees: [] } });
+  mount(<QuarterlyCompliancePacketPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Review SW-2' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Government form review' });
+  expect(dialog.hasAttribute('aria-modal')).toBe(false);
+  expect(dialog.className).toContain('w-[min(1600px,calc(100vw-1.5rem))]');
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
 });

@@ -554,6 +554,34 @@ module QuarterlyComplianceOfficialForms
     TEMPLATE_PATH = Rails.root.join("lib/assets/guam_sw2_quarterly_wage_report.pdf")
     PAGE_SIZE = [ 1008.0, 614.0 ].freeze
     EMPLOYEES_PER_PAGE = 11
+    # Street and city/state widgets from the official SW-2, in employee-row order.
+    ADDRESS_RECTS = [
+      [ [ 365.627106, 400.873779, 520.627991, 416.498871 ], [ 364.377075, 384.623688, 521.252991, 397.748749 ] ],
+      [ [ 365.002075, 367.748596, 520.002991, 380.873657 ], [ 363.127075, 350.248505, 521.877991, 363.373566 ] ],
+      [ [ 365.002075, 333.998413, 521.877991, 347.123474 ], [ 365.627106, 318.373322, 522.502991, 332.123383 ] ],
+      [ [ 365.002075, 300.873199, 521.877991, 315.873291 ], [ 364.002075, 283.998108, 524.002991, 298.998199 ] ],
+      [ [ 363.752075, 268.373016, 521.877991, 282.123108 ], [ 364.377075, 252.122925, 521.877991, 266.498016 ] ],
+      [ [ 364.377075, 235.872833, 522.502991, 250.24791 ], [ 363.752, 219.623, 523.128, 232.748 ] ],
+      [ [ 365.627106, 202.12265, 520.627991, 217.747726 ], [ 364.877075, 186.497559, 523.627991, 200.247635 ] ],
+      [ [ 365.002075, 170.247467, 521.877991, 182.747528 ], [ 364.377075, 153.37236, 523.127991, 165.872437 ] ],
+      [ [ 365.002075, 136.497269, 522.502991, 150.247345 ], [ 364.377075, 119.622177, 522.502991, 133.997269 ] ],
+      [ [ 365.627106, 102.747086, 522.502991, 117.122162 ], [ 365.627106, 85.871979, 521.877991, 99.622055 ] ],
+      [ [ 365.627106, 70.871902, 523.752991, 84.621979 ], [ 366.252106, 52.746796, 523.752991, 67.746872 ] ]
+    ].freeze
+    ZIP_RECTS = [
+      [ 526.877991, 400.873779, 625.628601, 415.873871 ],
+      [ 526.252991, 367.748596, 625.003601, 385.873718 ],
+      [ 526.252991, 335.248413, 624.378601, 348.998474 ],
+      [ 526.253052, 302.12323, 625.003601, 317.748291 ],
+      [ 525.002991, 268.998016, 626.253601, 284.623108 ],
+      [ 526.252991, 236.497833, 625.628601, 253.37294 ],
+      [ 528.378052, 203.37265, 624.628601, 220.872757 ],
+      [ 528.128052, 170.247467, 625.003601, 187.122559 ],
+      [ 526.252991, 137.122269, 626.253601, 153.997375 ],
+      [ 526.877991, 102.747086, 627.503601, 120.247177 ],
+      [ 527.503052, 70.246902, 625.00354, 88.997009 ]
+    ].freeze
+
     # Exact FIT widget rectangles from the official SW-2 template, ordered by employee row.
     FIT_WITHHELD_RECTS = [
       [ 872.505005, 401.498779, 975.005554, 418.998871 ],
@@ -637,24 +665,66 @@ module QuarterlyComplianceOfficialForms
       y = 416.0 - (index * 33.0)
       draw_text_box(pdf, [ 36, y - 17, 164, y ], employee_ssn(employee), size: 7)
       draw_text_box(pdf, [ 168, y - 17, 360, y ], employee[:name], size: 7)
-      draw_text_box(pdf, [ 365, y - 15, 522, y ], "", size: 6.5)
-      draw_text_box(pdf, [ 365, y - 32, 522, y - 17 ], "", size: 6.5)
+      draw_employee_address(pdf, employee, index)
       draw_text_box(pdf, [ 630, y - 17, 750, y ], employee[:status].to_s.first&.upcase || "A", size: 7, align: :center)
       draw_text_box(pdf, [ 754, y - 17, 870, y ], money_string(employee[:swica_wages]), size: 7, align: :right)
       draw_text_box(pdf, FIT_WITHHELD_RECTS.fetch(index), money_string(employee[:guam_withholding]), size: 7, align: :right)
     end
 
-    def employee_ssn(employee)
-      digits = employee_ssn_digits.fetch(employee[:employee_id].to_i, nil)
-      return "" if digits.blank?
+    def draw_employee_address(pdf, row, index)
+      employee = filing_employees[row[:employee_id].to_i]
+      return unless employee
 
+      street_rect, city_rect = ADDRESS_RECTS.fetch(index)
+      street = employee.address_line1.to_s.squish
+      unit = employee.address_line2.to_s.squish
+      # The SW-2 has its own ZIP column, so the city-state line stops at the state.
+      city_line = [ employee.city, employee.state ].compact_blank.join(", ")
+      combined_street = [ street, unit ].compact_blank.join(" ")
+      if pdf.width_of(combined_street, size: 6) <= street_rect[2] - street_rect[0] - 3
+        street = combined_street
+      else
+        # Reserve locality first; only the optional unit may lose text.
+        available = city_rect[2] - city_rect[0] - 3 - pdf.width_of("; #{city_line}", size: 6)
+        unit = fit_address_text(pdf, unit, available)
+        city_line = [ unit.presence, city_line.presence ].compact.join("; ")
+      end
+      draw_address_line(pdf, street_rect, street)
+      draw_address_line(pdf, city_rect, city_line)
+      draw_address_line(pdf, ZIP_RECTS.fetch(index), employee.zip.to_s.squish)
+    end
+
+    def draw_address_line(pdf, rect, text)
+      # Keep a readable floor and one line per widget. Exceptionally long
+      # values get an ellipsis rather than disappearing or crossing a border.
+      width = rect[2] - rect[0] - 3
+      text = fit_address_text(pdf, text, width)
+      size = 7.5
+      size = [ size - 0.1, 6 ].max while size > 6 && pdf.width_of(text, size: size) > width
+      draw_text_box(pdf, rect, text, size: size, min_font_size: 6)
+    end
+
+    def fit_address_text(pdf, text, width)
+      return text if pdf.width_of(text, size: 6) <= width
+      return "" if width < pdf.width_of("...", size: 6)
+
+      text = text.dup
+      text.chop! while text.present? && pdf.width_of("#{text}...", size: 6) > width
+      "#{text}..."
+    end
+
+    def employee_ssn(employee)
+      record = filing_employees[employee[:employee_id].to_i]
+      return "" unless record&.valid_filing_ssn?
+
+      digits = record.ssn_digits
       "#{digits[0, 3]}-#{digits[3, 2]}-#{digits[5, 4]}"
     end
 
-    def employee_ssn_digits
-      @employee_ssn_digits ||= begin
+    def filing_employees
+      @filing_employees ||= begin
         employee_ids = employee_pages.flatten.filter_map { |employee| employee[:employee_id] }
-        Employee.where(company_id: meta[:company_id], id: employee_ids).index_with(&:ssn_digits).transform_keys(&:id)
+        Employee.where(company_id: meta[:company_id], id: employee_ids).index_by(&:id)
       end
     end
   end
