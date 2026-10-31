@@ -334,7 +334,7 @@ class W2GuPdfGenerator
     missing_ssn_bg = emp[:has_missing_ssn] ? "FFF8E7" : "FFFFFF"
 
     [
-      { content: emp[:employee_name].to_s, background_color: missing_ssn_bg },
+      { content: [ emp[:employee_name], emp[:employee_address].presence || "ADDRESS MISSING" ].join("\n"), background_color: missing_ssn_bg },
       { content: ssn_label, background_color: missing_ssn_bg, font_style: (emp[:has_missing_ssn] ? :bold : :normal), text_color: (emp[:has_missing_ssn] ? "C0392B" : TEXT_DARK) },
       { content: fmt(emp[:box1_wages_tips_other_comp]), align: :right },
       { content: fmt(emp[:box2_federal_income_tax_withheld]), align: :right },

@@ -28,6 +28,7 @@ class QuarterlyCompliancePacketBuilder
       w1: w1_section,
       swica: swica_section,
       federal_941: federal_941_section,
+      employee_completeness: FilingEmployeeCompleteness.for(Employee.where(company_id: company.id, id: swica_section[:employees].map { |row| row[:employee_id] }).order(:last_name, :first_name, :id)),
       review_checks: review_checks,
       component_taxability: component_taxability
     }
