@@ -81,3 +81,29 @@ The versioned snapshot binds the complete enumerated candidate/period/void/dispo
 Inventory remains read-only. Its employee-year `calculable_below_thresholds` status and conservative history bounds describe capacity **before adding the next check**; they do not clear a paycheck of arbitrary size. Rows with unresolved history remain visible, including employee-years with only excluded candidates. `recover --apply` never creates old basis proofs for this status. Accounting and filing review must proceed separately.
 
 Deployment adds one small, reversible table and a reversible append-only guard migration with no financial backfill. Existing calculations and tax data are untouched. Deploy the migration before calculation code; gather source-completeness reviews and recalculate affected unfinished runs. Historical holds without the required evidence remain held.
+
+## Reviewed raw imported paycheck FICA support
+
+`HistoricalPaycheck` retains gross, earnings detail (including QuickBooks PayTip), employee SS/Medicare taxes, employer component detail when exported, payday, batch provenance and employee mapping. It has no finalized SS wage/tip or Medicare basis columns. A $0 outside-source review does not establish those missing bases. `BelowThresholdFicaContext` therefore held imported history before this change; native `recover` cannot create a proof for a raw imported row.
+
+Use the parallel inventory/plan/apply task **after** the existing native recovery and source-completeness reviews:
+
+```sh
+RAILS_ENV=production COMPANY_ID=123 TAX_YEAR=2026 \
+  bin/rake payroll:fica_legacy:reconcile_imports --dry-run > imported-fica-plan.json
+
+RAILS_ENV=production COMPANY_ID=123 TAX_YEAR=2026 ACTOR_ID=456 \
+  REVIEW_REFERENCE='Retained source reconciliation workpaper and reviewer' \
+  PLAN_DIGEST='<reviewed plan_digest>' \
+  bin/rake payroll:fica_legacy:reconcile_imports --apply > imported-fica-receipt.json
+```
+
+Optional `EMPLOYEE_IDS=789,790` narrows reconciliation to reviewed same-company identities; the selected IDs are bound into the plan. Unmapped company imports still prevent completeness. Without it, the task inventories every imported employee-year in the company. Default invocation is read-only, as is explicit `--dry-run`. Review each proposed base, stored employee/employer component, verified rule and exact plan digest. Apply re-reads under Company → PayPeriod → import-batch locks, locks/reloads the administrator and shares the verified rule locks. It appends `HistoricalPaycheckFicaBasisProof` records, with the actor, reference, plan/source/rule/dependency digests and derivation. UPDATE, DELETE and TRUNCATE are prohibited by PostgreSQL guards as well as model callbacks. Schema-only installs restore the guards from `db/integrity.sql`. The migration is fast, reversible and has no financial backfill.
+
+Only the full nonnegative gross allocation is supported: Medicare wages equal gross, SS wages equal gross minus recognized reported tips, SS tips equal those tips, and Additional Medicare base equals zero. Earnings detail must total gross. Explicit FICA-exempt components, ambiguous tip labels, signed imported adjustments, unlocked sources, missing/inconsistent mappings and nonfinite data stay held. Employee summary SS/Medicare and their retained detail must agree; taxes must match `FicaBasisEvidence.components` **exactly**, using decimal half-up rounding at the existing component boundary. Every present employer SS/Medicare component must match too. Missing employer components are not synthesized into source financial data. Retirement, Roth and loans are not subtracted from FICA gross merely because they reduce FIT or net pay. No tax inversion, partial allocation, one-cent tolerance, or replacement of stored taxes is allowed.
+
+A company-year plan reports individual mismatches and holds that employee-year until every candidate is supported. Source reviews must cover all candidate paydays. The complete conservative bound counts every positive native candidate, every imported check, every applied opening/bridge revision, and outside/predecessor bounds; overlaps deliberately count more than once. Both verified-year limits must hold. Existing proven annual calculations remain authoritative. Where imported proofs relax an annual hold, ordinary current checks use `calculable_below_thresholds`; history and filing review remain open. Approval and commit recompute sources, mappings, proofs, rules and added current wages, so changed evidence requires recalculation. Proofs do not post imported wages a second time to YTD or certify filings.
+
+Keep before/plan/apply/after receipts. A fresh plan after successful apply is idempotent; reusing a pre-apply digest is stale. Rows with mismatches remain held with the component named. For the November 1 staging clone, 65/109 checks for the nine held active-MoSa employees matched both employee and employer taxes exactly. The other 44 checks had one-cent SS and/or Medicare differences across eight employees. Read-only execution of the proposed bound rule found capacity for one employee-year (five imported proofs), leaving eight held. **This strict reconciliation path alone does not remove the active-MoSa release blocker.** Source evidence or an explicitly authorized additional reconciliation design is still needed for those discrepancies.
+
+The generic, reviewable release runner is tracked in `ops/payroll-release-day/`; its operational copy is in the release-day evidence folder. It scopes imported plans to unresolved/conditionally calculable annual employee-years, and its manifest also binds those selected IDs and imported plan digests. If native/source steps change those plans, it stops before imported proofs and requires a fresh preview. After apply, remaining holds still cause exit 3.
