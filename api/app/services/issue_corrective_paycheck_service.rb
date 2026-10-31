@@ -194,7 +194,7 @@ class IssueCorrectivePaycheckService
         is_zero_change: zero_change?
       }
     }
-  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+  rescue *PayrollCalculationHistory::ERRORS => e
     raise MissingHistoricalContextError, e.message
   end
 
@@ -267,7 +267,7 @@ class IssueCorrectivePaycheckService
 
       [ supplemental, corrective_item ]
     end
-  rescue PayrollComponentMirrors::AmbiguousHistoryError => e
+  rescue *PayrollCalculationHistory::ERRORS => e
     raise MissingHistoricalContextError, e.message
   end
 

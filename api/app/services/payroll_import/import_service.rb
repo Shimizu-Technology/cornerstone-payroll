@@ -224,6 +224,9 @@ module PayrollImport
           intake_stale_session: nil
         )
         PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).issue!
+      elsif results[:errors].any?
+        pay_period.association(:payroll_items).reset
+        pay_period.invalidate_calculation!(reason: "Payroll import calculation returned employee errors. Resolve them and calculate again before approval.")
       end
 
       results
