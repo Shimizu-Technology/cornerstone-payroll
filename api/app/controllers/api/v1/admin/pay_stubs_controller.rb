@@ -61,7 +61,10 @@ module Api
           # Try to get from storage first
           # The delivery method can be changed for an unissued committed run.
           # A previously stored PDF may still name the old method or check.
-          if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive?
+          # Older stored statements may contain accountant-only review notes.
+          # Regenerate affected history while preserving other archived PDFs.
+          if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive? &&
+              PayrollStatementYtdBreakdown.new(@payroll_item).review_warnings.empty?
             storage = R2StorageService.new
             key = existing_storage_key(storage: storage)
             pdf_data = storage.download(key) if key.present?

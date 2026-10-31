@@ -36,6 +36,8 @@ class PayrollStatementYtdBreakdown
     rows_for(:employer_contribution)
   end
 
+  # Legacy cached PDFs may still show these accountant-only warnings.
+  # Downloads use this to regenerate affected employee statements.
   def review_warnings
     @review_warnings ||= PayrollReportComponentReview.for_items(ytd_source_items)
   end
