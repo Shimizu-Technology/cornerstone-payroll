@@ -50,6 +50,9 @@ class PayrollFilingResponsibilityRecorder
 
   def persist_decisions!
     PayrollFilingResponsibility.transaction do
+      # Share the onboarding/reversal lock so an ownership edit cannot race
+      # its before/after evidence snapshot or be overwritten by reversal.
+      company.lock!
       reviewed_at = Time.current
       before = {}
 
