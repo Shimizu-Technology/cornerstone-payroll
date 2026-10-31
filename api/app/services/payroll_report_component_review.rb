@@ -4,7 +4,7 @@
 # claiming a source identity for financial writes. This never proves a payable.
 class PayrollReportComponentReview
   CODE = "legacy_employer_benefit_unclassified".freeze
-  MESSAGE = "Legacy employer benefit history not yet classified".freeze
+  MESSAGE = "Legacy employer benefit history not yet classified — saved amounts are shown; accountant review needed.".freeze
 
   def self.compatible_mirror?(item, field, deduction)
     context = item.calculation_context_snapshot.to_h

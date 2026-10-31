@@ -39,7 +39,7 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
   end
 
   def pdf_text(bytes)
-    PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n")
+    PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
   end
 
   context "when legacy benefits are in a prior committed period" do
@@ -54,13 +54,23 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
       allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
     end
 
-    it "downloads the current earnings statement and check with the historical review note" do
+    it "downloads the current earnings statement and check without exposing the historical review note" do
       get "/api/v1/admin/pay_stubs/#{later_item.id}/download"
       expect(response).to have_http_status(:ok)
-      expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE, "Saved employer health", "$25.00")
+      expect(pdf_text(response.body)).to include("Saved employer health", "$25.00")
+      expect(pdf_text(response.body)).not_to include("Legacy employer benefit history", "accountant review needed")
       get "/api/v1/admin/payroll_items/#{later_item.id}/check"
       expect(response).to have_http_status(:ok)
-      expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE)
+      expect(pdf_text(response.body)).to include("Saved employer health", "25.00")
+      expect(pdf_text(response.body)).not_to include("Legacy employer benefit history", "accountant review needed")
+    end
+
+    it "keeps employee batch statements free of accountant review notes" do
+      later_item
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: later_period.id }
+      expect(response).to have_http_status(:ok)
+      expect(pdf_text(response.body)).to include("Saved employer health", "$25.00")
+      expect(pdf_text(response.body)).not_to include("Legacy employer benefit history", "accountant review needed")
     end
 
     it "returns 422 for genuinely ambiguous prior history in statement and check downloads" do
@@ -137,6 +147,33 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
         report_get("payroll_register_pdf")
         expect(response).to have_http_status(:ok)
         expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE)
+      end
+
+      it "keeps the warning on accountant PDFs, workbook Report Info sheets, and item disclosure" do
+        %w[deductions_contributions_pdf paycheck_history_pdf retirement_plans_pdf full_print_package_pdf].each do |action|
+          report_get(action)
+          expect(response).to have_http_status(:ok), "#{action}: #{response.body.first(200)}"
+          expect(pdf_text(response.body)).to include(PayrollReportComponentReview::MESSAGE)
+        end
+        %w[payroll_summary_by_employee_xlsx ytd_summary_xlsx payroll_register_xlsx
+          deductions_contributions_xlsx paycheck_history_xlsx retirement_plans_xlsx].each do |action|
+          report_get(action)
+          expect(response).to have_http_status(:ok), action
+          Zip::File.open_buffer(response.body) do |zip|
+            workbook = Nokogiri::XML(zip.read("xl/workbook.xml"))
+            sheets = workbook.remove_namespaces!.xpath("//sheet")
+            index = sheets.index { |sheet| sheet["name"] == "Report Info" }
+            expect(index).not_to be_nil, action
+            info = Nokogiri::XML(zip.read("xl/worksheets/sheet#{index + 1}.xml")).remove_namespaces!
+            expect(info.xpath("//t").map(&:text).join(" ")).to include(PayrollReportComponentReview::MESSAGE), action
+          end
+        end
+        allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_company_id).and_return(company.id)
+        allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(actor)
+        get "/api/v1/admin/pay_periods/#{period.id}/payroll_items/#{item.id}"
+        expect(response).to have_http_status(:ok)
+        warnings = response.parsed_body.dig("payroll_item", "component_disclosure", "review_warnings")
+        expect(warnings).to include(include("message" => PayrollReportComponentReview::MESSAGE, "payroll_item_id" => item.id))
       end
 
       it "keeps calculation, correction components and liability writes strict" do

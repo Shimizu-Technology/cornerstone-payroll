@@ -27,7 +27,7 @@ RSpec.describe "Legacy employer benefit statements" do
       generator = generator_class.new(item)
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
       expect(text).to include("Saved employer health", "25.00", "2,200.00")
-      expect(text.scan(PayrollReportComponentReview::MESSAGE).size).to eq(generator_class == CheckGenerator ? 2 : 1)
+      expect(text).not_to include("Legacy employer benefit history", "accountant review needed")
       rows = PayrollStatementYtdBreakdown.new(item).employer_contributions
       expect(rows.select { |row| row.label == "Saved employer health" }.sum(&:ytd)).to eq(25)
       expect([ prior.reload.attributes, item.reload.attributes ]).to eq(saved)
