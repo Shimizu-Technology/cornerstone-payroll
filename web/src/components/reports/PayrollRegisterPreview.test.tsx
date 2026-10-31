@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { useState } from 'react';
 import type { PayrollRegisterReport } from '@/services/api';
-import { PayrollRegisterPreviewContent } from './PayrollRegisterPreview';
+import { PayrollRegisterPreviewContent, PayrollRegisterPreviewModal } from './PayrollRegisterPreview';
 
 const report = {
   type: 'payroll_register',
@@ -94,4 +95,22 @@ describe('PayrollRegisterPreviewContent', () => {
     expect(screen.getByRole('status').textContent).toContain('not committed or paid');
     expect(screen.getByText('Test-only payroll register')).toBeTruthy();
   });
+});
+
+it('keeps the preview modal until Escape finishes and returns focus to its opener', async () => {
+  function Preview() {
+    const [open, setOpen] = useState(false);
+    return <><button onClick={() => setOpen(true)}>View register</button><PayrollRegisterPreviewModal open={open} loading={false} report={report} error={null} onClose={() => setOpen(false)} downloadFormats={[]} /></>;
+  }
+  render(<Preview />);
+  const opener = screen.getByRole('button', { name: 'View register' });
+  opener.focus(); fireEvent.click(opener);
+  const dialog = screen.getByRole('dialog', { name: 'Payroll Register preview' });
+  expect(opener.closest('[inert]')).toBeTruthy();
+  expect(dialog.contains(screen.getByRole('region', { name: 'Payroll register report' }))).toBe(true);
+  expect(screen.getByRole('region', { name: 'Scrollable payroll report' }).tabIndex).toBe(0);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(opener.closest('[inert]')).toBeNull();
+  expect(document.activeElement).toBe(opener);
 });

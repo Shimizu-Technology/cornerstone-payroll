@@ -836,6 +836,7 @@ export function PayPeriods() {
               <option value="quickbooks">QuickBooks imports</option>
             </Select>
             <Select
+              aria-label="Sort pay periods"
               value={sortBy}
               onChange={(e) => updateViewParam('sort', e.target.value)}
               className="w-full sm:w-44"
@@ -860,6 +861,7 @@ export function PayPeriods() {
               {years.map((year) => <option key={year} value={year}>{year}</option>)}
             </Select>
             <Select
+              aria-label="Sort direction"
               value={sortDirection}
               onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"

@@ -325,7 +325,7 @@ export function EmployeeWorkspace(): ReactElement {
         }))}
       />
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">{companyReadOnlyMessage(activeCompany)}</p>}
         {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
@@ -368,7 +368,7 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         {activeTab === 'hours-payroll' && <EmployeeHoursPayroll employeeId={employeeId} companyId={companyId} report={payHistory} returnTo={currentPath} />}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
-      </main>
+      </div>
     </div>
   );
 }
@@ -813,7 +813,7 @@ interface ClassificationLinkProps {
 
 function ClassificationLink({ label, companyId, employee, returnTo }: ClassificationLinkProps): ReactElement | null {
   if (!employee) return null;
-  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition-[background-color,border-color,color] duration-120 ease-out hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-2 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
+  return <Link to={employeePath(companyId, employee.id, 'activity', { returnTo })} className="group block rounded-xl border border-neutral-200 p-4 transition-[background-color,border-color,color] duration-120 ease-out hover:border-primary-300 hover:bg-primary-50/40"><p className="text-xs font-medium tracking-normal text-neutral-600">{label}</p><p className="mt-2 font-semibold text-neutral-950 group-hover:text-primary-800">{employee.name}</p><p className="mt-2 text-xs capitalize text-neutral-500">{employee.tax_classification} · {employee.status}</p></Link>;
 }
 
 interface MetricProps {
@@ -824,7 +824,7 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-medium tracking-normal text-neutral-600">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
@@ -833,5 +833,5 @@ interface ContextRowProps {
 }
 
 function ContextRow({ label, value }: ContextRowProps): ReactElement {
-  return <div><p className="text-xs font-medium tracking-normal text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
+  return <div><p className="text-xs font-medium tracking-normal text-neutral-600">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
 }
