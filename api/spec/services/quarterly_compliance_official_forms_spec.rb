@@ -217,6 +217,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
   let(:report) do
     {
       meta: {
+        company_id: company.id,
         company_name: company.name,
         ein: company.ein,
         year: 2026,
@@ -253,7 +254,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
         draws << [ box, text, options ]
       end
 
-      form.send(:draw_employee_row, Object.new, employee_rows.first, 0)
+      form.send(:draw_employee_row, Prawn::Document.new, employee_rows.first, 0)
 
       expect(draws).to include(
         [ [ 630, 399.0, 750, 416.0 ], "A", { size: 7, align: :center } ],
@@ -270,7 +271,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
         draws << [ box, text, options ]
       end
 
-      form.send(:draw_employee_row, Object.new, employee_rows.last, 10)
+      form.send(:draw_employee_row, Prawn::Document.new, employee_rows.last, 10)
 
       expect(draws).to include(
         [ [ 873.755005, 71.496902, 978.130615, 88.371994 ], "111.00", { size: 7, align: :right } ]

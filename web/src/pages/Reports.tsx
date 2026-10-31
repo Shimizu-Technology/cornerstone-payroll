@@ -1,3 +1,5 @@
+import { FilingEmployeeWarnings } from '@/components/reports/FilingEmployeeWarnings';
+import type { FilingEmployeeCompleteness } from '@/types';
 import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -627,7 +629,7 @@ function TaxSummaryPanel() {
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
 export function W2GuPanel() {
-  const { activeCompany } = useCompany();
+  const { activeCompany, activeCompanyId } = useCompany();
   const hasClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const workspaceCanAdminister = canWriteCompany(activeCompany, 'manage_client_administration');
   const canMarkFilingReady = hasClientAdministration && workspaceCanAdminister;
@@ -646,6 +648,7 @@ export function W2GuPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
+  const [employeeCompleteness, setEmployeeCompleteness] = useState<FilingEmployeeCompleteness | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflight, setPreflight] = useState<W2GuPreflightResult | null>(null);
   const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
@@ -656,57 +659,88 @@ export function W2GuPanel() {
   const [filingGate, setFilingGate] = useState<PayrollFilingGateGroup | null>(null);
   const [canRecordFilingResponsibility, setCanRecordFilingResponsibility] = useState(false);
 
+  const employeeReadinessSequence = useRef(0);
+  const filingContextSequence = useRef(0);
+  const [employeeReadinessError, setEmployeeReadinessError] = useState(false);
+
   useEffect(() => {
+    setEmployeeCompleteness(null);
+    setEmployeeReadinessError(false);
+    setReport(null);
+    setPreflight(null);
+    setFiling(null);
+    setFilingGate(null);
+    setLoading(false);
+    setPreflightLoading(false);
     void loadPersistedFilingReadiness();
+    return () => { employeeReadinessSequence.current += 1; filingContextSequence.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year]);
+  }, [year, activeCompanyId]);
 
   async function loadPersistedFilingReadiness() {
-    try {
-      const res = await reportsApi.w2GuFilingReadiness(year);
+    const sequence = ++employeeReadinessSequence.current;
+    const context = filingContextSequence.current;
+    const [readiness, responsibilities] = await Promise.allSettled([
+      reportsApi.w2GuFilingReadiness(year),
+      reportsApi.payrollFilingResponsibilities(year),
+    ]);
+    if (context !== filingContextSequence.current) return;
+
+    // Permission loading belongs to the selected company/year even if a newer
+    // report or preflight superseded this request's employee details.
+    setCanRecordFilingResponsibility(responsibilities.status === 'fulfilled' && responsibilities.value.permissions.can_record);
+    if (sequence !== employeeReadinessSequence.current) return;
+    if (readiness.status === 'fulfilled') {
+      const res = readiness.value;
+      setEmployeeCompleteness(res.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       setFiling(res.filing);
       setFilingGate(res.filing_gate);
-    } catch {
-      // Non-blocking: filing readiness can be absent or temporarily unavailable.
+    } else {
+      setEmployeeCompleteness(null);
+      setEmployeeReadinessError(true);
       setFiling(null);
     }
-
-    try {
-      const response = await reportsApi.payrollFilingResponsibilities(year);
-      if ('filings' in response.data) setFilingGate(response.data);
-      setCanRecordFilingResponsibility(response.permissions.can_record);
-    } catch {
-      setCanRecordFilingResponsibility(false);
+    if (responsibilities.status === 'fulfilled' && 'filings' in responsibilities.value.data) {
+      setFilingGate(responsibilities.value.data);
     }
   }
 
   async function loadReport() {
+    const sequence = ++employeeReadinessSequence.current;
     setLoading(true);
     setError(null);
     setReport(null);
     try {
       const res = await reportsApi.w2Gu(year);
+      if (sequence !== employeeReadinessSequence.current) return;
       setReport(res.report);
+      setEmployeeCompleteness(res.report.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       if (res.report.filing_readiness !== undefined) setFiling(res.report.filing_readiness);
       setFilingGate(res.report.filing_gate);
     } catch (err: unknown) {
-      setError(extractErrorMessage(err));
+      if (sequence === employeeReadinessSequence.current) setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
   }
 
   async function runPreflight() {
+    const sequence = ++employeeReadinessSequence.current;
     setPreflightLoading(true);
     setPreflightError(null);
     setMarkReadyError(null);
     try {
       const res = await reportsApi.w2GuPreflight(year);
+      if (sequence !== employeeReadinessSequence.current) return;
       setPreflight(res.preflight);
+      setEmployeeCompleteness(res.preflight.employee_completeness ?? null);
+      setEmployeeReadinessError(false);
       setFiling(res.filing);
       setFilingGate(res.filing_gate);
     } catch (err: unknown) {
-      setPreflightError(extractErrorMessage(err));
+      if (sequence === employeeReadinessSequence.current) setPreflightError(extractErrorMessage(err));
     } finally {
       setPreflightLoading(false);
     }
@@ -744,6 +778,7 @@ export function W2GuPanel() {
         if (revalidatedPreflight) {
           setPreflight(revalidatedPreflight);
           revalidated = true;
+          void loadPersistedFilingReadiness();
         }
       }
       if (!revalidated) {
@@ -925,6 +960,14 @@ export function W2GuPanel() {
           onUpdated={(gate) => { setFilingGate(gate); void loadPersistedFilingReadiness(); }}
         />
       )}
+
+      {employeeReadinessError && (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          Employee filing details could not be refreshed. Review them before filing.
+          <Button variant="outline" className="ml-3" onClick={() => void loadPersistedFilingReadiness()}>Retry employee readiness</Button>
+        </div>
+      )}
+      <FilingEmployeeWarnings completeness={employeeCompleteness} />
 
       {preflightError && (
         <ActionFeedback retryKey={preflightErrorFeedbackAttempt} tone="error" message={preflightError}><CardContent className="pt-6">
@@ -2607,6 +2650,7 @@ export function QuarterlyCompliancePacketPanel() {
               Cornerstone prepares review copies from committed payroll. These reports do not prove agency submission, payment, or acceptance.
             </p>
           </div>
+          <FilingEmployeeWarnings completeness={report.employee_completeness} />
           <FilingResponsibilityPanel
             gate={report.filing_gate}
             canRecord={canRecordFilingResponsibility}
@@ -2929,6 +2973,7 @@ export function QuarterlyCompliancePacketPanel() {
           year={year}
           quarter={quarter}
           formType={reviewFormType}
+          employeeCompleteness={report?.employee_completeness}
           onClose={() => setReviewFormType(null)}
         />
       )}
@@ -2937,6 +2982,7 @@ export function QuarterlyCompliancePacketPanel() {
 }
 
 function QuarterlyOfficialFormModal({
+  employeeCompleteness,
   year,
   quarter,
   formType,
@@ -2945,6 +2991,7 @@ function QuarterlyOfficialFormModal({
   year: number;
   quarter: number;
   formType: QuarterlyOfficialFormType;
+  employeeCompleteness?: FilingEmployeeCompleteness;
   onClose: () => void;
 }) {
   const [fields, setFields] = useState<QuarterlyOfficialFormFields | null>(null);
@@ -3057,7 +3104,7 @@ function QuarterlyOfficialFormModal({
     <>
       <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
       <div className="fixed inset-0 z-[61] flex items-center justify-center p-3 xl:p-5">
-        <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div role="dialog" aria-label="Government form review" className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
             <div>
               <h2 className="text-2xl font-semibold text-neutral-900">{fields?.title || 'Government Form'} — Draft</h2>
@@ -3070,6 +3117,7 @@ function QuarterlyOfficialFormModal({
             <Button variant={mobileView === 'fields' ? 'primary' : 'outline'} onClick={() => setMobileView('fields')}>Form fields</Button>
             <Button variant={mobileView === 'preview' ? 'primary' : 'outline'} onClick={() => previewUrl ? setMobileView('preview') : void previewPdf()} disabled={working || !fields}>{previewUrl ? 'PDF preview' : 'Generate preview'}</Button>
           </div>
+          {formType === 'swica' && <div className="mx-4 mt-3 max-h-[30vh] shrink-0 overflow-y-auto lg:mx-5"><FilingEmployeeWarnings completeness={employeeCompleteness} compact /></div>}
           {error ? <div role="alert" className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 lg:mx-5">{error}</div> : null}
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
             <div className={`${mobileView === 'fields' ? 'block' : 'hidden'} min-h-0 overflow-y-auto bg-neutral-50 p-4 lg:block lg:p-5`}>

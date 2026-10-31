@@ -32,6 +32,25 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
         employer_medicare_tax: (gross_pay * 0.0145).round(2))
     end
 
+    it "warns only for employees actually included in the SW-2 wage rows" do
+      current = create_committed_period(start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 14), pay_date: Date.new(2026, 4, 17))
+      previous = create_committed_period(start_date: Date.new(2026, 3, 1), end_date: Date.new(2026, 3, 14), pay_date: Date.new(2026, 3, 17))
+      voided = create(:pay_period, :voided, company: company, pay_date: Date.new(2026, 4, 20))
+      included = create_item(pay_period: current, gross_pay: 100)
+      [ [ current, 0 ], [ previous, 100 ], [ voided, 100 ] ].each do |period, gross|
+        worker = create(:employee, company: company, department: department)
+        create_item(pay_period: period, gross_pay: gross, employee: worker)
+        worker.update_columns(ssn_encrypted: nil, city: nil)
+      end
+      contractor = create(:employee, :contractor, company: company, department: department)
+      create_item(pay_period: current, gross_pay: 100, employee: contractor).update!(employment_type: "contractor")
+      contractor.update_columns(ssn_encrypted: nil, city: nil)
+      included.employee.update_columns(ssn_encrypted: nil, city: nil)
+      warnings = described_class.new(company, 2026, 2).generate.fetch(:employee_completeness)
+      expect(warnings).to include(missing_ssn_count: 1, missing_address_count: 1)
+      expect(warnings[:employees].map { |row| row[:employee_id] }).to eq([ included.employee_id ])
+    end
+
     it "allocates Additional Medicare Tax into the pay-date 941 liability rows" do
       prior_period = create_committed_period(
         start_date: Date.new(2026, 3, 1),
@@ -143,6 +162,10 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(report.dig(:form_500, :total_guam_withholding)).to eq(100.0)
       expect(report.dig(:form_500, :excluded_historical_withholding)).to eq(80.0)
       expect(report.dig(:form_500, :deposits).map { |row| row[:pay_period_id] }).to eq([ live_period.id ])
+      employee.update_columns(ssn_encrypted: nil, city: nil)
+      warnings = described_class.new(company, 2026, 2).generate.fetch(:employee_completeness)
+      expect(warnings).to include(missing_ssn_count: 1, missing_address_count: 1)
+      expect(warnings[:employees].map { |row| row[:employee_id] }).to eq([ employee.id ])
     end
 
     it "does not add Additional Medicare twice when a committed item already stores it" do

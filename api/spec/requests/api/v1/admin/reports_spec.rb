@@ -491,6 +491,22 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       item.payroll_item_earnings.create!(category: "non_taxable", label: "Non-Taxable Pay", amount: 25.00)
     end
 
+    it "warns for included employees once, without SSNs, and permits a draft" do
+      employee.update_columns(ssn_encrypted: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+      create(:employee, company: company, department: department, first_name: "Unpaid").update_columns(ssn_encrypted: nil)
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      expect(response).to have_http_status(:ok)
+      warnings = response.parsed_body.dig("report", "employee_completeness")
+      expect(warnings).to include("missing_ssn_count" => 1, "missing_address_count" => 1)
+      expect(warnings.fetch("employees")).to eq([
+        { "employee_id" => employee.id, "name" => employee.full_name, "missing_fields" => %w[ssn address], "edit_path" => "/companies/#{company.id}/employees/#{employee.id}/edit" }
+      ])
+      expect(warnings.to_json).not_to include("ssn_last", "ssn_encrypted", "Unpaid")
+      post "/api/v1/admin/reports/quarterly_compliance_packet_official_form_preview", params: { year: 2026, quarter: 2, form_type: "swica", fields: {} }
+      expect(response).to have_http_status(:ok)
+      expect(response.media_type).to eq("application/pdf")
+    end
+
     it "builds a Q2 packet by pay date, not period end date" do
       get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
 
@@ -1351,6 +1367,31 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         withholding_tax: 250.00,
         social_security_tax: 186.00,
         medicare_tax: 43.50)
+    end
+
+    it "returns live missing-detail warnings before preflight and clears them after profile completion" do
+      employee.update_columns(ssn_encrypted: "12345678", city: nil)
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      warnings = response.parsed_body.fetch("employee_completeness")
+      expect(warnings).to include("missing_ssn_count" => 1, "missing_address_count" => 1)
+      expect(warnings.fetch("employees").first).to include("employee_id" => employee.id, "missing_fields" => %w[ssn address], "edit_path" => "/companies/#{company.id}/employees/#{employee.id}/edit")
+      expect(warnings.to_json).not_to include("12345678", "123-45-6789", "ssn_last")
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response.parsed_body.dig("preflight", "employee_completeness")).to eq(warnings)
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+      expect(response.parsed_body.dig("report", "employee_completeness")).to eq(warnings)
+      employee.update_columns(ssn_encrypted: "123-45-6789", city: "Tamuning")
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.fetch("employee_completeness")).to include("employees" => [], "missing_ssn_count" => 0, "missing_address_count" => 0)
+    end
+
+    it "loads employee details without running preflight or validating historical ledgers" do
+      expect(W2GuPreflightValidator).not_to receive(:new)
+      expect_any_instance_of(HistoricalPayrollFilingSource).not_to receive(:validate!)
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("employee_completeness").fetch("employees")).to be_empty
     end
 
     it "returns nil when no readiness row exists for year" do
