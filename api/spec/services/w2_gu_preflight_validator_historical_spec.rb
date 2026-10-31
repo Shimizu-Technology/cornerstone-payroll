@@ -32,6 +32,11 @@ RSpec.describe W2GuPreflightValidator, "locked QuickBooks history" do
 
     expect(result[:blocking_count]).to eq(0)
     expect(result[:findings]).not_to include(include(code: "NO_COMMITTED_PAYROLL"))
+    employee.update_columns(ssn_encrypted: nil, zip: nil)
+    warnings = described_class.new(company: company, year: 2026).run.fetch(:employee_completeness)
+    expect(warnings).to include(missing_ssn_count: 1, missing_address_count: 1)
+    expect(warnings[:employees].map { |row| row[:employee_id] }).to eq([ employee.id ])
+    expect(warnings.to_json).not_to include("ssn_encrypted", "ssn_last")
   end
 
   it "returns an actionable blocker when locked history has no applied bridge" do

@@ -73,6 +73,7 @@ class W2GuAggregator
         box12_code_tt_total: rows.sum(0.to_d) { |r| (r[:box12] || []).select { |e| e[:code] == "TT" }.sum(0.to_d) { |e| e[:amount].to_d } }.round(2),
         retirement_plan_participants: rows.count { |r| r[:box13_retirement_plan] }
       },
+      employee_completeness: FilingEmployeeCompleteness.for(employees),
       review_warnings: component_review_warnings,
       compliance_issues: compliance_issues(rows) + component_review_warnings.map { |warning| warning[:message] }.uniq,
       employees: rows

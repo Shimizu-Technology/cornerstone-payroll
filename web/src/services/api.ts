@@ -2834,6 +2834,7 @@ export interface Form941GuReport {
 }
 
 export interface QuarterlyCompliancePacketReport {
+  employee_completeness?: import('@/types').FilingEmployeeCompleteness;
   official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;

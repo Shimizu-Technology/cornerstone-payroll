@@ -31,7 +31,8 @@ class W2GuPreflightValidator
       run_at: Time.current.iso8601,
       blocking_count: findings.count { |f| f.severity == "blocking" },
       warning_count: findings.count { |f| f.severity == "warning" },
-      findings: findings.map { |f| serialize(f) }
+      findings: findings.map { |f| serialize(f) },
+      employee_completeness: FilingEmployeeCompleteness.for(Employee.where(company_id: company.id, id: employee_ids).order(:last_name, :first_name, :id))
     }
   end
 
@@ -69,7 +70,7 @@ class W2GuPreflightValidator
       return out
     end
 
-    Employee.where(id: employee_ids).find_each do |employee|
+    Employee.where(company_id: company.id, id: employee_ids).find_each do |employee|
       unless employee.valid_filing_ssn?
         out << Finding.new(
           severity: "blocking",

@@ -84,3 +84,15 @@ describe('Official Form 941 tax-year availability', () => {
     expect(mocks.packetPdf).not.toHaveBeenCalled();
   });
 });
+
+it('shows missing employee details in the packet and preserves draft preview actions', async () => {
+  mocks.packet.mockResolvedValue({ report: { ...packet(2026, true), employee_completeness: {
+    missing_ssn_count: 1, missing_address_count: 1, message: 'Missing details print blank. Drafts can still be generated.',
+    employees: [{ employee_id: 7, name: 'Synthetic Worker', missing_fields: ['ssn', 'address'], edit_path: '/companies/42/employees/7/edit' }],
+  } } });
+  mount(<QuarterlyCompliancePacketPanel />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Packet' }));
+  expect(await screen.findByText('Synthetic Worker — missing 9-digit SSN and complete address')).toBeTruthy();
+  expect(screen.getByRole('link', { name: /Edit profile for Synthetic Worker/ }).getAttribute('href')).toBe('/companies/42/employees/7/edit');
+  expect(screen.getByRole('button', { name: /Review.*SW-2/i })).toBeTruthy();
+});
