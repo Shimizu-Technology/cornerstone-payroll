@@ -65,6 +65,20 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
       expect(pdf_text(response.body)).not_to include("Legacy employer benefit history", "accountant review needed")
     end
 
+    it "bypasses stored statements with prior legacy warnings without changing safe cached downloads" do
+      later_item.update_columns(payment_delivery_method: nil)
+      storage = instance_double(R2StorageService)
+      allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(true)
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      allow(storage).to receive(:exists?).and_return(true)
+      expect(storage).not_to receive(:download)
+
+      get "/api/v1/admin/pay_stubs/#{later_item.id}/download"
+      expect(response).to have_http_status(:ok)
+      expect(pdf_text(response.body)).to include("Saved employer health", "$25.00")
+      expect(pdf_text(response.body)).not_to include("Legacy employer benefit history", "accountant review needed")
+    end
+
     it "keeps employee batch statements free of accountant review notes" do
       later_item
       post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: later_period.id }
