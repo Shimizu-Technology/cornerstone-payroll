@@ -2252,6 +2252,7 @@ export interface PayrollRegisterReport {
     review_warnings?: PayrollReportReviewWarning[];
     type: string;
     simple_payroll_register_enabled: boolean;
+    register_review?: Array<{ severity: string; employee?: string; issue: string; detail?: string }>;
     meta: {
       company_name?: string;
       generated_at?: string;
@@ -2321,6 +2322,11 @@ export interface PayrollRegisterReport {
     payroll_adjustments?: PayrollAdjustmentsDisclosure;
     employees: Array<PayrollItem & {
       total_retirement_payment?: number;
+      non_taxable_additions_total?: number;
+      payroll_adjustment_non_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      traditional_retirement_total?: number;
+      roth_retirement_total?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2328,6 +2334,11 @@ export interface PayrollRegisterReport {
     }>;
     contractors: Array<PayrollItem & {
       total_retirement_payment?: number;
+      non_taxable_additions_total?: number;
+      payroll_adjustment_non_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      traditional_retirement_total?: number;
+      roth_retirement_total?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2593,6 +2604,7 @@ export interface YtdSummaryReport {
       total_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
+      non_taxable_additions_total?: number;
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
@@ -2630,6 +2642,7 @@ export interface YtdSummaryReport {
       total_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
+      non_taxable_additions_total?: number;
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
