@@ -2,9 +2,17 @@
 
 # Never invert rounded tax. Only the full, ordinary gross/tip allocation is
 # supported; the caller must additionally establish the complete annual bound.
+# Bases always come from imported gross/tip amounts. Stored taxes only
+# corroborate them: QuickBooks rounds each check independently, so each present
+# tax component may differ from the rule-computed amount by at most one cent.
+# Every signed residual is retained in the plan and proof evidence.
 module ImportedPaycheckFicaEvidence
+  VERSION = 2
   SS = /\A(?:SS|Social Security(?: Employer)?)\z/i
   MEDICARE = /\A(?:Med|Medicare(?: Employer)?)\z/i
+  TOLERANCE = BigDecimal("0.01")
+  TOLERANCE_CENTS = 1
+  RESIDUAL_COMPONENTS = %w[employee_social_security_tax employee_medicare_tax employer_social_security_tax employer_medicare_tax].freeze
 
   def self.source(row)
     [ row.attributes, row.historical_import_batch.attributes,
@@ -13,6 +21,12 @@ module ImportedPaycheckFicaEvidence
   end
 
   def self.bases(row, rules)
+    corroborate(row, rules).fetch(:bases)
+  end
+
+  # Returns the gross-derived bases and signed per-component residuals in
+  # cents (stored minus rule-computed) for every present tax component.
+  def self.corroborate(row, rules)
     errors = []
     errors << "import batch is not locked" unless row.historical_import_batch.locked?
     errors << "employee mapping is absent or inconsistent" unless row.employee_id &&
@@ -42,19 +56,40 @@ module ImportedPaycheckFicaEvidence
     result = { social_security_taxable_wages: gross - tips, social_security_taxable_tips: tips,
       medicare_taxable_wages: gross, additional_medicare_taxable_wages: 0.to_d }
     expected = FicaBasisEvidence.components(result, rules)
+    residuals = {}
     { social_security_tax: SS, medicare_tax: MEDICARE }.each do |field, pattern|
-      value = expected.fetch(field)
-      errors << "#{field} does not exactly corroborate full gross under verified year rules" unless FicaBasisEvidence.amount(row.public_send(field)) == value
+      stored = FicaBasisEvidence.amount(row.public_send(field))
       detail = entries(row.employee_tax_breakdown).select { |label, _| label.match?(pattern) }
-      errors << "employee #{field} detail contradicts recorded tax" unless detail.sum(0.to_d, &:last) == FicaBasisEvidence.amount(row.public_send(field))
+      # Summary/detail agreement is internal source consistency, not rounding.
+      errors << "employee #{field} detail contradicts recorded tax" unless detail.sum(0.to_d, &:last) == stored
+      residual(errors, residuals, "employee", field, stored, expected.fetch(field))
       employer = entries(row.employer_tax_breakdown).select { |label, _| label.match?(pattern) }
-      if employer.any? && employer.sum(0.to_d, &:last) != expected.fetch(:"employer_#{field}")
-        errors << "employer #{field} does not exactly corroborate full gross under verified year rules"
-      end
+      residual(errors, residuals, "employer", field, employer.sum(0.to_d, &:last), expected.fetch(:"employer_#{field}")) if employer.any?
     end
     raise ArgumentError, errors.join("; ") if errors.any?
 
-    result
+    { bases: result, residual_cents: residuals }
+  end
+
+  def self.residual(errors, residuals, party, field, stored, computed)
+    difference = stored - computed
+    cents = difference * 100
+    if !cents.frac.zero?
+      errors << "#{party} #{field} is not a whole-cent amount (stored #{stored.to_s("F")})"
+    elsif difference.abs > TOLERANCE
+      errors << "#{party} #{field} differs from the rule-computed amount by #{signed(difference)} " \
+        "(stored #{format("%.2f", stored)}, computed #{format("%.2f", computed)}), beyond the $0.01 per-check rounding tolerance"
+    else
+      residuals["#{party}_#{field}"] = cents.to_i
+    end
+  end
+
+  def self.signed(amount)
+    "#{amount.negative? ? "-" : "+"}$#{format("%.2f", amount.abs)}"
+  end
+
+  def self.residual_totals(residuals)
+    RESIDUAL_COMPONENTS.to_h { |component| [ component, residuals.sum { |entry| entry.fetch(component, 0) } ] }
   end
 
   def self.entries(value)
@@ -69,7 +104,8 @@ module ImportedPaycheckFicaEvidence
 
   def self.verified_bases(row, rules:, year:)
     proof = row.fica_basis_proof&.evidence
-    return unless proof.is_a?(Hash) && proof["version"] == 1 && proof["year"] == year && proof["employee_id"] == row.employee_id
+    return unless proof.is_a?(Hash) && proof["version"] == VERSION && proof["year"] == year && proof["employee_id"] == row.employee_id
+    return unless proof["corroboration_tolerance_cents"] == TOLERANCE_CENTS
     return unless proof["source_digest"] == FicaBasisEvidence.digest(source(row))
     return unless proof["rule_digest"] == FicaBasisEvidence.digest(proof.fetch("rules"))
     return unless FicaBasisEvidence::RULE_FIELDS.all? do |field|
@@ -77,8 +113,10 @@ module ImportedPaycheckFicaEvidence
     end
     return unless proof["annual_source_digest"].to_s.match?(/\A[0-9a-f]{64}\z/)
 
-    result = bases(row, rules)
-    result if proof["bases"] == FicaBasisEvidence.normalize(result.stringify_keys)
+    result = corroborate(row, rules)
+    return unless proof["residual_cents"] == result.fetch(:residual_cents)
+
+    result.fetch(:bases) if proof["bases"] == FicaBasisEvidence.normalize(result.fetch(:bases).stringify_keys)
   rescue ArgumentError, KeyError, TypeError
     nil
   end

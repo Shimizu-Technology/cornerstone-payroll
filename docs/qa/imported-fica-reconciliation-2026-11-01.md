@@ -8,7 +8,7 @@ Cornerstone accountants run manual client payroll; Mark processes active MoSa's 
 
 Sources: existing `docs/FICA_LEGACY_RECOVERY.md`, PR #397, the private release-day `REHEARSAL.md`, `INVENTORY.json`, residual diagnostics/logs and `r2-fica-holds/REPORT.md` under `output/payroll-aire-prod-audit-2026-10-30`; client context in Brain-Dump `work/shimizu-tech/Cornerstone/payroll-priorities-and-aire-reconciliation-2026-09-19.md`. No current production state is inferred from those notes.
 
-Required acceptance: a reviewed company-year/employee selection produces a deterministic read-only plan; only exact full-gross/tip tax corroboration plus complete conservative annual bounds can create append-only proofs; authorized apply rejects drift and preserves financial rows; ordinary held calculations then approve/commit through the bounded path with review open. Contradictory or ambiguous sources must remain held. The release runner must bind imported plans and fail loudly on drift or remaining scoped holds.
+Required acceptance: a reviewed company-year/employee selection produces a deterministic read-only plan; only full-gross/tip tax corroboration (each present component within $0.01 per check, signed residuals recorded; round 2) plus complete conservative annual bounds can create append-only proofs; authorized apply rejects drift and preserves financial rows; ordinary held calculations then approve/commit through the bounded path with review open. Contradictory or ambiguous sources must remain held. The release runner must bind imported plans and fail loudly on drift or remaining scoped holds.
 
 ## Read-only staging diagnosis
 
@@ -21,7 +21,20 @@ The staging-only SSH transport asserted service `srv-dbemoodg1s2s7383eea0`, DB e
 
 Private aggregate logs: `release-day/import-fica-shape.log`, `import-fica-corroboration.log`, `import-fica-new-rule-preview.log`. Diagnostics and local gate evidence are retained in `output/payroll-imported-fica-20261101`.
 
-**Release acceptance remains blocked:** this exactness requirement cannot clear all nine from the available source rows. No one-cent tolerance or rounded-tax inversion was introduced. The remaining discrepancies need source evidence or an explicitly approved additional reconciliation design.
+Round 1 outcome: the exact rule could not clear all nine from the available source rows.
+
+### Round 2: approved one-cent per-check tolerance
+
+The lead approved a tolerance of at most $0.01 per tax component per check. QuickBooks rounds each check on its own, so a one-cent per-check difference is rounding, not a wage discrepancy. Bases still come only from the imported wage/tip amounts; taxes only corroborate. Anything beyond one cent on any component stays held with the component and signed difference named. Signed residual cents are recorded per check in plan rows and proof evidence (`version` 2), with per-employee-year and company totals inside the plan digest.
+
+Read-only re-run (`output/payroll-imported-fica-20261101/r2-tolerance/tolerance_preview.rb`, embedding the round-2 branch sources; same staging transport assertions on service `srv-dbemoodg1s2s7383eea0`, endpoint `ep-summer-bird-a13f6coa`, deployed `d7170343`; `REPEATABLE READ`, `READ ONLY` asserted, rolled back). It ran the actual `ImportedPaycheckFicaReconciliation#inventory` for the nine source-reviewed employees. The only changes were shims that treat every import as unproven, because staging has no proof table yet. Aggregate result:
+
+- 9 source-reviewed employees, covering all 9 native-held employee-years. 109 imported checks: **109 recoverable, 0 held**.
+- 65 exact checks; 44 with residuals. The maximum absolute residual is 1 cent. Per component, the residual histogram is SS −1:11 / 0:86 / +1:12 and Medicare −1:11 / 0:83 / +1:15, with employer mirroring employee.
+- Company residual totals: employee SS +1¢, employee Medicare +4¢, employer SS +1¢, employer Medicare +4¢.
+- **Employee-years: 9 ready, 0 held**; 109 proposable proofs at zero added wages.
+
+No proof, review, calculation or approval was written on staging. Real next-check amounts and the release runner still need the lead's post-merge staging rehearsal.
 
 ## Affected-flow QA
 
@@ -30,8 +43,10 @@ Agent-executed backend/CLI QA uses synthetic fixtures only, localhost PostgreSQL
 | Scenario | Expected saved outcome | Result |
 | --- | --- | --- |
 | Exact imported checks, with/without PayTip | Proposed wage/tip bases, attributed proof, unchanged imported amounts; calculate → approve → commit with review open | Passed |
-| One-cent employee/employer mismatch | Specific component named, no proof, existing hold retained | Passed |
-| Missing employer detail; present employer detail | Absence retained; any present component must corroborate exactly | Passed |
+| ±$0.01 on each of employee SS, employee Medicare, employer SS, employer Medicare (round 2) | Recoverable; signed residual in plan row, employee-year/company totals and proof evidence; bases from gross/tips; amounts unchanged; calculates | Passed |
+| $0.02 on each component; non-whole-cent employer detail (round 2) | Held; reason names component and signed difference; no proof; calculation held | Passed |
+| Mixed exact/±1¢ checks plus one 2¢ check (round 2) | Totals match and are digest-covered; changed residual changes digest; 2¢ check holds the employee-year with zero proofs | Passed |
+| Missing employer detail; present employer detail | Absence retained; any present component must corroborate within $0.01 | Passed |
 | Multiple earnings rates, traditional retirement, Roth and loan | Full FICA gross corroborated; deduction/imported amounts preserved | Passed |
 | Expired/missing outside review; threshold/current-check exposure | No proof or calculation clearance beyond verified bound | Passed |
 | Source, native-history or review identity changes | Reviewed digest rejected; changed imported source stales approval | Passed |
@@ -40,6 +55,7 @@ Agent-executed backend/CLI QA uses synthetic fixtures only, localhost PostgreSQL
 | Callback-bypassing UPDATE/DELETE/TRUNCATE | Database rejects mutation | Passed |
 | Ambiguous tips, inconsistent earnings, FICA-exempt detail, Additional Medicare exposure | Held; no guessed partial allocation | Passed |
 | Nine employee fixture, three imports each and later native runs | 27 imported proofs, approved later payrolls, zero holds | Passed |
+| Active-MoSa-shaped fixture: nine employees, four imports each, one-cent residuals on 24 checks across eight employees (round 2) | 36 proofs, residual totals reported, later payrolls approve in `calculable_below_thresholds` with review open, zero holds, idempotent re-apply | Passed |
 | Existing authoritative annual path with optional unavailable imported evidence | Existing annual behavior retained | Passed |
 | Actual release runner preview/stale apply/first apply/second pass/idempotence | Stale digest rejected; new source dependencies require fresh preview; exact row proven; mismatch exits 3 | Passed (actual script, 14 preview/apply invocations across mismatch and all-exact fixtures) |
 

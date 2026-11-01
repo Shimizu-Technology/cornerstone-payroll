@@ -12,6 +12,9 @@ class ImportedPaycheckFicaReconciliation
   def inventory
     data = { company_id: company.id, tax_year: year, employee_ids: employee_ids, employee_years: employee_plans.map { |plan| plan.except(:proofs) },
       source_digest: FicaBasisEvidence.digest(employee_plans.map { |plan| plan[:rows] }),
+      corroboration_tolerance_cents: ImportedPaycheckFicaEvidence::TOLERANCE_CENTS,
+      residual_totals_cents: ImportedPaycheckFicaEvidence.residual_totals(employee_plans.map { |plan| plan[:residual_totals_cents] }),
+      checks_with_residual: employee_plans.sum { |plan| plan[:checks_with_residual] },
       counts: %w[proven recoverable held].to_h { |status| [ status, employee_plans.sum { |plan| plan[:rows].count { |row| row[:status] == status } } ] } }
     data.merge(plan_digest: FicaBasisEvidence.digest(data))
   end
@@ -65,21 +68,26 @@ class ImportedPaycheckFicaReconciliation
     reports = rows.map do |row|
       report = begin
         raise ArgumentError, "Verified year rules unavailable or inconsistent" unless rules
-        bases = ImportedPaycheckFicaEvidence.bases(row, rules)
+        corroboration = ImportedPaycheckFicaEvidence.corroborate(row, rules)
+        residuals = corroboration.fetch(:residual_cents)
         if row.fica_basis_proof
           unless ImportedPaycheckFicaEvidence.verified_bases(row, rules: rules, year: year)
             raise ArgumentError, "Reviewed imported FICA proof no longer matches source or rules"
           end
-          { historical_paycheck_id: row.id, status: "proven", reason: "Reviewed imported FICA proof matches source and verified rules" }
+          { historical_paycheck_id: row.id, status: "proven", reason: "Reviewed imported FICA proof matches source and verified rules",
+            residual_cents: residuals }
         else
-          evidence = { "version" => 1, "year" => year, "employee_id" => employee_id,
+          evidence = { "version" => ImportedPaycheckFicaEvidence::VERSION, "year" => year, "employee_id" => employee_id,
             "source_digest" => FicaBasisEvidence.digest(ImportedPaycheckFicaEvidence.source(row)),
             "rule_digest" => FicaBasisEvidence.digest(rules), "rules" => rules,
-            "bases" => FicaBasisEvidence.normalize(bases.stringify_keys),
-            "derivation" => "Full uncapped gross with wages before reported tips; exact stored employee and present employer FICA taxes; no rounded-tax inversion" }
+            "bases" => FicaBasisEvidence.normalize(corroboration.fetch(:bases).stringify_keys),
+            "corroboration_tolerance_cents" => ImportedPaycheckFicaEvidence::TOLERANCE_CENTS, "residual_cents" => residuals,
+            "derivation" => "Full uncapped gross with wages before reported tips; stored employee and present employer FICA taxes each " \
+              "within $0.01 of the rule-computed amount (per-check rounding), signed residuals recorded; no rounded-tax inversion" }
           proofs[row.id] = evidence
           { historical_paycheck_id: row.id, status: "recoverable", proposed_bases: evidence["bases"], verified_rules: rules,
-            source_digest: evidence["source_digest"], stored_taxes: row.attributes.slice("social_security_tax", "medicare_tax", "employee_tax_breakdown", "employer_tax_breakdown") }
+            residual_cents: residuals, source_digest: evidence["source_digest"],
+            stored_taxes: row.attributes.slice("social_security_tax", "medicare_tax", "employee_tax_breakdown", "employer_tax_breakdown") }
         end
       rescue ArgumentError, KeyError, TypeError => error
         { historical_paycheck_id: row.id, status: "held", reason: error.message }
@@ -107,8 +115,13 @@ class ImportedPaycheckFicaReconciliation
       end
       proofs = {}
     end
+    # Totals cover every individually corroborated check, including any later
+    # held only by annual capacity, so reviewers see all accepted rounding.
+    residuals = reports.filter_map { |row| row[:residual_cents] }
     { employee_id: employee_id, status: reason || reports.any? { |row| row[:status] == "held" } ? "held" : "ready",
       reason: reason, rows: reports, proofs: proofs, conservative_history_bounds: capacity&.fetch("bounds"),
+      residual_totals_cents: ImportedPaycheckFicaEvidence.residual_totals(residuals),
+      checks_with_residual: residuals.count { |entry| entry.values.any?(&:nonzero?) },
       annual_source_digest: capacity&.fetch("source_digest"),
       history_review_open: true, filing_review_open: true }
   end
