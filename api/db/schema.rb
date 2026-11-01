@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3238,6 +3238,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
   end
 
+  create_table "prior_provider_history_drafts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "lock_version", default: 0, null: false
+    t.jsonb "payload", default: {}, null: false
+    t.integer "step", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id", null: false
+    t.index [ "company_id" ], name: "index_prior_provider_history_drafts_on_company_id", unique: true
+    t.index [ "updated_by_id" ], name: "index_prior_provider_history_drafts_on_updated_by_id"
+    t.check_constraint "step >= 0 AND step <= 3", name: "prior_provider_draft_step"
+  end
+
   create_table "prior_provider_history_onboardings", force: :cascade do |t|
     t.datetime "activated_at"
     t.bigint "activated_by_id"
@@ -4505,6 +4518,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
   add_foreign_key "historical_ytd_bridges", "prior_provider_history_onboardings", column: [ "prior_provider_history_onboarding_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_bridge_prior_provider_tenant"
   add_foreign_key "pay_periods", "historical_import_batches", column: "retired_to_historical_import_batch_id"
   add_foreign_key "pay_periods", "historical_import_batches", column: [ "retired_to_historical_import_batch_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_retired_history_tenant"
+  add_foreign_key "prior_provider_history_drafts", "companies"
+  add_foreign_key "prior_provider_history_drafts", "users", column: "updated_by_id"
   add_foreign_key "prior_provider_history_onboardings", "companies"
   add_foreign_key "prior_provider_history_onboardings", "historical_import_batches"
   add_foreign_key "prior_provider_history_onboardings", "historical_import_batches", column: [ "historical_import_batch_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_prior_provider_batch_tenant"

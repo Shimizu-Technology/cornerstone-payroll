@@ -81,10 +81,6 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
-    "api/v1/admin/prior_provider_histories#preview" => :manage_client_configuration,
-    "api/v1/admin/prior_provider_histories#create" => :manage_client_configuration,
-    "api/v1/admin/prior_provider_histories#activate" => :manage_client_configuration,
-    "api/v1/admin/prior_provider_histories#reverse" => :manage_client_configuration,
     "api/v1/admin/pay_periods#corrected_hours" => :payroll_operations,
     "api/v1/admin/pay_periods#connect_corrected_hours" => :payroll_operations,
     "api/v1/admin/annual_retirement_limits#create" => :manage_platform,

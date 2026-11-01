@@ -19,21 +19,83 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     HistoricalImportSourceFile.where(company: @company).find_each { |file| R2StorageService.new.delete(file.storage_key) }
   end
 
-  it "lets accountants inspect history while denying conversion, preview, activation and reversal" do
+  def grant_access(user, company = @company)
+    CompanyAssignment.create!(user: user, company: company, granted_by: @admin)
+  end
+
+  it "lets an accountant who runs this client's payroll record, activate and reverse history end to end" do
+    grant_access(@accountant)
     @actor = @accountant
     get "/api/v1/admin/prior_provider_histories"
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body["can_manage"]).to be(false)
-    expect(response.parsed_body["candidates"].size).to eq(1)
+    expect(response.parsed_body).to include("can_manage" => true)
+    expect(response.parsed_body["employees"].map { |row| row["ssn_last_four"] }).to eq(@employees.sort_by(&:last_name).map(&:ssn_last_four))
+    put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload, step: 1 }, as: :json
+    expect(response).to have_http_status(:ok), response.body
     post "/api/v1/admin/prior_provider_histories/preview", params: { payload: @payload }, as: :json
-    expect(response).to have_http_status(:forbidden)
-    post "/api/v1/admin/prior_provider_histories", params: { payload: @payload }, as: :json
-    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["ready"]).to be(true), response.body
+    post "/api/v1/admin/prior_provider_histories", params: { payload: JSON.generate(@payload), preview_digest: response.parsed_body.fetch("digest"),
+      idempotency_key: "accountant-history-2026", files: [ history_upload ], acknowledgement: PriorProviderHistory::Conversion::ACKNOWLEDGEMENT }
+    expect(response).to have_http_status(:created), response.body
+    id = response.parsed_body.dig("onboarding", "id")
+    expect(PriorProviderHistoryOnboarding.find(id).created_by).to eq(@accountant)
+    expect(PriorProviderHistoryDraft.where(company: @company)).to be_empty
+    post "/api/v1/admin/prior_provider_histories/#{id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
+    expect(response).to have_http_status(:ok), response.body
+    expect(PriorProviderHistoryOnboarding.find(id).activated_by).to eq(@accountant)
+    post "/api/v1/admin/prior_provider_histories/#{id}/reverse", params: { reason: "Provider sent a corrected register", acknowledgement: PriorProviderHistory::Reversal::ACKNOWLEDGEMENT }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("onboarding", "status")).to eq("reversed")
+  end
+
+  it "denies client and employee roles and staff without access to the client" do
+    other = create(:company, organization: @company.organization)
+    outsider = create(:user, company: other, organization: @company.organization, role: "accountant")
+    grant_access(outsider, other)
+    client = create(:user, company: @company, organization: @company.organization, role: "client")
+    employee_user = create(:user, company: @company, organization: @company.organization, role: "employee")
     onboarding = convert_history(@company, @admin, @payload)
-    post "/api/v1/admin/prior_provider_histories/#{onboarding.id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
-    expect(response).to have_http_status(:forbidden)
-    post "/api/v1/admin/prior_provider_histories/#{onboarding.id}/reverse", params: { reason: "Test", acknowledgement: PriorProviderHistory::Reversal::ACKNOWLEDGEMENT }
-    expect(response).to have_http_status(:forbidden)
+    [ outsider, client, employee_user ].each do |user|
+      @actor = user
+      get "/api/v1/admin/prior_provider_histories"
+      expect(response).to have_http_status(:forbidden), "#{user.role}: #{response.body}"
+      post "/api/v1/admin/prior_provider_histories/preview", params: { payload: @payload }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload, step: 1 }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      post "/api/v1/admin/prior_provider_histories/#{onboarding.id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
+      expect(response).to have_http_status(:forbidden)
+      expect { activate_history(onboarding, user) }.to raise_error(PriorProviderHistory::Authorization::NotAuthorized)
+    end
+    expect(onboarding.reload.status).to eq("converted")
+  end
+
+  it "saves a shared resumable draft and refuses a stale overwrite" do
+    grant_access(@accountant)
+    @actor = @accountant
+    put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload, step: 2 }, as: :json
+    version = response.parsed_body.dig("draft", "lock_version")
+    @actor = @admin
+    get "/api/v1/admin/prior_provider_histories"
+    expect(response.parsed_body["draft"]).to include("step" => 2, "updated_by_name" => @accountant.name, "lock_version" => version)
+    expect(response.parsed_body.dig("draft", "payload", "periods").size).to eq(1)
+    put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload.merge("provider_name" => "Admin edit"), step: 2, lock_version: version }, as: :json
+    expect(response).to have_http_status(:ok)
+    @actor = @accountant
+    put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload, step: 1, lock_version: version }, as: :json
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body["error"]).to include(@admin.name)
+    expect(PriorProviderHistoryDraft.find_by!(company: @company).payload["provider_name"]).to eq("Admin edit")
+    delete "/api/v1/admin/prior_provider_histories/draft"
+    expect(response).to have_http_status(:no_content)
+    expect(PriorProviderHistoryDraft.where(company: @company)).to be_empty
+  end
+
+  it "turns on historical payroll for the client when history is recorded" do
+    @company.update!(historical_payroll_enabled: false)
+    onboarding = convert_history(@company, @admin, @payload)
+    expect(@company.reload.historical_payroll_enabled).to be(true)
+    expect(AuditLog.find_by!(action: "prior_provider_history#convert", record_id: onboarding.id).metadata).to include("enabled_historical_payroll" => true)
   end
 
   it "provides the complete preview, upload, atomic conversion, activation and reversal API" do
@@ -64,27 +126,19 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     expect(response.parsed_body.dig("onboarding", "status")).to eq("reversed")
   end
 
-  it "hides foreign-company onboarding records and rechecks revoked permissions inside services" do
-    onboarding = convert_history(@company, @admin, @payload)
+  it "hides foreign-company onboarding records and rechecks revoked access inside services" do
+    home = create(:company, organization: @company.organization)
+    assigned = create(:user, company: home, organization: @company.organization, role: "accountant")
+    assignment = grant_access(assigned)
+    onboarding = convert_history(@company, assigned, @payload)
+    @actor = assigned
     @selected_company_id = create(:company, organization: @company.organization).id
     post "/api/v1/admin/prior_provider_histories/#{onboarding.id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
     expect(response).to have_http_status(:forbidden)
-    @admin.update!(role: "accountant")
-    expect { activate_history(onboarding, @admin) }.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized)
-  end
-  it "honors a current accountant client-management grant and rejects it after expiry" do
-    assignment = CompanyAssignment.find_or_initialize_by(user: @accountant, company: @company)
-    assignment.assign_attributes(client_management: true, granted_by: @admin)
-    assignment.save!
-    @actor = @accountant
-    get "/api/v1/admin/prior_provider_histories"
-    expect(response.parsed_body["can_manage"]).to be(true)
-    post "/api/v1/admin/prior_provider_histories/preview", params: { payload: @payload }, as: :json
-    expect(response).to have_http_status(:ok)
-    expect(response.parsed_body["ready"]).to be(true)
-    onboarding = convert_history(@company, @accountant, @payload)
     assignment.update!(expires_at: 1.minute.ago)
-    expect { activate_history(onboarding, @accountant) }.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized)
+    expect { activate_history(onboarding, assigned) }.to raise_error(PriorProviderHistory::Authorization::NotAuthorized)
+    @admin.update!(role: "client")
+    expect { activate_history(onboarding, @admin) }.to raise_error(PriorProviderHistory::Authorization::NotAuthorized)
     expect(onboarding.reload.status).to eq("converted")
   end
   it "reports candidate overflow instead of claiming a truncated list is complete" do

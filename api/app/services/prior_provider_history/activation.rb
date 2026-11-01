@@ -9,16 +9,15 @@ module PriorProviderHistory
     end
 
     def call
-      QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: onboarding.company_id)
+      Authorization.ensure_authorized!(actor: actor, company_id: onboarding.company_id)
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
       onboarding.class.transaction do
         company.lock!
         onboarding.lock!
         batch.lock!
-        @actor = QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
+        @actor = Authorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
         next onboarding if onboarding.status == "active"
         raise ArgumentError, "Only converted history can be activated" unless onboarding.status == "converted"
-        raise ArgumentError, "Enable historical payroll for this client before activation" unless company.historical_payroll_enabled?
         raise ArgumentError, "Resolve other payroll runs before activating the opening balances" if company.pay_periods.where.not(status: "retired_history").exists?
         raise ArgumentError, "Retained registers must still verify before activation" unless QuickbooksHistory::SourceFileVerificationService.new(batch: batch, actor: actor).call.all_verified
         raise ArgumentError, "Retained registers are incomplete" unless batch.reload.source_files_complete_and_verified?
