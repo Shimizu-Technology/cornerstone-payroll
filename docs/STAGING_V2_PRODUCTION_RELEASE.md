@@ -69,17 +69,19 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 7. [ ] **Smoke test while paused:**
    - AIRE: clock in and out, edit an entry, approve it.
    - Payroll: open a manual client, print a pay stub, the register, and the Q3 941 and W-1. Line 5 of the W-1 should be filled, and amounts should sit on 941 lines 6 and 10.
-8. [ ] **Activate the connection.**
+8. [ ] **Record AIRE's already-paid history before activation or calendar publication.** Follow [the paid-history procedure](integrations/aire-lock-rollout.md#already-paid-aire-history-release-gate) and the AIRE runner at `backend/ops/release-day/README.md`. Keep both apps paused. With Chels, review the exact source/commit timestamps, the #83/#85 adjustment entry IDs and preview hold list. Preview first; apply only the reviewed digest. Record Aug 16–31 → #67, Sep 1–15 → #76, Sep 16–30 → #86, Oct 1–15 → #94, in that order. July/earlier, edited-after-payment and adjustment source hours stay on evidence holds until exact paycheck reconciliation. Retain the idempotent receipt, five total batches and zero release-generated outbox events. Any mismatch or failed gate stops activation. **October 1–15 is already paid (#94, committed October 27); do not Lock/import/pay it again.** Backfilled ranges cannot be replaced by new AIRE calendars. Re-certify the final release SHA pair after these fixes merge.
+9. [ ] **Activate the connection.**
    - Review any overdue scheduled cutoffs first; they become eligible immediately.
    - Set `CONNECTED_PAYROLL_MODE=enabled` on AIRE and Payroll (web and worker).
    - Restart both promptly, so neither app is left enabled alone.
    - `connected_payroll:status` should show enabled on both.
    - Pending AIRE events should drain and receipts arrive.
-9. [ ] Decide whether to turn production auto-deploy back on.
+   - Publish the October 16–31 calendar before November 7 at 17:00 Pacific/Guam, using the real adjacent #94 regular run and October 31 payday. Review its snapshot for October 16–31 hours plus explicitly routed genuine corrections only.
+10. [ ] Decide whether to turn production auto-deploy back on.
 
 ## 3. After the release
 
-- [ ] Chels processes October 1–15 through the connected flow if it isn't already paid, using the manual Lock in Payroll.
+- [ ] Chels verifies October 1–15 remains recorded as already processed against paid run #94. Do not run another manual Lock or connected import for those wages. Reconcile any genuine correction through the settlement-case/evidence workflow.
 - [ ] Watch the first automatic lock on **November 7 at 17:00 ChST** and the November 15 payroll.
 - [ ] Before the first 2027 payroll, the CEO verifies the 2027 tables.
 
