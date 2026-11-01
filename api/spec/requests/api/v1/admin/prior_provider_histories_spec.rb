@@ -40,6 +40,9 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     id = response.parsed_body.dig("onboarding", "id")
     expect(PriorProviderHistoryOnboarding.find(id).created_by).to eq(@accountant)
     expect(PriorProviderHistoryDraft.where(company: @company)).to be_empty
+    totals = response.parsed_body.dig("onboarding", "employee_totals")
+    expect(totals.size).to eq(3)
+    expect(totals.map { |row| row["gross_pay"].to_d }).to all(eq(2_000))
     post "/api/v1/admin/prior_provider_histories/#{id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
     expect(response).to have_http_status(:ok), response.body
     expect(PriorProviderHistoryOnboarding.find(id).activated_by).to eq(@accountant)
