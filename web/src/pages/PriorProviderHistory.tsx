@@ -821,7 +821,7 @@ function PaycheckEditor({
 }) {
   const hiddenProblem = [...WAGE_COLUMNS, ...EMPLOYER_COLUMNS, ...OTHER_COLUMNS].some((key) => problems[key]) || (Object.keys(breakdownLabels) as BreakdownKey[]).some((key) => problems[key]);
   const [more, setMore] = useState(hiddenProblem);
-  const field = (key: AmountKey, label = amountLabels[key]) => (
+  const field = (key: AmountKey, label: string = amountLabels[key]) => (
     <Input key={key} label={label} inputMode="decimal" value={row[key]} error={problems[key]} onChange={(e) => onChange(setPaycheckAmount(row, key, e.target.value))} />
   );
   return (
