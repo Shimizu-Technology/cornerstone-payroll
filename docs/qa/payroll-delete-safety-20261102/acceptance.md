@@ -1,6 +1,6 @@
 # Payroll deletion safety — 2026-11-02
 
-Base: staging-v2 `ba027a743302fd79060eeb2cd0930c3e82cd1638`. Target: one held PR to staging-v2 for the November 7 release. No staging or production access.
+Base: staging-v2 `ba027a743302fd79060eeb2cd0930c3e82cd1638`. Target: one held PR to staging-v2 for the November 7 release. Target refreshed to `f7c3525f0de23f4a97d96d2a5af01fb6f44c8927` (documentation-only PR414); merged locally without any application source changes. No staging or production access.
 
 ## Context and acceptance
 
@@ -30,7 +30,7 @@ A recalculation cannot recreate lost manual hours or adjustments. Open the run �
 
 Local recovery passed in both dimensions: 12 regular hours × $10 plus a $25 bonus gave gross $145 and net $133.91; reload retained the inputs. N1 calculated at $100 gross/$92.35 net, then DELETE returned 204 and subsequent GET returned 404. N2 returned 422 with plain client-history guidance; run, item, earnings, field entries, review and import were byte-for-byte identical before/after in both dimensions (see refused-delete-evidence.json). N3 Cancel preserved 17 desktop/19 phone hours through Back and sidebar; Leave navigated. Actual browser Back also triggered the browser's native unsaved-page warning and retained 23 typed hours after Cancel at both widths. Clean navigation after successful calculation had no prompt.
 
-P1: downloaded single and batch PDFs, opened actual previews at both widths, rendered with Poppler and visually inspected. Both the plain-paper summary and both check-stub copies show $100 + $20 − $12.65 − $0 = $107.35 without overlap. The check-stub current and YTD columns agree. Source commit for final UI/PDF verification: `6b3cdac3286608ab01633724778c5726711d32d5` (later evidence-only commits do not change source).
+P1: downloaded single and batch PDFs, opened actual previews at both widths, rendered with Poppler and visually inspected. Both the plain-paper summary and both check-stub copies show $100 + $20 − $12.65 − $0 = $107.35 without overlap. The check-stub current and YTD columns agree. Source commit for final UI/PDF verification: `6b3cdac3286608ab01633724778c5726711d32d5` (later commits update tests/evidence and upstream release documentation; runtime code is unchanged).
 
 T3 preview was attempted first, then failed twice: “Preview automation snapshot timed out after 15000ms.” The task-created preview tab was closed and released. QA used local Playwright Chromium, 1440x900 and 390x844. The 390 run had scrollWidth 390. Synthetic committed-stub FICA bases and cached YTD amounts were completed during fixture preflight; its employee was kept separate from unfinished runs. No real provider authentication, payments or filing occurred.
 
@@ -41,8 +41,9 @@ T3 preview was attempted first, then failed twice: “Preview automation snapsho
 - RuboCop: 1,596 files, no offenses. Brakeman: no warnings. bundler-audit: no vulnerabilities. npm ci audit: zero vulnerabilities.
 - Transaction-mode PgBouncer: 13 examples passed, including the four conditional pooler cases.
 - Impeccable advisory on changed UI paths: [].
-- Complete RSpec: all 531 files in disjoint manifests, unique databases and storage roots; running. Final result pending.
+- Complete final RSpec: all 531 files in four disjoint shards; 5,798 examples, zero failures. The four pooler-conditional pending cases were separately executed in the passing 13-example PgBouncer run. Each shard used its own `payroll_codex_del_finalN` database, `TEST_STORAGE_ROOT` and TMPDIR. Shard counts: 1,672 + 1,231 + 1,408 + 1,487. Gate evidence and exact tested api/web tree IDs: gate-results.json, verified at `537ed02fac5879f5fc58bbde48403ceb7c89476d`. Final subsequent changes are evidence only.
+- The initial run found an existing model test expecting the late DeleteRestrictionError. The new pre-check correctly refuses first with RecordNotDestroyed. Its expectation was corrected while retaining every preservation assertion; the entire final suite was then rerun successfully. The dedicated late-callback request test still verifies transactional rollback independently of the pre-check.
 
 ## Resource ownership
 
-Lifecycle session `01a198f5-1edb-75e2-a4e7-e1a4247720e5`. Borrowed listeners, shared PostgreSQL 5432/Redis and existing simulators remain untouched. Disposable PostgreSQL 17 directory `/tmp/payroll-del-pg-01a198f5`, port 55447; helper refuses postgres claims by broad profile rule, so exact ownership is recorded in `/tmp/payroll-del-resource-ownership.txt` for manual cleanup. All databases use the `payroll_codex_del_` prefix; shards have separate storage and temporary directories. Final cleanup pending.
+Lifecycle session `01a198f5-1edb-75e2-a4e7-e1a4247720e5`. Borrowed listeners, shared PostgreSQL 5432/Redis and existing simulators remain untouched. Disposable PostgreSQL 17 directory `/tmp/payroll-del-pg-01a198f5`, port 55447; helper refuses postgres claims by broad profile rule, so exact ownership is recorded in `/tmp/payroll-del-resource-ownership.txt` for manual cleanup. All nine task databases (focus, UI, pooler, original two shards, final four shards) were dropped. The exact disposable cluster was stopped with pg_ctl, then its directory and the individual storage/TMPDIR roots were removed. Rails 5347, Vite 4347, Chromium/browser nodes, T3 tab and PgBouncer 56447 are stopped/closed; all four owned listener ports are absent. `dev-lifecycle status` reports no active owned resources. No resource handoff or unresolved ownership. The worktree/branch remain available for held PR417; no merge or deployment occurred.

@@ -1,0 +1,54 @@
+{
+  "verified_commit": "537ed02fac5879f5fc58bbde48403ceb7c89476d",
+  "api_tree": "d2311cff8e993d897a0f61d86a49ea355ad66538",
+  "web_tree": "1b98d84174d8e3dab7fb0b54cf1d7a21c8c48ae4",
+  "rspec": {
+    "files": 531,
+    "examples": 5798,
+    "failures": 0,
+    "pending": 4,
+    "shards": [
+      {
+        "shard": 1,
+        "files": 133,
+        "examples": 1672,
+        "failures": 0,
+        "pending": 0
+      },
+      {
+        "shard": 2,
+        "files": 133,
+        "examples": 1231,
+        "failures": 0,
+        "pending": 4
+      },
+      {
+        "shard": 3,
+        "files": 133,
+        "examples": 1408,
+        "failures": 0,
+        "pending": 0
+      },
+      {
+        "shard": 4,
+        "files": 132,
+        "examples": 1487,
+        "failures": 0,
+        "pending": 0
+      }
+    ],
+    "conditional_pooler_examples_separately_passed": 13
+  },
+  "frontend": {
+    "files": 142,
+    "tests": 1379,
+    "failures": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "production_build": "passed"
+  },
+  "rubocop": "1596 files, no offenses",
+  "brakeman": "0 warnings",
+  "bundler_audit": "0 vulnerabilities",
+  "impeccable": []
+}
