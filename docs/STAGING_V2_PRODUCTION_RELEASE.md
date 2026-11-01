@@ -18,7 +18,7 @@ Promotes Cornerstone Payroll `staging-v2` and AIRE Services `staging-v2` to prod
 
 Production auto-deploys from `main`, so everything here must be done before any merge.
 
-- [ ] **Staging acceptance.** Chels signs off on staging running the final release SHAs (manual payroll, AIRE import, the October 1–15 manual lock, reports Mark uses).
+- [ ] **Staging acceptance.** Chels signs off on staging running the final release SHAs (manual payroll, AIRE import, already-paid AIRE history reconciliation, manual Lock on an unpaid fixture, reports Mark uses). October 1–15 is already paid by #94; do not publish/Lock it again on the production-copy rehearsal.
 - [ ] **Final pair certificate.** The `quality.yml` exact-pair certification has passed for the exact Payroll and AIRE `staging-v2` SHAs you will merge. Re-run it if either branch changes:
   ```sh
   gh workflow run quality.yml --repo Shimizu-Technology/cornerstone-payroll --ref staging-v2 \
