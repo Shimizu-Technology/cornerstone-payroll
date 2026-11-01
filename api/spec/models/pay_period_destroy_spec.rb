@@ -57,7 +57,7 @@ RSpec.describe PayPeriod, "deletion", type: :model do
     expect(PayrollIntakeSession.exists?(session.id)).to be(true)
   end
 
-  it "rolls back the entire destroy chain when a calculated item has a restricted child" do
+  it "refuses a restricted paycheck before touching its source records" do
     period = create(:pay_period, :calculated)
     session = create(:payroll_intake_session, pay_period: period, company: period.company, status: "draft")
     document = session.documents.create!(document_type: "pdf", storage_reference: "synthetic/rollback.pdf")
@@ -67,7 +67,8 @@ RSpec.describe PayPeriod, "deletion", type: :model do
       review_reference: "Synthetic reviewed proof", plan_digest: "a" * 64, tax_year: period.pay_date.year, evidence: { "reviewed" => true })
     expect(R2StorageService).not_to receive(:new)
 
-    expect { period.destroy! }.to raise_error(ActiveRecord::DeleteRestrictionError)
+    expect { period.destroy! }.to raise_error(ActiveRecord::RecordNotDestroyed)
+    expect(period.errors.full_messages.to_sentence).to include("paychecks linked to retained payroll or payment evidence")
     expect(PayPeriod.exists?(period.id)).to be(true)
     expect(PayrollIntakeSession.exists?(session.id)).to be(true)
     expect(PayrollIntakeDocument.exists?(document.id)).to be(true)
