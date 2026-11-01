@@ -13,14 +13,14 @@ module PriorProviderHistory
     end
 
     def call
-      QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: company.id)
+      Authorization.ensure_authorized!(actor: actor, company_id: company.id)
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
       raise ArgumentError, "A unique request key is required" unless idempotency_key.to_s.match?(/\A[a-zA-Z0-9_-]{8,100}\z/)
       stored = []
       storage = QuickbooksHistory::SourceFileStorageService.new(company: company, actor: actor)
       PriorProviderHistoryOnboarding.transaction do
         company.lock!
-        @actor = QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
+        @actor = Authorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
         existing = PriorProviderHistoryOnboarding.find_by(company: company, idempotency_key: idempotency_key)
         if existing
           raise ArgumentError, "This request key belongs to different history" unless existing.preview_digest == preview_digest && existing.evidence.fetch("payload") == payload
@@ -49,11 +49,15 @@ module PriorProviderHistory
           takeover_on: plan.takeover_on, preview_digest: plan.digest, idempotency_key: idempotency_key,
           evidence: { "payload" => payload, "source_run_ids" => plan.run_ids, "retirement" => "calculated_to_retired_history", "acknowledgement" => acknowledgement }
         )
+        # Recorded history is only reachable through the historical payroll views.
+        enabled_history = !company.historical_payroll_enabled?
+        company.update!(historical_payroll_enabled: true) if enabled_history
+        PriorProviderHistoryDraft.where(company: company).delete_all
         # This is archival retirement only: never enter the commitment/void path.
         company.pay_periods.where(id: plan.run_ids).update_all(status: "retired_history", retired_to_historical_import_batch_id: batch.id, updated_at: Time.current)
         AuditLog.record!(user: actor, company_id: company.id, organization_id: company.organization_id,
           action: "prior_provider_history#convert", record_type: "prior_provider_history_onboardings", record_id: onboarding.id,
-          subject_name: batch.source_label, metadata: { batch_id: batch.id, preview_digest: plan.digest, source_run_ids: plan.run_ids, period_count: plan.periods.size })
+          subject_name: batch.source_label, metadata: { batch_id: batch.id, preview_digest: plan.digest, source_run_ids: plan.run_ids, period_count: plan.periods.size, enabled_historical_payroll: enabled_history })
         onboarding
       end
     rescue StandardError

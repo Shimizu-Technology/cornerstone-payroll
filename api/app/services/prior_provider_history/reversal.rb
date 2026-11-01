@@ -9,14 +9,14 @@ module PriorProviderHistory
     end
 
     def call
-      QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: onboarding.company_id)
+      Authorization.ensure_authorized!(actor: actor, company_id: onboarding.company_id)
       raise ArgumentError, "Type #{ACKNOWLEDGEMENT} to confirm" unless acknowledgement == ACKNOWLEDGEMENT
       raise ArgumentError, "Record a reversal reason (1–2000 characters)" unless reason.length.in?(1..2_000)
       onboarding.class.transaction do
         company.lock!
         onboarding.lock!
         batch.lock!
-        @actor = QuickbooksHistory::ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
+        @actor = Authorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
         next onboarding if onboarding.status == "reversed"
         if company.pay_periods.committed.exists?
           raise ArgumentError, "History cannot be reversed after the first live payroll commitment; use a reviewed historical amendment"

@@ -7,7 +7,7 @@ module Api
         rescue_from ArgumentError, ActiveRecord::RecordInvalid, QuickbooksHistory::SourceFileStorageService::StorageError do |error|
           render json: { error: error.message }, status: :unprocessable_entity
         end
-        rescue_from QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized do |error|
+        rescue_from PriorProviderHistory::Authorization::NotAuthorized do |error|
           render json: { error: error.message }, status: :forbidden
         end
 
@@ -21,16 +21,48 @@ module Api
           render json: {
             company_id: current_company_id,
             enabled: current_company.historical_payroll_enabled?,
-            can_manage: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company) && !current_company.test_workspace?,
+            can_manage: can_manage?,
             candidates: candidates,
             eligible_run_count: eligible_count,
             candidates_overflow: eligible_count > candidates.size,
-            employees: current_company.employees.order(:last_name, :first_name).map { |employee| { id: employee.id, name: employee.full_name } },
+            employees: current_company.employees.order(:last_name, :first_name).map { |employee| { id: employee.id, name: employee.full_name, ssn_last_four: employee.ssn_last_four } },
+            draft: serialize_draft(PriorProviderHistoryDraft.find_by(company_id: current_company_id)),
             onboardings: PriorProviderHistoryOnboarding.where(company_id: current_company_id).order(id: :desc).map { |record| serialize(record) }
           }
         end
 
+        # Shared by everyone working this client's history so a second staff
+        # member can resume; a stale save is refused rather than overwritten.
+        def save_draft
+          authorize_change!
+          step = Integer(params.fetch(:step, 0).to_s, 10)
+          conflict = nil
+          draft = PriorProviderHistoryDraft.transaction do
+            current_company.lock!
+            authorize_change!(lock: true)
+            record = PriorProviderHistoryDraft.lock.find_or_initialize_by(company_id: current_company_id)
+            if record.persisted? && params[:lock_version].to_s != record.lock_version.to_s
+              conflict = record
+              next
+            end
+            record.update!(payload: payload, step: step, updated_by: current_user)
+            record
+          end
+          if conflict
+            return render json: { error: "#{conflict.updated_by.name} saved newer changes. Reload to continue from their version.",
+              draft: serialize_draft(conflict) }, status: :conflict
+          end
+          render json: { draft: serialize_draft(draft) }
+        end
+
+        def discard_draft
+          authorize_change!
+          PriorProviderHistoryDraft.where(company_id: current_company_id).delete_all
+          head :no_content
+        end
+
         def preview
+          authorize_change!
           plan = PriorProviderHistory::Plan.new(company: current_company, payload: payload).call
           render json: { ready: plan.ready?, errors: plan.errors, digest: plan.digest, totals: plan.ready? ? plan.totals : nil }
         end
@@ -73,6 +105,21 @@ module Api
           value
         rescue JSON::ParserError
           raise ArgumentError, "History payload is not valid JSON"
+        end
+
+        def can_manage?
+          PriorProviderHistory::Authorization.allowed?(current_user, current_company) && !current_company.test_workspace?
+        end
+
+        def authorize_change!(lock: false)
+          PriorProviderHistory::Authorization.ensure_authorized!(actor: current_user, company_id: current_company_id, lock: lock)
+        end
+
+        def serialize_draft(draft)
+          return unless draft
+
+          { payload: draft.payload, step: draft.step, lock_version: draft.lock_version,
+            updated_at: draft.updated_at.iso8601, updated_by_name: draft.updated_by.name }
         end
 
         def scoped_record

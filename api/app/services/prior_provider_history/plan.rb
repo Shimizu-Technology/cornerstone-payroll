@@ -35,7 +35,6 @@ module PriorProviderHistory
     private
 
     def validate!
-      raise ArgumentError, "Enable historical payroll for this client before recording history" unless company.historical_payroll_enabled?
       raise ArgumentError, "Prior-provider onboarding requires a live client" if company.test_workspace?
       raise ArgumentError, "Select 1–#{SourceAdapter::MAX_RUNS} periods" unless periods.size.in?(1..SourceAdapter::MAX_RUNS)
       raise ArgumentError, "Tax year must be 2000–2200 and match the takeover date" unless tax_year.in?(2000..2200) && takeover_on.year == tax_year
