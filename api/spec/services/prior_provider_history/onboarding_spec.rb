@@ -242,5 +242,4 @@ RSpec.describe "Prior-provider existing-roster history" do
     expect(summary[:source_statement]).to include("already paid")
     expect(reporting.add_historical_to_employee_row({}, checks)).to include(tips: 100.0, tips_paid_out: 25.0)
   end
-
 end
