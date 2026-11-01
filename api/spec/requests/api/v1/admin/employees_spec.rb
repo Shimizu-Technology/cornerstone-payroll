@@ -43,6 +43,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
     it "allows personal details to remain blank but still rejects a malformed supplied SSN" do
       employee = create(:employee, company: company, department: department)
+      employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
       patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { hire_date: "", address_line1: "", city: "", state: "", zip: "" } }
       expect(response).to have_http_status(:ok)
       patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { ssn: "123", ssn_confirmation: "123" } }
@@ -775,7 +776,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           { "code" => "verify_hire_date", "message" => "Verify hire date", "fields" => [ "hire_date" ] },
           { "code" => "employee_address_missing", "message" => "Verify address", "fields" => %w[address_line1 city state zip] }
         ]
-        employee.update!(configuration_source: "quickbooks_history", configuration_review_status: "needs_review",
+        # Seed a retained import snapshot, rather than clearing a completed profile through an edit.
+        employee.update_columns(configuration_source: "quickbooks_history", configuration_review_status: "needs_review",
           configuration_review_items: review_items, ssn_encrypted: "000000001", hire_date: nil,
           address_line1: nil, city: nil, state: nil, zip: nil)
         original_rate = employee.pay_rate

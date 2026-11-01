@@ -226,14 +226,31 @@ class PayPeriod < ApplicationRecord
   before_destroy :prevent_finalized_run_deletion, prepend: true
   before_destroy :prevent_training_baseline_mutation
 
+  def previously_approved?
+    approved? || approved_at.present? || unapproved_at.present? ||
+      payroll_review_packages.where.not(approved_at: nil).exists? ||
+      AuditLog.where(company_id: company_id, record_type: [ "pay_periods", "PayPeriod" ], record_id: id,
+        action: %w[pay_periods#approve pay_periods#unapprove]).exists?
+  end
+
   def deletable_unapproved_run?
-    status.in?(%w[draft calculated]) && approved_at.nil? && committed_at.nil?
+    status.in?(%w[draft calculated]) && committed_at.nil? && !previously_approved?
   end
 
   def prevent_finalized_run_deletion
-    return if deletable_unapproved_run?
+    if previously_approved?
+      errors.add(:base, "This run was approved before. Keep it and correct it instead, or ask an admin.")
+    elsif !deletable_unapproved_run?
+      errors.add(:base, "Only unapproved payroll runs that have never been committed can be deleted. Keep this run and correct it instead, or ask an admin.")
+    else
+      deferred = PayrollIntakeRow.joins(:payroll_intake_session)
+        .where(payroll_intake_sessions: { pay_period_id: id }, disposition: "deferred")
+        .where.not(target_pay_period_id: [ nil, id ]).includes(:target_pay_period).order(:id).first
+      return unless deferred
 
-    errors.add(:base, "Only unapproved payroll runs that have never been committed can be deleted. Unapprove this run first, or keep its committed payroll history.")
+      target = deferred.target_pay_period
+      errors.add(:base, "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded.")
+    end
     throw :abort
   end
 
@@ -321,10 +338,10 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        unapproved_at: unapproved_at || approved_at,
+        unapproved_by_id: unapproved_by_id || approved_by_id,
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: at,
         intake_stale_reason: reason,
         intake_stale_session: session
@@ -341,10 +358,10 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        unapproved_at: unapproved_at || approved_at,
+        unapproved_by_id: unapproved_by_id || approved_by_id,
         approved_at: nil,
-        approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        approved_by_id: nil
       )
       invalidate_later_rehearsal_calculations!
     end
@@ -362,8 +379,9 @@ class PayPeriod < ApplicationRecord
         )
         later.update!(
           status: "draft", calculated_at: nil, calculated_by_id: nil,
-          approved_at: nil, approved_by_id: nil,
-          unapproved_at: nil, unapproved_by_id: nil
+          unapproved_at: later.unapproved_at || later.approved_at,
+          unapproved_by_id: later.unapproved_by_id || later.approved_by_id,
+          approved_at: nil, approved_by_id: nil
         )
       end
   end

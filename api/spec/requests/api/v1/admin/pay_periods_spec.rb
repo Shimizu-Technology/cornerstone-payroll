@@ -983,11 +983,11 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(PayrollItemEarning.where(payroll_item_id: item.id)).to be_empty
     end
 
-    it "preserves an approved run and tells the operator to unapprove it" do
+    it "preserves an approved run and explains that it must be corrected instead" do
       pay_period.update_columns(status: "approved", approved_at: Time.current)
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("Unapprove this run first")
+      expect(response.parsed_body.fetch("error")).to include("This run was approved before. Keep it and correct it instead, or ask an admin.")
       expect(pay_period.reload.status).to eq("approved")
     end
 
@@ -1360,7 +1360,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload).to be_draft
     end
 
-    it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
+    it "preserves unapproval history when payroll is recalculated" do
       pay_period.update!(
         status: "calculated",
         unapproved_at: 1.day.ago,
@@ -1372,8 +1372,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload).to have_attributes(
         status: "calculated",
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        unapproved_at: be_present,
+        unapproved_by_id: admin_user.id
       )
     end
 
