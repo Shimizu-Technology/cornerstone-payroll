@@ -3000,7 +3000,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       workbook = workbook_from_response
       expect(workbook.sheets.first).to eq("Employees")
-      expect(workbook.sheets).not_to include("Payroll Register", "Register Review")
+      expect(workbook.sheets).not_to include("Payroll Register")
+      expect(workbook.sheets).to include("Register Review")
       expect(workbook.sheets).to include("Earnings Detail", "Deductions Detail", "Report Info")
     end
 
