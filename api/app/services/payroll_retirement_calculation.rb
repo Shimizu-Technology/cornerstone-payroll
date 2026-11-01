@@ -111,7 +111,7 @@ class PayrollRetirementCalculation
     end
     if contribution_sources.any? { |entry| entry[:bucket] == :roth && entry[:requested].positive? } &&
         (!election[:roth_available] || election[:plan_source_reference].blank?)
-      raise ArgumentError, "Verify that the plan permits designated Roth employee contributions before calculating this paycheck."
+      raise ArgumentError, "#{employee.full_name}: Open Employees → #{employee.full_name} → Pay setup → Set up retirement and confirm the plan permits designated Roth employee contributions. Add the verified plan document or administrator reference, then calculate payroll again."
     end
   end
 

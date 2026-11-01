@@ -3,6 +3,7 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { AireManualHoursReview } from './AireManualHoursReview';
 
 const apiMocks = vi.hoisted(() => ({ manualReview: vi.fn() }));
@@ -67,6 +68,16 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
+  it.each(['rejected', 'saved-link fallback'])('explains an unconnected account for a %s response without showing the header error', async (mode) => {
+    const message = 'Missing X-Aire-Delegation-Token header';
+    if (mode === 'rejected') apiMocks.manualReview.mockRejectedValue(new Error(message));
+    else apiMocks.manualReview.mockResolvedValue({ source_available: false, source_error: message });
+    render(<MemoryRouter><AireManualHoursReview payPeriodId={17} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} /></MemoryRouter>);
+    expect(await screen.findByText('Connect your time tracking account to review AIRE hours for this payroll.')).toBeTruthy();
+    expect(screen.queryByText(/Missing X-Aire-Delegation-Token/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Settings → Time tracking account' }).getAttribute('href')).toBe('/app/aire-account-connection');
+  });
+
   it('does not turn an offline saved-link response into zero payable hours or a successful readiness check', async () => {
     apiMocks.manualReview.mockResolvedValue({ ...review, source_available: false, source_error: 'Time source unavailable',
       employees: [], exclusions: [], issues: null, summary: null });
