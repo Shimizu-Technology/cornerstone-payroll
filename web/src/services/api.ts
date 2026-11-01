@@ -2422,7 +2422,7 @@ export interface PayrollAdjustmentsDisclosure {
 }
 
 export interface PayrollSourceSummary {
-  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone';
+  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone' | 'locked_historical_plus_committed_cornerstone';
   source_statement: string;
   cornerstone: {
     payroll_count: number;
@@ -2437,6 +2437,7 @@ export interface PayrollSourceSummary {
     excluded_unlinked_gross_pay: number;
     excluded_unlinked_net_pay: number;
   };
+  prior_provider?: PayrollSourceSummary['quickbooks'];
   adjustments: {
     count: number;
     gross_pay_delta: number;
@@ -6297,6 +6298,15 @@ export const expensesApi = {
 };
 
 // Auth
+export function clearPriorProviderDrafts(): void {
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith('prior-provider-history:')) sessionStorage.removeItem(key);
+    }
+  } catch { /* Storage can be unavailable in restricted browser contexts. */ }
+}
+
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
   createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId }),
@@ -6305,6 +6315,7 @@ export const authApi = {
     return api.get<{ user: AuthApiUser }>('/auth/me');
   },
   logout: () => {
+    clearPriorProviderDrafts();
     api.setAuthToken(null);
     companiesApi.clearActiveCompanyId();
   },

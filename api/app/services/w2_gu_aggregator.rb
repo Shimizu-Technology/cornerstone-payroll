@@ -373,7 +373,7 @@ class W2GuAggregator
     return [] unless include_historical
 
     [
-      "Prior-provider values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
+      "Historical values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
       "Historical opening summaries and reviewed adjustments are included through the bridge exactly once; raw historical paychecks are not added again.",
       "QuickBooks history does not classify 2026 cash tips or qualified overtime for W-2 Box 12; affected employees remain flagged for review."
     ]

@@ -34,6 +34,8 @@ function page(canManage = true): HistoryPage {
     company_id: context.companyId,
     enabled: true,
     can_manage: canManage,
+    eligible_run_count: 1,
+    candidates_overflow: false,
     employees: [{ id: 1, name: "Employee One" }],
     onboardings: [],
     candidates: [
@@ -170,4 +172,22 @@ describe("Prior-provider history", () => {
     );
     await waitFor(() => expect((screen.getByLabelText("Previous provider") as HTMLInputElement).value).toBe(""));
   });
+  it("preserves reconciled edits when returning to select all", async () => {
+    open();
+    await screen.findByText("Select all eligible runs (1)");
+    fireEvent.click(screen.getByText("Select all eligible runs (1)"));
+    fireEvent.click(screen.getByText("Continue to reconciliation"));
+    fireEvent.change(screen.getByLabelText("Provider register / page reference"), { target: { value: "Verified paid register page 9" } });
+    fireEvent.click(screen.getByText("Back to selection"));
+    fireEvent.click(screen.getByText("Select all eligible runs (1)"));
+    fireEvent.click(screen.getByText("Continue to reconciliation"));
+    expect((screen.getByLabelText("Provider register / page reference") as HTMLInputElement).value).toBe("Verified paid register page 9");
+  });
+
+  it("shows incomplete candidate coverage explicitly", async () => {
+    vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...page(), eligible_run_count: 61, candidates_overflow: true });
+    open();
+    await screen.findByText(/Showing 1 of 61 eligible runs/);
+  });
+
 });

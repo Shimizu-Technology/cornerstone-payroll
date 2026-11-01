@@ -10,7 +10,7 @@ module PriorProviderHistory
     def self.candidate(period)
       rows = period.payroll_items.includes(:employee, :payroll_item_deductions).order(:employee_id).map do |item|
         taxes = item.withholding_tax.to_d + item.additional_withholding.to_d + item.social_security_tax.to_d + item.medicare_tax.to_d
-        pretax = item.retirement_payment.to_d + item.payroll_item_deductions.select(&:pre_tax?).sum(0.to_d, &:amount)
+        pretax = item.retirement_payment.to_d + item.payroll_item_deductions.select(&:pre_tax?).sum(0.to_d, &:amount) + item.pre_tax_payroll_adjustments_total.to_d
         aftertax = item.total_deductions.to_d - taxes - pretax
         row = Amounts::FIELDS.index_with { "0.0" }
         %w[gross_pay net_pay social_security_tax medicare_tax employer_social_security_tax employer_medicare_tax non_taxable_pay reported_tips tips_paid_out].each do |field|

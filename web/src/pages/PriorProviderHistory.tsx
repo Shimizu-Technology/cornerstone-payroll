@@ -437,12 +437,20 @@ function HistoryWorkspace({ companyId }: { companyId: number | null }) {
                         Only past-pay-date, calculated regular runs appear. Select every already-paid run for this year.
                         Values are a prefill for verification against the provider’s registers.
                       </p>
+                      {page.candidates_overflow && (
+                        <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                          Showing {page.candidates.length} of {page.eligible_run_count} eligible runs. This workflow supports at most 60 periods for one complete year. Ask an administrator to review the source coverage before proceeding; partial history cannot be converted.
+                        </p>
+                      )}
                       <Button
                         variant="outline"
                         onClick={() =>
                           update({
                             ...payload,
-                            periods: [...page.candidates, ...payload.periods.filter((p) => !p.run_id)],
+                            periods: [
+                              ...page.candidates.map((candidate) => payload.periods.find((p) => p.key === candidate.key) ?? candidate),
+                              ...payload.periods.filter((p) => !p.run_id),
+                            ],
                           })
                         }
                       >

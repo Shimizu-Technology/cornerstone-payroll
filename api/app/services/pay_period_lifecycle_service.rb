@@ -17,6 +17,7 @@ class PayPeriodLifecycleService
 
   def approve!
     with_financial_pay_period_lock do
+      validate_prior_provider_source!
       validate_current_intake!
       unless pay_period.calculated?
         raise InvalidTransitionError, "Can only approve a calculated pay period"
@@ -62,6 +63,7 @@ class PayPeriodLifecycleService
   def commit!
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
+      validate_prior_provider_source!
       validate_current_intake!
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
@@ -179,6 +181,12 @@ class PayPeriodLifecycleService
 
     names = numbered_direct_deposits.map { |item| item.employee.full_name }.sort.to_sentence
     raise InvalidTransitionError, "Remove draft check numbers for direct-deposit employees before approving payroll for #{names}."
+  end
+
+  def validate_prior_provider_source!
+    return unless pay_period.paid_prior_provider_source?
+
+    raise InvalidTransitionError, "Prior-provider source payroll was already paid; reconcile and convert it as history instead of approving or committing it"
   end
 
   def with_financial_pay_period_lock

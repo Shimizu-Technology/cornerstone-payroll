@@ -298,6 +298,14 @@ class PayPeriod < ApplicationRecord
 
   def retired_history? = status == "retired_history"
 
+  # Reversal restores editable source evidence, never authorization to pay again.
+  # Immutable onboarding evidence retains this provenance after the active link
+  # is cleared, including across repeated reversal/reconversion cycles.
+  def paid_prior_provider_source?
+    retired_history? || (persisted? && PriorProviderHistoryOnboarding.where(company_id: company_id)
+      .where("evidence->'source_run_ids' @> ?::jsonb", [ id ].to_json).exists?)
+  end
+
   def can_edit?
     !committed? && !voided? && !training_baseline? && !retired_history?
   end
