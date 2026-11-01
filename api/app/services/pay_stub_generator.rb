@@ -464,11 +464,17 @@ class PayStubGenerator
 
     ytd_data = [
       [ "Gross Earnings", format_currency(pay_ytd_total) ],
+      [ "Non-Taxable Pay", format_currency(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
       [ "Federal/Guam Tax", format_currency(payroll_item.ytd_withholding_tax) ],
       [ "Social Security", format_currency(payroll_item.ytd_social_security_tax) ],
       [ "Medicare", format_currency(payroll_item.ytd_medicare_tax) ],
+      [ "Deductions", format_currency(statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }) ],
       [ "Net Pay", format_currency(payroll_item.ytd_net) ]
     ]
+
+    if employee_ytd_additional_withholding.nonzero?
+      ytd_data.insert(3, [ "Additional Withholding", format_currency(employee_ytd_additional_withholding) ])
+    end
 
     pdf.font_size(8) do
       pdf.table(ytd_data, width: 250) do
