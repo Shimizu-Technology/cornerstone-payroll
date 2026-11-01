@@ -446,14 +446,16 @@ class PayStubGenerator
       [ "Deductions", format_currency(deductions) ],
       [ "NET PAY", format_currency(payroll_item.net_pay) ]
     ]
-    pdf.table(data, width: 250, position: :right) do
-      cells.padding = [ 4, 8 ]
-      column(1).align = :right
-      row(0).font_style = :bold
-      row(-1).font_style = :bold
-      row(-1).background_color = "E8F5E9"
+    pdf.font_size(8) do
+      pdf.table(data, width: 250, position: :right) do
+        cells.padding = [ 2, 8 ]
+        column(1).align = :right
+        row(0).font_style = :bold
+        row(-1).font_style = :bold
+        row(-1).background_color = "E8F5E9"
+      end
     end
-    pdf.move_down 14
+    pdf.move_down 10
   end
 
   def render_ytd_summary(pdf)
@@ -478,7 +480,7 @@ class PayStubGenerator
 
     pdf.font_size(8) do
       pdf.table(ytd_data, width: 250) do
-        cells.padding = [ 3, 6 ]
+        cells.padding = [ 2, 6 ]
         cells.borders = []
         column(0).font_style = :bold
         column(1).align = :right
@@ -572,16 +574,22 @@ class PayStubGenerator
   def employee_ytd_totals
     @employee_ytd_totals ||= begin
       year = payroll_item.pay_period.pay_date&.year || Date.current.year
-      payroll_item.employee.ytd_totals_through(
+      payroll_item.employee.ytd_totals_before(
         year: year,
         pay_date: payroll_item.pay_period.pay_date,
-        pay_period_id: payroll_item.pay_period_id
+        pay_period_id: payroll_item.pay_period_id,
+        for_reporting: true
       )
     end
   end
 
   def employee_ytd_additional_withholding
-    employee_ytd_totals[:additional_withholding].to_d
+    current = if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ])
+      payroll_item.additional_withholding.to_d
+    else
+      0.to_d
+    end
+    employee_ytd_totals[:additional_withholding].to_d + current
   end
 
   def format_currency(amount)
