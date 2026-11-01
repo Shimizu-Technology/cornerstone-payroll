@@ -338,8 +338,9 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
-        unapproved_at: unapproved_at || approved_at,
-        unapproved_by_id: unapproved_by_id || approved_by_id,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
         approved_by_id: nil,
         intake_stale_at: at,
@@ -358,8 +359,9 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
-        unapproved_at: unapproved_at || approved_at,
-        unapproved_by_id: unapproved_by_id || approved_by_id,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
         approved_by_id: nil
       )
@@ -379,8 +381,7 @@ class PayPeriod < ApplicationRecord
         )
         later.update!(
           status: "draft", calculated_at: nil, calculated_by_id: nil,
-          unapproved_at: later.unapproved_at || later.approved_at,
-          unapproved_by_id: later.unapproved_by_id || later.approved_by_id,
+          unapproved_at: later.unapproved_at || (later.approved_at && Time.current),
           approved_at: nil, approved_by_id: nil
         )
       end
