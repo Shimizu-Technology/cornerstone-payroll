@@ -539,6 +539,20 @@ RSpec.describe PayStubGenerator do
     expect(text).not_to include("$100.00")
   end
 
+  it "reconciles non-taxable pay and other deductions in the YTD summary" do
+    payroll_item.update!(gross_pay: 100, non_taxable_pay: 20, withholding_tax: 5,
+      social_security_tax: 6.20, medicare_tax: 1.45, additional_withholding: 3,
+      custom_deductions: [ { "label" => "Cash Advance", "amount" => 9 } ],
+      total_deductions: 24.65, net_pay: 95.35, ytd_gross: 100,
+      ytd_withholding_tax: 5, ytd_social_security_tax: 6.20, ytd_medicare_tax: 1.45, ytd_net: 95.35)
+
+    reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+    ytd = reader.pages.map(&:text).join("\n").split("YEAR-TO-DATE SUMMARY").last.gsub(/\s+/, " ")
+    expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Withholding $3.00",
+      "Federal/Guam Tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
+    expect(reader.page_count).to eq(1)
+  end
+
   it "keeps a standard earnings statement to one page" do
     payroll_item.payroll_item_earnings.create!(
       category: "regular",
