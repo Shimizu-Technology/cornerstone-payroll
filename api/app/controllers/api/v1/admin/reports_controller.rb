@@ -1388,6 +1388,11 @@ module Api
             return nil
           end
 
+          if pp.paid_prior_provider_source?
+            render json: { error: "Prior-provider source payroll is already paid history; use its historical record instead of live payroll reports" }, status: :unprocessable_entity
+            return nil
+          end
+
           pp
         end
 

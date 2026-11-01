@@ -106,7 +106,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                   <p className="font-semibold">Locked source record</p>
                   <p className="mt-1 text-sm leading-6 text-amber-800">{audience === 'client'
                     ? (record.source.system === 'prior_provider' ? 'This finalized payroll came from the prior provider. You can review it here, but it cannot be changed or recalculated in Cornerstone.' : 'This finalized payroll came from QuickBooks. You can review it here, but it cannot be changed or recalculated in Cornerstone.')
-                    : 'These values were accepted from the prior provider and are shown alongside Cornerstone payroll for continuity. Corrections use the migration workflow, not native payroll actions.'}</p>
+                    : (record.source.system === 'prior_provider' ? 'These values were accepted from the prior provider and are shown alongside Cornerstone payroll for continuity. Corrections require a reviewed historical amendment.' : 'These values were accepted from QuickBooks and are shown alongside Cornerstone payroll for continuity. Corrections use the migration workflow, not native payroll actions.')}</p>
                 </div>
               </div>
               <Badge variant="warning" className="shrink-0">{record.source.label || 'Historical import'}</Badge>

@@ -582,8 +582,10 @@ class Form941GuAggregator
   def historical_caveats
     return [] unless include_historical
 
+    sources = (historical_quarter_records + prior_historical_records).map(&:source_system).uniq
+    label = sources == [ "quickbooks_online" ] ? "QuickBooks" : (sources == [ "prior_provider" ] ? "Prior-provider" : "Historical")
     caveats = [
-      "Prior-provider values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
+      "#{label} values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
       "Historical YTD bridge balances are used only for source eligibility and annual carry-forward; they are not added to quarterly lines, avoiding duplicate wages and taxes."
     ]
     if historical_source.opening_summary_count(range: quarter_start_date..quarter_end_date).positive?

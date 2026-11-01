@@ -144,6 +144,10 @@ RSpec.describe "Prior-provider existing-roster history" do
     reverse_history(onboarding, @actor)
     expect(onboarding.reload.status).to eq("reversed")
     expect(@runs.first.reload).to be_calculated
+    expect(@runs.first.paid_prior_provider_source?).to be(true)
+    lifecycle = PayPeriodLifecycleService.new(pay_period: @runs.first, actor: @actor)
+    expect { lifecycle.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /already paid/)
+    expect { lifecycle.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /already paid/)
     expect(HistoricalPaycheck.count).to eq(3)
     expect(HistoricalEmployeeYtdBalance.count).to eq(3)
     expect(HistoricalYtdBridge.last.status).to eq("reversed")
@@ -211,4 +215,32 @@ RSpec.describe "Prior-provider existing-roster history" do
     expect { reverse_history(onboarding, @actor) }.to raise_error(ArgumentError, /Filing ownership changed/)
     expect(onboarding.reload.status).to eq("active")
   end
+  it "prefills active pre-tax adjustments in the correct register bucket" do
+    fixture(period_count: 1)
+    item = @runs.first.payroll_items.first
+    item.update!(payroll_adjustments: [ { "label" => "Pre-tax adjustment", "treatment" => "pre_tax_deduction", "amount" => 50, "active" => true } ], total_deductions: 403, net_pay: 1597)
+    row = PriorProviderHistory::SourceAdapter.candidate(@runs.first.reload).fetch("paychecks").find { |check| check["employee_id"] == item.employee_id }
+    expect(row).to include("pretax_deductions" => "50.0", "after_tax_deductions" => "0.0")
+  end
+
+  it "reports prior-provider source counts and explicit tips without inferring their labels" do
+    fixture(period_count: 1)
+    period = @payload["periods"].first
+    row = period["paychecks"].first
+    row.merge!("reported_tips" => "100.00", "tips_paid_out" => "25.00", "after_tax_deductions" => "25.00", "net_pay" => "1622.00",
+      "after_tax_deduction_breakdown" => [ { "label" => "Paid distribution", "amount" => "25.00" } ])
+    period["register_totals"] = PriorProviderHistory::Amounts.totals(period["paychecks"]).slice(*PriorProviderHistory::Amounts::REGISTER_FIELDS)
+    onboarding = convert_history(@company, @actor, @payload)
+    activate_history(onboarding, @actor)
+    reporting = UnifiedPayrollReporting.new(company_id: @company.id, period: PayrollReportingPeriod.from_params({ year: 2026 }))
+    checks = onboarding.historical_import_batch.historical_paychecks.to_a
+    row = reporting.history_row(checks.find { |check| check.employee_id == @employees.first.id })
+    expect(row).to include(reported_tips: 100.0, tips_paid_out: 25.0)
+    summary = reporting.source_summary(native_items: [], historical_paychecks: checks)
+    expect(summary.dig(:quickbooks, :paycheck_count)).to eq(0)
+    expect(summary.dig(:prior_provider, :paycheck_count)).to eq(3)
+    expect(summary[:source_statement]).to include("already paid")
+    expect(reporting.add_historical_to_employee_row({}, checks)).to include(tips: 100.0, tips_paid_out: 25.0)
+  end
+
 end

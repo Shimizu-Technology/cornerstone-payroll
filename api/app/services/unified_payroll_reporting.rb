@@ -221,27 +221,25 @@ class UnifiedPayrollReporting
   end
 
   def source_summary(native_items:, historical_paychecks:, historical_adjustments: [], excluded_unlinked_paychecks: [])
-    includes_quickbooks = historical_paychecks.any? || historical_adjustments.any? || excluded_unlinked_paychecks.any?
+    all_history = historical_paychecks + excluded_unlinked_paychecks + historical_adjustments.map(&:historical_paycheck)
+    sources = all_history.map { |row| row.historical_import_batch.source_system }.uniq
+    prior = historical_paychecks.select { |row| row.historical_import_batch.source_system == "prior_provider" }
+    quickbooks = historical_paychecks - prior
+    qb_unlinked = excluded_unlinked_paychecks.reject { |row| row.historical_import_batch.source_system == "prior_provider" }
+    prior_unlinked = excluded_unlinked_paychecks - qb_unlinked
     native_employee_dates = native_items.map { |item| [ item.employee_id, item.pay_period.pay_date ] }.uniq
     historical_employee_dates = historical_paychecks.select { |paycheck| paycheck.historical_pay_period.period_type == "regular" }
       .map { |paycheck| [ paycheck.employee_id, paycheck.pay_date ] }.uniq
     overlapping_employee_dates = native_employee_dates & historical_employee_dates
     {
-      mode: includes_quickbooks ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
-      source_statement: SOURCE_STATEMENT,
+      mode: sources.empty? ? "committed_cornerstone_only" : (sources == [ "quickbooks_online" ] ? "locked_quickbooks_plus_committed_cornerstone" : "locked_historical_plus_committed_cornerstone"),
+      source_statement: sources.include?("prior_provider") ? "Historical source values remain authoritative locked snapshots and were not recalculated. Prior-provider payments were already paid and create no new payment obligation." : SOURCE_STATEMENT,
       cornerstone: {
         payroll_count: native_items.map(&:pay_period_id).uniq.length,
         paycheck_count: native_items.length
       },
-      quickbooks: {
-        payroll_count: regular_period_count(historical_paychecks),
-        paycheck_count: regular_paycheck_count(historical_paychecks),
-        record_count: historical_paychecks.length,
-        opening_summary_count: opening_summary_count(historical_paychecks),
-        excluded_unlinked_paycheck_count: excluded_unlinked_paychecks.length,
-        excluded_unlinked_gross_pay: sum(excluded_unlinked_paychecks, :gross_pay),
-        excluded_unlinked_net_pay: sum(excluded_unlinked_paychecks, :net_pay)
-      },
+      quickbooks: historical_source_counts(quickbooks, qb_unlinked),
+      prior_provider: historical_source_counts(prior, prior_unlinked),
       adjustments: {
         count: historical_adjustments.length,
         gross_pay_delta: sum(historical_adjustments, :gross_pay),
@@ -255,6 +253,15 @@ class UnifiedPayrollReporting
   end
 
   private
+
+  def historical_source_counts(rows, excluded)
+    {
+      payroll_count: regular_period_count(rows), paycheck_count: regular_paycheck_count(rows),
+      record_count: rows.length, opening_summary_count: opening_summary_count(rows),
+      excluded_unlinked_paycheck_count: excluded.length,
+      excluded_unlinked_gross_pay: sum(excluded, :gross_pay), excluded_unlinked_net_pay: sum(excluded, :net_pay)
+    }
+  end
 
   def historical_scope
     HistoricalPaycheck
@@ -300,13 +307,19 @@ class UnifiedPayrollReporting
       health_insurance_deductions: component_sum(rows, :pretax_deduction_breakdown, /\AHealth Insurance\z/i) +
         component_sum(rows, :after_tax_deduction_breakdown, /\AHealth Insurance\z/i),
       source_labeled_after_tax_401k_in_pretax_bucket: component_sum(rows, :pretax_deduction_breakdown, /\A401\(k\) After Tax\z/i),
-      tips: component_sum(rows, :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS),
-      # QuickBooks history does not distinguish reported tips from tips that
-      # were paid out through payroll, so do not manufacture a paid-out value.
-      tips_paid_out: 0.0,
+      tips: rows.sum(0.to_d) { |row| verified_history_amount(row, "reported_tips") || component_sum([ row ], :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS).to_d }.to_f,
+      # QuickBooks does not distinguish paid-out tips; the existing-roster lane
+      # requires the provider's explicit verified value.
+      tips_paid_out: rows.sum(0.to_d) { |row| verified_history_amount(row, "tips_paid_out") || 0.to_d }.to_f,
       total_deductions: rows.sum(0.to_d) { |paycheck| paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions }.to_f,
       net_pay: sum(rows, :net_pay)
     }
+  end
+
+  def verified_history_amount(row, field)
+    return unless row.is_a?(HistoricalPaycheck) && row.historical_import_batch.source_system == "prior_provider"
+
+    row.source_metadata.fetch("verified_amounts").fetch(field).to_d
   end
 
   def sum(paychecks, field)

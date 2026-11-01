@@ -116,6 +116,8 @@ export type HistoryPage = {
   enabled: boolean;
   can_manage: boolean;
   candidates: HistoryPeriod[];
+  eligible_run_count: number;
+  candidates_overflow: boolean;
   employees: Array<{ id: number; name: string }>;
   onboardings: HistoryOnboarding[];
 };

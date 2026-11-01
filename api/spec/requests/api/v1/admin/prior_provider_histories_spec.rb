@@ -45,6 +45,14 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
       idempotency_key: "request-contract-2026", files: [ history_upload ], acknowledgement: PriorProviderHistory::Conversion::ACKNOWLEDGEMENT }
     expect(response).to have_http_status(:created), response.body
     id = response.parsed_body.dig("onboarding", "id")
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user) { @admin }
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id) { @company.id }
+    get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: @runs.first.id }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("already paid")
+    post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: @runs.first.id }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(@runs.first.transmittal).to be_nil
     post "/api/v1/admin/prior_provider_histories/#{id}/activate", params: { acknowledgement: PriorProviderHistory::Activation::ACKNOWLEDGEMENT }
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("onboarding", "status")).to eq("active")
@@ -79,4 +87,15 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     expect { activate_history(onboarding, @accountant) }.to raise_error(QuickbooksHistory::ClientBootstrapAuthorization::NotAuthorized)
     expect(onboarding.reload.status).to eq("converted")
   end
+  it "reports candidate overflow instead of claiming a truncated list is complete" do
+    scope = @company.pay_periods.calculated
+    allow(scope).to receive(:where).and_return(scope)
+    allow(scope).to receive(:count).and_return(61)
+    allow(@company).to receive(:pay_periods).and_return(double(calculated: scope))
+    allow_any_instance_of(Api::V1::Admin::PriorProviderHistoriesController).to receive(:current_company).and_return(@company)
+    get "/api/v1/admin/prior_provider_histories"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("eligible_run_count" => 61, "candidates_overflow" => true)
+  end
+
 end

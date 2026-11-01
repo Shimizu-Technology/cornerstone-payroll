@@ -12,8 +12,10 @@ module Api
         end
 
         def index
-          candidates = current_company.pay_periods.calculated.where(cycle: "regular", run_purpose: "regular", parallel_run: false, correction_status: nil)
-            .where("pay_date < ?", Date.current).order(:pay_date, :id).limit(PriorProviderHistory::SourceAdapter::MAX_RUNS).map do |period|
+          eligible = current_company.pay_periods.calculated.where(cycle: "regular", run_purpose: "regular", parallel_run: false, correction_status: nil)
+            .where("pay_date < ?", Date.current)
+          eligible_count = eligible.count
+          candidates = eligible.order(:pay_date, :id).limit(PriorProviderHistory::SourceAdapter::MAX_RUNS).map do |period|
               PriorProviderHistory::SourceAdapter.candidate(period)
             end
           render json: {
@@ -21,6 +23,8 @@ module Api
             enabled: current_company.historical_payroll_enabled?,
             can_manage: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company) && !current_company.test_workspace?,
             candidates: candidates,
+            eligible_run_count: eligible_count,
+            candidates_overflow: eligible_count > candidates.size,
             employees: current_company.employees.order(:last_name, :first_name).map { |employee| { id: employee.id, name: employee.full_name } },
             onboardings: PriorProviderHistoryOnboarding.where(company_id: current_company_id).order(id: :desc).map { |record| serialize(record) }
           }
