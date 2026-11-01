@@ -38,6 +38,14 @@ class HistoricalPayrollFilingSource
 
   attr_reader :company
 
+  # QuickBooks-only summaries keep their established mode; any prior-provider
+  # history is named so reviewers see the actual provenance.
+  def self.summary_mode(include_historical, systems)
+    return "committed_cornerstone_only" unless include_historical
+
+    systems.include?("prior_provider") ? "locked_historical_plus_committed_cornerstone" : "locked_quickbooks_plus_committed_cornerstone"
+  end
+
   def initialize(company)
     @company = company
   end
@@ -111,6 +119,11 @@ class HistoricalPayrollFilingSource
       pay_period_count: source_records.map(&:historical_pay_period_id).uniq.length,
       opening_summary_count_excluded: opening_summary_count(range: range)
     }
+  end
+
+  # Which import sources (quickbooks_online, prior_provider) feed this range.
+  def source_systems(range:)
+    eligible_batch_bridges(range: range).map { |batch, _bridge| batch.source_system }.uniq.sort
   end
 
   private

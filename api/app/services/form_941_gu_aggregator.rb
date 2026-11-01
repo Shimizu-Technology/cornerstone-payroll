@@ -564,8 +564,10 @@ class Form941GuAggregator
 
   def source_summary(items)
     metadata = include_historical ? historical_source.metadata(year: year, range: quarter_start_date..quarter_end_date) : {}
+    systems = include_historical ? historical_source.source_systems(range: quarter_start_date..quarter_end_date) : []
     {
-      mode: include_historical ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
+      historical_source_systems: systems,
       cornerstone: {
         payroll_item_count: items.count,
         pay_period_count: committed_pay_periods.count

@@ -122,6 +122,7 @@ class QuarterlyCompliancePacketBuilder
       generated_at: Time.current.iso8601,
       pay_periods_included: native_pay_period_rows.length + historical_pay_period_count,
       source_summary: {
+        historical_source_systems: historical_payroll_source.source_systems(range: quarter_start..quarter_end),
         cornerstone: {
           pay_period_count: native_pay_period_rows.length,
           payroll_item_count: payroll_items.length
@@ -155,7 +156,7 @@ class QuarterlyCompliancePacketBuilder
       federal_track: "Federal Form 941 reports Social Security, Medicare, Additional Medicare, deposits, and liability schedule.",
       form_941_guam_lines_2_3: "Skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
       schedule_b: "Schedule B is a liability schedule by pay date, not a payment list.",
-      imported_payroll: "Locked prior-provider wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
+      imported_payroll: "Locked historical wages (QuickBooks import or prior-provider history) feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
     }
   end
 
@@ -464,7 +465,7 @@ class QuarterlyCompliancePacketBuilder
     checks << review_check(
       "form_500_payments_reconciled",
       form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
-      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported prior-provider payments are not recreated.",
+      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported historical payments are not recreated.",
       details: {
         expected_withholding: form_500_section[:total_guam_withholding],
         imported_withholding_excluded: form_500_section[:excluded_historical_withholding],

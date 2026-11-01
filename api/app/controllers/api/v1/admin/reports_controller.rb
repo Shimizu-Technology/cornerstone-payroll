@@ -1432,6 +1432,9 @@ module Api
           unless pay_period && !pay_period.draft? && !pay_period.voided?
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
           end
+          if pay_period.paid_prior_provider_source?
+            return [ nil, render(json: { error: "The previous provider already paid this payroll; use its recorded history instead of a live payroll register" }, status: :unprocessable_entity) ]
+          end
 
           @audit_report_record = pay_period
           @audit_report_target_key = "native:#{pay_period.id}"

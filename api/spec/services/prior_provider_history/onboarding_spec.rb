@@ -88,6 +88,10 @@ RSpec.describe "Prior-provider existing-roster history" do
     expect(W2GuAggregator.new(@company, 2026).generate.dig(:totals, :box1_wages_tips_other_comp)).to eq(126_000)
     expect(Form941GuAggregator.new(@company, 2026, 4).generate.to_json).to include("18000")
     expect(q4.to_json).to include("paid_before_cornerstone", "prior_provider")
+    expect(q4.dig(:meta, :source_summary, :historical_source_systems)).to eq([ "prior_provider" ])
+    annual_summary = W2GuAggregator.new(@company, 2026).generate.dig(:meta, :source_summary)
+    expect(annual_summary).to include(mode: "locked_historical_plus_committed_cornerstone", historical_source_systems: [ "prior_provider" ])
+    expect(Form941GuAggregator.new(@company, 2026, 4).generate.dig(:meta, :source_summary, :historical_source_systems)).to eq([ "prior_provider" ])
     expect(source.records(range: Date.new(2026, 10, 1)..Date.new(2026, 12, 31)).sum(&:gross_pay) + period.payroll_items.sum(:gross_pay)).to eq(18_000)
     expect { reverse_history(onboarding, @actor) }.to raise_error(ArgumentError, /first live payroll commitment/)
   end
@@ -132,6 +136,10 @@ RSpec.describe "Prior-provider existing-roster history" do
     period.delete("source_digest")
     @runs.first.destroy!
     onboarding = convert_history(@company, @actor, @payload)
+    reverse_history(onboarding, @actor)
+    # The identical reviewed plan can be recorded again after an undo.
+    onboarding = convert_history(@company, @actor, @payload)
+    expect(onboarding.preview_digest).to eq(PriorProviderHistoryOnboarding.where(status: "reversed").sole.preview_digest)
     activate_history(onboarding, @actor)
     expect(HistoricalEmployeeYtdBalance.where(company: @company).sum(:gross_pay)).to eq(6_000)
     expect(onboarding.evidence["source_run_ids"]).to eq([])
@@ -155,6 +163,12 @@ RSpec.describe "Prior-provider existing-roster history" do
     expect(HistoricalPayrollFilingSource.new(@company).annual_balances(2026)).to be_empty
     expect(@company.payroll_filing_responsibilities).to be_empty
     expect(AuditLog.where(action: "prior_provider_history#reverse", record_id: onboarding.id)).to exist
+    # Unchanged history can be recorded again after an undo.
+    again = convert_history(@company, @actor, @payload.merge("periods" => [ PriorProviderHistory::SourceAdapter.candidate(@runs.first.reload)
+      .merge("register_totals" => @payload["periods"].first["register_totals"], "source_reference" => @payload["periods"].first["source_reference"]) ]))
+    expect(again.preview_digest).not_to be_nil
+    expect(again.historical_import_batch.bundle_digest).not_to eq(onboarding.historical_import_batch.bundle_digest)
+    expect(@runs.first.reload.status).to eq("retired_history")
   end
   it "preserves explicit taxable bases for non-taxable earnings and pre-tax deductions instead of deriving wages from gross or rounded tax" do
     fixture(period_count: 1)
