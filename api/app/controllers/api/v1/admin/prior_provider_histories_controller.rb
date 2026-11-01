@@ -122,6 +122,16 @@ module Api
             updated_at: draft.updated_at.iso8601, updated_by_name: draft.updated_by.name }
         end
 
+        # Per-employee year-to-date this history contributes, available before
+        # activation creates the opening balances.
+        def employee_totals(batch)
+          batch.historical_paychecks.group_by(&:employee_id).map do |employee_id, rows|
+            totals = PriorProviderHistory::Amounts.totals(rows.map { |row| row.source_metadata.fetch("verified_amounts") })
+            totals.slice("gross_pay", "net_pay", "federal_income_tax", "social_security_taxable_wages", "social_security_taxable_tips", "medicare_taxable_wages")
+              .merge("employee_id" => employee_id, "paycheck_count" => rows.size)
+          end
+        end
+
         def scoped_record
           PriorProviderHistoryOnboarding.where(company_id: current_company_id).find(params[:id])
         end
@@ -136,6 +146,7 @@ module Api
             periods: batch.historical_pay_periods.chronological.map { |period| period.attributes.slice("id", "pay_date", "start_date", "end_date", "paycheck_count", "totals") },
             totals: batch.preview_summary["totals"],
             employee_balances: batch.historical_ytd_bridge&.historical_employee_ytd_balances&.map { |balance| balance.attributes.slice("employee_id", "gross_pay", "net_pay", "federal_income_tax", "social_security_taxable_wages", "social_security_taxable_tips", "medicare_taxable_wages") } || [],
+            employee_totals: employee_totals(batch),
             source_files: batch.historical_import_source_files.in_manifest_order.map { |file| file.attributes.slice("id", "original_filename", "sha256", "byte_size", "verification_status") },
             source_run_ids: record.evidence["source_run_ids"],
             filing_responsibilities: record.status == "active" ? record.filing_after.map { |row| row.slice("filing_type", "quarter", "responsible_party", "imported_payroll_inclusion") } : [],
