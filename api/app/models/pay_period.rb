@@ -262,6 +262,9 @@ class PayPeriod < ApplicationRecord
     if training_baseline?
       return "This run is a protected training baseline and cannot be deleted."
     end
+    if payroll_review_packages.any?(&:client_review_history_unknown?)
+      return "This run has older client review records with unverified sharing history. Keep it and correct it instead, or ask an admin."
+    end
     if payroll_review_packages.any?(&:retained_client_evidence?)
       return "This run has client review history: it was shared for approval or has a client decision or comment. Keep it and correct it instead, or ask an admin."
     end
@@ -273,13 +276,17 @@ class PayPeriod < ApplicationRecord
       return "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded."
     end
 
+    if non_employee_checks.any? { |check| check.paid_at.present? || check.printed? || check.prepared_at.present? || check.payroll_liability_check_allocations.exists? }
+      return "This run has payment checks that were paid, printed, or prepared. Keep it for its payment history, or ask an admin."
+    end
+
     # Check all declared retained associations before dependent destroy callbacks
     # can touch source documents, paychecks or their entered hours.
     retained = self.class.reflect_on_all_associations.select { |association| association.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) }
     if retained.any? { |reflection| association(reflection.name).scope.exists? }
       return "This run is linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
     end
-    if payroll_items.any? { |item| item.class.reflect_on_all_associations.any? { |reflection| reflection.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) && item.association(reflection.name).scope.exists? } }
+    if PayrollItem.reflect_on_all_associations.any? { |reflection| reflection.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) && payroll_items.joins(reflection.name).exists? }
       return "This run has paychecks linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
     end
     nil

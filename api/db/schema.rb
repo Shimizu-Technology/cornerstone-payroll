@@ -3127,6 +3127,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
     t.bigint "approved_by_id"
     t.string "calculation_checksum", null: false
     t.jsonb "calculation_snapshot", default: {}, null: false
+    t.boolean "client_review_history_unknown", default: true, null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.datetime "generated_at", null: false

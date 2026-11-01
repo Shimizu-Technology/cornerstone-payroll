@@ -48,10 +48,10 @@ class PayrollReviewPackage < ApplicationRecord
     status == "superseded"
   end
 
-  # Revision generation is automatic; only shared or client-authored evidence
-  # makes an otherwise never-approved run permanent.
+  # New automatic revisions can be discarded. Shared, client-authored and
+  # unverified legacy evidence must be retained.
   def retained_client_evidence?
-    sent_for_client_approval_at.present? || approved? ||
+    client_review_history_unknown? || sent_for_client_approval_at.present? || approved? ||
       APPROVAL_EVIDENCE_FIELDS.any? { |field| self[field].present? }
   end
 

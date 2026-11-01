@@ -498,8 +498,8 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       if (command.companyId === activeCompanyId) return;
 
       const redirect = getCompanySwitchRedirect(location.pathname, command.companyId, location.search);
+      if (switchCompany(command.companyId) === false) return;
       analytics.companySwitch(command.companyId);
-      switchCompany(command.companyId);
 
       if (redirect) {
         navigate(redirect.to, {

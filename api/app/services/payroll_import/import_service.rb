@@ -101,12 +101,14 @@ module PayrollImport
     # @param tips_paid_out_from_tips [Boolean] when true, imported tips were already paid daily and should offset the check
     # @return [Hash] results with success/error counts
     def apply!(matched:, force_overwrite: false, tips_paid_out_from_tips: false)
-      pay_period.with_lock do
-        apply_locked!(
-          matched: matched,
-          force_overwrite: force_overwrite,
-          tips_paid_out_from_tips: tips_paid_out_from_tips
-        )
+      Company.find(company_id).with_lock do
+        pay_period.with_lock do
+          apply_locked!(
+            matched: matched,
+            force_overwrite: force_overwrite,
+            tips_paid_out_from_tips: tips_paid_out_from_tips
+          )
+        end
       end
     end
 

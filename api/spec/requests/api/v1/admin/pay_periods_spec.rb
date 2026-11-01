@@ -972,7 +972,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
       earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
       entry = create(:payroll_item_field_entry, payroll_item: item)
-      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, approval_notes: "Client asked to review these hours")
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, approval_notes: "Client asked to review these hours")
       records = [ pay_period, item, earning, entry, package ]
       before = records.map { |record| record.reload.attributes }
 
@@ -1011,7 +1011,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
       entry = create(:payroll_item_field_entry, payroll_item: item)
       before = [ item, earning, entry ].map { |record| record.reload.attributes }
-      pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, sent_for_client_approval_at: Time.current)
+      pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, sent_for_client_approval_at: Time.current)
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("client review history")
@@ -1050,7 +1050,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "preserves all inputs and the review when a client approved a revision" do
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
-      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current,
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current,
         status: "approved", approved_at: Time.current, approved_by: admin_user, approval_recorded_by: admin_user, approval_method: "client_portal", approval_acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
       before = [ pay_period, item, package ].map { |record| record.reload.attributes }
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
@@ -1059,8 +1059,9 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "retains portal publication after client approval is disabled again" do
+      pay_period.update!(status: "calculated")
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
-      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
       company.update!(client_payroll_approval_required: true)
       expect(package.reload.sent_for_client_approval_at).to be_present
       company.update!(client_payroll_approval_required: false)
@@ -1068,6 +1069,31 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response).to have_http_status(:unprocessable_entity)
       expect([ pay_period, item, package ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "preserves a historical review whose prior sharing cannot be verified" do
+      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, client_review_history_unknown: true)
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      before = [ pay_period, package, item ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("unverified sharing history")
+      expect([ pay_period, package, item ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    %i[paid_at printed_at prepared_at].each do |evidence|
+      it "preserves the run and its non-employee payment with #{evidence}" do
+        check = create(:non_employee_check, company: company, pay_period: pay_period)
+        attributes = { evidence => Time.current }
+        attributes.merge!(paid_by: admin_user, payment_method: "ach", confirmation_number: "Synthetic paid-payment evidence") if evidence == :paid_at
+        check.update!(attributes)
+        item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+        before = [ pay_period, check, item ].map { |record| record.reload.attributes }
+        delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("payment checks")
+        expect([ pay_period, check, item ].map { |record| record.reload.attributes }).to eq(before)
+      end
     end
 
     it "deletes a draft pay period" do

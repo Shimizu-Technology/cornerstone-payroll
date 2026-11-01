@@ -258,6 +258,30 @@ RSpec.describe CheckGenerator do
       end
     end
 
+    it "fits a 95-to-108-point deductions table above the expanded summary" do
+      rows = (1..9).map { |n| [ "Deduction #{n}", "10.00", "100.00" ] }
+      rows << [ { content: "TOTAL", font_style: :bold }, "90.00", "900.00" ]
+      allow(generator).to receive(:deduction_rows).and_return(rows)
+      sections = []
+      boxes = []
+      allow(generator).to receive(:draw_section_table).and_wrap_original do |method, pdf, **args|
+        height = method.call(pdf, **args)
+        sections << { top: args[:y], bottom: args[:y] - height } if args[:title] == "DEDUCTIONS"
+        height
+      end
+      allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+        boxes << { top: point.last, bottom: point.last - height } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
+        method.call(point, width, height)
+      end
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.first.text
+      expect(boxes.size).to eq(2)
+      sections.zip(boxes).each do |deductions, summary|
+        expect(summary[:top]).to be <= deductions[:bottom] - 5
+      end
+      expect(text.scan("Deduction 9").size).to eq(2)
+      expect(text).not_to include("[SUMMARY]", "[TABLE]")
+    end
+
     [ 12.0, 1_000.0 ].each do |offset|
       it "keeps the summary readable and within the right column with a #{offset} point offset" do
         company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
