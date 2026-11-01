@@ -67,6 +67,33 @@ jobs:
       - run: bundle exec rails db:integrity
       - run: bundle exec rubocop
       - run: bundle exec rspec
+      # Hosted databases are reached through PgBouncer in transaction mode,
+      # where consecutive statements can run on different server backends.
+      - name: Payment transition lock through a transaction-mode pooler
+        env:
+          POOLER_DIR: ${{ runner.temp }}/pgbouncer
+        run: |
+          sudo apt-get update && sudo apt-get install -y pgbouncer
+          mkdir -p "$POOLER_DIR"
+          cat > "$POOLER_DIR/pgbouncer.ini" <<EOF
+          [databases]
+          cornerstone_payroll_test = host=127.0.0.1 port=5432 dbname=cornerstone_payroll_test user=postgres password=postgres
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6439
+          auth_type = any
+          pool_mode = transaction
+          default_pool_size = 4
+          unix_socket_dir =
+          logfile = $POOLER_DIR/pgbouncer.log
+          pidfile = $POOLER_DIR/pgbouncer.pid
+          EOF
+          /usr/sbin/pgbouncer -d "$POOLER_DIR/pgbouncer.ini"
+          export TEST_DATABASE_URL=postgres://postgres@127.0.0.1:6439/cornerstone_payroll_test
+          export TRANSACTION_POOLER_URL=$TEST_DATABASE_URL
+          export TRANSACTION_POOLER_DIRECT_URL=postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_test
+          export DB_PREPARED_STATEMENTS=false
+          bundle exec rspec spec/services/payment_transition_lock_transaction_pooler_spec.rb spec/services/payment_transition_lock_spec.rb
       - run: bundle exec brakeman -q
       - run: bundle exec bundler-audit check --update
 
