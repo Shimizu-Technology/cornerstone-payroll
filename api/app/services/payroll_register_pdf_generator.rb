@@ -55,6 +55,7 @@ class PayrollRegisterPdfGenerator
       pdf.text "Review required: #{message}", size: 10
       pdf.move_down 8
     end
+    render_reconciliation(pdf)
     render_summary_block(pdf)
     render_employee_table(pdf)
     render_payroll_adjustment_matrix(pdf)
@@ -90,6 +91,16 @@ class PayrollRegisterPdfGenerator
   end
 
   # ─── Pay Period Block ───────────────────────────────────────────────────────
+
+  def render_reconciliation(pdf)
+    pdf.font_size(8) do
+      pdf.text "Gross + non-taxable additions - deductions (including employee taxes) = net. Employer contributions are informational and do not reduce net."
+      PayrollRegisterReconciliation.review_rows(report).each do |entry|
+        pdf.text "Review: #{entry[:employee]} - #{entry[:issue]}. #{entry[:detail]}", color: "A33020"
+      end
+    end
+    pdf.move_down 8
+  end
 
   def render_pay_period_block(pdf)
     pp     = report[:pay_period] || {}
@@ -139,6 +150,7 @@ class PayrollRegisterPdfGenerator
       [ "Overtime Hours",       decimal(s[:total_overtime_hours]) ],
       [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| worker[key].to_f } }) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
+      [ "Non-Taxable Additions", fmt(payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) }) ],
       [ "Bonus",                fmt(s[:total_bonus]) ],
       [ "Reported Tips",        fmt(s[:total_reported_tips]) ],
       [ "Tips Paid Out",        fmt(s[:total_tips_paid_out]) ],
@@ -519,7 +531,10 @@ class PayrollRegisterPdfGenerator
       total_additional_withholding: sum_workers(workers, :additional_withholding),
       total_social_security: sum_workers(workers, :social_security_tax),
       total_medicare: sum_workers(workers, :medicare_tax),
-      total_retirement: sum_workers(workers, :retirement_payment),
+      total_traditional_retirement: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.traditional_retirement(worker) },
+      total_roth_retirement: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) },
+      total_retirement: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.traditional_retirement(worker) } + workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) },
+      total_non_taxable_additions: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) },
       total_straight_loan_deductions: sum_workers(workers, :straight_loan_deduction),
       total_installment_loan_payments: sum_workers(workers, :installment_loan_payment),
       total_custom_deductions: sum_workers(workers, :custom_deductions_total),
@@ -550,6 +565,7 @@ class PayrollRegisterPdfGenerator
       { key: :hours_worked, label: "Regular Hours", weight: 5, align: :right },
       { key: :overtime_hours, label: "OT Hrs", weight: 5, align: :right },
       { key: :gross_pay, label: "Gross Pay", weight: 8, align: :right },
+      { key: :non_taxable_additions_total, label: "Non-Taxable Additions", weight: 8, align: :right },
       { key: :reported_tips, label: "Tips", weight: 6, align: :right },
       { key: :tips_paid_out, label: "Tips Out", weight: 6, align: :right },
       { key: :bonus, label: "Bonus", weight: 6, align: :right },
@@ -557,7 +573,8 @@ class PayrollRegisterPdfGenerator
       { key: :additional_withholding, label: "Additional FIT", weight: 7, align: :right },
       { key: :social_security_tax, label: "Soc Sec", weight: 7, align: :right },
       { key: :medicare_tax, label: "Medicare", weight: 7, align: :right },
-      { key: :retirement_payment, label: "Retirement", weight: 7, align: :right },
+      { key: :retirement_payment, label: "Pre-Tax Retirement", weight: 7, align: :right },
+      { key: :roth_retirement_payment, label: "Roth Retirement", weight: 7, align: :right },
       { key: :straight_loan_deduction, label: "Straight Loan", weight: 6, align: :right },
       { key: :installment_loan_payment, label: "Installment Loan", weight: 7, align: :right },
       { key: :total_deductions, label: "Deductions", weight: 8, align: :right },
@@ -575,6 +592,12 @@ class PayrollRegisterPdfGenerator
     case key
     when :employee_name, :employment_type, :check_number
       emp[key].to_s
+    when :retirement_payment
+      fmt(PayrollRegisterReconciliation.traditional_retirement(emp))
+    when :roth_retirement_payment
+      fmt(PayrollRegisterReconciliation.roth_retirement(emp))
+    when :non_taxable_additions_total
+      fmt(PayrollRegisterReconciliation.non_taxable_additions(emp))
     when :hours_worked, :overtime_hours
       emp[key].to_f.to_s
     else
@@ -609,7 +632,11 @@ class PayrollRegisterPdfGenerator
     when :medicare_tax
       fmt(summary[:total_medicare])
     when :retirement_payment
-      fmt(summary[:total_retirement])
+      fmt(summary[:total_traditional_retirement] || payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.traditional_retirement(worker) })
+    when :roth_retirement_payment
+      fmt(summary[:total_roth_retirement] || payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) })
+    when :non_taxable_additions_total
+      fmt(summary[:total_non_taxable_additions] || payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) })
     when :straight_loan_deduction
       fmt(summary[:total_straight_loan_deductions])
     when :installment_loan_payment

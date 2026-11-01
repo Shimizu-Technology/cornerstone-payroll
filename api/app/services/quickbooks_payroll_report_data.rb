@@ -82,7 +82,7 @@ class QuickbooksPayrollReportData
         correction.map { |line| Line.new(label: line.label, amount: line.amount, hours: line.hours, source: line.source) }
     end
     flexible = flexible_addition_lines(item, "taxable_addition")
-    remaining = item.payroll_item_earnings.reject { |earning| earning.category == "non_taxable" }
+    remaining = item.payroll_item_earnings.reject { |earning| earning.category.in?(PayrollEarningsRounding::NON_TAXABLE_CATEGORIES) }
     remove_mirrored_earnings!(remaining, flexible, category: "other")
     grouped = remaining.group_by { |earning| earning.label.presence || earning.category.to_s.titleize }
     lines = [ Line.new(label: "Gross", amount: item.gross_pay.to_f, hours: item.total_hours.to_f) ]
@@ -109,7 +109,7 @@ class QuickbooksPayrollReportData
     if item.non_taxable_pay.to_f.nonzero?
       flexible << Line.new(label: "Non-Taxable Pay", amount: item.non_taxable_pay.to_f, source: "manual")
     end
-    remaining = item.payroll_item_earnings.select { |earning| earning.category == "non_taxable" }
+    remaining = item.payroll_item_earnings.select { |earning| earning.category.in?(PayrollEarningsRounding::NON_TAXABLE_CATEGORIES) }
     remove_mirrored_earnings!(remaining, flexible, category: "non_taxable")
     remaining.map do |earning|
       Line.new(label: earning.label.presence || "Other Pay", amount: earning.amount.to_f, hours: earning.hours)
