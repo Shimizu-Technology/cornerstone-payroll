@@ -45,7 +45,8 @@ class ReversePaycheckService
         # could settle.
         payments = PayrollRevisionPaymentPreflight.new(pay_period: period, lock: true, payroll_item: item).ensure_eligible!
         active_payments = payments.other_payments.reject(&:voided?)
-        if active_payments.any? && (!liability_free? || active_payments.any? { |payment| allocated_to_item_or_unattributed?(payment) })
+        item_liability_free = liability_free?
+        if active_payments.any? && (!item_liability_free || active_payments.any? { |payment| allocated_to_item_or_unattributed?(payment) })
           raise ArgumentError, "This payroll has shared liability payments; reconcile them before reversing one paycheck"
         end
         PayrollLiabilityPaymentGuard.ensure_clear!(pay_period: period,
@@ -59,8 +60,14 @@ class ReversePaycheckService
         end
         # Capture legacy liabilities before recording the item offset. Period
         # reversal later reverses both the original posting and this offset.
-        PayrollLiabilityPostingService.post!(pay_period: period, actor: actor) unless period.payroll_liability_postings.exists?
-        reverse_liabilities!(period)
+        # A liability-free paycheck in a legacy-unposted period has nothing to
+        # offset; capturing would post the other paychecks' historical (often
+        # already paid) obligations for the first time, so the period stays
+        # unposted. A later capture omits this reversed paycheck.
+        unless item_liability_free && !period.payroll_liability_postings.exists?
+          PayrollLiabilityPostingService.post!(pay_period: period, actor: actor) unless period.payroll_liability_postings.exists?
+          reverse_liabilities!(period)
+        end
         item.void!(user: actor, reason: reason, payroll_obligation_retained: false) if item.check_number.present? && !item.voided?
         employee_ytd.subtract_payroll_item!(item)
         company_ytd.subtract_payroll_item!(item)
