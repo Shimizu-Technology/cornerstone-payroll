@@ -138,6 +138,10 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
     item.update_columns(payroll_adjustments: [ { label: "Mileage", treatment: "non_taxable_addition", amount: "0.10", source: "manual" } ], net_pay: item.net_pay + 0.30)
     definition = create(:payroll_field_definition, company: company, name: "Supplies", tax_treatment: "non_taxable_addition")
     create(:payroll_item_field_entry, payroll_item: item, payroll_field_definition: definition, amount: 0.20)
+    # Saved earning mirrors may use either supported non-taxable category.
+    item.payroll_item_earnings.create!(category: "reimbursement", label: "Non-Taxable Pay", amount: 20)
+    item.payroll_item_earnings.create!(category: "reimbursement", label: "Mileage", amount: 0.10)
+    item.payroll_item_earnings.create!(category: "non_taxable", label: "Supplies", amount: 0.20)
     row = register[:employees].find { |worker| worker[:employee_id] == item.employee_id }
     expect(row[:non_taxable_additions_total].to_d).to eq(20.30.to_d)
     expect(PayrollRegisterReconciliation.review_rows(employees: [ row ])).to be_empty
