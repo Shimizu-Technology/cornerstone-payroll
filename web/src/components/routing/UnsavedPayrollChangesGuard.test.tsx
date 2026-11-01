@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { createMemoryRouter, Link, RouterProvider } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
+import { confirmPayrollScopeChange } from '@/lib/payroll-scope-change';
 import { UnsavedPayrollChangesGuard } from './UnsavedPayrollChangesGuard';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -52,4 +53,18 @@ it('asks again after an accepted tab change when the worksheet stays mounted', a
   expect(confirm).toHaveBeenCalledTimes(2);
   expect(router.state.location.pathname).toBe('/work');
   expect((screen.getByLabelText('Hours') as HTMLInputElement).value).toBe('19');
+});
+
+it('reuses consent for scope synchronization only until the operation finishes', async () => {
+  setup();
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '17' } });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  expect(confirmPayrollScopeChange()).toBe(true);
+  expect(confirmPayrollScopeChange()).toBe(true);
+  expect(confirm).toHaveBeenCalledOnce();
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  confirm.mockReturnValue(false);
+  expect(confirmPayrollScopeChange()).toBe(false);
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect((screen.getByLabelText('Hours') as HTMLInputElement).value).toBe('17');
 });
