@@ -967,6 +967,38 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:id" do
+    it "deletes a calculated run and its applied source package, document, row and paycheck dependents" do
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      session = pay_period.payroll_intake_sessions.create!(company: company, source_type: "spike_email", import_hash: "ux-fixture", parser_version: "1", package_id: SecureRandom.uuid, package_revision: 1, status: "draft")
+      document = session.documents.create!(document_type: "pasted_text", text_content: "Synthetic payroll hours", verification_status: "legacy_unverified")
+      row = session.rows.create!(source_employee_name: employee.full_name, employee: employee, applied_payroll_item: item)
+      session.update!(status: "applied")
+      item.payroll_item_earnings.create!(category: "other", label: "Synthetic earning", amount: 20)
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:no_content)
+      [ pay_period, item, session, document, row ].each { |record| expect(record.class.exists?(record.id)).to be(false) }
+      expect(PayrollItemEarning.where(payroll_item_id: item.id)).to be_empty
+    end
+
+    it "preserves an approved run and explains that it must be corrected instead" do
+      pay_period.update_columns(status: "approved", approved_at: Time.current)
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("This run was approved before. Keep it and correct it instead, or ask an admin.")
+      expect(pay_period.reload.status).to eq("approved")
+    end
+
+    it "preserves a never-finalized run with a retained review package and explains the blocker" do
+      pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("payroll review packages")
+      expect(PayPeriod.exists?(pay_period.id)).to be(true)
+    end
+
     it "deletes a draft pay period" do
       expect {
         delete "/api/v1/admin/pay_periods/#{pay_period.id}"
@@ -1328,7 +1360,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload).to be_draft
     end
 
-    it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
+    it "preserves unapproval history when payroll is recalculated" do
       pay_period.update!(
         status: "calculated",
         unapproved_at: 1.day.ago,
@@ -1340,8 +1372,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload).to have_attributes(
         status: "calculated",
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        unapproved_at: be_present,
+        unapproved_by_id: admin_user.id
       )
     end
 

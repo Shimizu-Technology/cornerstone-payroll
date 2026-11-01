@@ -131,14 +131,16 @@ RSpec.describe EmployeeIntakePolicy do
     expect(employee.tax_classification).to eq("w2")
   end
 
-  it "permits incremental completion after restoration but rejects clearing completed fields" do
+  it "rejects clearing completed fields while allowing fields that are still missing" do
     employee = incomplete_employee
     company.update!(employee_intake_expires_at: nil)
     employee.update!(address_line1: "123 Main Street")
     employee.update!(city: "Hagatna")
     expect(employee.update(address_line1: nil)).to be false
-    expect(employee.errors[:address_line1]).to include("can't be blank")
-    expect(described_class.summary(employee.reload)[:missing_fields]).not_to include("address_line1", "city")
+    expect(employee.reload.address_line1).to eq("123 Main Street")
+    expect(employee.update(hire_date: "", zip: "")).to be true
+    expect(described_class.summary(employee.reload)[:missing_fields]).not_to include("address_line1")
+    expect(described_class.summary(employee)[:missing_fields]).not_to include("city")
   end
 
   it "validates supplied identifiers and confirmation despite relaxed presence requirements" do
@@ -342,13 +344,42 @@ RSpec.describe EmployeeIntakePolicy do
       attributes: { status: "received", lock_version: requirement.lock_version }).call! }.to raise_error(EmployeeDocumentRequirementReviewService::Error, /reviewed outcome/)
   end
 
-  it "protects completed fields during client validation and rejects malformed dates" do
+  it "validates client edits of a legacy incomplete profile without requiring a new intake exception" do
+    employee = create(:employee, company: company)
+    employee.update_columns(ssn_encrypted: nil, hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { first_name: "Updated" })
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload).to have_attributes(first_name: "Updated", ssn_encrypted: nil, hire_date: nil, city: nil)
+  end
+
+  it "rejects clearing completed fields during client validation but allows already-blank fields" do
     employee = incomplete_employee
     employee.update!(city: "Hagatna")
     service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { city: "" })
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+    expect(employee.reload.city).to eq("Hagatna")
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { first_name: "Updated", hire_date: "", address_line1: "" })
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload).to have_attributes(first_name: "Updated", hire_date: nil, address_line1: nil)
     service = ClientEmployeeUpdateService.new(employee: employee.reload, company: company, requested_by: accountant, attrs: { hire_date: "nonsense" })
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+  end
+
+  %i[hire_date address_line1].each do |field|
+    it "protects a filled #{field} through client direct updates without an intake exception" do
+      employee = create(:employee, company: company)
+      original = employee.public_send(field)
+      service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+        attrs: { field => "" })
+      expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(employee.reload.public_send(field)).to eq(original)
+
+      employee.update_columns(field => nil)
+      service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+        attrs: { field => "", first_name: "Updated" })
+      expect { service.update! }.not_to raise_error
+      expect(employee.reload.first_name).to eq("Updated")
+    end
   end
 
   it "rejects an explicit client creation receipt lacking proof before queuing or saving anything" do

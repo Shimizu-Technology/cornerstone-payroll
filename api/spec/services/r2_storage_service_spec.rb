@@ -5,7 +5,8 @@ require "tmpdir"
 
 RSpec.describe R2StorageService, "default local storage configuration" do
   it "isolates local objects by Rails environment" do
-    expect(described_class::LOCAL_STORAGE_ROOT).to eq(Rails.root.join("tmp", "local_r2_storage", "test"))
+    expected = ENV["TEST_STORAGE_ROOT"].present? ? Pathname(ENV.fetch("TEST_STORAGE_ROOT")).join("local_r2_storage") : Rails.root.join("tmp", "local_r2_storage", "test")
+    expect(described_class::LOCAL_STORAGE_ROOT).to eq(expected)
   end
 end
 

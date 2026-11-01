@@ -139,6 +139,10 @@ RSpec.describe "Employee incomplete intake", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { city: "" } }
     expect(response).to have_http_status(:unprocessable_entity)
+    expect(employee.reload.city).to eq("Hagatna")
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { zip: "", pay_rate: 22 } }
+    expect(response).to have_http_status(:ok)
+    expect(employee.reload).to have_attributes(zip: nil, pay_rate: 22)
   end
 
   it "does not accept spoofed authorization through employee parameters" do

@@ -34,7 +34,7 @@ export function PayrollCalculationIssues({ failures, names, companyId, year, ret
           {!isSharedAnnualRules && <Link target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-full border border-primary-200 px-4 py-2 text-sm font-semibold text-primary-800 hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-primary-600" to={isRetirement
             ? retirementSetupPath(companyId, failure.employee_id, year, isYearReview ? 'retirement-year-evidence' : 'retirement-plan', { returnTo })
             : employeePath(companyId, failure.employee_id, 'pay-setup', { returnTo })}>
-            {isRetirement ? (isYearReview ? `Review ${year} retirement checks` : 'Review contribution settings') : 'Open employee pay setup'}
+            {isRetirement ? (isYearReview ? `Review ${year} retirement checks` : /designated Roth employee contributions/i.test(message) ? 'Set up retirement' : 'Review contribution settings') : 'Open employee pay setup'}
           </Link>}
         </li>)}</ul>
       </div>;

@@ -31,7 +31,11 @@ class R2StorageService
   class UploadError < StandardError; end
   class DownloadError < StandardError; end
   class InvalidKeyError < StandardError; end
-  LOCAL_STORAGE_ROOT = Rails.root.join("tmp", "local_r2_storage", Rails.env)
+  LOCAL_STORAGE_ROOT = if Rails.env.test? && ENV["TEST_STORAGE_ROOT"].present?
+    Pathname(ENV.fetch("TEST_STORAGE_ROOT")).join("local_r2_storage")
+  else
+    Rails.root.join("tmp", "local_r2_storage", Rails.env)
+  end
   STAGING_STORAGE_ROOT = Rails.root.join("storage", "local_r2_storage")
 
   def initialize

@@ -275,8 +275,6 @@ module PayrollIntake
         calculated_by_id: actor&.id,
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: nil,
         intake_stale_reason: nil,
         intake_stale_session: nil

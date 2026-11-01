@@ -2016,3 +2016,17 @@ it('opens the completed Hours step from a blocking loan approval reason', async 
   expect(hours.open).toBe(true);
   expect(document.activeElement?.id).toBe('payroll-loan-inputs');
 });
+
+it.each([0, 1])('warns before leaving unsaved draft hours through employee link %s and retains hours on Cancel', async (index) => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    const card = await renderLoanWorksheet('draft');
+    const input = within(card!).getByLabelText(/Regular hours/);
+    fireEvent.change(input, { target: { value: '17' } });
+    fireEvent.click(screen.getAllByRole('link', { name: 'Ana Cruz' })[index]);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('unsaved payroll changes'));
+    expect((input as HTMLInputElement).value).toBe('17');
+    expect(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeTruthy();
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  } finally { confirm.mockRestore(); }
+});

@@ -26,10 +26,19 @@ class PayrollIntakeDocument < ApplicationRecord
   delegate :company, :pay_period, to: :payroll_intake_session
 
   before_destroy :prevent_destroy, prepend: true
+  after_destroy_commit :purge_stored_source
 
   scope :in_package_order, -> { order(:position, :id) }
 
   private
+
+  def purge_stored_source
+    return if storage_reference.blank?
+
+    R2StorageService.new.delete(storage_reference)
+  rescue StandardError => e
+    Rails.logger.error("Payroll source document #{id} storage purge failed: #{e.class}: #{e.message}")
+  end
 
   def has_content_or_reference
     return if text_content.present? || extracted_text.present? || storage_reference.present? || filename.present?
@@ -59,7 +68,11 @@ class PayrollIntakeDocument < ApplicationRecord
   end
 
   def prevent_destroy
-    errors.add(:base, "Payroll source documents cannot be deleted")
+    session = payroll_intake_session
+    return if destroyed_by_association&.active_record == PayrollIntakeSession &&
+      session.destroyed_by_association&.active_record == PayPeriod && session.pay_period.deletable_unapproved_run?
+
+    errors.add(:base, "Payroll source documents can only be removed when deleting their unapproved payroll run")
     throw(:abort)
   end
 end
