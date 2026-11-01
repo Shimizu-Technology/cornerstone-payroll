@@ -5,25 +5,21 @@ module TimeTracking
   # The new operation must be explicitly pinned; the legacy AIRE profile never
   # grants it implicitly.
   class PaymentCancellationBridge
-    # A session lock spans the short durable-intent transaction, remote command,
+    LOCK_KEY_BASE = 4_100_000_000_000_000_000
+    LOCK_WAIT_SECONDS = 10
+
+    # One lock spans the short durable-intent transaction, remote command,
     # and local acknowledgement. Both native method changes and sync use it.
     # Row locks alone would roll back the command intent after remote success.
-    def self.with_item_lock(item_id)
-      ApplicationRecord.connection_pool.with_connection do |connection|
-        key = 4_100_000_000_000_000_000 + Integer(item_id)
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
-        until connection.select_value("SELECT pg_try_advisory_lock(#{key})")
-          if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-            raise TimeTracking::Client::Error, "Another payment transition is in progress; refresh and retry"
-          end
-          sleep 0.05
-        end
-        begin
-          yield
-        ensure
-          connection.select_value("SELECT pg_advisory_unlock(#{key})")
-        end
-      end
+    # The lock is held on a dedicated connection rather than as a session lock
+    # on the pooled Rails connection: through Neon's transaction-mode pooler a
+    # session lock and its unlock can run on different server backends,
+    # stranding the item. The key is unchanged, so it also excludes processes
+    # still running the earlier session-lock release during a deploy.
+    def self.with_item_lock(item_id, &)
+      DedicatedAdvisoryLock.with_lock(LOCK_KEY_BASE + Integer(item_id), wait_seconds: LOCK_WAIT_SECONDS, &)
+    rescue DedicatedAdvisoryLock::Unavailable
+      raise TimeTracking::Client::Error, "Another payment transition is in progress; refresh and retry"
     end
 
     def self.blocker_for(item, check_activity: nil)

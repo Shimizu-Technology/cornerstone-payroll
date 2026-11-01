@@ -203,4 +203,36 @@ RSpec.describe "Earned payroll and retired checks" do
     correction = PayPeriodCorrectionService.create_correction_run!(source_pay_period: period.reload, actor: actor, reason: "Correct remaining payroll only")
     expect(correction.payroll_items.pluck(:employee_id)).to eq([ other.id ])
   end
+
+  # Staging item 289: a committed, check-numbered legacy instrument void with no
+  # connected-source allocations, reversed through the payment transition lock.
+  it "reverses a legacy voided check and leaves no payment transition lock behind" do
+    item.update!(voided: true, voided_at: Time.current, void_reason: "Legacy check not issued")
+    item.check_events.create!(user: actor, event_type: "voided", check_number: item.check_number, reason: item.void_reason)
+    db_config = ApplicationRecord.connection_db_config
+    observer = db_config.adapter_class.new(db_config.configuration_hash).raw_connection
+    key = TimeTracking::PaymentCancellationBridge::LOCK_KEY_BASE + item.id
+    holders = lambda do
+      observer.exec_params("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 1 AND classid = $1::bigint::oid AND objid = $2::bigint::oid",
+        [ key >> 32, key & 0xffffffff ]).getvalue(0, 0).to_i
+    end
+    held_during = nil
+    allow(PayrollYtdSnapshotRefresh).to receive(:call).and_wrap_original do |original, **args|
+      held_during = holders.call
+      original.call(**args)
+    end
+
+    ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Check was never issued; reverse the legacy void")
+
+    expect(held_during).to eq(1)
+    expect(holders.call).to eq(0)
+    expect(item.reload.payroll_included?).to be(false)
+    expect { ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Second reversal attempt for this check") }
+      .to raise_error(ArgumentError, "This paycheck has already been reversed")
+    expect { PayrollPaymentMethodService.new(payroll_item: item, method: "direct_deposit", actor: actor, reason: "Not applicable").call }
+      .to raise_error(PayrollPaymentMethodService::Error, "Cannot change a voided payment")
+    expect(holders.call).to eq(0)
+  ensure
+    observer&.close
+  end
 end

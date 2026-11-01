@@ -16,6 +16,10 @@ RSpec.describe "Legacy FICA release tasks" do
     FicaLegacyRakeOptions.configure!(arguments)
     expect(arguments).to eq([ "payroll:fica_legacy:recover[dry-run]" ])
     expect { FicaLegacyRakeOptions.configure!([ "payroll:fica_legacy:recover", "--apply", "--dry-run" ]) }.to raise_error(ArgumentError)
+    arguments = [ "payroll:fica_legacy:reconcile_imports", "--apply" ]
+    FicaLegacyRakeOptions.configure!(arguments)
+    expect(arguments).to eq([ "payroll:fica_legacy:reconcile_imports[apply]" ])
+    expect { FicaLegacyRakeOptions.configure!([ "payroll:fica_legacy:reconcile_imports", "--apply", "--dry-run" ]) }.to raise_error(ArgumentError)
   end
 
   it "keeps ordinary rake arguments unchanged" do
