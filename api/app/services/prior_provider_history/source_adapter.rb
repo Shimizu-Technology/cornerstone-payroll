@@ -26,7 +26,7 @@ module PriorProviderHistory
           "pretax_deductions" => pretax.to_s("F"), "after_tax_deductions" => aftertax.to_s("F"),
           "retirement" => item.retirement_payment.to_d.to_s("F"), "roth_retirement" => item.roth_retirement_payment.to_d.to_s("F"),
           "insurance" => item.insurance_payment.to_d.to_s("F"), "loans" => item.loan_payment.to_d.to_s("F"),
-          "employer_contributions" => PayrollEmployerContributions.total(item).to_s("F")
+          "employer_contributions" => employer_contributions(item)
         )
         row.merge(
           "earnings_breakdown" => component("Earnings (verify source classification)", row["gross_pay"]),
@@ -41,6 +41,15 @@ module PriorProviderHistory
         "paychecks" => rows, "calculated_totals" => Amounts.totals(rows),
         "source_digest" => digest(period), "source_reference" => "", "register_totals" => {}
       }
+    end
+
+    # Runs calculated before employer-component provenance was recorded can be
+    # ambiguous. Leave the amount blank so the operator enters it from the paid
+    # register; selection and conversion never depend on a recalculation.
+    def self.employer_contributions(item)
+      PayrollEmployerContributions.total(item).to_s("F")
+    rescue PayrollComponentMirrors::AmbiguousHistoryError
+      ""
     end
 
     def self.component(label, amount)
