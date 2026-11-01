@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3135,6 +3135,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
     t.integer "revision", null: false
     t.string "schema_version", default: "v1", null: false
     t.jsonb "source_manifest", default: {}, null: false
+    t.datetime "sent_for_client_approval_at"
     t.string "status", default: "pending", null: false
     t.datetime "superseded_at"
     t.text "supersession_reason"

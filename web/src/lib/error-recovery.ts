@@ -1,5 +1,6 @@
 /** Guidance supplements the original error; it never clears a payroll blocker. */
 export function errorRecovery(message: string): string | null {
+  if (/Open Employees → .+ → Pay setup → Set up retirement/.test(message)) return null;
   if (/^Calculated \d+ employees?\. \d+ employees? needs? attention/i.test(message)) return null;
   if (/Can only approve a calculated pay period/i.test(message)) return 'Calculate payroll and resolve every employee error, then review the results before approval.';
   if (/Can only commit an approved pay period/i.test(message)) return 'Review the completed calculation and approve the payroll before committing it.';

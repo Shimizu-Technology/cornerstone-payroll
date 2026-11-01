@@ -225,7 +225,7 @@ function payrollFieldHeaderClass(group: PayrollFieldGroup) {
 
 function PayrollFieldHeader({ column }: { column: PayrollFieldColumn }) {
   const inclusion = column.group === 'addition'
-    ? 'Included in gross'
+    ? column.taxTreatment === 'non_taxable_addition' ? 'Added outside gross' : 'Included in gross'
     : column.group === 'deduction'
       ? 'Included in deductions'
       : 'Employer only';

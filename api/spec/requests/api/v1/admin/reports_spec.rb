@@ -2447,6 +2447,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(pdf_text).to include("Employer Social", "Security", "Medicare")
       expect(pdf_text).to include("Employer Traditional 401(k)", "Employer Roth 401(k) Match")
       expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
+      expect(pdf_text).to include("Non taxable additions total", "Employer taxes total")
+      expect(pdf_text).not_to include("non_taxable_additions_total", "employer_taxes_total")
     end
   end
 

@@ -73,6 +73,15 @@ RSpec.describe CheckGenerator do
     expect(generator.render_input_payload.dig("summary", "ytd_gross")).to eq("2,919.20")
   end
 
+  it "reconciles non-taxable pay in both copies of the check summary" do
+    payroll_item.update!(gross_pay: 100, non_taxable_pay: 20, withholding_tax: 5, social_security_tax: 6.20, medicare_tax: 1.45,
+      total_deductions: 12.65, net_pay: 107.35)
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+    expect(text.scan(/SUMMARY[\s\S]*?Non-Taxable Pay/).size).to eq(2)
+    expect(text).to include("100.00", "20.00", "12.65", "107.35")
+    expect(text).not_to include("[SUMMARY]")
+  end
+
   it "includes both a direct loan and a separate loan field in check deductions" do
     field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
@@ -235,7 +244,7 @@ RSpec.describe CheckGenerator do
 
       summary_boxes = []
       allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
-        summary_boxes << { x: point.first, y: point.last, height: height } if height == 48.0
+        summary_boxes << { x: point.first, y: point.last, height: height } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
         method.call(point, width, height)
       end
 
@@ -254,7 +263,7 @@ RSpec.describe CheckGenerator do
         company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
         summary_boxes = []
         allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
-          summary_boxes << { x: point.first, width: width } if height == 48.0
+          summary_boxes << { x: point.first, width: width } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
           method.call(point, width, height)
         end
 

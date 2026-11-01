@@ -40,7 +40,8 @@ module PayrollReview
           calculation_snapshot: evidence.fetch(:snapshot),
           status: "pending",
           generated_by: actor,
-          generated_at: now
+          generated_at: now,
+          sent_for_client_approval_at: pay_period.company.client_payroll_approval_required? ? now : nil
         )
       end
 
