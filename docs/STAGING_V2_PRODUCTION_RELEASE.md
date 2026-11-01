@@ -54,23 +54,17 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
    bin/rails aire_lock_rollout:configure SOURCE_ID=<id> STARTS_ON=2026-10-16 ACTOR='<name>' REASON='Approved October lock rollout'
    ```
 4. [ ] Confirm both Netlify production builds from the new `main` succeeded.
-5. [ ] **Legacy reviews** (Payroll, accounting reviewer present). All of these preview by default and write nothing until applied:
-   - `bin/rake payroll:fica_legacy:inventory` shows each client's status. On the October 25 copy:
-     - Spike: 12 employees held.
-     - AIRE: 19 employees held.
-     - Cornerstone: 18 rows recoverable.
-     - Older MoSa: 49 rows recoverable.
-     - Active MoSa: all complete.
-   - **Recoverable rows** (Cornerstone, older MoSa): review each company-year plan with `payroll:fica_legacy:recover`, then apply it as one batch per company. See [FICA legacy recovery](FICA_LEGACY_RECOVERY.md).
-   - **Held employees** (Spike, AIRE): once the reviewer confirms there are no outside or predecessor wages, record one source review per employee covering the rest of the year. Preview first, then rerun with `APPLY=1`:
-     ```sh
-     COMPANY_ID=<id> EMPLOYEE_IDS=<id,id,...> ACTOR_ID=<admin user id> TAX_YEAR=2026 \
-       THROUGH_PAY_DATE=2026-12-31 EXTERNAL_SS_WAGE_BOUND=0 EXTERNAL_MEDICARE_WAGE_BOUND=0 \
-       REVIEW_REFERENCE='<workpaper reference>' bin/rake payroll:fica_legacy:review_sources
-     ```
-     This unblocks paycheck calculation only. Each employee's history and filing review stays open until the voids are reconciled.
-   - `bin/rake payroll:legacy_check_voids` lists checks to classify. On the copy there was one AIRE check and none for manual clients. Classify using [check retirement and paycheck reversal](CHECK_RETIREMENT_AND_PAYCHECK_REVERSAL.md).
-   - `bin/rake payroll:legacy_employer_benefits:inventory` counts employees whose reports will show "Legacy employer benefit history not yet classified".
+5. [ ] **Legacy reviews** (Payroll, accounting reviewer present). Use the release runner in [`ops/payroll-release-day`](../ops/payroll-release-day/README.md). It previews first, refuses to apply without the reviewed preview digest, and fails loudly if anyone is still held. It was rehearsed end to end on the staging copy of production (October 25 data); the steps took seconds each.
+   - **Inputs:** companies Cornerstone, AIRE, older MoSa, Spike, active MoSa and Sweep; an authorized admin actor; tax year 2026, coverage through 2026-12-31; external wage bounds $0. Leon confirmed on 2026-10-31 that no 2026 wages were paid outside Payroll un-imported, and that the Spike/AIRE re-runs and voids were handled properly.
+   - **What it does, in order:**
+     - Applies the reviewed legacy FICA recovery plans (staging copy: Cornerstone 2, older MoSa 49 proofs).
+     - Records one $0 source review per held employee (staging copy: Cornerstone 4, AIRE 25, Spike 15, active MoSa 9). This unblocks calculation only; each employee's history and filing review stays open.
+     - Reconciles QuickBooks-imported paychecks for active MoSa (staging copy: 109 proofs; 44 checks differed from the computed tax by at most $0.01, which is accepted and recorded).
+   - **Run it twice if asked:** after the source reviews, the imported-paycheck plan changes, so the first apply can stop with `Imported FICA plan changed`. Preview again, review the new digest, and apply again. The final preview must exit 0 with zero held employee-years for every selected company.
+   - **Reverse AIRE paycheck 289** (Leon approved 2026-11-01): the $175 contractor intern check in the Apr 16–30 payroll was voided because it was never issued and the intern should not have been in that payroll. Reverse it with `ReversePaycheckService` (reason recorded); its year-to-date gross must drop by exactly $175. Then `bin/rake payroll:legacy_check_voids` must list no candidates.
+   - **Data fixes in production before or right after the release** (supported UI only): Zachary Camacho's missing 4% Roth retirement election (MoSa), Monique Amani's missing pre-tax 401(k) election (MoSa; four paychecks took $0 since go-live and need an accounting correction). Then recalculate every unfinished run before approval.
+   - `bin/rake payroll:legacy_employer_benefits:inventory` should report no affected employees (it found none on the staging copy).
+   - Data added after October 25 (for example Kasperbauer) is covered by the fresh inventory the runner takes; Kasperbauer's history is recorded later with the prior-provider history feature, not here.
 6. [ ] **Access.** Grant Chels "Client management" for each client she will run.
 7. [ ] **Smoke test while paused:**
    - AIRE: clock in and out, edit an entry, approve it.
@@ -98,6 +92,8 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 ## Known follow-ups (not release blockers)
 
 - An employee with a linked predecessor record in the same company who is near the Social Security wage base can have predecessor wages missed by the ordinary annual FICA path. This predates staging-v2. Check before any such employee nears $184,500.
-- Pay stubs and check stubs show "Legacy employer benefit history not yet classified" for affected employees. Consider showing it only on admin reports.
-- Older MoSa has six calculated, never-approved runs (June–September). If any should be finished, recalculate and approve it after the release.
+- Older MoSa (inactive) has six calculated, never-approved runs (June–September), and 13 of its employees would be held for Roth plan verification. Only matters if that company runs payroll again.
+- `InvoiceSendSchedule` and `HistoricalClientBootstrapDispatch` hold session advisory locks, which are unreliable through Neon's transaction-mode pooler (the same problem fixed for payment transitions in #409). Move them to the dedicated-connection lock.
+- Kasperbauer: merge the prior-provider history feature (#407) after the release, then record their 2026 history before their first Cornerstone payroll.
+- Before January W-2s: enter missing SSNs and addresses (AIRE, Cornerstone, MoSa); the CEO verifies the 2027 tax tables.
 - Small performance items in the below-threshold FICA path (duplicate review-note query; per-employee snapshot evaluation).
