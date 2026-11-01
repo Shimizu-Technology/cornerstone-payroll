@@ -2,19 +2,19 @@ import api from "./api";
 
 export const amountLabels = {
   gross_pay: "Gross pay",
-  federal_income_tax: "FIT / Guam withholding",
-  social_security_tax: "Employee Social Security",
-  medicare_tax: "Employee Medicare (including additional)",
+  federal_income_tax: "Income tax withheld (Guam)",
+  social_security_tax: "Social Security (employee)",
+  medicare_tax: "Medicare (employee, incl. additional)",
   pretax_deductions: "Pre-tax deductions",
   after_tax_deductions: "Post-tax deductions",
   net_pay: "Net pay",
-  employer_social_security_tax: "Employer Social Security",
-  employer_medicare_tax: "Employer Medicare",
+  employer_social_security_tax: "Social Security (employer)",
+  employer_medicare_tax: "Medicare (employer)",
   employer_contributions: "Employer contributions",
-  fit_taxable_wages: "FIT taxable wages",
-  social_security_taxable_wages: "SS taxable wages (capped)",
-  social_security_taxable_tips: "SS taxable tips (capped)",
-  medicare_taxable_wages: "Medicare wages (uncapped)",
+  fit_taxable_wages: "Income-tax wages",
+  social_security_taxable_wages: "Social Security wages",
+  social_security_taxable_tips: "Social Security tips",
+  medicare_taxable_wages: "Medicare wages",
   additional_medicare_taxable_wages: "Additional Medicare wages",
   non_taxable_pay: "Non-taxable pay",
   reported_tips: "Reported tips",
@@ -27,12 +27,12 @@ export const amountLabels = {
 export type AmountKey = keyof typeof amountLabels;
 export const registerLabels = {
   gross_pay: "Gross pay",
-  federal_income_tax: "FIT / Guam withholding",
-  social_security_tax: "Employee Social Security",
-  medicare_tax: "Employee Medicare",
-  deductions: "Deductions (excluding taxes)",
+  federal_income_tax: "Income tax withheld",
+  social_security_tax: "Social Security (employee)",
+  medicare_tax: "Medicare (employee)",
+  deductions: "Deductions (not taxes)",
   net_pay: "Net pay",
-  employer_taxes: "Employer SS + Medicare",
+  employer_taxes: "Employer Social Security + Medicare",
   employer_contributions: "Employer contributions",
 } as const;
 export type Component = { label: string; amount: string };
@@ -97,6 +97,16 @@ export type HistoryOnboarding = {
     social_security_taxable_tips: string;
     medicare_taxable_wages: string;
   }>;
+  employee_totals: Array<{
+    employee_id: number;
+    paycheck_count: number;
+    gross_pay: string;
+    net_pay: string;
+    federal_income_tax: string;
+    social_security_taxable_wages: string;
+    social_security_taxable_tips: string;
+    medicare_taxable_wages: string;
+  }>;
   source_files: Array<{
     id: number;
     original_filename: string;
@@ -118,8 +128,17 @@ export type HistoryPage = {
   candidates: HistoryPeriod[];
   eligible_run_count: number;
   candidates_overflow: boolean;
-  employees: Array<{ id: number; name: string }>;
+  employees: HistoryEmployee[];
+  draft: HistoryDraft | null;
   onboardings: HistoryOnboarding[];
+};
+export type HistoryEmployee = { id: number; name: string; ssn_last_four: string | null };
+export type HistoryDraft = {
+  payload: HistoryPayload;
+  step: number;
+  lock_version: number;
+  updated_at: string;
+  updated_by_name: string;
 };
 export type HistoryPreview = {
   ready: boolean;
@@ -130,6 +149,9 @@ export type HistoryPreview = {
 const path = "/admin/prior_provider_histories";
 export const priorProviderHistoryApi = {
   get: () => api.get<HistoryPage>(path),
+  saveDraft: (payload: HistoryPayload, step: number, lock_version?: number) =>
+    api.put<{ draft: HistoryDraft }>(`${path}/draft`, { payload, step, lock_version }),
+  discardDraft: () => api.delete<void>(`${path}/draft`),
   preview: (payload: HistoryPayload) => api.post<HistoryPreview>(`${path}/preview`, { payload }),
   convert: (
     payload: HistoryPayload,
