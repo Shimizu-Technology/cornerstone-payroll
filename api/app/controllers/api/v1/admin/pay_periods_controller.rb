@@ -546,9 +546,7 @@ module Api
               calculated_at: Time.current,
               calculated_by_id: current_user_id,
               approved_at: nil,
-              approved_by_id: nil,
-              unapproved_at: nil,
-              unapproved_by_id: nil
+              approved_by_id: nil
             }
             if @pay_period.intake_stale_session&.status == "applied"
               calculation_attributes.merge!(

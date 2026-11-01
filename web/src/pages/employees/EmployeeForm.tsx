@@ -690,9 +690,15 @@ export function EmployeeForm() {
   };
 
   const deferredEditFields = ['ssn', 'hire_date', 'address_line1', 'city', 'state', 'zip'];
-  const allowsUnverifiedBlank = (field: string) => (isEditing && deferredEditFields.includes(field))
-    || importedProfileAllowsBlank(loadedEmployee, field)
-    || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
+  const allowsUnverifiedBlank = (field: string) => {
+    if (isEditing && deferredEditFields.includes(field)) {
+      const storedValue = loadedEmployee?.[field as keyof Employee];
+      const hasStoredSsn = field === 'ssn' && Boolean(storedSsnLastFour);
+      return !hasStoredSsn && !String(storedValue ?? '').trim();
+    }
+    return importedProfileAllowsBlank(loadedEmployee, field)
+      || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
+  };
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};

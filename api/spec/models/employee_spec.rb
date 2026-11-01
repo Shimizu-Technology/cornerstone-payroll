@@ -506,6 +506,19 @@ RSpec.describe Employee, type: :model do
       expect(employee.save).to be(true)
     end
 
+    %i[hire_date address_line1 city state zip ssn_encrypted].each do |field|
+      it "rejects clearing a filled #{field} but saves it when already blank" do
+        employee = create(:employee)
+        original = employee.public_send(field)
+        expect(employee.update(field => "")).to be(false)
+        expect(employee.reload.public_send(field)).to eq(original)
+
+        employee.update_columns(field => nil)
+        expect(employee.update(field => "", first_name: "Updated")).to be(true)
+        expect(employee.reload.first_name).to eq("Updated")
+      end
+    end
+
     it "still allows an incomplete legacy record to be terminated" do
       employee = create(:employee)
       employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)

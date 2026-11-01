@@ -363,3 +363,17 @@ it('saves an existing employee wage change with missing personal details and an 
   await screen.findByText('Saved employee profile');
   expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 28, hire_date: '', address_line1: '' });
 });
+
+
+it.each([
+  [/^Hire Date/, 'Hire date is required'],
+  [/^Address Line 1/, 'Address line 1 is required'],
+] as const)('rejects clearing a completed field %s', async (label, message) => {
+  await loadEmployee(employee());
+  const field = screen.getByLabelText(label) as HTMLInputElement;
+  expect(field.required).toBe(true);
+  fireEvent.change(field, { target: { value: '' } });
+  fireEvent.submit(field.closest('form')!);
+  expect(await screen.findByText(message)).toBeTruthy();
+  expect(mocks.updateEmployee).not.toHaveBeenCalled();
+});
