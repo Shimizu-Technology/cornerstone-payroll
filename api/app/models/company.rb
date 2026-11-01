@@ -273,20 +273,6 @@ class Company < ApplicationRecord
     payroll_intake_source_types.include?(source_type.to_s)
   end
 
-  # Stamp visible revisions before disabling the portal as well as when
-  # enabling it. Callers serialize this with revision issuance on Company.
-  before_update :retain_published_payroll_reviews,
-    if: -> { will_save_change_to_client_payroll_approval_required? && client_payroll_approval_required_in_database }
-  after_update :retain_published_payroll_reviews,
-    if: -> { saved_change_to_client_payroll_approval_required? && client_payroll_approval_required? }
-
-  def retain_published_payroll_reviews
-    self.class.where(id: id).lock.pluck(:id)
-    PayrollReviewPackage.joins(:pay_period).where(company_id: id, superseded_at: nil, sent_for_client_approval_at: nil)
-      .where(pay_periods: { status: %w[calculated approved] })
-      .update_all(sent_for_client_approval_at: Time.current, client_review_history_unknown: false)
-  end
-
   private
 
   def normalize_blanks

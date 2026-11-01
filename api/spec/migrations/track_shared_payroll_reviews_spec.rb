@@ -29,4 +29,23 @@ RSpec.describe TrackSharedPayrollReviews do
     end
     expect(disabled_run.deletion_blocker).to include("unverified sharing history")
   end
+
+  it "retains publication by an old writer that bypasses model callbacks" do
+    company = create(:company, client_payroll_approval_required: false)
+    run = create(:pay_period, :calculated, company: company)
+    item = create(:payroll_item, company: company, pay_period: run, hours_worked: 17)
+    package = run.payroll_review_packages.create!(company: company, revision: 1,
+      schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current,
+      client_review_history_unknown: false)
+
+    # Emulate the old application's UPDATE statements with no new callbacks.
+    Company.where(id: company.id).update_all(client_payroll_approval_required: true)
+    Company.where(id: company.id).update_all(client_payroll_approval_required: false)
+
+    expect(package.reload.sent_for_client_approval_at).to be_present
+    expect(package.client_review_history_unknown?).to be(false)
+    expect { run.destroy! }.to raise_error(ActiveRecord::RecordNotDestroyed)
+    expect(item.reload.hours_worked).to eq(17)
+    expect(package.reload).to be_persisted
+  end
 end
