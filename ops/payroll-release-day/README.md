@@ -1,6 +1,6 @@
 # Payroll release-day data rehearsal
 
-`release_day.rb` is the reusable Rails-runner script executed on staging. It contains no staging company, actor, service, database, or commit IDs. `run-staging.py` is a separate staging-only SSH transport and cannot target production. No Render API key is used.
+`release_day.rb` is the generic release runner. The previous revision was rehearsed on staging; this imported-FICA revision has been verified with local synthetic data only. The lead must repeat the staging rehearsal after merge. The script contains no staging company, actor, service, database or commit IDs. The private operational folder retains the staging-only SSH transport and earlier receipts.
 
 ## Preconditions
 
@@ -64,7 +64,7 @@ The November 1 read-only clone diagnosis found 65/109 active-MoSa imported check
 
 ## Voids and remaining gates
 
-The script **lists** candidates; it does not classify, reverse, or reissue them automatically. Confirm actual payment, saved YTD, liability and source evidence first. Never reverse paid wages to remove a warning. The certified candidate's `void!` rejects an already-voided check, and no dedicated legacy instrument-classification service/task was found. The AIRE rehearsal candidate also has contradictory evidence; see `REHEARSAL.md`. Record the accounting decision and resolve this release gate through an appropriate supported path.
+The script **lists** candidates; it does not classify, reverse, or reissue them automatically. Confirm actual payment, saved YTD, liability and source evidence first. Never reverse paid wages to remove a warning. Record the accounting decision and resolve disputed legacy instruments through an appropriate supported path. The private rehearsal receipts retain the AIRE candidate's unresolved payment evidence; this script does not resolve that separate release gate. See [the QA record](../../docs/qa/imported-fica-reconciliation-2026-11-01.md) for this change's acceptance limits.
 
 Zero held inventory is calculation capacity at **zero added wages**. `calculable_below_thresholds` still has history/filing review open, and an actual new check must stay within both conservative bounds. It is not filing approval or proof of arbitrary future payroll. Recalculate every affected unfinished run before approval; roll back approval first if applicable. Client approval, document, go-live, source, and other lifecycle gates remain enforced.
 
