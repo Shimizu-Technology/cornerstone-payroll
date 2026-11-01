@@ -14,6 +14,7 @@ function PayrollRouteBlocker({ dirty }: { dirty: boolean }) {
   });
   useEffect(() => {
     const onScopeChange = (event: Event) => {
+      if (acceptedScopeChange.current === location.key) return;
       if (dirty && !window.confirm(UNSAVED_PAYROLL_MESSAGE)) {
         event.preventDefault();
         return;
