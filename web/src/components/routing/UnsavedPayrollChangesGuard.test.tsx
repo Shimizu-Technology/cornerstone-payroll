@@ -37,3 +37,19 @@ it('warns on reload only while dirty and removes the handler after leaving', asy
   await screen.findByText('Employees page');
   expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
 });
+
+it('asks again after an accepted tab change when the worksheet stays mounted', async () => {
+  const router = createMemoryRouter([{ path: '*', element: <Worksheet /> }], { initialEntries: ['/work'] });
+  render(<RouterProvider router={router} />);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '10' } });
+  await router.navigate('/reports');
+  fireEvent.click(screen.getByText('Save'));
+  await router.navigate('/work');
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '19' } });
+  confirm.mockReturnValue(false);
+  fireEvent.click(screen.getByText('Employees'));
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(router.state.location.pathname).toBe('/work');
+  expect((screen.getByLabelText('Hours') as HTMLInputElement).value).toBe('19');
+});
