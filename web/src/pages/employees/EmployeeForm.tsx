@@ -480,7 +480,7 @@ export function EmployeeForm() {
     return `${digits.slice(0, 2)}-${digits.slice(2)}`;
   };
 
-  const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean | null): void => {
+  const handleChange = (field: keyof typeof form, value: string | number | boolean | null): void => {
     if (field === 'pay_frequency') payFrequencyTouchedRef.current = true;
     setForm((prev) => ({ ...prev, [field]: value }));
     const linkedSsnField = field === 'ssn' ? 'ssn_confirmation' : field === 'ssn_confirmation' ? 'ssn' : null;
@@ -689,7 +689,9 @@ export function EmployeeForm() {
     }));
   };
 
-  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field)
+  const deferredEditFields = ['ssn', 'hire_date', 'address_line1', 'city', 'state', 'zip'];
+  const allowsUnverifiedBlank = (field: string) => (isEditing && deferredEditFields.includes(field))
+    || importedProfileAllowsBlank(loadedEmployee, field)
     || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
 
   const validateForm = (): boolean => {
@@ -1041,6 +1043,9 @@ export function EmployeeForm() {
       />
 
       {(intake.settings?.enabled && !isEditing) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Incomplete employee entry is enabled for this client.</p><p>Enter the name and valid pay setup. Unknown personal details may stay blank and will remain on a follow-up checklist. Payroll setup and documents need separate review.</p></div>}
+      {isEditing && deferredEditFields.some((field) => field === 'ssn'
+        ? taxIdUsesSsn && !form.ssn && !storedSsnLastFour
+        : !form[field as keyof typeof form]) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">You can save this employee with missing personal details.</p><p>Add the missing SSN, hire date and mailing address when available. Review missing details before Q4 SW-2 and January W-2 preparation.</p></div>}
       {loadedEmployee?.intake_readiness?.profile_incomplete && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Complete this profile as information arrives</p><p>Still missing: {loadedEmployee.intake_readiness.missing_fields.map((field) => intakeFieldLabels[field] || field).join(', ')}. You can save the approved missing fields incrementally.</p></div>}
       {intake.error && <div className="mx-4 mt-4 sm:mx-6 lg:mx-8"><ActionFeedback tone="error" message="Employee entry settings could not be loaded. Full details are required for new entries." /><Button variant="outline" onClick={() => void intake.reload()}>Retry entry settings</Button></div>}
 

@@ -589,6 +589,10 @@ class Employee < ApplicationRecord
     end
   end
 
+  def new_filing_profile?
+    new_record? && !intake_original_employee&.persisted?
+  end
+
   def required_filing_fields
     {
       hire_date: hire_date,
@@ -597,13 +601,13 @@ class Employee < ApplicationRecord
       state: state,
       zip: zip
     }.each do |field, value|
-      errors.add(field, "can't be blank") if value.blank? && !configuration_review_allows_blank?(field) && !intake_allows_blank?(field)
+      errors.add(field, "can't be blank") if new_filing_profile? && value.blank? && !configuration_review_allows_blank?(field) && !intake_allows_blank?(field)
     end
 
     if business_contractor?
       errors.add(:business_name, "can't be blank") if business_name.blank?
       errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank? && !intake_allows_blank?(:contractor_ein)
-    elsif ssn_encrypted.blank? && !intake_allows_blank?(:ssn)
+    elsif new_filing_profile? && ssn_encrypted.blank? && !intake_allows_blank?(:ssn)
       errors.add(:ssn, "can't be blank")
     end
   end

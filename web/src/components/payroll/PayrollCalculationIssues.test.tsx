@@ -19,3 +19,13 @@ it('groups repeated errors while keeping named employee-specific resolution link
   expect(links[0].getAttribute('target')).toBe('_blank');
   expect(screen.getByRole('link', { name: 'Open employee pay setup' }).getAttribute('href')).toContain('/employees/32/pay-setup');
 });
+
+it('links a named employee Roth error directly to their retirement setup while preserving the payroll tab', () => {
+  const error = 'Ana Cruz: Open Employees → Ana Cruz → Pay setup → Set up retirement and confirm the plan permits designated Roth employee contributions.';
+  render(<MemoryRouter><PayrollCalculationIssues companyId={7} year={2026} returnTo="/companies/7/pay-runs/12/work" names={new Map([[30, 'Ana Cruz']])} failures={[{ employee_id: 30, error }]} /></MemoryRouter>);
+  expect(screen.getByText(error)).toBeTruthy();
+  const link = screen.getByRole('link', { name: 'Set up retirement' });
+  expect(link.getAttribute('href')).toContain('/employees/30/pay-setup?');
+  expect(link.getAttribute('href')).toContain('#retirement-plan');
+  expect(link.getAttribute('target')).toBe('_blank');
+});

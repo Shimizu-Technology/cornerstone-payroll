@@ -59,7 +59,11 @@ class PayrollIntakeDocument < ApplicationRecord
   end
 
   def prevent_destroy
-    errors.add(:base, "Payroll source documents cannot be deleted")
+    session = payroll_intake_session
+    return if destroyed_by_association&.active_record == PayrollIntakeSession &&
+      session.destroyed_by_association&.active_record == PayPeriod && session.pay_period.deletable_unapproved_run?
+
+    errors.add(:base, "Payroll source documents can only be removed when deleting their unapproved payroll run")
     throw(:abort)
   end
 end

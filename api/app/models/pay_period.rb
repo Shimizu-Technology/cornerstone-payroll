@@ -51,11 +51,12 @@ class PayPeriod < ApplicationRecord
   has_many :origin_late_hours_runs, class_name: "TimeTrackingLateHoursRun", foreign_key: :origin_pay_period_id, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
+  # Source rows reference payroll items; remove them first, newest revision first.
+  has_many :payroll_intake_sessions, -> { order(package_revision: :desc) }, dependent: :destroy
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
-  has_many :payroll_intake_sessions, dependent: :destroy
   has_many :payroll_review_packages, dependent: :restrict_with_error
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
@@ -222,7 +223,19 @@ class PayPeriod < ApplicationRecord
     errors.add(:base, "Reconcile the saved reported-payment match before revising or voiding this payroll. Its hours remain reserved.")
     throw :abort
   end
+  before_destroy :prevent_finalized_run_deletion, prepend: true
   before_destroy :prevent_training_baseline_mutation
+
+  def deletable_unapproved_run?
+    status.in?(%w[draft calculated]) && approved_at.nil? && committed_at.nil?
+  end
+
+  def prevent_finalized_run_deletion
+    return if deletable_unapproved_run?
+
+    errors.add(:base, "Only unapproved payroll runs that have never been committed can be deleted. Unapprove this run first, or keep its committed payroll history.")
+    throw :abort
+  end
 
   scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }
   scope :draft, -> { where(status: "draft") }

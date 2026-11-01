@@ -131,14 +131,14 @@ RSpec.describe EmployeeIntakePolicy do
     expect(employee.tax_classification).to eq("w2")
   end
 
-  it "permits incremental completion after restoration but rejects clearing completed fields" do
+  it "keeps missing personal details on the follow-up list without blocking edits after restoration" do
     employee = incomplete_employee
     company.update!(employee_intake_expires_at: nil)
     employee.update!(address_line1: "123 Main Street")
     employee.update!(city: "Hagatna")
-    expect(employee.update(address_line1: nil)).to be false
-    expect(employee.errors[:address_line1]).to include("can't be blank")
-    expect(described_class.summary(employee.reload)[:missing_fields]).not_to include("address_line1", "city")
+    expect(employee.update(address_line1: nil)).to be true
+    expect(described_class.summary(employee.reload)[:missing_fields]).to include("address_line1")
+    expect(described_class.summary(employee)[:missing_fields]).not_to include("city")
   end
 
   it "validates supplied identifiers and confirmation despite relaxed presence requirements" do
@@ -342,11 +342,20 @@ RSpec.describe EmployeeIntakePolicy do
       attributes: { status: "received", lock_version: requirement.lock_version }).call! }.to raise_error(EmployeeDocumentRequirementReviewService::Error, /reviewed outcome/)
   end
 
-  it "protects completed fields during client validation and rejects malformed dates" do
+  it "validates client edits of a legacy incomplete profile without requiring a new intake exception" do
+    employee = create(:employee, company: company)
+    employee.update_columns(ssn_encrypted: nil, hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { first_name: "Updated" })
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload).to have_attributes(first_name: "Updated", ssn_encrypted: nil, hire_date: nil, city: nil)
+  end
+
+  it "allows missing personal details during client validation but rejects malformed supplied dates" do
     employee = incomplete_employee
     employee.update!(city: "Hagatna")
     service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { city: "" })
-    expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload.city).to be_nil
     service = ClientEmployeeUpdateService.new(employee: employee.reload, company: company, requested_by: accountant, attrs: { hire_date: "nonsense" })
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
   end
