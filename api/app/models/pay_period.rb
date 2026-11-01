@@ -57,7 +57,7 @@ class PayPeriod < ApplicationRecord
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
-  has_many :payroll_review_packages, dependent: :restrict_with_error
+  has_many :payroll_review_packages, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
   has_many :check_print_generations, dependent: :restrict_with_error
@@ -237,21 +237,52 @@ class PayPeriod < ApplicationRecord
     status.in?(%w[draft calculated]) && committed_at.nil? && !previously_approved?
   end
 
-  def prevent_finalized_run_deletion
-    if previously_approved?
-      errors.add(:base, "This run was approved before. Keep it and correct it instead, or ask an admin.")
-    elsif !deletable_unapproved_run?
-      errors.add(:base, "Only unapproved payroll runs that have never been committed can be deleted. Keep this run and correct it instead, or ask an admin.")
-    else
-      deferred = PayrollIntakeRow.joins(:payroll_intake_session)
-        .where(payroll_intake_sessions: { pay_period_id: id }, disposition: "deferred")
-        .where.not(target_pay_period_id: [ nil, id ]).includes(:target_pay_period).order(:id).first
-      return unless deferred
+  # Run before any import/source/paycheck write, and again from before_destroy.
+  def ensure_deletable!
+    reason = deletion_blocker
+    return true unless reason
 
-      target = deferred.target_pay_period
-      errors.add(:base, "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded.")
-    end
+    errors.add(:base, reason)
+    raise ActiveRecord::RecordNotDestroyed.new(reason, self)
+  end
+
+  def prevent_finalized_run_deletion
+    reason = deletion_blocker
+    return unless reason
+
+    errors.add(:base, reason)
     throw :abort
+  end
+
+  def deletion_blocker
+    return "This run was approved before. Keep it and correct it instead, or ask an admin." if previously_approved?
+    unless deletable_unapproved_run?
+      return "Only unapproved payroll runs that have never been committed can be deleted. Keep this run and correct it instead, or ask an admin."
+    end
+    if training_baseline?
+      return "This run is a protected training baseline and cannot be deleted."
+    end
+    if payroll_review_packages.any?(&:retained_client_evidence?)
+      return "This run has client review history: it was shared for approval or has a client decision or comment. Keep it and correct it instead, or ask an admin."
+    end
+    deferred = PayrollIntakeRow.joins(:payroll_intake_session)
+      .where(payroll_intake_sessions: { pay_period_id: id }, disposition: "deferred")
+      .where.not(target_pay_period_id: [ nil, id ]).includes(:target_pay_period).order(:id).first
+    if deferred
+      target = deferred.target_pay_period
+      return "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded."
+    end
+
+    # Check all declared retained associations before dependent destroy callbacks
+    # can touch source documents, paychecks or their entered hours.
+    retained = self.class.reflect_on_all_associations.select { |association| association.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) }
+    if retained.any? { |reflection| association(reflection.name).scope.exists? }
+      return "This run is linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    if payroll_items.any? { |item| item.class.reflect_on_all_associations.any? { |reflection| reflection.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) && item.association(reflection.name).scope.exists? } }
+      return "This run has paychecks linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    nil
   end
 
   scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }

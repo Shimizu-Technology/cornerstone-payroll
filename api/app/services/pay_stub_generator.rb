@@ -434,23 +434,25 @@ class PayStubGenerator
   end
 
   def render_net_pay(pdf)
-    pdf.bounding_box([ pdf.bounds.width - 200, pdf.cursor ], width: 200) do
-      data = [
-        [
-          { content: "NET PAY", font_style: :bold },
-          { content: format_currency(payroll_item.net_pay), font_style: :bold }
-        ]
-      ]
-
-      pdf.font_size(11) do
-        pdf.table(data, width: 200) do
-          cells.padding = [ 7, 12 ]
-          cells.background_color = "E8F5E9"
-          column(1).align = :right
-        end
-      end
+    additions = statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }
+    deductions = statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.current.to_d }
+    taxes = payroll_item.withholding_tax.to_d + payroll_item.additional_withholding.to_d +
+      payroll_item.social_security_tax.to_d + payroll_item.medicare_tax.to_d
+    data = [
+      [ "SUMMARY", "Current" ],
+      [ "Gross Pay", format_currency(payroll_item.gross_pay) ],
+      [ "Non-Taxable Pay", format_currency(additions) ],
+      [ "Taxes", format_currency(taxes) ],
+      [ "Deductions", format_currency(deductions) ],
+      [ "NET PAY", format_currency(payroll_item.net_pay) ]
+    ]
+    pdf.table(data, width: 250, position: :right) do
+      cells.padding = [ 4, 8 ]
+      column(1).align = :right
+      row(0).font_style = :bold
+      row(-1).font_style = :bold
+      row(-1).background_color = "E8F5E9"
     end
-
     pdf.move_down 14
   end
 

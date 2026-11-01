@@ -546,7 +546,7 @@ class CheckGenerator
 
   def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height)
     non_overlapping_top = deductions_top - deductions_height - 6.0
-    minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
+    minimum_top = sect_bot + summary_box_height(stub_cfg) + 20.0
 
     [ [ default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top ].min, minimum_top ].max
   end
@@ -562,8 +562,12 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # SUMMARY box (bottom-right, with NET PAY below like QuickBooks)
   # -----------------------------------------------------------------------
+  def summary_box_height(stub_cfg)
+    [ stub_cfg["summary_box_h"].to_f, 5 * (8 + 2 * stub_cfg["summary_padding_y"].to_f) + 6 ].max
+  end
+
   def draw_summary_box(pdf, x:, y:, w:, stub_cfg:)
-    box_h = stub_cfg["summary_box_h"].to_f
+    box_h = summary_box_height(stub_cfg)
 
     pdf.stroke_color "333333"
     pdf.line_width 0.8
@@ -580,6 +584,7 @@ class CheckGenerator
 
     data_rows = [
       [ "Total Pay", fd(payroll_item.gross_pay), fd(pay_ytd_total) ],
+      [ "Non-Taxable Pay", fd(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }), fd(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
       [ "Taxes", fd(cur_taxes), fd(ytd[:taxes]) ],
       [ "Deductions", fd(cur_deds), fd(ytd_visible_deds) ]
     ]

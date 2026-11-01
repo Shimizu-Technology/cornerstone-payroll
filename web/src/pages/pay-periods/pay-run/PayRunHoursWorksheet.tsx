@@ -2,9 +2,9 @@
 
 import { NamedLoanInputs } from '@/components/payroll/NamedLoanInputs';
 
-import { Fragment, type MouseEvent } from 'react';
+import { Fragment, useContext, type MouseEvent } from 'react';
 
-import { Link } from 'react-router';
+import { UNSAFE_DataRouterContext, Link } from 'react-router';
 
 import { Card } from '@/components/ui/card';
 
@@ -81,7 +81,9 @@ export function PayRunHoursWorksheet({
   updateWageRateHours,
   worksheetPayrollFields
 }: PayRunSectionProps<'hours'>) {
+  const dataRouter = useContext(UNSAFE_DataRouterContext);
   const confirmEmployeeNavigation = (event: MouseEvent<HTMLAnchorElement>): void => {
+    if (dataRouter) return;
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (hasStagedWorksheetChanges && !window.confirm('You have unsaved payroll changes. Stay here and calculate payroll to save them. Leave without saving?')) {
       event.preventDefault();

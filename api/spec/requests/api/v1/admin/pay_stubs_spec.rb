@@ -73,6 +73,25 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
     end
   end
 
+  it "reconciles the plain-paper single and batch stub summaries with non-taxable pay" do
+    allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
+    payroll_item.update!(gross_pay: 100, non_taxable_pay: 20, withholding_tax: 5, social_security_tax: 6.20, medicare_tax: 1.45,
+      total_deductions: 12.65, net_pay: 107.35)
+    # An archived statement predating this repair must not keep the old summary.
+    allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(true)
+    expect(storage).not_to receive(:download)
+    get "/api/v1/admin/pay_stubs/#{payroll_item.id}/download"
+    expect(response).to have_http_status(:ok)
+    single = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+    post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id, payroll_item_ids: [ payroll_item.id ] }
+    expect(response).to have_http_status(:ok)
+    batch = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+    [ single, batch ].each do |text|
+      summary = text.split("SUMMARY").first(2).last
+      expect(summary).to include("Gross Pay", "Non-Taxable Pay", "Taxes", "Deductions", "NET PAY", "$100.00", "$20.00", "$12.65", "$107.35")
+    end
+  end
+
   describe "GET /api/v1/admin/pay_stubs/:id" do
     it "reports legacy-stored pay stubs as generated" do
       get "/api/v1/admin/pay_stubs/#{payroll_item.id}"

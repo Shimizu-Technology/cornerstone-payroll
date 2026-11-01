@@ -273,6 +273,15 @@ class Company < ApplicationRecord
     payroll_intake_source_types.include?(source_type.to_s)
   end
 
+  # Enabling client approval publishes existing review revisions in the portal.
+  # Keep that evidence even if approval is subsequently disabled.
+  after_update :retain_published_payroll_reviews, if: -> { saved_change_to_client_payroll_approval_required? && client_payroll_approval_required? }
+
+  def retain_published_payroll_reviews
+    PayrollReviewPackage.where(company_id: id, sent_for_client_approval_at: nil)
+      .update_all("sent_for_client_approval_at = generated_at")
+  end
+
   private
 
   def normalize_blanks

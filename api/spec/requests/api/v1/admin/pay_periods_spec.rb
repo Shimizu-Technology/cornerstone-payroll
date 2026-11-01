@@ -967,6 +967,21 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:id" do
+    it "keeps every saved input when review evidence refuses deletion" do
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, approval_notes: "Client asked to review these hours")
+      records = [ pay_period, item, earning, entry, package ]
+      before = records.map { |record| record.reload.attributes }
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(records.map { |record| record.class.find_by(id: record.id)&.attributes }).to eq(before)
+    end
+
     it "deletes a calculated run and its applied source package, document, row and paycheck dependents" do
       pay_period.update!(status: "calculated")
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
@@ -991,12 +1006,68 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.status).to eq("approved")
     end
 
-    it "preserves a never-finalized run with a retained review package and explains the blocker" do
-      pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
+    it "preserves a never-finalized run with a shared review package and explains the blocker" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      before = [ item, earning, entry ].map { |record| record.reload.attributes }
+      pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, sent_for_client_approval_at: Time.current)
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("payroll review packages")
+      expect(response.parsed_body.fetch("error")).to include("client review history")
       expect(PayPeriod.exists?(pay_period.id)).to be(true)
+      expect([ item, earning, entry ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "deletes an actually calculated never-approved run and its automatic review revisions" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 10 } } }
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.payroll_items).not_to be_empty
+      expect(pay_period.payroll_review_packages).not_to be_empty
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:no_content)
+      expect(PayPeriod.exists?(pay_period.id)).to be(false)
+      expect(PayrollReviewPackage.where(pay_period_id: pay_period.id)).to be_empty
+    end
+
+    it "rolls back child writes even when a late destroy callback refuses inside the financial lock" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      import = PayrollImportRecord.create!(pay_period: pay_period, status: "applied")
+      records = [ pay_period, item, earning, entry, import ]
+      before = records.map { |record| record.reload.attributes }
+      # Simulates a new or nested retention restriction after the pre-check.
+      allow_any_instance_of(PayPeriod).to receive(:destroy_row) { raise ActiveRecord::RecordNotDestroyed.new("Retain evidence", pay_period) }
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(records.map { |record| record.class.find_by(id: record.id)&.attributes }).to eq(before)
+    end
+
+    it "preserves all inputs and the review when a client approved a revision" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current,
+        status: "approved", approved_at: Time.current, approved_by: admin_user, approval_recorded_by: admin_user, approval_method: "client_portal", approval_acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
+      before = [ pay_period, item, package ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect([ pay_period, item, package ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "retains portal publication after client approval is disabled again" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
+      company.update!(client_payroll_approval_required: true)
+      expect(package.reload.sent_for_client_approval_at).to be_present
+      company.update!(client_payroll_approval_required: false)
+      before = [ pay_period, item, package ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect([ pay_period, item, package ].map { |record| record.reload.attributes }).to eq(before)
     end
 
     it "deletes a draft pay period" do
