@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { confirmPayrollScopeChange } from '@/lib/payroll-scope-change';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -14,8 +15,8 @@ interface CompanyContextValue {
   canViewClientManagement: boolean;
   canSwitchCompany: boolean;
   loading: boolean;
-  switchCompany: (companyId: number) => void;
-  switchOrganization: (organizationId: number) => void;
+  switchCompany: (companyId: number) => boolean;
+  switchOrganization: (organizationId: number) => boolean;
   refreshCompanies: () => Promise<void>;
 }
 
@@ -30,8 +31,8 @@ const CompanyContext = createContext<CompanyContextValue>({
   canViewClientManagement: false,
   canSwitchCompany: false,
   loading: true,
-  switchCompany: () => {},
-  switchOrganization: () => {},
+  switchCompany: () => false,
+  switchOrganization: () => false,
   refreshCompanies: async () => {},
 });
 
@@ -148,13 +149,13 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const switchCompany = useCallback((companyId: number) => {
     const company = companies.find((candidate) => candidate.id === companyId);
-    if (!company) return;
-    if (companyId === activeCompanyId) {
-      return;
-    }
+    if (!company) return false;
+    if (companyId === activeCompanyId) return true;
+    if (!confirmPayrollScopeChange()) return false;
 
     setActiveCompanyId(companyId);
     companiesApi.switchCompany(companyId, company.organization_id);
+    return true;
   }, [activeCompanyId, companies]);
 
   const activeCompany = companies.find(c => c.id === activeCompanyId) || null;
@@ -165,10 +166,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     { id: company.organization_id, name: company.organization_name || `Organization #${company.organization_id}` },
   ])).values()).sort((left, right) => left.name.localeCompare(right.name));
   const switchOrganization = (organizationId: number) => {
-    if (organizationId === activeOrganizationId) return;
+    if (organizationId === activeOrganizationId) return true;
     const destination = companies.find((company) => company.organization_id === organizationId && !company.test_workspace)
       || companies.find((company) => company.organization_id === organizationId);
-    if (destination) switchCompany(destination.id);
+    return destination ? switchCompany(destination.id) : false;
   };
 
   return (

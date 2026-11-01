@@ -26,7 +26,7 @@ export function OrganizationSwitcher({ onNavigate }: { onNavigate?: () => void }
         className="mt-1.5 min-h-11 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-semibold text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         value={activeOrganizationId ?? ''}
         onChange={(event) => {
-          switchOrganization(Number(event.target.value));
+          if (switchOrganization(Number(event.target.value)) === false) return;
           onNavigate?.();
           navigate('/app', { state: { companySwitchNotice: 'Switched organizations. Select a client or open Finance to continue.' } });
         }}

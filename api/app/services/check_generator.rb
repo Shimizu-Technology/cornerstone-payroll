@@ -307,7 +307,7 @@ class CheckGenerator
       padding_x: stub_cfg["table_padding_x"].to_f
     )
 
-    draw_section_table(pdf,
+    taxes_height = draw_section_table(pdf,
       x: rx, y: table_y1, w: right_w,
       title: "TAXES",
       columns: %w[Current YTD],
@@ -334,15 +334,20 @@ class CheckGenerator
       padding_x: stub_cfg["table_padding_x"].to_f
     )
 
+    # The right column flows independently: use the space below taxes, and
+    # reserve the expanded summary plus NET PAY before rendering deductions.
+    deductions_top = table_y1 - taxes_height - 6.0
+    summary_floor = sect_bot + summary_box_height(stub_cfg) + 20.0
     deductions_height = draw_section_table(pdf,
-      x: rx, y: table_y2, w: right_w,
+      x: rx, y: deductions_top, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
       col_ratios: [ 0.46, 0.27, 0.27 ],
       rows: deduction_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
-      padding_x: stub_cfg["table_padding_x"].to_f
+      padding_x: stub_cfg["table_padding_x"].to_f,
+      max_height: [ deductions_top - summary_floor - 6.0, 1.0 ].max
     )
 
     # ================================================================
@@ -374,7 +379,7 @@ class CheckGenerator
     draw_summary_box(
       pdf,
       x: summary_x,
-      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg, deductions_height),
+      y: summary_box_y(sect_bot, deductions_top, row3_top, stub_cfg, deductions_height),
       w: right_w - (summary_x - rx),
       stub_cfg: stub_cfg
     )
@@ -385,7 +390,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # Section table helper
   # -----------------------------------------------------------------------
-  def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:, table_height:, padding_y:, padding_x:)
+  def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:, table_height:, padding_y:, padding_x:, max_height: nil)
     header = [ { content: title, font_style: :bold } ] +
       columns.map { |c| { content: c, font_style: :bold, align: :right } }
 
@@ -397,7 +402,7 @@ class CheckGenerator
     rendered_height = 0.0
     pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6.5) do
-        table = pdf.table(data, column_widths: col_widths, cell_style: {
+        table = pdf.make_table(data, column_widths: col_widths, cell_style: {
           padding: [ padding_y, padding_x ], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
           row(0).borders = [ :bottom ]
@@ -409,7 +414,9 @@ class CheckGenerator
             row(last_idx).border_color = "999999"
           end
         end
-        rendered_height = table.height
+        scale = max_height ? [ 1.0, max_height / table.height ].min : 1.0
+        pdf.scale(scale, origin: [ 0, pdf.cursor ]) { table.draw }
+        rendered_height = table.height * scale
       end
     end
     rendered_height

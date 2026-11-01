@@ -27,6 +27,7 @@ RSpec.describe PayrollReview::RevisionService do
 
     expect(second).to eq(first)
     expect(first).to have_attributes(revision: 1, status: "pending", company_id: company.id)
+    expect(first.client_review_history_unknown?).to be(false)
     expect(first.calculation_checksum).to match(/\A[0-9a-f]{64}\z/)
     expect(first.calculation_snapshot.dig("payroll_items", 0, "employee_id")).to eq(employee.id)
     expect(first.calculation_snapshot.dig("payroll_items", 0, "employee")).to include(
@@ -34,6 +35,36 @@ RSpec.describe PayrollReview::RevisionService do
       "first_name" => employee.first_name,
       "last_name" => employee.last_name
     )
+  end
+
+  it "locks company before period and reads the fresh approval setting" do
+    company.update!(client_payroll_approval_required: false)
+    pay_period.company # cache the disabled setting on this instance
+    Company.find(company.id).update!(client_payroll_approval_required: true)
+    locks = []
+    subscriber = ->(_name, _start, _finish, _id, payload) { locks << payload[:sql] if payload[:sql].include?("FOR UPDATE") }
+    package = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") { service.issue! }
+    expect(package.sent_for_client_approval_at).to be_present
+    company_lock = locks.index { |sql| sql.include?('"companies"') }
+    period_lock = locks.index { |sql| sql.include?('"pay_periods"') }
+    expect(company_lock).to be < period_lock
+  end
+
+  it "stamps a visible legacy revision before disabling approval" do
+    package = service.issue!
+    package.update_columns(sent_for_client_approval_at: nil)
+    company.update!(client_payroll_approval_required: false)
+    expect(package.reload.sent_for_client_approval_at).to be_present
+    expect(pay_period.reload.deletion_blocker).to include("client review history")
+  end
+
+  it "does not call an invisible superseded draft revision shared when approval is enabled" do
+    company.update!(client_payroll_approval_required: false)
+    package = service.issue!
+    pay_period.invalidate_calculation!(reason: "Inputs changed before client review")
+    company.update!(client_payroll_approval_required: true)
+    expect(package.reload.sent_for_client_approval_at).to be_nil
+    expect(pay_period.reload.destroy).to be_truthy
   end
 
   it "creates a new review revision when the displayed employee identity changes" do
