@@ -105,8 +105,11 @@ module PayrollReleaseDay
         connection.execute('SET TRANSACTION READ ONLY')
         companies.to_h do |co|
           plan = ImportedPaycheckFicaReconciliation.new(company: co, year: year, employee_ids: imported_employee_ids.fetch(co.id)).inventory
+          # Aggregate signed per-component rounding residuals (cents) accepted
+          # under the one-cent per-check tolerance; no employee identities.
           emit('imported_fica_plan', company_id: co.id, plan_digest: plan.fetch(:plan_digest), counts: plan.fetch(:counts),
-            held_reasons: plan.fetch(:employee_years).select { |entry| entry[:status] == 'held' }.group_by { |entry| entry[:reason] }.transform_values(&:size))
+            corroboration_tolerance_cents: plan.fetch(:corroboration_tolerance_cents), checks_with_residual: plan.fetch(:checks_with_residual),
+            residual_totals_cents: plan.fetch(:residual_totals_cents), held_reasons: plan.fetch(:employee_years).select { |entry| entry[:status] == 'held' }.group_by { |entry| entry[:reason] }.transform_values(&:size))
           [co.id, plan]
         end
       end
@@ -163,7 +166,8 @@ module PayrollReleaseDay
       variables = base.merge(COMPANY_ID: co.id, EMPLOYEE_IDS: imported_employee_ids.fetch(co.id).join(','))
       plan = timed('reconcile_imports_dry_run', company_id: co.id) { task('payroll:fica_legacy:reconcile_imports', variables, 'dry-run').fetch('result') }
       raise 'Imported FICA preview changed' unless plan.fetch('plan_digest') == fresh.fetch(:plan_digest)
-      emit('imported_fica_review', company_id: co.id, plan_digest: plan.fetch('plan_digest'), counts: plan.fetch('counts'))
+      emit('imported_fica_review', company_id: co.id, plan_digest: plan.fetch('plan_digest'), counts: plan.fetch('counts'),
+        checks_with_residual: plan.fetch('checks_with_residual'), residual_totals_cents: plan.fetch('residual_totals_cents'))
       if mode == 'apply'
         receipt = timed('reconcile_imports_apply', company_id: co.id) { task('payroll:fica_legacy:reconcile_imports', variables.merge(PLAN_DIGEST: plan.fetch('plan_digest')), 'apply').fetch('result') }
         emit('imported_fica_receipt', company_id: co.id, applied_proofs: receipt.fetch('applied_proofs'), plan_digest: receipt.fetch('plan_digest'))

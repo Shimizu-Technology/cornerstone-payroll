@@ -43,6 +43,21 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
       employer_tax_breakdown: employer ? [ { label: "SS", amount: ss.to_s("F") }, { label: "Med", amount: med.to_s("F") } ] : [])
   end
 
+  # Shift stored taxes by signed cents from the rule-computed amounts while
+  # keeping employee summary and detail consistent.
+  def shift!(row, **cents)
+    gross = row.gross_pay.to_d
+    ss = (gross * "0.062".to_d).round(2)
+    med = (gross * "0.0145".to_d).round(2)
+    amount = ->(base, key) { base + cents.fetch(key, 0).to_d / 100 }
+    employee_ss, employee_med = amount.call(ss, :employee_social_security_tax), amount.call(med, :employee_medicare_tax)
+    row.update_columns(social_security_tax: employee_ss, medicare_tax: employee_med,
+      employee_tax_breakdown: [ { label: "SS", amount: employee_ss.to_s("F") }, { label: "Med", amount: employee_med.to_s("F") } ],
+      employer_tax_breakdown: [ { label: "SS", amount: amount.call(ss, :employer_social_security_tax).to_s("F") },
+        { label: "Med", amount: amount.call(med, :employer_medicare_tax).to_s("F") } ])
+    row
+  end
+
   def calculate(person = employee, status: "calculated")
     run = create(:pay_period, company: company, status: status, start_date: "2026-11-01", end_date: "2026-11-14", pay_date: "2026-11-20")
     item = run.payroll_items.build(employee: person, company: company, employment_type: "hourly", pay_rate: 15,
@@ -87,26 +102,78 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
     end
   end
 
-  it "accepts absent employer components, but requires exact present components" do
+  it "accepts absent employer components, and corroborates present ones within one cent" do
     row = imported(employer: false)
     review
     expect(service.inventory[:counts]["recoverable"]).to eq(1)
+    expect(service.inventory[:employee_years].sole[:rows].sole[:residual_cents]).to eq("employee_social_security_tax" => 0, "employee_medicare_tax" => 0)
     row.update_columns(employer_tax_breakdown: [ { label: "SS", amount: "61.99" } ])
-    expect(service.inventory[:employee_years].sole[:rows].sole[:reason]).to include("employer social_security_tax")
+    expect(service.inventory[:employee_years].sole[:rows].sole).to include(status: "recoverable",
+      residual_cents: { "employee_social_security_tax" => 0, "employee_medicare_tax" => 0, "employer_social_security_tax" => -1 })
+    row.update_columns(employer_tax_breakdown: [ { label: "SS", amount: "61.98" } ])
+    expect(service.inventory[:employee_years].sole[:rows].sole[:reason])
+      .to include("employer social_security_tax differs from the rule-computed amount by -$0.02 (stored 61.98, computed 62.00)")
+    row.update_columns(employer_tax_breakdown: [ { label: "SS", amount: "61.995" } ])
+    expect(service.inventory[:employee_years].sole[:rows].sole[:reason]).to include("employer social_security_tax is not a whole-cent amount")
     expect(apply[:applied_proofs]).to eq(0)
   end
 
-  %i[social_security_tax medicare_tax].each do |field|
-    it "holds a one-cent #{field} mismatch with an exact reason" do
-      row = imported
-      row.update_columns(field => row.public_send(field) + "0.01".to_d)
+  ImportedPaycheckFicaEvidence::RESIDUAL_COMPONENTS.each do |component|
+    [ 1, -1 ].each do |cents|
+      it "accepts a #{cents.positive? ? "+" : "-"}$0.01 #{component} rounding residual, records it and derives bases from gross" do
+        row = shift!(imported(tips: 100), component.to_sym => cents)
+        original = row.reload.attributes
+        review
+        plan = service.inventory
+        report = plan[:employee_years].sole[:rows].sole
+        expected = ImportedPaycheckFicaEvidence::RESIDUAL_COMPONENTS.to_h { |key| [ key, key == component ? cents : 0 ] }
+        expect(report).to include(status: "recoverable", residual_cents: expected)
+        expect(plan[:employee_years].sole).to include(residual_totals_cents: expected, checks_with_residual: 1)
+        expect(plan).to include(residual_totals_cents: expected, checks_with_residual: 1, corroboration_tolerance_cents: 1)
+        expect(apply(plan)[:applied_proofs]).to eq(1)
+        evidence = row.reload.fica_basis_proof.evidence
+        expect(evidence).to include("version" => 2, "corroboration_tolerance_cents" => 1, "residual_cents" => expected)
+        expect(evidence["bases"]).to eq("additional_medicare_taxable_wages" => "0.0", "medicare_taxable_wages" => "1000.0",
+          "social_security_taxable_tips" => "100.0", "social_security_taxable_wages" => "900.0")
+        expect(row.attributes).to eq(original)
+        expect(service.inventory[:employee_years].sole[:rows].sole).to include(status: "proven", residual_cents: expected)
+        expect(calculate).to have_attributes(social_security_tax: 31.to_d, medicare_tax: "7.25".to_d)
+      end
+    end
+
+    it "holds a $0.02 #{component} difference with a reason naming the component and difference" do
+      row = shift!(imported, component.to_sym => 2)
       review
       report = service.inventory[:employee_years].sole[:rows].sole
+      party, field = component.split("_", 2)
       expect(report).to include(status: "held")
-      expect(report[:reason]).to include(field.to_s, "exactly corroborate")
+      expect(report).not_to have_key(:residual_cents)
+      expect(report[:reason]).to include("#{party} #{field} differs from the rule-computed amount by +$0.02", "beyond the $0.01 per-check rounding tolerance")
       expect(apply[:applied_proofs]).to eq(0)
-      expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /#{field}/)
+      expect { calculate }.to raise_error(EmployeeYearFicaContext::UnreconciledLedgerError, /#{party} #{field} differs/)
+      expect(row.reload.fica_basis_proof).to be_nil
     end
+  end
+
+  it "totals mixed residuals into a digest-covered plan and holds the employee-year when any check exceeds a cent" do
+    rows = [ imported, shift!(imported, employee_social_security_tax: 1, employer_social_security_tax: 1),
+      shift!(imported, employee_medicare_tax: -1, employer_medicare_tax: 1), shift!(imported, employee_social_security_tax: -1) ]
+    review
+    plan = service.inventory
+    totals = { "employee_social_security_tax" => 0, "employee_medicare_tax" => -1, "employer_social_security_tax" => 1, "employer_medicare_tax" => 1 }
+    expect(plan[:employee_years].sole).to include(status: "ready", residual_totals_cents: totals, checks_with_residual: 3)
+    expect(plan[:plan_digest]).to eq(FicaBasisEvidence.digest(plan.except(:plan_digest)))
+    shift!(rows.last, employee_social_security_tax: 1)
+    changed = service.inventory
+    expect(changed[:employee_years].sole[:residual_totals_cents]).to include("employee_social_security_tax" => 2)
+    expect(changed[:plan_digest]).not_to eq(plan[:plan_digest])
+    expect { apply(plan) }.to raise_error(ArgumentError, /inventory changed/)
+    shift!(imported, employee_medicare_tax: -2)
+    held = service.inventory
+    expect(held[:counts]).to include("held" => 5, "recoverable" => 0)
+    expect(held[:employee_years].sole).to include(status: "held", reason: /employee medicare_tax differs from the rule-computed amount by -\$0\.02/)
+    expect(held[:employee_years].sole[:residual_totals_cents]).to eq(totals.merge("employee_social_security_tax" => 2))
+    expect(apply(held)[:applied_proofs]).to eq(0)
   end
 
   it "rejects changed plan digests and reloads authorization under locks" do
@@ -186,6 +253,33 @@ RSpec.describe ImportedPaycheckFicaReconciliation do
     inventory = PayrollFicaLegacyRecovery.new(company: company, year: 2026).inventory
     expect(inventory[:employee_year_counts].fetch("held", 0)).to eq(0)
     expect(service.inventory[:counts]).to include("held" => 0, "proven" => 27)
+  end
+
+  it "clears an Active-MoSa-shaped fixture with one-cent QuickBooks rounding across employees" do
+    people = [ employee, *create_list(:employee, 8, company: company, pay_rate: 15) ]
+    pattern = [ {}, { employee_social_security_tax: 1, employer_social_security_tax: 1 }, { employee_medicare_tax: -1, employer_medicare_tax: -1 },
+      { employee_social_security_tax: -1, employer_social_security_tax: -1, employee_medicare_tax: 1, employer_medicare_tax: 1 } ]
+    people.each_with_index do |person, index|
+      calculate(person, status: "committed")
+      pattern.each_with_index { |cents, check| shift!(imported(person, gross: 900 + (check * 37), tips: check * 25), **(index.zero? ? {} : cents)) }
+      review(person)
+    end
+    plan = service.inventory
+    expect(plan[:counts]).to include("recoverable" => 36, "held" => 0)
+    expect(plan[:checks_with_residual]).to eq(24)
+    expect(plan[:residual_totals_cents]).to eq("employee_social_security_tax" => 0, "employer_social_security_tax" => 0,
+      "employee_medicare_tax" => 0, "employer_medicare_tax" => 0)
+    expect(plan[:employee_years].map { |entry| entry[:checks_with_residual] }).to eq([ 0, *[ 3 ] * 8 ])
+    expect(apply(plan)[:applied_proofs]).to eq(36)
+    people.each do |person|
+      item = calculate(person)
+      PayPeriodLifecycleService.new(pay_period: item.pay_period, actor: actor).approve!
+      expect(item.pay_period.reload).to be_approved
+      expect(item.tax_rule_snapshot["annual_fica_context"]).to include("mode" => "calculable_below_thresholds", "history_review_open" => true, "filing_review_open" => true)
+    end
+    expect(PayrollFicaLegacyRecovery.new(company: company, year: 2026).inventory[:employee_year_counts].fetch("held", 0)).to eq(0)
+    expect(service.inventory[:counts]).to include("held" => 0, "proven" => 36)
+    expect { apply }.not_to change(HistoricalPaycheckFicaBasisProof, :count)
   end
 
   it "keeps an already authoritative native annual calculation available when optional imported evidence is unavailable" do
