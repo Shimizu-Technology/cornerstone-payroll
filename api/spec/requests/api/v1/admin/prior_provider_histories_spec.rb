@@ -97,5 +97,4 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to include("eligible_run_count" => 61, "candidates_overflow" => true)
   end
-
 end
