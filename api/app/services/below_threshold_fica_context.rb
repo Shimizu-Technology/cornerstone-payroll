@@ -5,7 +5,7 @@
 class BelowThresholdFicaContext
   VERSION = 1
   MODE = "calculable_below_thresholds"
-  NOTE = "Prior-period void history needs accountant review; this paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. Historical tax and filing review remains open.".freeze
+  NOTE = "Prior-period void history or imported paycheck history needs accountant review; this paycheck's Social Security/Medicare is unaffected because the conservative annual wage bounds are within the limits. Historical tax and filing review remains open.".freeze
   TAX_FIELDS = %w[social_security_tax employer_social_security_tax medicare_tax employer_medicare_tax].freeze
   SOURCE_FIELDS = (EmployeeYearFicaContext::FINGERPRINT_FIELDS + %w[
     company_id employee_id employment_type voided voided_at void_reason payroll_reversed_at
@@ -20,12 +20,14 @@ class BelowThresholdFicaContext
   def applicable?
     periods = PayPeriod.where(company: company, status: "committed", pay_date: year_range)
     periods = periods.where.not(id: excluding_pay_period_id) if excluding_pay_period_id
+    return true if imported_paychecks.any?
+
     PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
       .where.not(employment_type: "contractor").left_joins(:legacy_disposition, :pay_period)
       .where("payroll_items.payroll_reversed_at IS NOT NULL OR pay_periods.correction_status = 'voided' OR payroll_item_legacy_dispositions.id IS NOT NULL").exists?
   end
 
-  def snapshot(current_item:, rules:, lock_rules: false)
+  def snapshot(current_item:, rules:, lock_rules: false, reviewing_imports: false)
     if lock_rules
       AnnualTaxConfig.where(tax_year: year).order(:id).lock("FOR SHARE").load
       TaxTable.for_year(year).order(:id).lock("FOR SHARE").load
@@ -38,17 +40,24 @@ class BelowThresholdFicaContext
       hold!("Signed corrections or tip reclassifications require reviewed annual reconciliation")
     end
     review = EmployeeYearFicaSourceReview.where(company: company, employee: employee, tax_year: year).order(:id).last
-    through = [ current_item.pay_period.pay_date, *candidates.map { |item| item.pay_period.pay_date } ].max
+    through = [ current_item.pay_period.pay_date, *candidates.map { |item| item.pay_period.pay_date }, *imported_paychecks.map(&:pay_date) ].max
     hold!("External/predecessor wage completeness needs an attributable source review") unless review && review.through_pay_date >= through
-    # Imported checks lack finalized SS/Medicare wage/tip bases. Do not treat
-    # gross, a tax inversion, or an inactive import as proof of those amounts.
-    if HistoricalPaycheck.where(company: company, employee_id: [ nil, *candidate_employee_ids ], pay_date: year_range).exists?
-      hold!("Imported paycheck FICA source completeness requires separately reviewed reconciliation")
+    imported_bases = imported_paychecks.to_h do |row|
+      begin
+        bases = ImportedPaycheckFicaEvidence.bases(row, verified)
+        unless (reviewing_imports && row.fica_basis_proof.nil?) || ImportedPaycheckFicaEvidence.verified_bases(row, rules: verified, year: year)
+          hold!("Imported paycheck ##{row.id} lacks a matching reviewed FICA proof; run reconcile_imports")
+        end
+        [ row.id, bases ]
+      rescue ArgumentError, KeyError, TypeError => error
+        raise error if error.is_a?(EmployeeYearFicaContext::UnreconciledLedgerError)
+        hold!("Imported paycheck ##{row.id}: #{error.message}")
+      end
     end
     if PayrollGoLiveReview.where(company: company).exists?
       hold!("Successor/predecessor import mapping requires separately reviewed reconciliation")
     end
-    hold!("No disputed financial history for the below-threshold path") unless disputed_history?
+    hold!("No disputed financial history for the below-threshold path") unless disputed_history? || imported_paychecks.any?
     bounds = { ss: 0.to_d, medicare: 0.to_d }
     candidates.each do |item|
       validate_candidate!(item, verified)
@@ -65,6 +74,11 @@ class BelowThresholdFicaContext
       bounds[:ss] += maximum
       bounds[:medicare] += maximum
     end
+    imported_bases.each_value do |bases|
+      # Deliberately count imports AND native/bridge history even if overlapping.
+      bounds[:ss] += bases.fetch(:medicare_taxable_wages)
+      bounds[:medicare] += bases.fetch(:medicare_taxable_wages)
+    end
     bounds[:ss] += amount(review.external_ss_wage_bound) + gross
     bounds[:medicare] += amount(review.external_medicare_wage_bound) + gross
     if bounds[:ss] > amount(verified.fetch("social_security_wage_base")) || bounds[:medicare] > amount(verified.fetch("additional_medicare_threshold"))
@@ -74,6 +88,8 @@ class BelowThresholdFicaContext
       candidates.map { |item| [ item.attributes.slice(*SOURCE_FIELDS), FicaBasisEvidence.rule_evidence(item),
         item.pay_period.attributes.slice(*PERIOD_FIELDS), item.legacy_disposition&.attributes, item.fica_basis_proof&.evidence ] },
       balances.map { |balance| [ balance.attributes, balance.historical_ytd_bridge.attributes ] },
+      imported_paychecks.map { |row| [ ImportedPaycheckFicaEvidence.source(row),
+        (row.fica_basis_proof&.evidence unless reviewing_imports) ] },
       review.attributes, candidate_employees.map { |person| person.attributes.slice("id", "company_id", "previous_employee_id", "employment_type") }
     ])
     { "version" => VERSION, "mode" => MODE, "year" => year, "employee_id" => employee.id,
@@ -118,6 +134,11 @@ class BelowThresholdFicaContext
       PayrollItem.where(company: company, employee_id: candidate_employee_ids, pay_period_id: periods.select(:id))
         .where.not(employment_type: "contractor").includes(:pay_period, :legacy_disposition, :fica_basis_proof).order(:id).to_a
     end
+  end
+
+  def imported_paychecks
+    @imported_paychecks ||= HistoricalPaycheck.where(company: company, employee_id: [ nil, *candidate_employee_ids ], pay_date: year_range)
+      .includes(:employee, :historical_import_batch, :historical_worker, :historical_pay_period, :historical_paycheck_adjustments, :fica_basis_proof).order(:id).to_a
   end
 
   def balances

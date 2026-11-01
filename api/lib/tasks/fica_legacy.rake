@@ -34,6 +34,31 @@ namespace :payroll do
       end
     end
 
+    desc "Preview imported paycheck FICA reconciliation; apply only the reviewed digest"
+    task :reconcile_imports, [ :mode ] => :environment do |_task, args|
+      mode = args[:mode] || "dry-run"
+      raise ArgumentError, "Reconciliation mode must be dry-run or apply" unless %w[dry-run apply].include?(mode)
+      ids = ENV["EMPLOYEE_IDS"]&.split(",", -1)&.map { |id| Integer(id.strip) }
+      service = ImportedPaycheckFicaReconciliation.new(company: Company.find(Integer(ENV.fetch("COMPANY_ID"))),
+        year: Integer(ENV.fetch("TAX_YEAR")), employee_ids: ids)
+      if mode == "apply"
+        result = service.apply!(actor: User.find(Integer(ENV.fetch("ACTOR_ID"))),
+          review_reference: ENV.fetch("REVIEW_REFERENCE"), expected_digest: ENV.fetch("PLAN_DIGEST"))
+        puts JSON.pretty_generate(mode: mode, result: result)
+      else
+        connection = ApplicationRecord.connection
+        result = if connection.transaction_open?
+          service.inventory
+        else
+          connection.transaction(isolation: :repeatable_read) do
+            connection.execute("SET TRANSACTION READ ONLY")
+            service.inventory
+          end
+        end
+        puts JSON.pretty_generate(mode: mode, result: result)
+      end
+    end
+
     desc "Review legacy FICA recovery (dry-run by default); use bin/rake ... --apply with a reviewed plan"
     task :recover, [ :mode ] => :environment do |_task, args|
       mode = args[:mode] || "dry-run"

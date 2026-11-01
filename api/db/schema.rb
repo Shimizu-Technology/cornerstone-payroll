@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_01_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1695,6 +1695,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
     t.check_constraint "jsonb_typeof(hours_breakdown) = 'array'::text", name: "historical_adjustments_hours_array"
     t.check_constraint "jsonb_typeof(pretax_deduction_breakdown) = 'array'::text", name: "historical_adjustments_pretax_deduction_array"
     t.check_constraint "kind::text = ANY (ARRAY['correction'::character varying::text, 'void'::character varying::text, 'reversal'::character varying::text])", name: "historical_adjustments_kind_check"
+  end
+
+  create_table "historical_paycheck_fica_basis_proofs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id", null: false
+    t.jsonb "evidence", null: false
+    t.bigint "historical_paycheck_id", null: false
+    t.string "plan_digest", null: false
+    t.string "review_reference", null: false
+    t.integer "tax_year", null: false
+    t.index [ "company_id" ], name: "index_historical_paycheck_fica_basis_proofs_on_company_id"
+    t.index [ "created_by_id" ], name: "index_historical_paycheck_fica_basis_proofs_on_created_by_id"
+    t.index [ "historical_paycheck_id" ], name: "idx_imported_fica_proof_paycheck", unique: true
   end
 
   create_table "historical_paychecks", force: :cascade do |t|
@@ -4148,6 +4162,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
   add_foreign_key "historical_paycheck_adjustments", "historical_paychecks"
   add_foreign_key "historical_paycheck_adjustments", "historical_paychecks", column: [ "historical_paycheck_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_historical_adjustments_paycheck_tenant"
   add_foreign_key "historical_paycheck_adjustments", "users", column: "created_by_id", on_delete: :restrict
+  add_foreign_key "historical_paycheck_fica_basis_proofs", "companies", on_delete: :restrict
+  add_foreign_key "historical_paycheck_fica_basis_proofs", "historical_paychecks", on_delete: :restrict
+  add_foreign_key "historical_paycheck_fica_basis_proofs", "users", column: "created_by_id", on_delete: :restrict
   add_foreign_key "historical_paychecks", "companies"
   add_foreign_key "historical_paychecks", "employees"
   add_foreign_key "historical_paychecks", "historical_import_batches"
