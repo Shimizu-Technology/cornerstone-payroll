@@ -4,6 +4,10 @@ require "rails_helper"
 require Rails.root.join("db/migrate/20261102010000_track_shared_payroll_reviews")
 
 RSpec.describe TrackSharedPayrollReviews do
+  after do
+    PayrollReviewPackage.reset_column_information
+    ApplicationRecord.connection.clear_cache!
+  end
   it "retains unknown legacy visibility and positively stamps only visible current revisions" do
     company = create(:company, client_payroll_approval_required: true)
     visible_run = create(:pay_period, :calculated, company: company)
@@ -19,6 +23,8 @@ RSpec.describe TrackSharedPayrollReviews do
     migration = described_class.new
     migration.down
     migration.up
+    PayrollReviewPackage.reset_column_information
+    ApplicationRecord.connection.clear_cache!
 
     expect(visible.reload.sent_for_client_approval_at).to be_present
     expect(visible.client_review_history_unknown?).to be(false)
