@@ -18,7 +18,7 @@ Promotes Cornerstone Payroll `staging-v2` and AIRE Services `staging-v2` to prod
 
 Production auto-deploys from `main`, so everything here must be done before any merge.
 
-- [ ] **Staging acceptance.** Chels signs off on staging running the final release SHAs (manual payroll, AIRE import, the October 1–15 manual lock, reports Mark uses).
+- [ ] **Staging acceptance.** Chels signs off on staging running the final release SHAs (manual payroll, AIRE import, already-paid AIRE history reconciliation, manual Lock on an unpaid fixture, reports Mark uses). October 1–15 is already paid by #94; do not publish/Lock it again on the production-copy rehearsal.
 - [ ] **Final pair certificate.** The `quality.yml` exact-pair certification has passed for the exact Payroll and AIRE `staging-v2` SHAs you will merge. Re-run it if either branch changes:
   ```sh
   gh workflow run quality.yml --repo Shimizu-Technology/cornerstone-payroll --ref staging-v2 \
@@ -69,17 +69,22 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 7. [ ] **Smoke test while paused:**
    - AIRE: clock in and out, edit an entry, approve it.
    - Payroll: open a manual client, print a pay stub, the register, and the Q3 941 and W-1. Line 5 of the W-1 should be filled, and amounts should sit on 941 lines 6 and 10.
-8. [ ] **Activate the connection.**
+8. [ ] **Record AIRE's already-paid history before activation or calendar publication.** Follow [the paid-history procedure](integrations/aire-lock-rollout.md#already-paid-aire-history-release-gate) and the AIRE runner at `backend/ops/release-day/README.md`. Keep both apps paused. With Chels, review the exact source/commit timestamps, the #83/#85 adjustment entry IDs and preview hold list. Preview must rehearse all four finalizations in a rolled-back savepoint and report four would-be batch checksums; stop on `preview_failed`. Apply only a clean reviewed digest. For the 55 historical category gaps, the reviewed plan may use `acknowledge_missing_categories: true` with an evidence note, preserving source timestamps and category gaps rather than editing history. Record Aug 16–31 → #67, Sep 1–15 → #76, Sep 16–30 → #86, Oct 1–15 → #94, in that order. July/earlier, edited-after-payment and adjustment source hours stay on evidence holds until exact paycheck reconciliation. Retain the idempotent receipt, five total batches and zero release-generated outbox events. Any mismatch or failed gate stops activation. **October 1–15 is already paid (#94, committed October 27); do not Lock/import/pay it again.** Backfilled ranges cannot be replaced by new AIRE calendars. Zero-hour entries are excluded from both holds and coverage. After backfill, arbitrary Finalize for Oct 1–15 is refused by the #94 batch-overlap check, rather than the history recovery message. Run the runner near the DB from a Render one-off shell/console with a generous timeout (at least 30 minutes per preview/apply); the November 2 laptop-to-Neon-Singapore rehearsal took 762/753 seconds. Re-certify the final release SHA pair after these fixes merge.
+9. [ ] **Map all six missing AIRE employee identities before activation and the first October 16–31 import.** Create and verify `time_tracking_employee_mappings` rows for Ethan C (AIRE 37 / Payroll 108), Francisco S (39 / Payroll 581), Stevie S (40), Christopher L (23), Amanda M (16), and Mindy W (20). These six have about 294 October 16–31 hours; verify each actual Payroll employee and category/pay-component mapping. Matching names in an audit does not create source mappings.
+10. [ ] **Route unpaid entry 1804 explicitly.** Ethan C's approved Sep 15 4.25 h was created September 23 after #76 was calculated and is in neither #76 nor #86. The AIRE plan must contain `"owed_entry_ids": [1804]`; the runner opens a settlement case and records neither a paid snapshot nor an already-paid hold for it. Once October 16–31 is published, route it payable to that first connected period before November 7 17:00 Pacific/Guam. Alternatively pay manually in Cornerstone and reconcile the case through the exact allocation. Reconcile adjustments with `"83": []` (voided duplicate, no hours paid) and `"85": []` (Francisco's Sep 1–15 80.30 regular + 14.00 OT hours have no AIRE source entries), retaining those evidence notes.
+11. [ ] **Decide all pending legacy entries with accounting.** The November 2 production-copy rehearsal found 70 payable pending entries with NULL approval: Nadia 62 (May 1–Aug 21), Thomas 2, Amanda 3 and Asia 3 (the eight non-Nadia entries are in early May), plus one zero-hour Mindy entry that is ignored. These are dated evidence counts, not release-runner constants; review the live preview's `uncovered_pending_by_user` counts and date ranges. Chels and Mark decide the May–June dispositions. Arbitrary-range Finalize stays blocked until accounting denies these entries or records their reviewed disposition; connected calendar payroll is not blocked. Nadia's Aug 20/21 entries 1429/1437 (6.38/4.38 h) were already paid by #67; do not approve them merely to clear a checklist. Later approval opens an individual case for explicit payable/already-paid/not-payable routing.
+12. [ ] **Activate the connection.**
    - Review any overdue scheduled cutoffs first; they become eligible immediately.
    - Set `CONNECTED_PAYROLL_MODE=enabled` on AIRE and Payroll (web and worker).
    - Restart both promptly, so neither app is left enabled alone.
    - `connected_payroll:status` should show enabled on both.
    - Pending AIRE events should drain and receipts arrive.
-9. [ ] Decide whether to turn production auto-deploy back on.
+   - Publish the October 16–31 calendar before November 7 at 17:00 Pacific/Guam, using the real adjacent #94 regular run and October 31 payday. Review its snapshot for October 16–31 hours plus explicitly routed genuine corrections only.
+13. [ ] Decide whether to turn production auto-deploy back on.
 
 ## 3. After the release
 
-- [ ] Chels processes October 1–15 through the connected flow if it isn't already paid, using the manual Lock in Payroll.
+- [ ] Chels verifies October 1–15 remains recorded as already processed against paid run #94. Do not run another manual Lock or connected import for those wages. Reconcile any genuine correction through the settlement-case/evidence workflow.
 - [ ] Watch the first automatic lock on **November 7 at 17:00 ChST** and the November 15 payroll.
 - [ ] Before the first 2027 payroll, the CEO verifies the 2027 tables.
 
