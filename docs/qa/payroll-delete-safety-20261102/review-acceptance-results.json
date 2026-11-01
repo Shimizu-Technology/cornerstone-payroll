@@ -50,11 +50,22 @@
     {
       "range": "a6a4c8ec..9a18ed42",
       "status": "clean narrow source review"
+    },
+    {
+      "commit": "e81a715121b4406adf904c821a2b28a506499490",
+      "status": "clean narrow YTD source review; current withholding exactly once"
     }
   ],
   "limits": [
     "Desktop Chromium emulated390width, no physical phone",
     "No printer/provider/payment/filing/deployment certification",
     "No staging or production access"
-  ]
+  ],
+  "final_pdf_runtime_commit": "e81a715121b4406adf904c821a2b28a506499490",
+  "final_pdf_http_requests": [
+    "GET /api/v1/admin/pay_stubs/3/download",
+    "POST /api/v1/admin/pay_stubs/batch_pdf"
+  ],
+  "final_pdf_pages": 1,
+  "final_ytd_regression": "Calculated and committed:100+20-12.65-3additionalwithholding-9deductions=95.35, one page"
 }
