@@ -419,7 +419,9 @@ RSpec.describe PayrollRetirementCalculation do
 
   it "requires verified plan availability for legacy employee Roth contributions" do
     employee.update!(roth_retirement_rate: 0.05)
-    expect { calculate }.to raise_error(ArgumentError, /plan permits designated Roth employee/)
+    expect { calculate }.to raise_error(ArgumentError) { |error|
+      expect(error.message).to include(employee.full_name, "Employees → #{employee.full_name} → Pay setup → Set up retirement", "plan permits designated Roth employee contributions")
+    }
   end
 
   it "requires verified provider support for legacy Roth employer matching" do

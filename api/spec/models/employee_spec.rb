@@ -496,14 +496,14 @@ RSpec.describe Employee, type: :model do
       expect(employee.errors.attribute_names).to include(:address_line1, :city, :state, :zip)
     end
 
-    it "requires legacy incomplete records to be completed when they are edited" do
+    it "allows edits to legacy records with missing personal details" do
       employee = create(:employee)
       employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
 
       employee.first_name = "Updated"
 
-      expect(employee).not_to be_valid
-      expect(employee.errors.attribute_names).to include(:hire_date, :address_line1, :city, :state, :zip)
+      expect(employee).to be_valid
+      expect(employee.save).to be(true)
     end
 
     it "still allows an incomplete legacy record to be terminated" do

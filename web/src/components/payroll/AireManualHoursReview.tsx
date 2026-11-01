@@ -1,3 +1,5 @@
+import { Link } from 'react-router';
+import { needsTimeTrackingAccount, TIME_TRACKING_CONNECTION_MESSAGE } from '@/lib/time-tracking-account';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +90,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
   const attentionCount = Number(review?.summary?.exclusion_count || 0)
     + Number(review?.issues?.missing_category_count || 0)
     + Number(review?.issues?.negative_adjustment_count || 0);
+  const needsAccountConnection = needsTimeTrackingAccount(error);
   const isCommitted = payPeriodStatus === 'committed';
 
   return (
@@ -117,7 +120,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
         ) : error ? (
           <div role="alert" className="flex items-start gap-4 px-6 py-6 text-sm text-danger-800">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            <div><p className="font-semibold">The live time tracking preview could not load.</p><p className="mt-2 leading-5">{error} Refresh before using time tracking hours for payroll.</p></div>
+            <div><p className="font-semibold">The live time tracking preview could not load.</p><p className="mt-2 leading-5">{needsAccountConnection ? TIME_TRACKING_CONNECTION_MESSAGE : `${error} Refresh before using time tracking hours for payroll.`}</p>{needsAccountConnection && <Link className="mt-2 inline-block font-semibold underline" to="/app/aire-account-connection">Settings → Time tracking account</Link>}</div>
           </div>
         ) : review && review.summary && (
           <>

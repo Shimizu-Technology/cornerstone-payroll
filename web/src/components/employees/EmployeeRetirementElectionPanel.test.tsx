@@ -152,4 +152,20 @@ describe('retirement election setup', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+
+it('keeps the saved Roth employer destination and explains the checkbox or Traditional alternative before saving', async () => {
+  const user = userEvent.setup();
+  render(<EmployeeRetirementElectionPanel employee={{ id: 5, company_id: 1, retirement_rate: 0.02, employer_roth_match_rate: 0.03 } as Employee} onSaved={async () => undefined} />);
+  await user.click(screen.getByRole('button', { name: 'Set up retirement' }));
+  await user.type(screen.getByLabelText('First pay date using this election'), '2026-11-01');
+  expect((screen.getByLabelText('Employer contribution destination') as HTMLSelectElement).value).toBe('roth');
+  await user.click(screen.getByRole('button', { name: 'Save contribution change' }));
+  expect(screen.getByText(/For Roth employer contributions, check/).textContent).toContain('Administrator confirmed employer Roth support');
+  expect(screen.getByText(/For Roth employer contributions, check/).textContent).toContain('Traditional');
+  expect(mocks.create).not.toHaveBeenCalled();
+  await user.selectOptions(screen.getByLabelText('Employer contribution destination'), 'traditional');
+  await user.click(screen.getByRole('button', { name: 'Save contribution change' }));
+  expect(mocks.create).toHaveBeenCalledWith(5, expect.objectContaining({ employer_match_destination: 'traditional' }));
+});
+
 });
