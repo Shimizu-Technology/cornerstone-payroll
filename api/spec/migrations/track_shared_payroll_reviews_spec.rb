@@ -19,6 +19,7 @@ RSpec.describe TrackSharedPayrollReviews do
     superseded = visible_run.payroll_review_packages.create!(**attributes, company: company, revision: 1, status: "superseded", superseded_at: Time.current, supersession_reason: "Replaced before migration")
     invisible = invisible_run.payroll_review_packages.create!(**attributes, company: company, revision: 1)
     disabled = disabled_run.payroll_review_packages.create!(**attributes, company: other_company, revision: 1)
+    item = create(:payroll_item, company: other_company, pay_period: disabled_run, hours_worked: 17)
 
     migration = described_class.new
     migration.down
@@ -34,6 +35,21 @@ RSpec.describe TrackSharedPayrollReviews do
       expect(package.retained_client_evidence?).to be(true)
     end
     expect(disabled_run.deletion_blocker).to include("unverified sharing history")
+    records = [ other_company, disabled_run, disabled, item ]
+    before = records.map { |record| record.reload.attributes }
+    expect { disabled_run.destroy! }.to raise_error(ActiveRecord::RecordNotDestroyed)
+    expect(records.map { |record| record.class.find(record.id).attributes }).to eq(before)
+
+    # Only the new issuer can positively identify an unshared package after
+    # the migration boundary; null historical timestamps alone cannot do so.
+    fresh_run = create(:pay_period, :calculated, company: other_company)
+    fresh_item = create(:payroll_item, company: other_company, pay_period: fresh_run)
+    fresh_package = PayrollReview::RevisionService.new(pay_period: fresh_run).issue!
+    expect(fresh_package).to have_attributes(client_review_history_unknown: false, sent_for_client_approval_at: nil)
+    expect { fresh_run.destroy! }.not_to raise_error
+    expect(PayPeriod.exists?(fresh_run.id)).to be(false)
+    expect(PayrollItem.exists?(fresh_item.id)).to be(false)
+    expect(PayrollReviewPackage.exists?(fresh_package.id)).to be(false)
   end
 
   it "retains publication by an old writer that bypasses model callbacks" do

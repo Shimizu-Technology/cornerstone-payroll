@@ -140,6 +140,8 @@ class CheckGenerator
       "summary" => {
         "gross" => fn(payroll_item.gross_pay),
         "ytd_gross" => fn(pay_ytd_total),
+        "non_taxable_pay" => fn(current_non_taxable_pay),
+        "ytd_non_taxable_pay" => fn(ytd_non_taxable_pay),
         "taxes" => fn(cur_taxes),
         "ytd_taxes" => fn(ytd[:taxes]),
         "deductions" => fn(cur_deds),
@@ -337,7 +339,17 @@ class CheckGenerator
     # The right column flows independently: use the space below taxes, and
     # reserve the expanded summary plus NET PAY before rendering deductions.
     deductions_top = table_y1 - taxes_height - 6.0
-    summary_floor = sect_bot + summary_box_height(stub_cfg) + 20.0
+    requested_shift = [ stub_cfg["summary_x_offset"].to_f, 0.0 ].max
+    maximum_shift = [ right_w - MIN_SUMMARY_BOX_WIDTH, 0.0 ].max
+    summary_x = rx + [ requested_shift, maximum_shift ].min
+    summary_w = right_w - (summary_x - rx)
+    summary_table = build_summary_table(pdf, summary_w, stub_cfg)
+    summary_height = summary_box_height(stub_cfg, rendered_height: summary_table.height)
+    summary_floor = sect_bot + summary_height + 20.0
+    deductions_space = deductions_top - summary_floor - 6.0
+    if deductions_space < 10.0
+      raise ArgumentError, "This printer layout leaves no readable space for deductions and the summary. Adjust the stub layout before printing."
+    end
     deductions_height = draw_section_table(pdf,
       x: rx, y: deductions_top, w: right_w,
       title: "DEDUCTIONS",
@@ -347,7 +359,8 @@ class CheckGenerator
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
       padding_x: stub_cfg["table_padding_x"].to_f,
-      max_height: [ deductions_top - summary_floor - 6.0, 1.0 ].max
+      max_height: deductions_space,
+      min_scale: 0.75
     )
 
     # ================================================================
@@ -373,15 +386,13 @@ class CheckGenerator
     # SUMMARY box (bordered)
     # Keep the summary inside the right column without making its table too
     # narrow to print monetary values. Legacy offsets may be negative or large.
-    requested_shift = [ stub_cfg["summary_x_offset"].to_f, 0.0 ].max
-    maximum_shift = [ right_w - MIN_SUMMARY_BOX_WIDTH, 0.0 ].max
-    summary_x = rx + [ requested_shift, maximum_shift ].min
     draw_summary_box(
       pdf,
       x: summary_x,
-      y: summary_box_y(sect_bot, deductions_top, row3_top, stub_cfg, deductions_height),
-      w: right_w - (summary_x - rx),
-      stub_cfg: stub_cfg
+      y: summary_box_y(sect_bot, deductions_top, row3_top, stub_cfg, deductions_height, summary_height: summary_height),
+      w: summary_w,
+      stub_cfg: stub_cfg,
+      table: summary_table
     )
 
     draw_void_watermark(pdf, sect_bot) if voided || rehearsal_preview
@@ -390,7 +401,7 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # Section table helper
   # -----------------------------------------------------------------------
-  def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:, table_height:, padding_y:, padding_x:, max_height: nil)
+  def draw_section_table(pdf, x:, y:, w:, title:, columns:, col_ratios:, rows:, table_height:, padding_y:, padding_x:, max_height: nil, min_scale: nil)
     header = [ { content: title, font_style: :bold } ] +
       columns.map { |c| { content: c, font_style: :bold, align: :right } }
 
@@ -415,16 +426,44 @@ class CheckGenerator
           end
         end
         scale = max_height ? [ 1.0, max_height / table.height ].min : 1.0
+        raise Prawn::Errors::CannotFit if min_scale && scale < min_scale
+
         pdf.scale(scale, origin: [ 0, pdf.cursor ]) { table.draw }
         rendered_height = table.height * scale
       end
     end
     rendered_height
   rescue Prawn::Errors::CannotFit
+    if title == "DEDUCTIONS"
+      return draw_readable_deductions(pdf, x: x, y: y, w: w, data: data, max_height: max_height)
+    end
     pdf.bounding_box([ x, y ], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
     table_height
+  end
+
+  # A check-stock PDF must not silently omit deductions or insert extra pages
+  # into a printer's stock sequence. Keep every row at a readable size. If even
+  # this compact list cannot fit, refuse generation with actionable guidance.
+  def draw_readable_deductions(pdf, x:, y:, w:, data:, max_height:)
+    rendered_height = 0.0
+    pdf.bounding_box([ x, y ], width: w) do
+      table = pdf.make_table(data, column_widths: [ w * 0.46, w * 0.27, w * 0.27 ],
+        cell_style: { padding: [ 0, 1 ], borders: [], size: 6.5 }) do
+        row(0).font_style = :bold
+        row(0).borders = [ :bottom ]
+        columns(1..2).align = :right
+      end
+      if max_height && table.height > max_height
+        raise Prawn::Errors::CannotFit
+      end
+      table.draw
+      rendered_height = table.height
+    end
+    rendered_height
+  rescue Prawn::Errors::CannotFit
+    raise ArgumentError, "The deductions cannot fit readably on this check stock. Adjust the stub layout or use a separate earnings statement before printing. No deductions were omitted."
   end
 
   # -----------------------------------------------------------------------
@@ -551,9 +590,9 @@ class CheckGenerator
       .to_a
   end
 
-  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height)
+  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height, summary_height: summary_box_height(stub_cfg))
     non_overlapping_top = deductions_top - deductions_height - 6.0
-    minimum_top = sect_bot + summary_box_height(stub_cfg) + 20.0
+    minimum_top = sect_bot + summary_height + 20.0
 
     [ [ default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top ].min, minimum_top ].max
   end
@@ -569,17 +608,11 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # SUMMARY box (bottom-right, with NET PAY below like QuickBooks)
   # -----------------------------------------------------------------------
-  def summary_box_height(stub_cfg)
-    [ stub_cfg["summary_box_h"].to_f, 5 * (8 + 2 * stub_cfg["summary_padding_y"].to_f) + 6 ].max
+  def summary_box_height(stub_cfg, rendered_height: 0.0)
+    [ stub_cfg["summary_box_h"].to_f, 5 * (8 + 2 * stub_cfg["summary_padding_y"].to_f) + 6, rendered_height + 6 ].max
   end
 
-  def draw_summary_box(pdf, x:, y:, w:, stub_cfg:)
-    box_h = summary_box_height(stub_cfg)
-
-    pdf.stroke_color "333333"
-    pdf.line_width 0.8
-    pdf.stroke_rectangle [ x, y ], w, box_h
-
+  def build_summary_table(pdf, w, stub_cfg)
     inner_w = w - 6
     cw = [ inner_w * 0.38, inner_w * 0.31, inner_w * 0.31 ]
 
@@ -591,27 +624,33 @@ class CheckGenerator
 
     data_rows = [
       [ "Total Pay", fd(payroll_item.gross_pay), fd(pay_ytd_total) ],
-      [ "Non-Taxable Pay", fd(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }), fd(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
+      [ "Non-Taxable Pay", fd(current_non_taxable_pay), fd(ytd_non_taxable_pay) ],
       [ "Taxes", fd(cur_taxes), fd(ytd[:taxes]) ],
       [ "Deductions", fd(cur_deds), fd(ytd_visible_deds) ]
     ]
 
     data = [ header ] + data_rows
 
-    pdf.bounding_box([ x + 3, y - 3 ], width: inner_w) do
-      pdf.font_size(6.5) do
-        pdf.table(data, column_widths: cw, cell_style: {
-          padding: [ stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f ], borders: [], size: 6.5
-        }) do
-          row(0).borders = [ :bottom ]
-          row(0).border_color = "999999"
-          row(0).background_color = "EEEEEE"
-          columns(1..2).align = :right
-        end
-      rescue Prawn::Errors::CannotFit
-        pdf.text "[SUMMARY]", size: 6, color: "CC0000"
-      end
+    pdf.make_table(data, column_widths: cw, cell_style: {
+      padding: [ stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f ], borders: [], size: 6.5
+    }) do
+      row(0).borders = [ :bottom ]
+      row(0).border_color = "999999"
+      row(0).background_color = "EEEEEE"
+      columns(1..2).align = :right
     end
+  rescue Prawn::Errors::CannotFit
+    raise ArgumentError, "The check summary cannot fit this printer layout. Widen the summary column or reduce summary padding before printing."
+  end
+
+  def draw_summary_box(pdf, x:, y:, w:, stub_cfg:, table:)
+    box_h = summary_box_height(stub_cfg, rendered_height: table.height)
+    pdf.stroke_color "333333"
+    pdf.line_width 0.8
+    pdf.stroke_rectangle [ x, y ], w, box_h
+    # Prawn's row-fit check rounds cell positions independently; an exact-height
+    # box can paginate its last row. The ink still uses the measured height.
+    pdf.bounding_box([ x + 3, y - 3 ], width: w - 6, height: table.height + 0.5) { table.draw }
 
     net_y = y - box_h - 8
     amount_text = fd(payroll_item.net_pay)
@@ -622,6 +661,14 @@ class CheckGenerator
       amount_w = pdf.width_of(amount_text, style: :bold)
       pdf.draw_text amount_text, at: [ x + w - amount_w - 3, net_y ], style: :bold
     end
+  end
+
+  def current_non_taxable_pay
+    statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }
+  end
+
+  def ytd_non_taxable_pay
+    statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }
   end
 
   # -----------------------------------------------------------------------

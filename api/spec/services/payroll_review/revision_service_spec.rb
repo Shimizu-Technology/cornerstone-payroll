@@ -64,7 +64,11 @@ RSpec.describe PayrollReview::RevisionService do
     pay_period.invalidate_calculation!(reason: "Inputs changed before client review")
     company.update!(client_payroll_approval_required: true)
     expect(package.reload.sent_for_client_approval_at).to be_nil
-    expect(pay_period.reload.destroy).to be_truthy
+    expect(package.client_review_history_unknown?).to be(false)
+    expect(package.retained_client_evidence?).to be(false)
+    expect { pay_period.reload.destroy! }.not_to raise_error
+    expect(PayPeriod.exists?(pay_period.id)).to be(false)
+    expect(PayrollReviewPackage.exists?(package.id)).to be(false)
   end
 
   it "creates a new review revision when the displayed employee identity changes" do
