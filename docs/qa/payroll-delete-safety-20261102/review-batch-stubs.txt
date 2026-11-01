@@ -1,7 +1,7 @@
 Delete Safety Synthetic
-220 Schulist Stream
+153 Champlin Parks
 Hagåtña, GU 96910
-(235) 604 4029
+1060896376
 
 
                                                      EARNINGS STATEMENT
@@ -16,23 +16,22 @@ Pay Date:                  10/23/2026
 Check #:                   1001
 
 EARNINGS
- Description                                         Hours                                Rate                        Current        YTD
- Regular                                              10.00                             $10.00                        $100.00          —
- GROSS PAY                                                                                                            $100.00     $100.00
+ Description                                         Hours                                Rate                        Current      YTD
+ Regular                                              10.00                             $10.00                        $100.00        —
+ GROSS PAY                                                                                                            $100.00   $100.00
 
 
 DEDUCTIONS
- Description                                                                                            Current                      YTD
- Federal/Guam Income Tax                                                                                   $5.00                    $5.00
- Social Security (6.2%)                                                                                    $6.20                    $6.20
- Medicare (1.45%)                                                                                          $1.45                    $1.45
- TOTAL DEDUCTIONS                                                                                        $12.65                    $12.65
+ Description                                                                                            Current                    YTD
+ Federal/Guam Income Tax                                                                                   $5.00                  $5.00
+ Social Security (6.2%)                                                                                    $6.20                  $6.20
+ Medicare (1.45%)                                                                                          $1.45                  $1.45
+ TOTAL DEDUCTIONS                                                                                        $12.65                  $12.65
 
 
 NON-TAXABLE ADDITIONS
- Description                                                                                         Current                         YTD
- Non-Taxable Pay                                                                                      $20.00                       $20.00
-
+ Description                                                                                         Current                       YTD
+ Non-Taxable Pay                                                                                      $20.00                     $20.00
 
 
                                                                                          SUMMARY                                Current
@@ -42,16 +41,19 @@ NON-TAXABLE ADDITIONS
                                                                                          Deductions                               $0.00
                                                                                          NET PAY                                $107.35
 
+
 YEAR-TO-DATE SUMMARY
  Gross Earnings                                           $100.00
+ Non-Taxable Pay                                            $20.00
  Federal/Guam Tax                                             $5.00
  Social Security                                              $6.20
  Medicare                                                     $1.45
+ Deductions                                                   $0.00
  Net Pay                                                  $107.35
 
 
 
 
                                           This is your official earnings statement. Please retain for your records.
-                                                   Generated on November 02, 2026 at 08:35 AM ChST
+                                                   Generated on November 02, 2026 at 08:55 AM ChST
 
