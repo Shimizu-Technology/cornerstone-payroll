@@ -157,7 +157,7 @@ export function calculateGrossPay(
  * Pay period status display
  */
 export const payPeriodStatusConfig = {
-  retired_history: { label: 'Retired to history', color: 'bg-neutral-100 text-neutral-800', dotColor: 'bg-neutral-400' },
+  retired_history: { label: 'Paid by previous provider', color: 'bg-neutral-100 text-neutral-800', dotColor: 'bg-neutral-400' },
   draft: {
     label: 'Draft',
     color: 'bg-neutral-100 text-neutral-800',

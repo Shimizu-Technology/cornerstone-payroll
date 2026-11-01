@@ -81,3 +81,23 @@ CI backend on `b9164e39` failed only RuboCop's two extra blank lines (`ci-backen
 `origin/staging-v2` at `e45f54dd` (#408 imported-paycheck FICA proofs, #409 DedicatedAdvisoryLock, #410 checklist, #411/#412 zero-liability reversal) was merged without rewriting history. The only textual conflict was the schema version line; both migrations remain and the schema version is `2026_11_01_090000`.
 
 New regression `api/spec/services/prior_provider_history/pre_upgrade_source_runs_spec.rb` reproduces the read-only production shape recorded on 2026-11-02: three salaried per-period employees on a semimonthly profile, 20 calculated runs of 14 days (three 21-day: Apr 23–May 13, Jul 23–Aug 12, Oct 8–28), pay date equal to period end, gross $4,300 for the first two runs and $4,150 after. Items are calculated and then stripped of staging-v2-only calculation artifacts (`annual_fica_context`, earnings rounding and employer-match identity snapshots). The spec proves that upgraded approval of such a run demands recalculation, while selection, preview, conversion and activation use the saved rows unchanged (payroll item attributes identical before and after), create no checks, postings, deposits, tax-sync changes, jobs or email, and the first live run (Oct 29–Nov 11) calculates on the ordinary annual FICA path, approves and commits without a source review even though imported paychecks engage the conservative imported-history path. The release-day legacy inventory for the client stays clean. A second example covers an old calculation whose employer-contribution provenance is ambiguous: it now prefills blank for explicit entry instead of failing the selection page.
+
+## Accountant access and ease-of-use pass (2026-11-02)
+
+Access: any staff user who can run and commit the client's payroll (super admin, org admin, admin, manager, or accountant with access to the client) can view, save, record, turn on year-to-date and undo. Client and employee users, and staff without access to the client, get 403. The services recheck access under the business locks. Recording turns on Historical payroll for the client automatically.
+
+Ease of use: five steps with a "What's left" list; every run, takeover date and paycheck is prefilled; employees are confirmed against roster SSN last four; paycheck and register problems show next to the field with the exact difference; progress autosaves to a shared per-client draft with stale-save protection; typed confirmation phrases are replaced by summary dialogs (pay dates, paychecks, totals, per-employee year-to-date) with a checkbox. The API still records the same acknowledgement constants.
+
+Agent-executed local walkthrough (headless Chromium, `AUTH_ENABLED=false`, the only payroll user an assigned accountant, synthetic fixture with the recorded Kasperbauer run shape: 20 runs of 14/21 days, pay date on period end, $83,300 gross):
+
+| Case | Result |
+|---|---|
+| Accountant opens the client from Client Management; can manage; 20 runs / 60 paychecks prefilled and selected; takeover Nov 1 | passed (1440) |
+| Paycheck net and register gross differences shown inline with exact amount (−$10.00) | passed (1440) |
+| Autosaved progress resumes at Match registers with 10 of 20 matched after reload | passed (1440) |
+| Match registers at phone width, no page overflow; 21-day Oct 8–28 period listed | passed (390) |
+| Record through summary dialog (checkbox required) → 20 pay dates / 60 paychecks | passed (1440) |
+| Turn on year-to-date through dialog at phone width; Q1–Q3 provider / Q4 + W-2GU Cornerstone; survives reload | passed (390, 1440) |
+| Saved API state: 20 periods, 60 paychecks, gross 83,300, 3 opening balances | passed |
+
+Screenshots are in `docs/qa/prior-provider-history-20261101/`. Limits: resized headless browser, not physical devices or a human operator.
