@@ -3,6 +3,16 @@
 # Explicit accounting reversal, independent of retiring a payment instrument.
 # Connected source corrections continue through their reviewed correction flow.
 class ReversePaycheckService
+  # Every saved source that can become a tax, deduction, contribution or loan
+  # obligation. A nonzero value means a shared payment may settle part of it.
+  LIABILITY_FIELDS = %i[
+    withholding_tax additional_withholding social_security_tax medicare_tax additional_medicare_tax
+    employer_social_security_tax employer_medicare_tax retirement_payment roth_retirement_payment
+    employer_retirement_match employer_roth_retirement_match insurance_payment loan_payment loan_deduction
+    total_deductions
+  ].freeze
+  ADDITION_TREATMENTS = %w[taxable_addition non_taxable_addition].freeze
+
   def self.call(payroll_item:, actor:, reason:)
     new(payroll_item, actor, reason).call
   end
@@ -30,9 +40,12 @@ class ReversePaycheckService
           raise ArgumentError, "This paycheck reserves connected source hours; use the reviewed source correction workflow"
         end
         # Employee payment evidence belongs to this paycheck. Filing evidence
-        # and shared liability payments still apply to the entire period.
+        # still applies to the entire period. A shared liability or payee
+        # payment blocks unless this paycheck provably contributes nothing it
+        # could settle.
         payments = PayrollRevisionPaymentPreflight.new(pay_period: period, lock: true, payroll_item: item).ensure_eligible!
-        if payments.other_payments.any? { |payment| !payment.voided? }
+        active_payments = payments.other_payments.reject(&:voided?)
+        if active_payments.any? && (!liability_free? || active_payments.any? { |payment| allocated_to_item_or_unattributed?(payment) })
           raise ArgumentError, "This payroll has shared liability payments; reconcile them before reversing one paycheck"
         end
         PayrollLiabilityPaymentGuard.ensure_clear!(pay_period: period,
@@ -73,6 +86,34 @@ class ReversePaycheckService
   private
 
   attr_reader :item, :actor, :reason
+
+  # True only when the paycheck has no liability source at all. Anything that
+  # cannot be shown to be zero (including an unexplained gross/net difference)
+  # counts as a contribution, so the shared-payment guard fails closed.
+  def liability_free?
+    item.gross_pay.to_d == item.net_pay.to_d &&
+      LIABILITY_FIELDS.none? { |field| item.public_send(field).to_d.nonzero? } &&
+      item.named_loan_payments.to_h.values.all? { |amount| zero_amount?(amount) } &&
+      Array(item.custom_deductions).empty? &&
+      Array(item.payroll_adjustments).all? { |row| row.is_a?(Hash) && ADDITION_TREATMENTS.include?(row["treatment"].to_s) } &&
+      item.payroll_item_deductions.none? { |row| row.amount.to_d.nonzero? } &&
+      item.payroll_item_field_entries.none? { |row| row.kind != "addition" && row.amount.to_d.nonzero? } &&
+      !item.loan_transactions.exists? &&
+      !item.payroll_liability_entries.exists?
+  end
+
+  def zero_amount?(value)
+    (value.is_a?(Numeric) || value.is_a?(String)) && BigDecimal(value.to_s).zero?
+  rescue ArgumentError
+    false
+  end
+
+  # A payment reserving this paycheck's journal entries, or entries without a
+  # paycheck, may settle this paycheck's share; treat it as related.
+  def allocated_to_item_or_unattributed?(payment)
+    payment.payroll_liability_check_allocations.joins(:payroll_liability_entry)
+      .where(payroll_liability_entries: { payroll_item_id: [ item.id, nil ] }).exists?
+  end
 
   def reverse_liabilities!(period)
     entries = period.payroll_liability_postings.joins(:entries)
