@@ -257,6 +257,16 @@ describe("Prior-provider history", () => {
     await waitFor(() => expect((screen.getByLabelText("Previous payroll provider") as HTMLInputElement).value).toBe(""));
   });
 
+  it("selects the remaining runs, not clears, when a manual pay date is also added", async () => {
+    open();
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    fireEvent.click(screen.getByRole("button", { name: /Add a pay date that isn’t listed/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Select all (2)" }));
+    expect(screen.getByText(/3 pay dates · 5 paychecks/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+  });
+
   it("shows incomplete run coverage explicitly", async () => {
     vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...page(), eligible_run_count: 61, candidates_overflow: true });
     open();

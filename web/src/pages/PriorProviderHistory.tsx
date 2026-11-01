@@ -486,6 +486,9 @@ function SaveStatus({ state, savedAt, onSave }: { state: SaveState; savedAt: str
 
 function PayDatesStep({ page, payload, onChange }: { page: HistoryPage; payload: HistoryPayload; onChange: (next: HistoryPayload) => void }) {
   const selected = new Set(payload.periods.map((period) => period.key));
+  const candidateKeys = new Set(page.candidates.map((candidate) => candidate.key));
+  const allSelected = page.candidates.length > 0 && page.candidates.every((candidate) => selected.has(candidate.key));
+  const unavailable = payload.periods.filter((period) => period.run_id && !candidateKeys.has(period.key));
   const totals = payload.periods.reduce((sum, period) => sum.plus(decimal(periodTotals(period).gross_pay)), decimal("0"));
   const addManual = () =>
     onChange({
@@ -535,13 +538,13 @@ function PayDatesStep({ page, payload, onChange }: { page: HistoryPage; payload:
               onClick={() =>
                 onChange({
                   ...payload,
-                  periods: selected.size === page.candidates.length
+                  periods: allSelected
                     ? payload.periods.filter((period) => !period.run_id)
                     : [...page.candidates.map((candidate) => payload.periods.find((p) => p.key === candidate.key) ?? normalizeCandidate(candidate)), ...payload.periods.filter((p) => !p.run_id)],
                 })
               }
             >
-              {selected.size === page.candidates.length ? "Clear all" : `Select all (${page.candidates.length})`}
+              {allSelected ? "Clear all" : `Select all (${page.candidates.length})`}
             </Button>
           </div>
           <ul className="divide-y divide-neutral-100">
@@ -570,6 +573,14 @@ function PayDatesStep({ page, payload, onChange }: { page: HistoryPage; payload:
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {unavailable.length > 0 && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-warning-50 p-3 text-sm text-warning-900">
+          <span>{unavailable.length} saved pay {unavailable.length === 1 ? "date is" : "dates are"} no longer available here (the run changed or was removed).</span>
+          <Button variant="outline" size="sm" onClick={() => onChange({ ...payload, periods: payload.periods.filter((period) => !unavailable.includes(period)) })}>
+            Remove {unavailable.length === 1 ? "it" : "them"}
+          </Button>
         </div>
       )}
       {!page.candidates.length && <p className="text-sm text-neutral-600">No payroll runs are waiting here. Add each pay date from the provider’s registers.</p>}

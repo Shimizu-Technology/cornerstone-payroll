@@ -35,7 +35,9 @@ module PriorProviderHistory
         batch = HistoricalImportBatch.create!(
           company: company, created_by: actor, applied_by: actor, applied_at: Time.current,
           status: "applied", source_system: "prior_provider", source_label: payload.fetch("provider_name").strip,
-          bundle_digest: plan.digest, importer_version: SourceAdapter::VERSION,
+          # Unique per recording so unchanged history can be recorded again
+          # after an undo; preview_digest still binds the reviewed plan.
+          bundle_digest: Digest::SHA256.hexdigest("#{plan.digest}:#{idempotency_key}"), importer_version: SourceAdapter::VERSION,
           source_file_manifest: stored.map { |source| { "filename" => source.fetch(:original_filename), "sha256" => source.fetch(:sha256), "byte_size" => source.fetch(:byte_size), "report_type" => source.fetch(:report_type) } },
           preview_summary: { "totals" => plan.totals, "paycheck_count" => plan.periods.sum { |period| period.fetch("paychecks").size } },
           reconciliation_summary: { "passed" => true, "period_count" => plan.periods.size },

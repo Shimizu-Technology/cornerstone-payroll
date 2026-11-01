@@ -356,8 +356,10 @@ class W2GuAggregator
   end
 
   def source_summary
+    systems = include_historical ? historical_source.source_systems(range: year_range) : []
     {
-      mode: include_historical ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
+      historical_source_systems: systems,
       cornerstone: {
         payroll_item_count: aggregated_items.values.sum { |item| item.payroll_item_count.to_i }
       },

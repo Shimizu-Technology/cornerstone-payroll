@@ -354,7 +354,9 @@ export function HistoricalPayroll(): ReactElement {
       ? selectedBatchIdRef.current
       : preferredBatchId;
     const providers = (response.meta.import_providers || []).filter(provider => provider.key !== 'prior_provider');
-    setBatches(response.data);
+    // Prior-provider history has its own workflow; keep it out of this list.
+    const listedBatches = response.data.filter((batch) => batch.source_system !== 'prior_provider');
+    setBatches(listedBatches);
     setArchive(response.meta.archive);
     setImportProviders(providers);
     if (providers.length > 0) setSelectedImportProviderKey((current) => (
@@ -365,9 +367,9 @@ export function HistoricalPayroll(): ReactElement {
     setBatchMeta(response.meta);
     selectBatchPage(response.meta.current_page);
     selectBatch(
-      currentPreferredBatchId && response.data.some((batch) => batch.id === currentPreferredBatchId)
+      currentPreferredBatchId && listedBatches.some((batch) => batch.id === currentPreferredBatchId)
         ? currentPreferredBatchId
-        : response.data[0]?.id ?? null,
+        : listedBatches[0]?.id ?? null,
     );
   }, [selectBatch, selectBatchPage]);
 

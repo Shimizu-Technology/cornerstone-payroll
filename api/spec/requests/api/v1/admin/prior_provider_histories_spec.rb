@@ -115,6 +115,9 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: @runs.first.id }
     expect(response).to have_http_status(:unprocessable_entity)
     expect(response.parsed_body["error"]).to include("already paid")
+    get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: @runs.first.id }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("already paid")
     post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: @runs.first.id }
     expect(response).to have_http_status(:unprocessable_entity)
     expect(@runs.first.transmittal).to be_nil
