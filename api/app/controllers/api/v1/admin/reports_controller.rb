@@ -4092,7 +4092,7 @@ module Api
           end
           [
             { name: "Payroll Summary", rows: rows },
-            { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).map { |key, value| [ key.to_s.humanize, value ] } },
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),

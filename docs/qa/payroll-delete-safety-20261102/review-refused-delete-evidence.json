@@ -1,0 +1,30 @@
+{
+  "desktop": {
+    "identical": true,
+    "sha256": "193ac7a165020b9c8235f9163c2daf93b5b319c4fd5ac1244f0ab6bd352f0da2",
+    "collections": {
+      "items": 1,
+      "fields": 1,
+      "imports": 1,
+      "reviews": 1,
+      "earnings": 1
+    },
+    "entered_hours": [
+      10.0
+    ]
+  },
+  "phone": {
+    "identical": true,
+    "sha256": "84ce652468d0a3c41082867f4ebe847e656b5cf6b1b4c9fc8e054c7533fa6241",
+    "collections": {
+      "items": 1,
+      "fields": 1,
+      "imports": 1,
+      "reviews": 1,
+      "earnings": 1
+    },
+    "entered_hours": [
+      10.0
+    ]
+  }
+}
