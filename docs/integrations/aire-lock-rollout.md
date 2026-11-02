@@ -1,3 +1,7 @@
+# Stage 2 order supersedes the dated October activation examples
+
+Stage 1 releases the certified pair paused with **no rollout configured**. It does not activate the connection. For Stage 2, use [historical packet approval](aire-history-packet.md) as the authoritative order: paused preparation → enabled/unpublished maintenance → pin/link/map/history approval and fresh completion → publication. The October dates below are retained implementation examples, not authorization or the selected production activation period.
+
 # AIRE manual-to-scheduled lock rollout
 
 ## Connected payroll pause during a coordinated release

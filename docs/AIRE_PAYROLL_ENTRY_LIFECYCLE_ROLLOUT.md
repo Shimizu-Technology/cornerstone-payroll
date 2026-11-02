@@ -2,6 +2,10 @@
 
 This rollout links each immutable AIRE time-entry adjustment to the Cornerstone payroll item that processed it. It does not change compensation rates or recalculate a committed payroll.
 
+## Stage 2 historical packet
+
+Stage 1 stays paused with no rollout configured. The separate [Stage 2 packet procedure](integrations/aire-history-packet.md) adds read-only historical dispositions. Approving an already-processed baseline, pending review, owed work or an evidence hold creates no payment-issued event or allocation and approves no time. The older **Link AIRE Record** workflow below remains a separate exact allocation action; it is not the new baseline disposition.
+
 ## Release order
 
 1. Deploy AIRE first. Run its migrations, then confirm the payroll batch endpoints still accept the existing version 2 contract and that newly finalized batches include `source_user_uuid`.
