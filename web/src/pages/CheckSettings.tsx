@@ -226,6 +226,16 @@ export function CheckSettingsPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedCheckSettings]);
 
+  const suggestionFocused = useRef(false);
+  useEffect(() => {
+    if (loading || !suggestedNumber || !canManageClientCheckSettings || suggestionFocused.current) return;
+    const input = document.getElementById('next-check-number');
+    if (!input) return;
+    input.scrollIntoView?.({ block: 'center' });
+    input.focus({ preventScroll: true });
+    suggestionFocused.current = true;
+  }, [loading, suggestedNumber, canManageClientCheckSettings]);
+
   useEffect(() => {
     if (!activePrinterProfileId) {
       setActivePrinterProfileName(null);

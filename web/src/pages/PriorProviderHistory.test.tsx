@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PriorProviderHistory } from "./PriorProviderHistory";
@@ -123,6 +124,16 @@ afterEach(() => {
 });
 
 describe("Prior-provider history", () => {
+  it("ignores a late initial load after the current load has opened an editable draft", async () => {
+    let finishFirst!: (value: HistoryPage) => void;
+    vi.mocked(priorProviderHistoryApi.get).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; })).mockResolvedValue(page());
+    render(<StrictMode><MemoryRouter><PriorProviderHistory /></MemoryRouter></StrictMode>);
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    fireEvent.change(screen.getByLabelText("Previous payroll provider"), { target: { value: "Already entered provider" } });
+    await act(async () => finishFirst(page()));
+    expect((screen.getByLabelText("Previous payroll provider") as HTMLInputElement).value).toBe("Already entered provider");
+  });
+
   it("keeps old check references visible, optional, and in the shared draft", async () => {
     open();
     await screen.findByText(/2 pay dates · 4 paychecks/);
