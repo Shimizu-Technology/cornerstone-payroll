@@ -7,7 +7,7 @@ import type { CompanyListItem } from '@/services/api';
 import { CheckSettingsPage } from './CheckSettings';
 const mocks = vi.hoisted(() => ({
   company: null as CompanyListItem | null, id: 1,
-  get: vi.fn(), update: vi.fn(), layout: vi.fn(), profiles: vi.fn(), next: vi.fn(),
+  get: vi.fn(), update: vi.fn(), layout: vi.fn(), profiles: vi.fn(), next: vi.fn(), select: vi.fn(),
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'accountant' }, hasCapability: () => false }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.company, activeCompanyId: mocks.id }) }));
@@ -16,7 +16,7 @@ vi.mock('@/components/documents/PdfPreview', () => ({ PdfPreview: () => null }))
 vi.mock('@/components/checks/CheckLayoutEditor', () => ({ CheckLayoutEditor: () => null }));
 vi.mock('@/services/api', () => ({
   checksApi: { getSettings: mocks.get, updateSettings: mocks.update, getLayout: mocks.layout, updateNextCheckNumber: mocks.next },
-  printerProfilesApi: { list: mocks.profiles },
+  printerProfilesApi: { list: mocks.profiles, selectForMe: mocks.select },
 }));
 const settings = { check_stock_type: 'top_check', check_offset_x: 0, check_offset_y: 0, bank_name: 'Synthetic bank', bank_address: '', check_layout_config: {}, next_check_number: 1001 };
 beforeEach(() => {
@@ -43,6 +43,22 @@ describe('selected client check controls', () => {
     expect(mocks.next).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Update Next Number' }));
     expect(mocks.next).toHaveBeenCalledWith(709);
+  });
+  it('preserves an edited next number when a printer profile refreshes settings', async () => {
+    const user = userEvent.setup();
+    const profile = { id: 9, name: 'Example printer', check_stock_type: 'top_check', check_offset_x: 0, check_offset_y: 0, check_layout_config: {}, lock_version: 0 };
+    mocks.profiles.mockResolvedValue({ printer_profiles: [profile], selections: [] });
+    mocks.select.mockResolvedValue({});
+    mocks.get.mockResolvedValueOnce({ check_settings: settings }).mockResolvedValue({ check_settings: { ...settings, active_printer_profile_id: 9, active_printer_profile_name: profile.name } });
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    await user.clear(number);
+    await user.type(number, '712');
+    await user.click(screen.getByRole('button', { name: 'Use This Profile' }));
+    await screen.findByText(/is now your selected printer profile/);
+    expect(mocks.select).toHaveBeenCalledWith('top_check', 9);
+    expect(number.value).toBe('712');
+    expect(mocks.next).not.toHaveBeenCalled();
   });
   it('ignores a check suggestion addressed to another client', async () => {
     render(<MemoryRouter initialEntries={['/check-settings?company_id=2&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
