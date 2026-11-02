@@ -567,7 +567,7 @@ class Form941GuAggregator
     systems = include_historical ? historical_source.source_systems(range: quarter_start_date..quarter_end_date) : []
     {
       mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
-      historical_source_systems: systems,
+      **(systems.include?("prior_provider") ? { historical_source_systems: systems } : {}),
       cornerstone: {
         payroll_item_count: items.count,
         pay_period_count: committed_pay_periods.count
@@ -585,13 +585,14 @@ class Form941GuAggregator
     return [] unless include_historical
 
     sources = (historical_quarter_records + prior_historical_records).map(&:source_system).uniq
-    label = sources == [ "quickbooks_online" ] ? "QuickBooks" : (sources == [ "prior_provider" ] ? "Prior-provider" : "Historical")
+    label = sources.include?("prior_provider") ? (sources == [ "prior_provider" ] ? "Prior-provider" : "Historical") : "QuickBooks"
     caveats = [
       "#{label} values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
       "Historical YTD bridge balances are used only for source eligibility and annual carry-forward; they are not added to quarterly lines, avoiding duplicate wages and taxes."
     ]
     if historical_source.opening_summary_count(range: quarter_start_date..quarter_end_date).positive?
-      caveats << "Historical opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
+      opening_label = sources.include?("prior_provider") ? "Historical" : "QuickBooks"
+      caveats << "#{opening_label} opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
     end
     caveats
   end
