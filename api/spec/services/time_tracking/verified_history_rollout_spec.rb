@@ -448,6 +448,16 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
         accepted_manifest_sha256: digest, release_owner: "Approved test owner")
     end
 
+    it "requires authenticated versioned installation evidence for paid-only inventory" do
+      response = { "time_entries" => [ inventory_entry ], "source_state" => "current",
+        "through_work_date" => manifest["history_through_work_date"],
+        "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(response)
+      expect { described_class.new(manifest: manifest, actor: actor).preview! }
+        .to raise_error(described_class::Error, /evidence version or installation differs/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    end
+
     it "approves only the aggregate of both partial checks without creating duplicate allocations" do
       expect(described_class.new(manifest: manifest, actor: actor).preview!).to include(history_coverage_verified: true)
       expect { apply_accepted_history }.not_to change(TimeTrackingManualAllocation, :count)
@@ -766,6 +776,9 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
   end
 
   it "rejects a historical inventory that omits rows from its advertised total" do
+    source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
     manifest["history_through_work_date"] = period.end_date.iso8601
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],

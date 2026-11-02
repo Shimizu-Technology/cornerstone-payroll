@@ -142,7 +142,7 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
 
     before do
       employee = create(:employee, company: company)
-      create(:time_tracking_employee_mapping, company: company, time_tracking_source: source, employee: employee,
+      TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee,
         source_user_id: "91", source_user_uuid: uuid)
       create(:payroll_item, company: company, pay_period: run, employee: employee, hours_worked: 4.25, overtime_hours: 0)
       current["state"]["approval_status"] = "approved"
