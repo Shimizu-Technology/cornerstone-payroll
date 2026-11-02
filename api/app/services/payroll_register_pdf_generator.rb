@@ -169,6 +169,7 @@ class PayrollRegisterPdfGenerator
       [ "1099 Gross Pay",       fmt(s[:contractor_total_gross]) ],
       [ "1099 Net Pay",         fmt(s[:contractor_total_net]) ]
     ]
+    rows.insert(-3, [ "Previous Provider Loans (Type Not Recorded)", fmt(sum_workers(payroll_workers, :historical_loan_deductions_unclassified)) ]) if historical_loans_column?
     rows.insert(2, [ "Custom Earnings", fmt(s[:total_custom_earnings]) ]) if custom_earnings_column?
     rows.insert(-3, [ "Custom Deductions", fmt(s[:total_custom_deductions]) ]) if custom_deductions_column?
 
@@ -568,6 +569,7 @@ class PayrollRegisterPdfGenerator
       total_roth_retirement: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) },
       total_retirement: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.traditional_retirement(worker) } + workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) },
       total_non_taxable_additions: workers.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) },
+      total_historical_loan_deductions_unclassified: sum_workers(workers, :historical_loan_deductions_unclassified),
       total_straight_loan_deductions: sum_workers(workers, :straight_loan_deduction),
       total_installment_loan_payments: sum_workers(workers, :installment_loan_payment),
       total_custom_deductions: sum_workers(workers, :custom_deductions_total),
@@ -616,6 +618,7 @@ class PayrollRegisterPdfGenerator
       { key: :employer_payroll_cost, label: "Employer Cost", weight: 7, align: :right },
       { key: :check_number, label: "Check #", weight: 8 }
     ]
+    columns.insert(-4, { key: :historical_loan_deductions_unclassified, label: "Previous Provider Loans (Type Not Recorded)", weight: 9, align: :right }) if historical_loans_column?
     columns.insert(5, { key: :custom_earnings_total, label: "Custom Earn", weight: 7, align: :right }) if custom_earnings_column?
     columns.insert(-4, { key: :custom_deductions_total, label: "Custom Ded", weight: 7, align: :right }) if custom_deductions_column?
     columns
@@ -670,6 +673,8 @@ class PayrollRegisterPdfGenerator
       fmt(summary[:total_roth_retirement] || payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) })
     when :non_taxable_additions_total
       fmt(summary[:total_non_taxable_additions] || payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) })
+    when :historical_loan_deductions_unclassified
+      fmt(summary[:total_historical_loan_deductions_unclassified] || sum_workers(payroll_workers, :historical_loan_deductions_unclassified))
     when :straight_loan_deduction
       fmt(summary[:total_straight_loan_deductions])
     when :installment_loan_payment
@@ -694,6 +699,10 @@ class PayrollRegisterPdfGenerator
       font_style: content.present? ? :bold : nil,
       background_color: SECTION_BG
     }.compact
+  end
+
+  def historical_loans_column?
+    payroll_workers.any? { |worker| worker.key?(:historical_loan_deductions_unclassified) }
   end
 
   def custom_earnings_column?

@@ -131,7 +131,11 @@ class ImportedPayrollRegister
       earnings_breakdown: earning_lines(paycheck.earnings_breakdown),
       deductions_breakdown: pretax_lines + employee_tax_lines + after_tax_lines,
       employer_contributions_breakdown: contribution_lines(paycheck.employer_contribution_breakdown)
-    }
+    }.tap do |row|
+      # Provider totals do not identify a Cornerstone loan subtype.
+      loans = verified_amount(paycheck, "loans")
+      row[:historical_loan_deductions_unclassified] = loans unless loans.nil?
+    end
   end
 
   def summary(rows, employees, contractors)
