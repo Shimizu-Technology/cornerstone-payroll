@@ -34,8 +34,15 @@ Production auto-deploys from `main`, so everything here must be done before any 
   - Rounding: some gross/net amounts move by a cent (for example $0.21 → $0.22) to match the saved earnings lines.
   - Voided-check inclusion: historical reports change wherever a paper check was voided but the wages were really paid.
   
+  - Form 941 line 7 now uses the IRS fractions-of-cents method, so lines 7, 10 and 12 move by a few cents: Cornerstone +$0.02, AIRE +$0.07, Spike −$0.04, MoSa +$0.10. Tell Chels in case Q3 was filed from the old screen.
+  - AIRE employee 15's $66 W-4 additional withholding (Mar 30, Apr 16 and May 15) now counts in the deposit totals and the YTD summary. Chels confirms the Q1 deposit and W-1 included $66, and the Q2 ones $132.
+  - Voided runs show $0, and the FIT columns are split into base, additional and total (same amounts).
+
   Anything else is a stop.
 - [ ] **Background backlog.** List pending Solid Queue jobs in production (invoice emails, reminders, tax sync, OCR, invites). They resume when the new workers start. Decide whether each should run.
+  - The November 2 copy had none ready or scheduled.
+  - It had 168 **failed** jobs from April to September: 155 are `AirePayrollAcknowledgementDispatchJob` missing-table errors, plus OCR and process-pruned failures. Failed jobs never rerun on their own, so leave them or discard them after the release.
+  - 21 committed periods (Cornerstone 4, AIRE 4, Shimizu 1, Spike 12; January to May) have failed Cornerstone Tax sync with 0 attempts. Nothing retries them. Use `retry_tax_sync` only if Cornerstone Tax needs those months.
 - [ ] **Backups.** Take a paired restore point of both production databases immediately before the window. Several migrations can't be reversed, so this is the real fallback.
 
 ## 2. Release window
@@ -62,9 +69,17 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
      - Reconciles QuickBooks-imported paychecks for active MoSa (staging copy: 109 proofs; 44 checks differed from the computed tax by at most $0.01, which is accepted and recorded).
    - **Run it twice if asked:** after the source reviews, the imported-paycheck plan changes, so the first apply can stop with `Imported FICA plan changed`. Preview again, review the new digest, and apply again. The final preview must exit 0 with zero held employee-years for every selected company.
    - **Reverse AIRE paycheck 289** (Leon approved 2026-11-01): the $175 contractor intern check in the Apr 16–30 payroll was voided because it was never issued and the intern should not have been in that payroll. Reverse it with `ReversePaycheckService` (reason recorded); its year-to-date gross must drop by exactly $175. Then `bin/rake payroll:legacy_check_voids` must list no candidates.
-   - **Data fixes in production before or right after the release** (supported UI only): Zachary Camacho's missing 4% Roth retirement election (MoSa), Monique Amani's missing pre-tax 401(k) election (MoSa; four paychecks took $0 since go-live and need an accounting correction). Then recalculate every unfinished run before approval.
+   - **Data fix in production before MoSa's next payroll** (supported UI only): add Zachary Camacho's 4% Roth election. In MoSa's Hotbox, Inc., open Employees → Zachary Camacho → Pay setup → **Set up retirement**, then:
+     - set the first pay date using the election, and enter the plan source reference (MoSa's plan permits Roth; QuickBooks "401(k) After Tax" 4% through 2026-07-30);
+     - check **Plan permits employee Roth deferrals**, with Roth at 4%;
+     - for the employer match, either check **Administrator confirmed employer Roth support** or set the destination to Traditional.
+
+     Until the election exists, the new code refuses to calculate his paycheck. He has had no paid hours since July 30, so no contributions were missed.
+   - **Monique Amani needs no correction.** Her $927.91 pre-tax 401(k) and 4% match were deducted on every Cornerstone check through a payroll-field deduction (verified in production 2026-11-02, and recalculated correctly on staging).
+   - Recalculate every unfinished run before approval.
    - `bin/rake payroll:legacy_employer_benefits:inventory` should report no affected employees (it found none on the staging copy).
    - Data added after October 25 (for example Kasperbauer) is covered by the fresh inventory the runner takes; Kasperbauer's history is recorded later with the prior-provider history feature, not here.
+   - **Kasperbauer's 20 calculated runs (Jan 14 – Oct 28) are prior-provider history.** Never approve, commit or delete them. After the release they show "Recalculate — lacks annual context verification"; that is expected. They are converted with the prior-provider history feature (#407) after the release.
 6. [ ] **Access.** Grant Chels "Client management" for each client she will run.
 7. [ ] **Smoke test while paused:**
    - AIRE: clock in and out, edit an entry, approve it.
