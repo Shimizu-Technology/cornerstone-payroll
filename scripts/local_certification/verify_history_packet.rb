@@ -13,7 +13,9 @@ manifest = { "version" => 1, "company_id" => source.company_id, "company_name" =
   "source_id" => source.id, "source_instance_id" => source.expected_source_instance_id, "actor_id" => actor.id,
   "history_through_work_date" => period.end_date.iso8601, "identity_links" => [], "delivered_checks" => [],
   "issued_entries" => [], "classification_cases" => [], "finalized_batch_entries" => [] }
+export_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 packet = TimeTracking::VerifiedHistoryRollout.new(manifest: manifest, actor: actor).capture_review_packet!
+puts "TIMING: authenticated history export rows=#{packet.fetch("reviewed_dispositions").length} seconds=#{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - export_started).round(3)} page_size=#{ENV.fetch("AIRE_HISTORY_PAGE_SIZE", "50")} read_budget_seconds=#{ENV.fetch("AIRE_HISTORY_READ_TIMEOUT_SECONDS", "60")}"
 raise "Incomplete synthetic history export" unless packet.fetch("reviewed_dispositions").length == fixture.fetch("history_entry_ids").length
 packet.fetch("reviewed_dispositions").each do |review|
   row = review.fetch("source")

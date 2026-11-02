@@ -5,7 +5,7 @@ module ManualPrinterFixture
   def self.seed!(company:, accountant:, admin:)
     database = ActiveRecord::Base.connection_db_config.database.to_s
     unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" &&
-           database.match?(/\Acornerstone_aire_certification_\d+_\d+\z/) &&
+           database.match?(/\Acornerstone_aire_certification_(?:rollout_rehearsal_)?\d+_\d+\z/) &&
            accountant.accountant? && accountant.organization_id == company.organization_id &&
            StaffRolePolicy.historical_reconciliation_allowed?(accountant, company) &&
            !StaffRolePolicy.allowed?(accountant, :manage_client_configuration)

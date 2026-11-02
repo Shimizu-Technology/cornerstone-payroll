@@ -24,6 +24,9 @@ RSpec.describe AirePayrollCalendar::LockRollout do
     expect { service.configure! }.to raise_error(described_class::Error, /immutable|only move later/)
     expect(later.configure!).to include(status: "configured")
     expect(TimeTrackingLockRolloutSelection.count).to eq(1)
+    audit = AuditLog.find_by!(action: "time_tracking_source#initial_lock_rollout_selected", record_id: source.id)
+    expect(audit.metadata).to include("old_starts_on" => "2026-10-16", "new_starts_on" => "2026-11-01")
+    expect(audit.actor_name).to eq("Release operator")
     selection = source.lock_rollout_selection
     expect { selection.update!(starts_on: "2026-11-16") }.to raise_error(ActiveRecord::ReadOnlyRecord)
     expect do

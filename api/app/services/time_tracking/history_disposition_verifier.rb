@@ -23,6 +23,10 @@ module TimeTracking
       # One fresh local read per coverage pass, including the completion lock.
       # Do not perform a company/run query for each of thousands of lines.
       @runs = @company.pay_periods.where(status: "committed").index_by { |run| run.id.to_s }
+      @employees = @source.time_tracking_employee_mappings.where(company: @company).index_by(&:source_user_uuid)
+      @run_hours = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
+        .group(:pay_period_id, :employee_id).pluck(:pay_period_id, :employee_id, Arel.sql("SUM(hours_worked)"), Arel.sql("SUM(overtime_hours)"))
+        .to_h { |run_id, employee_id, regular, overtime| [ [ run_id.to_s, employee_id ], [ regular, overtime ] ] }
     end
 
     def verified?(disposition, current)
@@ -34,7 +38,9 @@ module TimeTracking
         disposition["source_time_entry_id"] == current.fetch("id") &&
         disposition["source_time_entry_version"] == current.fetch("version") &&
         disposition["source_user_uuid"] == current.fetch("source_user_uuid") &&
-        disposition["source"] == current.slice(*SOURCE_FIELDS)
+        disposition["source"] == current.slice(*SOURCE_FIELDS) &&
+        current.key?("work_date") && current.key?("category") &&
+        current["state"].is_a?(Hash) && current["state"].key?("approval_status")
 
       evidence = current.fetch("history_evidence")
       return false unless evidence.fetch("payable_content_checksum").match?(/\A[0-9a-f]{64}\z/) &&
@@ -43,12 +49,13 @@ module TimeTracking
 
       baseline = evidence.fetch("baseline_lines")
       unallocated = evidence.fetch("active_manual_allocation_ids").empty? && evidence["payment_attestation"].nil?
+      unheld = evidence.fetch("active_cases").none? { |record| record["status"].in?(%w[open scheduled]) }
       pending = current.dig("state", "approval_status").in?([ nil, "pending" ])
       case disposition.fetch("disposition")
       when "historical_baseline"
         unallocated && !pending && baseline_verified?(baseline, current)
       when "pending_review"
-        unallocated && pending && (baseline.empty? || baseline_verified?(baseline, current))
+        unallocated && unheld && pending && (baseline.empty? || baseline_verified?(baseline, current))
       when "owed"
         unallocated && baseline.empty? && decimal(current.fetch("hours")).positive? &&
           current.dig("state", "status") == "completed" && current.dig("state", "approval_status") == "approved" &&
@@ -58,10 +65,10 @@ module TimeTracking
               record["status"].in?(%w[open scheduled]) && decimal(record.fetch("held_total_hours")) == decimal(current.fetch("hours"))
           end
       when "not_payable"
-        unallocated && baseline.empty? && current.dig("state", "approval_status") == "denied" &&
+        unallocated && unheld && baseline.empty? && current.dig("state", "approval_status") == "denied" &&
           current.dig("lifecycle", "status") == "not_payable"
       when "no_payable_hours"
-        unallocated && baseline.empty? && decimal(current.fetch("hours")).zero?
+        unallocated && unheld && baseline.empty? && decimal(current.fetch("hours")).zero?
       when "payment_evidence_pending"
         report = evidence["payment_attestation"]
         baseline.empty? && evidence.fetch("active_manual_allocation_ids").empty? && report.is_a?(Hash) &&
@@ -76,6 +83,7 @@ module TimeTracking
     private
 
     def baseline_verified?(lines, current)
+      refresh_runs! unless @runs
       return false if lines.empty? || lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
       return false unless lines.map { |line| line.fetch("line_key") }.uniq.length == lines.length
       return false unless lines.sum { |line| decimal(line.fetch("total_hours")) } == decimal(current.fetch("hours"))
@@ -101,7 +109,15 @@ module TimeTracking
             row["source_user_uuid"] == current.fetch("source_user_uuid")
           end
         end
-        frozen = Array(source_employee&.fetch("adjustments")).find do |row|
+        mapping = @employees[current.fetch("source_user_uuid")]
+        next false unless source_employee && mapping
+        hours = @run_hours[[ run_id, mapping.employee_id ]]
+        # Manual runs aggregate multiple source lines into one or more earnings.
+        # Reconcile the complete frozen employee balance, never an entry to a whole item.
+        frozen_lines = source_employee.fetch("adjustments")
+        next false unless hours && hours.map { |value| decimal(value) } ==
+          %w[regular_hours overtime_hours].map { |key| frozen_lines.sum { |row| decimal(row.fetch(key)) } }
+        frozen = frozen_lines.find do |row|
           row["source_time_entry_id"] == current.fetch("id") && row["line_key"] == line.fetch("line_key")
         end
         frozen && frozen["source_time_entry_version"] == line.fetch("source_time_entry_version") &&

@@ -725,7 +725,8 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM aire_payroll_calendar_periods WHERE time_tracking_source_id = NEW.time_tracking_source_id)
     OR EXISTS (SELECT 1 FROM aire_payroll_calendar_publications publications JOIN aire_payroll_calendar_periods periods ON periods.id = publications.aire_payroll_calendar_period_id WHERE periods.time_tracking_source_id = NEW.time_tracking_source_id)
-    OR EXISTS (SELECT 1 FROM aire_verified_history_rollout_receipts WHERE time_tracking_source_id = NEW.time_tracking_source_id AND coverage_verified)
+    OR EXISTS (SELECT 1 FROM aire_verified_history_rollout_receipts WHERE time_tracking_source_id = NEW.time_tracking_source_id)
+          OR EXISTS (SELECT 1 FROM time_tracking_imports WHERE time_tracking_source_id = NEW.time_tracking_source_id)
     OR EXISTS (SELECT 1 FROM audit_logs WHERE record_type = 'TimeTrackingSource' AND record_id = NEW.time_tracking_source_id
       AND action = 'time_tracking_source#lock_rollout_gate_passed') THEN
     RAISE EXCEPTION 'initial payroll rollout selection requires an unused, ungated source';
