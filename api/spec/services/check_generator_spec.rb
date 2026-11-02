@@ -303,6 +303,22 @@ RSpec.describe CheckGenerator do
       expect { generator.generate }.to raise_error(ArgumentError, /cannot fit readably.*No deductions were omitted/)
     end
 
+    it "fits an empty deductions header in less than ten points without refusing the check" do
+      company.update!(check_layout_config: { stub: { row1_y: 160.4, row2_y: 112, row3_y: 68 } })
+      expect(generator.send(:deduction_rows)).to be_empty
+      spaces = []
+      allow(generator).to receive(:draw_section_table).and_wrap_original do |method, pdf, **args|
+        spaces << args.fetch(:max_height) if args[:title] == "DEDUCTIONS"
+        method.call(pdf, **args)
+      end
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      expect(spaces.size).to eq(2)
+      expect(spaces).to all(be_between(9, 10))
+      expect(reader.page_count).to eq(1)
+      expect(reader.pages.first.text.scan("DEDUCTIONS").size).to eq(2)
+      expect_net_pay_inside_stubs(reader.pages.first)
+    end
+
     it "measures a wrapped summary in a narrow saved printer profile and reserves its entire height" do
       company.update!(check_layout_config: { stub: { left_ratio: 0.75, summary_padding_y: 2.5, summary_padding_x: 4 } })
       payroll_item.update!(custom_deductions: (1..5).map { |n| { "label" => "Deduction #{n}", "amount" => 1 } })
