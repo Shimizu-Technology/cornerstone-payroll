@@ -131,6 +131,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const save = useCallback(async () => {
     if (!payload || !canManage || active) return;
     setSaveState("saving");
+    setError("");
     dirty.current = false;
     try {
       const result = await priorProviderHistoryApi.saveDraft(payload, Math.min(step, 3), version);
@@ -146,13 +147,14 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       } else {
         dirty.current = true;
         setSaveState("error");
+        setError(err instanceof Error ? err.message : "Couldn’t save progress. Retry when you’re ready.");
       }
     }
   }, [payload, step, version, canManage, active]);
 
   // Autosave quietly after edits so work can be resumed at any step.
   useEffect(() => {
-    if (!dirty.current || saveState === "conflict" || saveState === "saving") return;
+    if (!dirty.current || saveState === "conflict" || saveState === "saving" || saveState === "error") return;
     const timer = window.setTimeout(() => void save(), AUTOSAVE_MS);
     return () => window.clearTimeout(timer);
   }, [payload, step, save, saveState]);
@@ -1118,7 +1120,7 @@ function ActivateDialog({ open, record, employees, busy, onClose, onConfirm }: {
         <DialogHeader>
           <DialogTitle>Turn on year-to-date totals?</DialogTitle>
           <DialogDescription>
-            Adds {record.periods.length} pay dates · {money(record.totals.gross_pay)} gross · {money(record.totals.net_pay)} net to each employee’s {record.tax_year} year-to-date.
+            Adds these combined totals to {record.tax_year} year-to-date: {record.periods.length} pay dates · {money(record.totals.gross_pay)} gross · {money(record.totals.net_pay)} net. Each employee’s amounts are listed below.
           </DialogDescription>
         </DialogHeader>
         <EmployeeTotalsTable rows={rows} caption="Year-to-date amounts being turned on" />
@@ -1286,16 +1288,14 @@ function LivePayrollNextSteps({ record, companyId, readinessGaps }: { record: Hi
   const numericReferences = (record.payment_references ?? []).map((row) => row.reference?.trim() ?? "").filter((value) => /^\d+$/.test(value)).map(Number).filter((value) => Number.isSafeInteger(value) && value >= 0 && value < 2_147_483_647);
   const nextNumber = numericReferences.length ? Math.max(...numericReferences) + 1 : undefined;
   const lastEnd = record.periods.map((period) => period.end_date).sort().at(-1);
-  const lastPayDate = record.periods.map((period) => period.pay_date).sort().at(-1);
-  const lastBoundary = [lastEnd, lastPayDate].filter(Boolean).sort().at(-1);
   return <div className="space-y-3 border-t border-success-200 pt-3">
     <h3 className="font-semibold">Before the first live payroll</h3>
     <p>Confirm these settings before paying employees through Cornerstone.</p>
     {record.can_reverse && <>
       <Link to={`/check-settings?company_id=${companyId}${nextNumber ? `&suggested_next=${nextNumber}` : ""}#next-check-number`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Set the next live check number{nextNumber ? ` (suggested: ${nextNumber})` : ""}</Link>
       <p>Use the next number on the client’s actual check stock. You can edit the suggestion before saving.</p>
-      <Link to={`/companies/${companyId}/pay-runs${lastBoundary ? `?new_after=${lastBoundary}` : ""}`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Create the first live pay period</Link>
-      <p>Start after the last historical period and pay date. Confirm the period end and first unpaid pay date with the client.</p>
+      <Link to={`/companies/${companyId}/pay-runs${lastEnd ? `?new_after=${lastEnd}` : ""}`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Create the first live pay period</Link>
+      <p>Start after the last historical period. Confirm the period end and first unpaid pay date with the client; the pay date must follow the last historical pay date.</p>
     </>}
     {readinessGaps.length > 0 ? <div className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-warning-950">
       <p className="font-semibold">Employee documents to resolve before approval ({readinessGaps.length})</p>

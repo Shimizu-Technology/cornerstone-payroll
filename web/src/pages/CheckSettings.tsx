@@ -170,7 +170,7 @@ export function CheckSettingsPage() {
 
   const hasUnsavedCheckSettings = savedSettingsSnapshot !== null && currentSettingsSnapshot !== savedSettingsSnapshot;
 
-  const applySettingsToForm = useCallback((s: CheckSettingsType) => {
+  const applySettingsToForm = useCallback((s: CheckSettingsType, preserveNextNumber = false) => {
     const normalizedOffsetX = typeof s.check_offset_x === 'number'
       ? s.check_offset_x
       : Number(s.check_offset_x || 0);
@@ -197,7 +197,7 @@ export function CheckSettingsPage() {
     if (suggestedNumber && !suggestionApplied.current) {
       setNextCheckNumber(suggestedNumber);
       suggestionApplied.current = true;
-    } else {
+    } else if (!preserveNextNumber) {
       setNextCheckNumber(String(s.next_check_number));
     }
     setActivePrinterProfileId(s.active_printer_profile_id ?? null);
@@ -406,7 +406,7 @@ export function CheckSettingsPage() {
         ),
         check_layout_config: parsedLayoutOverrides,
       });
-      applySettingsToForm(data.check_settings);
+      applySettingsToForm(data.check_settings, true);
       await loadCheckLayout(stockType);
       setSuccess(data.check_settings.active_printer_profile_id
         ? `Saved calibration to “${data.check_settings.active_printer_profile_name || 'your selected profile'}” and client check settings.`
@@ -582,7 +582,7 @@ export function CheckSettingsPage() {
       if (data.check_settings.check_stock_type !== stockType) {
         skipNextLayoutEffectRef.current = true;
       }
-      applySettingsToForm(data.check_settings);
+      applySettingsToForm(data.check_settings, true);
       await loadCheckLayout(data.check_settings.check_stock_type);
       setSuccess(`“${profile.name}” is now your selected printer profile for ${stockType.replaceAll('_', ' ')} stock.`);
       await loadProfiles();

@@ -53,6 +53,9 @@ class PayrollFilingResponsibilityRecorder
       # Share the onboarding/reversal lock so an ownership edit cannot race
       # its before/after evidence snapshot or be overwritten by reversal.
       company.lock!
+      @actor = User.lock.find_by(id: actor&.id)
+      CompanyAssignment.where(company_id: company.id, user_id: actor&.id).lock.load
+      PayrollFilingResponsibilityPolicy.authorize_record!(actor: actor, company: company)
       reviewed_at = Time.current
       before = {}
 

@@ -146,7 +146,7 @@ describe("Prior-provider history", () => {
   });
 
   it("shows saved references, check settings and document fixes after turning on YTD", async () => {
-    const record = { ...onboarding("active"), payment_references: [{ employee_id: 1, pay_date: "2026-10-28", reference: "00707" }, { employee_id: 2, pay_date: "2026-10-28", reference: "DD-99999" }] };
+    const record = { ...onboarding("active"), periods: onboarding("active").periods.map(period => ({ ...period, pay_date: "2026-11-04" })), payment_references: [{ employee_id: 1, pay_date: "2026-10-28", reference: "00707" }, { employee_id: 2, pay_date: "2026-10-28", reference: "DD-99999" }] };
     vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...page(), candidates: [], onboardings: [record], readiness_gaps: [{ employee_id: 1, employee_name: "Ana Cruz", label: "Signed withholding election", status: "missing" }] });
     open();
     await screen.findByText("00707");
@@ -265,6 +265,22 @@ describe("Prior-provider history", () => {
     });
     await waitFor(() => expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ provider_name: "ADP" }), 0, undefined));
     await screen.findByText(/^Saved/);
+  });
+
+  it("pauses failed autosaves, shows the reason, and recovers with an explicit retry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(priorProviderHistoryApi.saveDraft).mockRejectedValueOnce(new ApiError("Register notes are too long. Shorten them and retry.", 422));
+    open();
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    fireEvent.change(screen.getByLabelText("Previous payroll provider"), { target: { value: "ADP" } });
+    await act(async () => { vi.advanceTimersByTime(1500); });
+    await screen.findByText(/Register notes are too long/);
+    await act(async () => { vi.advanceTimersByTime(6000); });
+    expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    await screen.findByText(/^Saved/);
+    expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Register notes are too long/)).toBeNull();
   });
 
   it("is view-only for staff who can’t record this client’s history", async () => {

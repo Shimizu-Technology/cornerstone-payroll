@@ -12,8 +12,7 @@ module Api
         end
 
         def index
-          eligible = current_company.pay_periods.calculated.where(cycle: "regular", run_purpose: "regular", parallel_run: false, correction_status: nil)
-            .where("pay_date < ?", Date.current)
+          eligible = PriorProviderHistory::Discovery.candidates(current_company)
           eligible_count = eligible.count
           candidates = eligible.order(:pay_date, :id).limit(PriorProviderHistory::SourceAdapter::MAX_RUNS).map do |period|
               PriorProviderHistory::SourceAdapter.candidate(period)
@@ -38,16 +37,24 @@ module Api
           authorize_change!
           step = Integer(params.fetch(:step, 0).to_s, 10)
           conflict = nil
+          removed = false
           draft = PriorProviderHistoryDraft.transaction do
             current_company.lock!
             authorize_change!(lock: true)
             record = PriorProviderHistoryDraft.lock.find_or_initialize_by(company_id: current_company_id)
+            if record.new_record? && params[:lock_version].present?
+              removed = true
+              next
+            end
             if record.persisted? && params[:lock_version].to_s != record.lock_version.to_s
               conflict = record
               next
             end
             record.update!(payload: payload, step: step, updated_by: current_user)
             record
+          end
+          if removed
+            return render json: { error: "The saved draft was removed. Reload before starting again.", draft: nil }, status: :conflict
           end
           if conflict
             return render json: { error: "#{conflict.updated_by.name} saved newer changes. Reload to continue from their version.",
@@ -58,7 +65,11 @@ module Api
 
         def discard_draft
           authorize_change!
-          PriorProviderHistoryDraft.where(company_id: current_company_id).delete_all
+          PriorProviderHistoryDraft.transaction do
+            current_company.lock!
+            authorize_change!(lock: true)
+            PriorProviderHistoryDraft.where(company_id: current_company_id).delete_all
+          end
           head :no_content
         end
 

@@ -114,6 +114,10 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     delete "/api/v1/admin/prior_provider_histories/draft"
     expect(response).to have_http_status(:no_content)
     expect(PriorProviderHistoryDraft.where(company: @company)).to be_empty
+    put "/api/v1/admin/prior_provider_histories/draft", params: { payload: @payload, step: 1, lock_version: version }, as: :json
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body["error"]).to include("removed")
+    expect(PriorProviderHistoryDraft.where(company: @company)).to be_empty
   end
 
   it "turns on historical payroll for the client when history is recorded" do
