@@ -78,6 +78,7 @@ module TimeTracking
       validate_checks!
       validate_entries!
       validate_finalized_batch_entries!
+      coverage_verified = history_scope_verified?
       {
         identity_links: identities.length,
         delivered_checks: checks.length,
@@ -90,7 +91,9 @@ module TimeTracking
           { disposition: type, meaning: HistoryDispositionVerifier::LABELS.fetch(type, "Requires individual accounting review"), entries: rows.length }
         end,
         manifest_sha256: @manifest_sha256,
-        history_coverage_verified: history_scope_verified?
+        rounding_variances: @history_disposition_verifier&.rounding_variances || [],
+        rounding_review_blockers: @history_disposition_verifier&.rounding_review_blockers || [],
+        history_coverage_verified: coverage_verified
       }
     end
 
@@ -100,10 +103,16 @@ module TimeTracking
       validate_structure!
       validate_company!
       validate_history_scope!(require_evidence: true)
+      raise Error, "History scope is required to export a review packet" unless @history_inventory
       raise Error, "Pin the source installation before exporting a review packet" unless @source.remote_identity_pinned? &&
         manifest["source_instance_id"] == @source.expected_source_instance_id
 
-      manifest.merge("reviewed_dispositions" => @history_inventory.map do |row|
+      verifier = history_disposition_verifier
+      verifier.discover_rounding_variances!(@history_inventory)
+      manifest.merge("rounding_variances" => verifier.rounding_variances,
+        "rounding_review_blockers" => verifier.rounding_review_blockers,
+        "rounding_variance_acknowledgements" => [], "historical_earning_component_bindings" => [],
+        "reviewed_dispositions" => @history_inventory.map do |row|
         { "disposition" => "review_required", "actor_id" => actor.id, "reason" => "", "evidence" => "",
           "source_instance_id" => @source.expected_source_instance_id,
           "source_time_entry_id" => row.fetch("id"), "source_user_uuid" => row.fetch("source_user_uuid"),
@@ -404,15 +413,15 @@ module TimeTracking
       return false if Array(manifest["reviewed_unpaid_entries"]).any? || Array(manifest["held_source_entries"]).any?
       reviewed = manifest.fetch("reviewed_dispositions", [])
       return false unless reviewed.is_a?(Array)
-      reviewed_by_key = reviewed.group_by { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id"), row.fetch("source_time_entry_version") ] }
+      reviewed_by_key = reviewed.group_by { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
       return false unless reviewed_by_key.values.all?(&:one?)
       dispositions = paid_keys + reviewed_by_key.keys
       return false unless dispositions.uniq.length == dispositions.length
-      inventory_keys = @history_inventory.map { |row| [ row.fetch("source_user_uuid"), row.fetch("id"), row.fetch("version") ] }
+      inventory_keys = @history_inventory.map { |row| [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ] }
       return false unless (dispositions - inventory_keys).empty?
-      verifier = @history_disposition_verifier ||= HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client)
-      verifier.refresh_runs!
-      @history_inventory.all? do |row|
+      verifier = history_disposition_verifier
+      verifier.discover_rounding_variances!(@history_inventory)
+      covered = @history_inventory.all? do |row|
         key = [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ]
         next false unless dispositions.include?(key)
         total = coverage_hours(row.fetch("hours"))
@@ -427,8 +436,15 @@ module TimeTracking
         end
         paid_by_key.key?(key) || verifier.verified?(reviewed_by_key.fetch(key).sole, row)
       end
+      covered && verifier.rounding_acknowledgements_valid?
     rescue KeyError, ArgumentError, TypeError
       false
+    end
+
+    def history_disposition_verifier
+      @history_disposition_verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
+        rounding_acknowledgements: manifest.fetch("rounding_variance_acknowledgements", []),
+        component_bindings: manifest.fetch("historical_earning_component_bindings", []))
     end
 
     def coverage_hours(value)

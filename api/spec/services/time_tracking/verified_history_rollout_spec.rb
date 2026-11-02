@@ -78,6 +78,11 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     end
   end
 
+  it "reports a missing export history scope as an actionable error" do
+    expect { described_class.new(manifest: manifest, actor: actor).capture_review_packet! }
+      .to raise_error(described_class::Error, /History scope is required/)
+  end
+
   it "preflights exact identities, checks, and source entries without writing" do
     rollout = described_class.new(manifest: manifest, actor: actor)
 
@@ -645,6 +650,12 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
           end
         end
       end
+    end
+
+    it "normalizes numeric inventory IDs consistently while keeping exact reviewed source values" do
+      source_rows.each { |row| row["id"] = row.fetch("id").to_i }
+      manifest["reviewed_dispositions"] = source_rows.drop(1).map { |row| pending_disposition(row) }
+      expect(described_class.new(manifest: manifest, actor: actor).preview!).to include(history_coverage_verified: true)
     end
 
     it "rejects conflicting dispositions and rows outside the captured inventory" do
