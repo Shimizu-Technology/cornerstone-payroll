@@ -280,7 +280,7 @@ class PayrollRegisterPdfGenerator
       .sort_by { |key, _| key.map(&:to_s) }
       .map do |key, grouped|
         first = grouped.first
-        label = key[0] == :item ? "#{first[:label]} [#{key[1]}/#{key[2].to_i + 1}]" : first[:label].to_s
+        label = payroll_adjustment_label(first, key)
         [ first[:treatment].to_s.humanize, label, adjustment_source_label(first[:source]), fmt(grouped.sum { |entry| entry[:amount].to_d }) ]
       end
   end
@@ -300,7 +300,7 @@ class PayrollRegisterPdfGenerator
         entry = entries.first
         {
           key: key,
-          label: key[0] == :item ? "#{entry[:label]} [#{key[1]}/#{key[2].to_i + 1}]" : entry[:label].to_s,
+          label: payroll_adjustment_label(entry, key),
           treatment: entry[:treatment].to_s.humanize,
           source: adjustment_source_label(entry[:source])
         }
@@ -418,9 +418,21 @@ class PayrollRegisterPdfGenerator
   end
 
   def payroll_field_label(entry, key)
-    return entry[:label].to_s if key[1].blank?
+    keys = active_payroll_field_entries_by_worker.select { |row| row[:label] == entry[:label] }
+      .map { |row| payroll_field_column_key(row) }.uniq
+    distinct_label(entry[:label], key, keys)
+  end
 
-    "#{entry[:label]} [#{key[0] == :definition ? 'field' : 'entry'} ##{key[1]}]"
+  def payroll_adjustment_label(entry, key)
+    keys = active_payroll_adjustments_by_worker.select { |row| row[:label] == entry[:label] }
+      .map { |row| payroll_adjustment_column_key(row) }.uniq
+    distinct_label(entry[:label], key, keys)
+  end
+
+  # Keep saved identities separate while using human-readable occurrence numbers
+  # only when two distinct components have the same name.
+  def distinct_label(label, key, keys)
+    keys.length > 1 ? "#{label} (#{keys.index(key).to_i + 1})" : label.to_s
   end
 
   def payroll_field_group(entry)
@@ -678,7 +690,7 @@ class PayrollRegisterPdfGenerator
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   def fmt(value)
-    format("$%.2f", value.to_f)
+    ActiveSupport::NumberHelper.number_to_currency(value.to_d, precision: 2)
   end
 
   def decimal(value)

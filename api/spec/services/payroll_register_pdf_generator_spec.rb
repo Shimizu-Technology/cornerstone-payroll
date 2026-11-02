@@ -87,6 +87,13 @@ RSpec.describe PayrollRegisterPdfGenerator do
   subject(:generator) { described_class.new(report_data) }
 
   describe "#generate" do
+    it "groups currency with thousands separators" do
+      report_data[:employees].first[:payroll_field_entries].first[:amount] = 1216.35
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+      expect(text).to include("$1,216.35")
+      expect(text).not_to include("$1216.35", "Shift Bonus [")
+    end
+
     it "returns a binary String" do
       result = generator.generate
       expect(result).to be_a(String)
@@ -146,7 +153,8 @@ RSpec.describe PayrollRegisterPdfGenerator do
 
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
-      expect(text).to include("Loan [field #21]", "Loan [field #22]", "$12.00", "$7.00")
+      expect(text).to include("Loan (1)", "Loan (2)", "$12.00", "$7.00")
+      expect(text).not_to include("[field #", "[entry #")
     end
 
     it "renders named payroll fields beside each worker before the reconciliation summary" do
@@ -160,7 +168,7 @@ RSpec.describe PayrollRegisterPdfGenerator do
 
       expect(text).to include("Regular Hours", "80.00", "Overtime Hours", "2.00", "Bonus", "$100.00")
       expect(text).to include("Straight Loans", "$25.00", "Installment Loans", "$50.00")
-      expect(text).to include("Employer Contributions", "$60.00", "Employer Payroll Cost", "$2213.00")
+      expect(text).to include("Employer Contributions", "$60.00", "Employer Payroll Cost", "$2,213.00")
     end
 
     it "renders source-aware recurring and manual adjustments by worker" do
@@ -194,7 +202,7 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).to include("Contractor payments are reported separately")
     end
 
-    it "labels same-name adjustment totals with their saved payroll item identity" do
+    it "keeps same-name adjustment totals separate without exposing database IDs" do
       report_data[:employees].first[:payroll_adjustments] = [
         { payroll_item_id: 10, position: 0, label: "Allowance", treatment: "taxable_addition", source: "manual", amount: BigDecimal("12") },
         { payroll_item_id: 11, position: 0, label: "Allowance", treatment: "taxable_addition", source: "manual", amount: BigDecimal("7") }
@@ -202,7 +210,8 @@ RSpec.describe PayrollRegisterPdfGenerator do
 
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
-      expect(text).to include("Allowance [10/1]", "Allowance [11/1]", "$12.00", "$7.00")
+      expect(text).to include("Allowance (1)", "Allowance (2)", "$12.00", "$7.00")
+      expect(text).not_to include("[10/1]", "[11/1]")
     end
 
     it "distinguishes an assigned zero amount from a field that was not assigned" do
