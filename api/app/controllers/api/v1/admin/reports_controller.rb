@@ -1097,7 +1097,7 @@ module Api
             title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Pay Date" : "Payroll Summary by Pay Date",
             subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}#{report.dig(:meta, :provisional) ? ' — calculated, not paid' : ''}",
             filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.pdf",
-            sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
+            sheets: ytd_summary_pdf_sheets(report).each_with_index.map do |sheet, index|
               index.zero? ? sheet.merge(pdf_frozen_columns: 3, pdf_max_columns: 9) : sheet
             end
           )
@@ -4056,6 +4056,36 @@ module Api
           return "#{start_date}_to_#{end_date}" if start_date.present? && end_date.present?
 
           year.presence || "report"
+        end
+
+        # Presentation only: spreadsheet exports retain their numeric cells.
+        def ytd_summary_pdf_sheets(report)
+          ytd_summary_sheets(report).map do |sheet|
+            next sheet unless sheet[:name] == "Company Totals"
+
+            rows = (report[:company_totals] || {}).map do |key, value|
+              label = case key.to_sym
+              when :source_labeled_after_tax_401k_in_pretax_bucket
+                "Historical 401(k) labeled after-tax (source pre-tax bucket)"
+              when :withholding_tax then "Federal/Guam income tax"
+              when :social_security_tax then "Social Security tax"
+              when :medicare_tax then "Medicare tax"
+              when :retirement then "Traditional 401(k)"
+              when :roth_retirement then "Roth 401(k)"
+              else key.to_s.humanize
+              end
+              display = case key.to_sym
+              when :period_basis then value.to_s.humanize
+              when :year, :start_date, :end_date then value
+              when :total_hours, :total_overtime_hours
+                ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", value.to_d))
+              else
+                key.to_s.end_with?("_count") ? value : ActiveSupport::NumberHelper.number_to_currency(value.to_d, precision: 2)
+              end
+              [ label, display ]
+            end
+            sheet.merge(rows: [ [ "Field", "Value" ], *rows ])
+          end
         end
 
         def ytd_summary_sheets(report)

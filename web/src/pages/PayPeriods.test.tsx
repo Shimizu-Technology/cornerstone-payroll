@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
+import { ActionFeedback, FeedbackProvider } from '@/components/ui/action-feedback';
 import { PayPeriods } from './PayPeriods';
 import type { PayrollHistoryRecord } from '@/services/api';
 
@@ -244,4 +245,103 @@ it.each(['desktop', 'phone'])('opens the source acknowledgement worksheet instea
   fireEvent.click(within(container).getByRole('button', { name: /Recalculate/ }));
   expect(await screen.findByText('Review hours and acknowledge source coverage')).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+
+describe('PayPeriods delete confirmation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.activeCompany = { id: 11, name: 'Local Payroll QA' };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod]));
+    apiMocks.payPeriodDelete.mockResolvedValue(undefined);
+  });
+
+  const openDelete = async (employeeCount = 2, hours = 0) => {
+    apiMocks.payPeriodGet.mockResolvedValue({ pay_period: {
+      ...editablePeriod, employee_count: employeeCount,
+      payroll_items: [{ id: 1, hours_worked: hours }],
+    } });
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    return screen.findByRole('dialog', { name: 'Delete unfinished pay run?' });
+  };
+
+  it.each([[10, 0], [2, 0.25]])('requires acknowledgement for %s employees and %s hours, then names the deleted run', async (count, hours) => {
+    const dialog = await openDelete(count, hours);
+    expect(dialog.textContent).toContain('Local Payroll QA');
+    expect(dialog.textContent).toContain('Aug 24 - Sep 6, 2026');
+    expect(dialog.textContent).toContain('Sep 10, 2026');
+    expect(dialog.textContent).toContain('Calculated');
+    expect(dialog.textContent).toContain('$3,086.25');
+    expect(dialog.textContent).toContain('permanently deletes this unfinished run and its entered hours');
+    const submit = within(dialog).getByRole('button', { name: 'Delete pay run' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'I understand this deletes the entered hours' }));
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    fireEvent.click(submit);
+    await waitFor(() => expect(apiMocks.payPeriodDelete).toHaveBeenCalledExactlyOnceWith(12));
+    expect(await screen.findByText(/Deleted Local Payroll QA — Aug 24 - Sep 6, 2026/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
+  it('allows a small run without hours, but Cancel leaves it untouched', async () => {
+    const dialog = await openDelete(9, 0);
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Delete pay run' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+  });
+
+  it('resets the checkbox on cancel and preserves the run after a server refusal', async () => {
+    let dialog = await openDelete(66, 2898.16);
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    apiMocks.payPeriodDelete.mockRejectedValue(new Error('This run was approved before. Keep it and correct it instead.'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    expect(await screen.findByText(/This run was approved before/)).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByText(/Deleted Local Payroll QA/)).toBeNull();
+  });
+
+  it('dismisses the published success notice before a later refused deletion', async () => {
+    const secondPeriod = { ...editablePeriod, id: 13, key: 'native:13' };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod, secondPeriod]));
+    apiMocks.payPeriodGet.mockImplementation((id: number) => Promise.resolve({ pay_period: {
+      ...(id === 12 ? editablePeriod : secondPeriod), payroll_items: [{ id, hours_worked: 0 }],
+    } }));
+    render(<FeedbackProvider><ActionFeedback tone="success" message="Employee saved." /><MemoryRouter><PayPeriods /></MemoryRouter></FeedbackProvider>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    let dialog = await screen.findByRole('dialog');
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([secondPeriod]));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    const success = await screen.findByText(/Deleted Local Payroll QA/);
+    fireEvent.mouseEnter(success.closest('[data-feedback-tone]')!);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    dialog = await screen.findByRole('dialog');
+    apiMocks.payPeriodDelete.mockRejectedValue(new Error('This run was approved before. Keep it and correct it instead.'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    expect(await screen.findByText(/This run was approved before/)).toBeTruthy();
+    expect(screen.queryByText(/Deleted Local Payroll QA/)).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(apiMocks.payPeriodDelete.mock.calls).toEqual([[12], [13]]);
+    expect(screen.getByText('Employee saved.')).toBeTruthy();
+  });
+
+  it('fails closed when current run details cannot load', async () => {
+    apiMocks.payPeriodGet.mockRejectedValue(new Error('Could not load the run'));
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    expect(await screen.findByText('Could not load the run')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+  });
 });
