@@ -1,0 +1,117 @@
+{
+  "source": "29cc2b36bcca4afbfeb70b548d1d0f947d522e28",
+  "api_tree": "09a83e6c6617ceb45530d2f243c08045fab3fc6e",
+  "web_tree": "8646ac019416fd54a309973219f8cbf883fc1426",
+  "full_rspec": {
+    "files": 532,
+    "examples": 5816,
+    "failures": 0,
+    "conditional_pending": 4,
+    "shards": [
+      {
+        "shard": 1,
+        "files": 133,
+        "examples": 1507,
+        "failures": 0,
+        "pending": 0,
+        "database": "payroll_pr417_r2_isolated1_01a19977",
+        "storage_root": "/tmp/pr417-r2-isolated1-storage",
+        "tmpdir": "/tmp/pr417-r2-isolated1-tmp",
+        "log_sha256": "e9bdd855cc61210bd33f6e83130a174cfd019fb5a6203ee972a4cdbfe84d65e3"
+      },
+      {
+        "shard": 2,
+        "files": 133,
+        "examples": 1674,
+        "failures": 0,
+        "pending": 0,
+        "database": "payroll_pr417_r2_isolated2_01a19977",
+        "storage_root": "/tmp/pr417-r2-isolated2-storage",
+        "tmpdir": "/tmp/pr417-r2-isolated2-tmp",
+        "log_sha256": "9074af9424114e6a56b7d3952d8762badaa1c9d0d74a8ee4ea61691ea40711e7"
+      },
+      {
+        "shard": 3,
+        "files": 133,
+        "examples": 1226,
+        "failures": 0,
+        "pending": 4,
+        "database": "payroll_pr417_r2_isolated3_01a19977",
+        "storage_root": "/tmp/pr417-r2-isolated3-storage",
+        "tmpdir": "/tmp/pr417-r2-isolated3-tmp",
+        "log_sha256": "2cdb28442eb8604a29e847dd846a78d8e35bbb96d0de720ba89d3d44593c40b3"
+      },
+      {
+        "shard": 4,
+        "files": 133,
+        "examples": 1409,
+        "failures": 0,
+        "pending": 0,
+        "database": "payroll_pr417_r2_isolated4_01a19977",
+        "storage_root": "/tmp/pr417-r2-isolated4-storage",
+        "tmpdir": "/tmp/pr417-r2-isolated4-tmp",
+        "log_sha256": "46024a5eea8379b56a5900073bebb7475c9dc06c1e3395094c1516c1cbee714c"
+      }
+    ],
+    "exit_codes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "host": "owned local PostgreSQL17 port55457; no shared/deployed data"
+  },
+  "pooler": {
+    "examples": 13,
+    "failures": 0,
+    "covers_conditional_pending": 4,
+    "port": 56457,
+    "mode": "transaction"
+  },
+  "frontend": {
+    "files": 143,
+    "tests": "passed",
+    "workers": 4,
+    "test_timeout_ms": 120000,
+    "hook_timeout_ms": 120000,
+    "retry_permitted": 1,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "build_flags": {
+      "DEPLOYMENT_ENV": "production",
+      "VITE_DEPLOYMENT_ENV": "production"
+    }
+  },
+  "security": {
+    "rubocop_files": 1597,
+    "offenses": 0,
+    "brakeman_warnings": 0,
+    "bundler_audit_vulnerabilities": 0
+  },
+  "affected_checks": {
+    "migration_revision_examples": 12,
+    "renderer_workflow_request_examples": 67,
+    "digest_zero_nonzero_examples": 2,
+    "scope_guard_examples": 11
+  },
+  "acceptance": {
+    "source": "595c200605a44317a571053a8214b3ccdd5373ca (frontend unchanged through final head)",
+    "desktop": "passed",
+    "narrow_viewport": "passed",
+    "widths": [
+      1440,
+      390
+    ],
+    "final_empty_section_pdf_source": "29cc2b36bcca4afbfeb70b548d1d0f947d522e28",
+    "physical_printers": "not run",
+    "private_production_profiles": "not accessed"
+  },
+  "review": {
+    "manual_full_review_request": "https://github.com/Shimizu-Technology/cornerstone-payroll/pull/417#issuecomment-6565785966",
+    "status": "rate limited; no approval claimed",
+    "original_inline_threads_replied": 8,
+    "additional_minor_threads_replied": 2
+  },
+  "cleanup": "Final resource disposition is recorded in the PR description and local task handoff; UI servers and browsers were cleaned after acceptance."
+}
