@@ -11,6 +11,7 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
   let(:uuid) { SecureRandom.uuid }
   let(:current) do
     { "id" => "1804", "version" => 2, "source_user_uuid" => uuid, "work_date" => "2026-09-15", "hours" => 4.25,
+      "employee" => { "id" => "91", "payroll_integration_id" => uuid },
       "category" => { "id" => "1", "key" => "admin", "name" => "Admin" },
       "state" => { "status" => "completed", "approval_status" => "pending", "entry_method" => "manual" },
       "lifecycle" => { "status" => "awaiting_approval" },
@@ -152,6 +153,110 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
       validator = instance_double(TimeTracking::PayrollBatchPayloadValidator, validate!: payload)
       allow(TimeTracking::PayrollBatchPayloadValidator).to receive(:new).and_return(validator)
       capture("historical_baseline")
+    end
+
+    context "with separately typed legacy frozen evidence" do
+      before do
+        current["employee"] = { "id" => "91", "payroll_integration_id" => uuid }
+        line.merge!("current_content_matches" => false, "source_time_entry_version" => nil,
+          "source_user_id" => "91", "identity_basis" => "reviewed_legacy_owner", "snapshot_checksum" => "c" * 64,
+          "legacy_frozen_evidence" => {
+            "kind" => "legacy_frozen_batch_baseline", "evidence_strength" => "retained_snapshot_and_unchanged_source",
+            "eligible" => true, "blockers" => [], "payload_checksum_verified" => true,
+            "batch_finalized_at" => "2026-09-18T07:00:00Z", "source_created_at" => "2026-09-15T00:00:00Z",
+            "source_updated_at" => "2026-09-16T00:00:00Z", "source_version" => 2,
+            "source_user_id" => "91", "source_user_uuid" => uuid, "later_edit_audit_count" => 0,
+            "retained_snapshot_fields" => %w[user_id work_date hours time_category],
+            "source_observation_checksum" => "d" * 64, "revision_observation_checksum" => "e" * 64
+          })
+        payload["export"]["finalized_at"] = "2026-09-18T07:00:00Z"
+        payload["export"]["finalized_at_precise"] = "2026-09-18T07:00:00Z"
+        payload["employees"].first.merge!("source_user_uuid" => nil, "source_user_id" => "91")
+        payload["employees"].first["adjustments"].first["source_time_entry_version"] = nil
+        capture("legacy_frozen_batch_baseline")
+      end
+
+      it "accepts the lower-strength type without asserting original frozen version or time approval" do
+        current["state"]["approval_status"] = nil
+        capture("legacy_frozen_batch_baseline")
+        expect(verifier.verified?(disposition, current)).to be(true)
+        expect(current.dig("state", "approval_status")).to be_nil
+        capture("historical_baseline")
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects any reported mismatch or edit even when the manifest repeats the returned evidence" do
+        line["legacy_frozen_evidence"].merge!("eligible" => false, "blockers" => [ "snapshot_mismatch" ])
+        capture("legacy_frozen_batch_baseline")
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "independently refuses a source timestamp after finalization" do
+        line["legacy_frozen_evidence"]["source_updated_at"] = "2026-09-19T00:00:00Z"
+        capture("legacy_frozen_batch_baseline")
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects a different finalization timestamp from the authenticated batch" do
+        payload["export"]["finalized_at_precise"] = "2026-09-17T07:00:00Z"
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects a saved mapping whose numeric source owner differs despite a matching UUID" do
+        source.time_tracking_employee_mappings.sole.update!(source_user_id: "92")
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      context "with a complete canonical legacy payload and the real payload validator" do
+        def reconcile_payload!
+          employee = payload.fetch("employees").sole
+          lines = employee.fetch("adjustments")
+          totals = %w[total_hours regular_hours overtime_hours].to_h { |key| [ key, lines.sum { |row| row.fetch(key).to_d }.to_f ] }
+          employee.merge!(totals)
+          payload["summary"] = totals.merge("employee_count" => 1, "adjustment_count" => lines.length,
+            "exclusion_count" => 0, "current_count" => lines.length, "carryover_count" => 0, "correction_count" => 0)
+          line["batch_checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+          payload["export"]["checksum"] = line.fetch("batch_checksum")
+          capture("legacy_frozen_batch_baseline")
+        end
+
+        before do
+          allow(TimeTracking::PayrollBatchPayloadValidator).to receive(:new).and_call_original
+          payload.merge!("schema_version" => "2.0", "source" => "aire_services",
+            "cutoff_at" => "2026-09-18T07:00:00Z", "generated_at" => "2026-09-18T07:00:00Z", "exclusions" => [],
+            "issues" => %w[missing_category_count negative_adjustment_count pending_approval_count denied_approval_count open_clock_count pending_overtime_count denied_overtime_count].index_with { 0 })
+          payload["employees"].sole["adjustments"].sole.merge!("original_week_start" => "2026-09-13", "source_category_id" => "1")
+          payload["export"].merge!("id" => line["batch_id"], "batch_id" => line["batch_id"],
+            "readiness_status" => "finalized", "cutoff_at" => payload["cutoff_at"], "checksum_algorithm" => "SHA-256",
+            "checksum_scope" => "payload_without_export")
+          reconcile_payload!
+        end
+
+        it "accepts a complete checksum-bound legacy payload including fractional finalization" do
+          line["legacy_frozen_evidence"]["batch_finalized_at"] = "2026-09-18T07:00:00.123456Z"
+          payload["export"]["finalized_at_precise"] = "2026-09-18T07:00:00.123456Z"
+          capture("legacy_frozen_batch_baseline")
+          expect(verifier.verified?(disposition, current)).to be(true)
+        end
+
+        [ [ "75.03", "0", "75.00", "0" ], [ "80", "20.57", "80", "20.60" ] ].each do |frozen_reg, frozen_ot, run_reg, run_ot|
+          it "rejects exact multi-line balance #{frozen_reg}/#{frozen_ot} versus committed #{run_reg}/#{run_ot}" do
+            other = payload["employees"].sole["adjustments"].sole.deep_dup
+            regular = frozen_reg.to_d - 4.25.to_d
+            other.merge!("source_time_entry_id" => "1805", "line_key" => "other",
+              "total_hours" => (regular + frozen_ot.to_d).to_f, "regular_hours" => regular.to_f, "overtime_hours" => frozen_ot.to_f)
+            payload["employees"].sole["adjustments"] << other
+            PayrollItem.where(pay_period: run).update_all(hours_worked: run_reg, overtime_hours: run_ot)
+            reconcile_payload!
+            expect(verifier.verified?(disposition, current)).to be(false)
+          end
+        end
+      end
+
+      it "rejects local committed-run hours that differ from the complete frozen employee balance" do
+        PayrollItem.where(pay_period: run).update_all(overtime_hours: 0.03)
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
     end
 
     it "verifies frozen lines against authenticated batch content and the company-owned committed run" do
