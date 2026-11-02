@@ -374,6 +374,10 @@ class PayPeriod < ApplicationRecord
       .where("evidence->'source_run_ids' @> ?::jsonb", [ id ].to_json).exists?)
   end
 
+  def unresolved_prior_provider_history?
+    PriorProviderHistoryOnboarding.unresolved_reversed_for(company_id).exists?
+  end
+
   def can_edit?
     !committed? && !voided? && !training_baseline? && !retired_history?
   end
@@ -711,6 +715,10 @@ class PayPeriod < ApplicationRecord
 
   def starts_after_historical_ytd_boundary
     return if retired_history?
+    if company_id.present? && unresolved_prior_provider_history? && !paid_prior_provider_source?
+      errors.add(:base, "Record and activate replacement prior-provider history before starting live payroll; the previous history was undone")
+      return
+    end
     if PriorProviderHistoryOnboarding.where(company_id: company_id, status: "converted").exists?
       errors.add(:base, "Activate or reverse the converted prior-provider history before starting live payroll")
       return
