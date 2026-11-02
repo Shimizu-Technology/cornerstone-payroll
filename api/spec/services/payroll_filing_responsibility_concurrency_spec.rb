@@ -60,40 +60,52 @@ RSpec.describe PayrollFilingResponsibilityRecorder, :postgres_concurrency, type:
     Timeout.timeout(10) { writer&.join }
   end
 
-  it "refuses a filing write when access is revoked while waiting for the company lock" do
-    writer_pid, result = Queue.new, Queue.new
-    writer = nil
-    audit_count = AuditLog.where(company_id: company.id).count
-    Company.transaction do
-      company.lock!
-      writer = Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |connection|
-          writer_pid << connection.raw_connection.backend_pid
-          record_decision(Company.find(company.id), User.find(actor.id), "external_provider", "Must not save")
-          result << :saved
-        rescue StandardError => error
-          result << error
-        end
-      end
-      pid = Timeout.timeout(30) { writer_pid.pop }
-      Timeout.timeout(30) do
-        loop do
-          ActiveRecord::Base.connection.execute("SELECT pg_stat_clear_snapshot()")
-          waiting = ActiveRecord::Base.uncached do
-            ActiveRecord::Base.connection.select_value("SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{Integer(pid)}")
+  [ :deactivated, :assignment_expired ].each do |revocation|
+    it "refuses a filing write when #{revocation} while waiting for the company lock" do
+      writer_pid, result = Queue.new, Queue.new
+      writer = nil
+      reviewer_home = create(:company, organization: organization) if revocation == :assignment_expired
+      reviewer = revocation == :deactivated ? actor : create(:user, company: reviewer_home, organization: organization, role: "accountant")
+      assignment = CompanyAssignment.create!(company: company, user: reviewer, granted_by: actor) if revocation == :assignment_expired
+      audit_count = AuditLog.where(company_id: company.id).count
+      Company.transaction do
+        company.lock!
+        writer = Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection do |connection|
+            writer_pid << connection.raw_connection.backend_pid
+            record_decision(Company.find(company.id), User.find(reviewer.id), "external_provider", "Must not save")
+            result << :saved
+          rescue StandardError => error
+            result << error
           end
-          break if waiting == "Lock"
-          sleep 0.01
+        end
+        pid = Timeout.timeout(30) { writer_pid.pop }
+        Timeout.timeout(30) do
+          loop do
+            ActiveRecord::Base.connection.execute("SELECT pg_stat_clear_snapshot()")
+            waiting = ActiveRecord::Base.uncached do
+              ActiveRecord::Base.connection.select_value("SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{Integer(pid)}")
+            end
+            break if waiting == "Lock"
+            sleep 0.01
+          end
+        end
+        if assignment
+          assignment.update_columns(expires_at: 1.second.ago)
+        else
+          actor.update_columns(active: false)
         end
       end
-      actor.update_columns(active: false)
+      Timeout.timeout(30) { writer.join }
+      expect(result.pop).to be_a(PayrollFilingResponsibilityPolicy::NotAuthorized)
+      expect(responsibility.reload.responsible_party).to eq("cornerstone")
+      expect(AuditLog.where(company_id: company.id).count).to eq(audit_count)
+    ensure
+      Timeout.timeout(30) { writer&.join }
+      assignment&.destroy!
+      reviewer&.destroy! if reviewer && reviewer != actor
+      Company.where(id: reviewer_home&.id).delete_all
     end
-    Timeout.timeout(30) { writer.join }
-    expect(result.pop).to be_a(PayrollFilingResponsibilityPolicy::NotAuthorized)
-    expect(responsibility.reload.responsible_party).to eq("cornerstone")
-    expect(AuditLog.where(company_id: company.id).count).to eq(audit_count)
-  ensure
-    Timeout.timeout(30) { writer&.join }
   end
 
   def record_decision(client, user, party, note)
