@@ -60,7 +60,21 @@ RSpec.describe "Prior-provider final review regressions" do
     register_row = report[:employees].find { |record| record[:employee_id] == employees.first.id }
     expect(paycheck.gross_pay).to eq(2_000)
     expect(register_row).to include(gross_pay: 1_900, non_taxable_pay: 100, retirement_payment: 100,
-      roth_retirement_payment: 20, total_retirement_payment: 120, insurance_payment: 30, loan_payment: 10)
+      roth_retirement_payment: 20, total_retirement_payment: 120, insurance_payment: 30, loan_payment: 10, historical_loan_deductions_unclassified: 10)
+    csv = CSV.parse(PayrollRegisterCsvExporter.new(report).generate, headers: true)
+    expect(csv.first["Previous Provider Loans (Type Not Recorded)"]).to eq("10.00")
+    expect(csv.last["Previous Provider Loans (Type Not Recorded)"]).to eq("10.00")
+    expect(csv.first["Straight Loan (One-Time)"]).to eq("0.00")
+    expect(csv.first["Installment Loan (Recurring)"]).to eq("0.00")
+    pdf = PayrollRegisterPdfGenerator.new(report)
+    column = pdf.send(:employee_table_columns).find { |entry| entry[:key] == :historical_loan_deductions_unclassified }
+    expect(column[:label]).to eq("Previous Provider Loans (Type Not Recorded)")
+    expect(pdf.send(:employee_table_value, register_row, column[:key])).to include("10.00")
+    sheets = Api::V1::Admin::ReportsController.new.send(:payroll_register_sheets, report)
+    employee_sheet = sheets.find { |sheet| sheet[:name] == "Employees" }
+    loan_column = employee_sheet[:rows][3].index("Previous Provider Loans (Type Not Recorded)")
+    expect(employee_sheet[:rows][4][loan_column]).to eq(10)
+    expect(employee_sheet[:rows].last[loan_column]).to eq(10)
     expect(PayrollRegisterReconciliation.review_rows(report)).to be_empty
     reporting = UnifiedPayrollReporting.new(company_id: @company.id, period: PayrollReportingPeriod.from_params({ year: 2026 }))
     expect(reporting.add_historical_to_employee_row({}, [ paycheck ])).to include(

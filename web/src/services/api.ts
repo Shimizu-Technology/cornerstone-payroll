@@ -2327,6 +2327,7 @@ export interface PayrollRegisterReport {
       payroll_field_non_taxable_additions_total?: number;
       traditional_retirement_total?: number;
       roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2339,6 +2340,7 @@ export interface PayrollRegisterReport {
       payroll_field_non_taxable_additions_total?: number;
       traditional_retirement_total?: number;
       roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;

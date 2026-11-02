@@ -3088,9 +3088,11 @@ module Api
           adjustment_export = PayrollAdjustmentExport.new(employees + contractors)
           field_columns = payroll_field_export_columns(employees + contractors)
           status_note = report.dig(:meta, :payroll_status_note)
-          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
-          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
-          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          historical_loans = (employees + contractors).any? { |worker| worker.key?(:historical_loan_deductions_unclassified) }
+          historical_headers = historical_loans ? [ "Previous Provider Loans (Type Not Recorded)" ] : []
+          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + historical_headers + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + (historical_loans ? [ emp[:historical_loan_deductions_unclassified] ] : []) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + (historical_loans ? [ emp[:historical_loan_deductions_unclassified] ] : []) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
@@ -3111,7 +3113,7 @@ module Api
           pp = report[:pay_period] || {}
           context = "Work period: #{pp[:start_date]} to #{pp[:end_date]} | Pay date: #{pp[:pay_date]}"
           # Sum saved numeric amounts, hours, and disclosure columns, never rates/IDs.
-          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)" ]
+          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)", "Previous Provider Loans (Type Not Recorded)" ]
           totals = headers.each_with_index.map do |header, index|
             if header == "Employee Name"
               "TOTALS"
