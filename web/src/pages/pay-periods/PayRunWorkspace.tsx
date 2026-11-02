@@ -1,3 +1,4 @@
+import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
@@ -214,6 +215,7 @@ export function PayRunWorkspace(): ReactElement {
   </div>;
 
   return <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
+    {payRun.prior_provider_history_available && <div className="px-4 pt-4 sm:px-6 lg:px-8"><PriorProviderHistoryNotice companyId={companyId} /></div>}
     <PayPeriodDetail key={`${companyId}:${payRunId}`} activeTab={activeTab} initialPayPeriod={payRun} onPayPeriodChange={handlePayRunChange} refreshToken={processingRefreshToken} navigation={navigation} checksContent={({ searchTerm, onChecksLoaded, refreshToken }) => <PayRunChecks readOnly={false} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} searchTerm={searchTerm} onChecksLoaded={onChecksLoaded} externalRefreshToken={refreshToken} showDraftPaymentControls={false} />} activityContent={activity} />
   </Suspense>;
 }

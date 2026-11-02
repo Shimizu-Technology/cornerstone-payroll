@@ -101,3 +101,25 @@ Agent-executed local walkthrough (headless Chromium, `AUTH_ENABLED=false`, the o
 | Saved API state: 20 periods, 60 paychecks, gross 83,300, 3 opening balances | passed |
 
 Screenshots are in `docs/qa/prior-provider-history-20261101/`. Limits: resized headless browser, not physical devices or a human operator.
+
+## Final release-current pass (2026-11-02, in progress)
+
+Source brief: user brief for #407; this guide and QA ledger; Brain-Dump `work/shimizu-tech/Cornerstone/payroll-priorities-and-aire-reconciliation-2026-09-19.md` (distinct register columns, paid payroll must not be paid twice); private Kasperbauer audit `output/payroll-aire-prod-audit-2026-10-30/kasperbauer/REPORT.md`; release branch `08b5379e`. Production/staging versions in the user brief are background, not independently deployed-version verification here. `staging-v2` was merged without rewriting history as `b41541aa`. No textual conflicts. #407 remains draft/HELD; Claude alone owns merge after the release. No deployment is authorized.
+
+Experience: accountants compare paid paper registers with saved calculations, enter old check numbers in a visible column, review/save evidence, and turn on YTD before genuinely unpaid payroll. Preserve exact-cents reconciliation, explicit bases, identity checks, source locks and document/approval gates. Use existing operational surfaces with no new motion. Resized desktop/phone browser coverage is not physical-device or CEO acceptance.
+
+Agent-executed required final scenarios (synthetic local fixtures unless stated):
+
+| ID | Starting conditions → actions → expected saved outcome | Coverage | Status |
+|---|---|---|---|
+| F01 | Past calculated runs, no live commitment → find notice in list/workspace; attempt approval → history link/guidance; live clients hide notice | API + desktop/phone | not_run |
+| F02 | Match registers → tab through old check numbers (leading zeros/blank allowed), save/reload → references retained without check allocation | desktop/phone + API | not_run |
+| F03 | Reconcile register mismatch, recover, record once → 20 periods / 60 paychecks with references in summary, saved view and imported detail | desktop/phone + API | not_run |
+| F04 | Turn on YTD/reload → next-number suggestion (highest numeric + 1), editable existing check settings, no automatic sequence write | desktop/phone + API | not_run |
+| F05 | Active history → create first live period → start after historical end/pay date; operator confirms end/payday; saved new period | desktop/phone + API | not_run |
+| F06 | Six missing document requirements → visible pre-approval links to actual employee document manager; no waiver by activation | desktop/phone + API | not_run |
+| F07 | Fresh contained production copy → record/activate real company-10 shape using stand-in registers → 20/60 once; no historical checks/postings/deposits/loans/jobs/email; correct filing ownership/YTD | services/API | not_run |
+| F08 | Copy-only document waivers → Oct 29–Nov 11 live calculate/approve/commit → normal annual FICA; employee YTD = history + live | services/API | not_run |
+| F09 | Same 356 report requests for companies 1,2,4,5,6,10,11 on staging-v2 vs #407 before conversion → no changed responses for other clients | contained copy | not_run |
+
+Private evidence is under `output/payroll-aire-prod-audit-2026-10-30/pr407-final/` (0600 files). Only synthetic screenshots and redacted counts belong in Git/PR. Real registers, actual document verification, filing/deposit evidence and the first unpaid payday remain operator decisions.

@@ -628,7 +628,10 @@ module Api
           lifecycle_service.approve!
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue ActiveRecord::RecordInvalid, PayPeriodLifecycleService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          guidance = if PriorProviderHistory::Discovery.available?(current_company, period: @pay_period)
+            " Were these already paid by a previous provider? Record them as prior-provider history from this client's pay runs."
+          end
+          render json: { error: "#{e.message}#{guidance}" }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/unapprove
@@ -1339,6 +1342,7 @@ module Api
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,
             annual_fica_review_note: pay_period.annual_fica_review_note,
+            prior_provider_history_available: PriorProviderHistory::Discovery.available?(pay_period.company, period: pay_period),
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             intake_stale_at: pay_period.intake_stale_at,

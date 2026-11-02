@@ -27,6 +27,7 @@ module Api
             candidates_overflow: eligible_count > candidates.size,
             employees: current_company.employees.order(:last_name, :first_name).map { |employee| { id: employee.id, name: employee.full_name, ssn_last_four: employee.ssn_last_four } },
             draft: serialize_draft(PriorProviderHistoryDraft.find_by(company_id: current_company_id)),
+            readiness_gaps: readiness_gaps,
             onboardings: PriorProviderHistoryOnboarding.where(company_id: current_company_id).order(id: :desc).map { |record| serialize(record) }
           }
         end
@@ -122,6 +123,12 @@ module Api
             updated_at: draft.updated_at.iso8601, updated_by_name: draft.updated_by.name }
         end
 
+        def readiness_gaps
+          current_company.employees.active.where(document_readiness_required: true).flat_map do |employee|
+            EmployeeDocumentReadiness.gaps_for(employees: [ employee ]).map { |gap| gap.merge(employee_id: employee.id) }
+          end
+        end
+
         # Per-employee year-to-date this history contributes, available before
         # activation creates the opening balances.
         def employee_totals(batch)
@@ -145,6 +152,10 @@ module Api
             reversal_reason: record.reversal_reason, batch_id: batch.id,
             periods: batch.historical_pay_periods.chronological.map { |period| period.attributes.slice("id", "pay_date", "start_date", "end_date", "paycheck_count", "totals") },
             totals: batch.preview_summary["totals"],
+            payment_references: batch.historical_paychecks.order(:pay_date, :employee_id, :id).map do |check|
+              { employee_id: check.employee_id, pay_date: check.pay_date,
+                reference: check.source_metadata["provider_payment_reference"] }
+            end,
             employee_balances: batch.historical_ytd_bridge&.historical_employee_ytd_balances&.map { |balance| balance.attributes.slice("employee_id", "gross_pay", "net_pay", "federal_income_tax", "social_security_taxable_wages", "social_security_taxable_tips", "medicare_taxable_wages") } || [],
             employee_totals: employee_totals(batch),
             source_files: batch.historical_import_source_files.in_manifest_order.map { |file| file.attributes.slice("id", "original_filename", "sha256", "byte_size", "verification_status") },

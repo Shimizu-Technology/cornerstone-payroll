@@ -123,6 +123,27 @@ afterEach(() => {
 });
 
 describe("Prior-provider history", () => {
+  it("keeps old check references visible, optional, and in the shared draft", async () => {
+    open();
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    fireEvent.click(screen.getByRole("button", { name: /Match registers/ }));
+    const input = screen.getByLabelText("Check # from previous provider — Ana Cruz");
+    expect(screen.queryByLabelText("Provider check or deposit number (optional)")).toBeNull();
+    fireEvent.change(input, { target: { value: "00707" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save progress" }));
+    await waitFor(() => expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ periods: expect.arrayContaining([expect.objectContaining({ paychecks: expect.arrayContaining([expect.objectContaining({ provider_payment_reference: "00707" })]) })]) }), 2, undefined));
+  });
+
+  it("shows saved references, check settings and document fixes after turning on YTD", async () => {
+    const record = { ...onboarding("active"), payment_references: [{ employee_id: 1, pay_date: "2026-10-28", reference: "00707" }, { employee_id: 2, pay_date: "2026-10-28", reference: "DD-99999" }] };
+    vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...page(), candidates: [], onboardings: [record], readiness_gaps: [{ employee_id: 1, employee_name: "Ana Cruz", label: "Signed withholding election", status: "missing" }] });
+    open();
+    await screen.findByText("00707");
+    expect(screen.getByRole("link", { name: /Set the next live check number/ }).getAttribute("href")).toBe("/check-settings?company_id=10&suggested_next=708#next-check-number");
+    expect(screen.getByRole("link", { name: "Create the first live pay period" }).getAttribute("href")).toBe("/companies/10/pay-runs?new_after=2026-10-28");
+    expect(screen.getByRole("link", { name: /Ana Cruz: Signed withholding election/ }).getAttribute("href")).toContain("/companies/10/employees/1/edit?");
+  });
+
   it("prefills every saved run and the takeover date, and lists what’s left", async () => {
     open();
     await screen.findByText(/2 pay dates · 4 paychecks/);
