@@ -106,22 +106,23 @@ class ImportedPayrollRegister
       payroll_adjustment_totals: {},
       payroll_field_entries: [],
       payroll_field_totals: {},
-      gross_pay: money(paycheck.gross_pay),
+      # The archive retains inclusive gross. Register rows present non-taxable
+      # cash separately, as required by the shared net-pay reconciliation.
+      gross_pay: money(paycheck.gross_pay - (verified_amount(paycheck, "non_taxable_pay") || 0.to_d)),
       withholding_tax: money(paycheck.federal_income_tax),
       additional_withholding: 0.0,
       social_security_tax: money(paycheck.social_security_tax),
       medicare_tax: money(paycheck.medicare_tax),
       employer_social_security_tax: component_amount(paycheck.employer_tax_breakdown, /social security/i),
       employer_medicare_tax: component_amount(paycheck.employer_tax_breakdown, /medicare/i),
-      retirement_payment: component_amount(paycheck.pretax_deduction_breakdown, /401|retirement/i),
-      roth_retirement_payment: component_amount(paycheck.after_tax_deduction_breakdown, /roth/i),
-      total_retirement_payment: component_amount(paycheck.pretax_deduction_breakdown, /401|retirement/i) +
-        component_amount(paycheck.after_tax_deduction_breakdown, /roth/i),
+      retirement_payment: retirement_amount(paycheck),
+      roth_retirement_payment: roth_amount(paycheck),
+      total_retirement_payment: retirement_amount(paycheck) + roth_amount(paycheck),
       employer_retirement_match: component_amount(paycheck.employer_contribution_breakdown, /401|retirement|match/i),
       employer_roth_retirement_match: component_amount(paycheck.employer_contribution_breakdown, /roth/i),
-      loan_deduction: component_amount(paycheck.after_tax_deduction_breakdown, /loan/i),
-      loan_payment: component_amount(paycheck.after_tax_deduction_breakdown, /loan/i),
-      insurance_payment: component_amount(paycheck.after_tax_deduction_breakdown, /insurance|medical|dental|vision/i),
+      loan_deduction: verified_amount(paycheck, "loans") || component_amount(paycheck.after_tax_deduction_breakdown, /loan/i),
+      loan_payment: verified_amount(paycheck, "loans") || component_amount(paycheck.after_tax_deduction_breakdown, /loan/i),
+      insurance_payment: verified_amount(paycheck, "insurance") || component_amount(paycheck.after_tax_deduction_breakdown, /insurance|medical|dental|vision/i),
       total_deductions: money(paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions),
       net_pay: money(paycheck.net_pay),
       check_number: paycheck.check_number,
@@ -179,6 +180,20 @@ class ImportedPayrollRegister
     normalized_lines(lines).map do |line|
       { category: "Employer contribution", label: line[:label], amount: line[:amount] }
     end
+  end
+
+  def verified_amount(paycheck, field)
+    return unless historical_period.historical_import_batch.source_system == "prior_provider"
+
+    paycheck.source_metadata.fetch("verified_amounts").fetch(field).to_d
+  end
+
+  def retirement_amount(paycheck)
+    verified_amount(paycheck, "retirement") || component_amount(paycheck.pretax_deduction_breakdown, /401|retirement/i)
+  end
+
+  def roth_amount(paycheck)
+    verified_amount(paycheck, "roth_retirement") || component_amount(paycheck.after_tax_deduction_breakdown, /roth/i)
   end
 
   def component_amount(lines, pattern)

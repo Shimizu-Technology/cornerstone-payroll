@@ -184,9 +184,12 @@ class PayPeriodLifecycleService
   end
 
   def validate_prior_provider_source!
-    return unless pay_period.paid_prior_provider_source?
-
-    raise InvalidTransitionError, "Prior-provider source payroll was already paid; reconcile and convert it as history instead of approving or committing it"
+    if pay_period.paid_prior_provider_source?
+      raise InvalidTransitionError, "Prior-provider source payroll was already paid; reconcile and convert it as history instead of approving or committing it"
+    end
+    if pay_period.unresolved_prior_provider_history?
+      raise InvalidTransitionError, "Record and activate replacement prior-provider history before live payroll; the previous history was undone"
+    end
   end
 
   def with_financial_pay_period_lock

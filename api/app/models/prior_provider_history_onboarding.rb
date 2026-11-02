@@ -15,6 +15,11 @@ class PriorProviderHistoryOnboarding < ApplicationRecord
   before_update :protect_evidence
   before_destroy :retain_evidence
 
+  def self.unresolved_reversed_for(company_id)
+    records = where(company_id: company_id)
+    records.where(status: "reversed").where.not(tax_year: records.where(status: "active").select(:tax_year))
+  end
+
   private
 
   def protect_evidence

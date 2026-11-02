@@ -300,12 +300,12 @@ class UnifiedPayrollReporting
       withholding_tax: sum(rows, :federal_income_tax),
       social_security_tax: sum(rows, :social_security_tax),
       medicare_tax: sum(rows, :medicare_tax),
-      retirement: component_sum(rows, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX),
-      roth_retirement: component_sum(rows, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH),
-      historical_loan_deductions_unclassified: component_sum(rows, :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN) +
-        component_sum(rows, :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN),
-      health_insurance_deductions: component_sum(rows, :pretax_deduction_breakdown, /\AHealth Insurance\z/i) +
-        component_sum(rows, :after_tax_deduction_breakdown, /\AHealth Insurance\z/i),
+      retirement: classified_deduction_sum(rows, "retirement", [ [ :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX ] ]),
+      roth_retirement: classified_deduction_sum(rows, "roth_retirement", [ [ :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH ] ]),
+      historical_loan_deductions_unclassified: classified_deduction_sum(rows, "loans", [ [ :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN ],
+        [ :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN ] ]),
+      health_insurance_deductions: classified_deduction_sum(rows, "insurance", [ [ :pretax_deduction_breakdown, /\AHealth Insurance\z/i ],
+        [ :after_tax_deduction_breakdown, /\AHealth Insurance\z/i ] ]),
       source_labeled_after_tax_401k_in_pretax_bucket: component_sum(rows, :pretax_deduction_breakdown, /\A401\(k\) After Tax\z/i),
       tips: rows.sum(0.to_d) { |row| verified_history_amount(row, "reported_tips") || component_sum([ row ], :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS).to_d }.to_f,
       # QuickBooks does not distinguish paid-out tips; the existing-roster lane
@@ -320,6 +320,12 @@ class UnifiedPayrollReporting
     return unless row.is_a?(HistoricalPaycheck) && row.historical_import_batch.source_system == "prior_provider"
 
     row.source_metadata.fetch("verified_amounts").fetch(field).to_d
+  end
+
+  def classified_deduction_sum(rows, field, components)
+    rows.sum(0.to_d) do |row|
+      verified_history_amount(row, field) || components.sum(0.to_d) { |bucket, pattern| component_sum([ row ], bucket, pattern).to_d }
+    end.to_f
   end
 
   def sum(paychecks, field)
