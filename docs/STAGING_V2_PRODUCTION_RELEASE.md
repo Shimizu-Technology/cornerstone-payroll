@@ -2,7 +2,7 @@
 
 Promotes Cornerstone Payroll `staging-v2` and AIRE Services `staging-v2` to production together. This page is the ordered checklist; the linked documents hold the detailed procedures. Written October 31, 2026.
 
-**Two stages (November 2 correction).** Stage 1 ships certified Payroll `08b5379ec448eda50b86477fcce9e2141686b172` and AIRE `4698a7dc3e6b64af2ab72f2df7c927b2e30c3c07` with connected payroll **paused and no lock rollout configured**. The accountant continues manual entry. Stage 2 is held for a separately selected later period and a newly reviewed/certified pair; see [the Stage 2 procedure](integrations/aire-history-packet.md). Claude is the only merge owner for the held implementation PRs.
+**Two stages (November 2 correction).** Stage 1 ships certified Payroll `08b5379ec448eda50b86477fcce9e2141686b172` and AIRE `4698a7dc3e6b64af2ab72f2df7c927b2e30c3c07` with connected payroll **paused, without running rollout configure tasks**. Payroll migration `20261024092000` nevertheless persists the immutable Oct 16 boundary; AIRE has no rollout singleton or calendars. The accountant continues manual entry. Stage 2 is held for a separately selected later period and a newly reviewed/certified pair; see [the Stage 2 procedure](integrations/aire-history-packet.md). Claude is the only merge owner for the held implementation PRs.
 
 **Do not start the release window while any payroll is mid-process** (calculated but not committed, or checks being printed) in either app.
 
@@ -82,7 +82,7 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 7. [ ] **Smoke test while paused:**
    - AIRE: clock in and out, edit an entry, approve it.
    - Payroll: open a manual client, print a pay stub, the register, and the Q3 941 and W-1. Line 5 of the W-1 should be filled, and amounts should sit on 941 lines 6 and 10.
-8. [ ] **Stop Stage 1 here.** Verify both fleets remain paused, no rollout is configured and no connected calendar was published. Keep entering AIRE hours by hand. Do not run the AIRE paid-history or Payroll historical approval commands as part of Stage 1.
+8. [ ] **Stop Stage 1 here.** Verify both fleets remain paused, neither rollout configure task was run, AIRE has no rollout singleton and no connected calendar was published. Payroll’s migration-default Oct 16 boundary remains present. Keep entering AIRE hours by hand. Do not run the AIRE paid-history or Payroll historical approval commands as part of Stage 1.
 9. [ ] **Stage 2 is separately held.** After its implementation is reviewed, the exact pair is certified and a fresh contained rehearsal passes, Leon/Chels choose the first connected period. Follow [the ordered maintenance and packet procedure](integrations/aire-history-packet.md): configure later boundaries and reconcile manual history while paused; enable both fleets **unpublished**; pin/link/map; export/review/preview/apply/fresh completion; only then publish and route genuinely owed hours.
 13. [ ] Decide whether to turn production auto-deploy back on.
 

@@ -1,6 +1,6 @@
 # Review historical coverage before Stage 2 publication
 
-Stage 1 ships the certified pair paused with no rollout configured. Accounting continues entering hours manually. These steps belong to Stage 2, held until Leon approves a later first connected period and Claude releases the reviewed implementation. Nothing here authorizes deployment or production data changes.
+Stage 1 ships the certified pair paused without running rollout configure tasks. Its Payroll migration still installs the immutable Oct 16 boundary; AIRE has no rollout singleton or calendars. Accounting continues entering hours manually. These steps belong to Stage 2, held until Leon approves a later first connected period and Claude releases the reviewed implementation. Nothing here authorizes deployment or production data changes.
 
 ## Meaning of each reviewed disposition
 
