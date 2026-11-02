@@ -87,6 +87,7 @@ export type HistoryOnboarding = {
   }>;
   totals: Record<string, string>;
   source_run_ids: number[];
+  payment_references?: Array<{ employee_id: number; pay_date: string; reference: string | null }>;
   can_reverse: boolean;
   employee_balances: Array<{
     employee_id: number;
@@ -130,6 +131,7 @@ export type HistoryPage = {
   candidates_overflow: boolean;
   employees: HistoryEmployee[];
   draft: HistoryDraft | null;
+  readiness_gaps?: Array<{ employee_id: number; employee_name: string; label: string; status: string }>;
   onboardings: HistoryOnboarding[];
 };
 export type HistoryEmployee = { id: number; name: string; ssn_last_four: string | null };

@@ -23,6 +23,28 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     CompanyAssignment.create!(user: user, company: company, granted_by: @admin)
   end
 
+  it "retains provider check references separately from Cornerstone checks and exposes document gaps early" do
+    employee = @employees.first
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: @admin)
+    get "/api/v1/admin/prior_provider_histories"
+    expect(response.parsed_body.fetch("readiness_gaps").map { |gap| gap["employee_id"] }).to eq([ employee.id, employee.id ])
+    @payload["periods"].first["paychecks"].first["provider_payment_reference"] = "000708"
+    original_sequence = @company.reload.next_check_number
+    onboarding = convert_history(@company, @admin, @payload)
+    get "/api/v1/admin/prior_provider_histories"
+    expect(response.parsed_body.dig("onboardings", 0, "payment_references")).to include(
+      hash_including("employee_id" => employee.id, "reference" => "000708")
+    )
+    check = onboarding.historical_import_batch.historical_paychecks.find_by!(employee: employee)
+    expect(check.check_number).to be_nil
+    expect(@company.reload.next_check_number).to eq(original_sequence)
+    activate_history(onboarding, @admin)
+    result = ImportedPayPeriodQuery.new(company_id: @company.id, id: check.historical_pay_period_id, params: {}).call
+    expect(result.data.fetch(:paychecks)).to include(hash_including(provider_payment_reference: "000708", check_number: nil))
+    client_result = ImportedPayPeriodQuery.new(company_id: @company.id, id: check.historical_pay_period_id, params: {}, audience: :client).call
+    expect(client_result.data.fetch(:paychecks).map { |row| row[:provider_payment_reference] }).to all(be_nil)
+  end
+
   it "lets an accountant who runs this client's payroll record, activate and reverse history end to end" do
     grant_access(@accountant)
     @actor = @accountant

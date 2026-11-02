@@ -246,6 +246,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                 canManage={canManage}
                 busy={busy}
                 onDownload={download}
+                readinessGaps={page.readiness_gaps ?? []}
                 onActivate={() => setDialog("activate")}
                 onReverse={() => setDialog("reverse")}
               />
@@ -754,6 +755,17 @@ function PeriodEditor({
         error={period.source_reference.trim() ? undefined : "Needed: a page or file reference for this pay date"}
         onChange={(e) => onChange({ ...period, source_reference: e.target.value })}
       />
+      <div className="space-y-2">
+        <p className="text-xs text-neutral-600">Check numbers are optional. Enter the previous provider’s numbers, including any leading zeros. These never use Cornerstone’s check sequence.</p>
+        <table className="w-full text-left text-sm">
+          <caption className="sr-only">Previous provider’s checks for this pay date</caption>
+          <thead><tr><th scope="col" className="w-1/2 py-2 pr-3">Employee</th><th scope="col" className="py-2">Check # from previous provider</th></tr></thead>
+          <tbody>{period.paychecks.map((row, rowIndex) => <tr key={`${row.employee_id}:${rowIndex}`}>
+            <th scope="row" className="py-2 pr-3 font-medium">{row.source_employee_name}</th>
+            <td className="py-2"><Input aria-label={`Check # from previous provider — ${row.source_employee_name}`} autoComplete="off" maxLength={255} value={row.provider_payment_reference ?? ""} onChange={(e) => onChange({ ...period, paychecks: period.paychecks.map((check, index) => index === rowIndex ? { ...check, provider_payment_reference: e.target.value } : check) })} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
       <div className="space-y-3">
         {period.paychecks.map((row, rowIndex) => (
           <PaycheckEditor
@@ -884,7 +896,6 @@ function PaycheckEditor({
             <h6 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Other amounts</h6>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{OTHER_COLUMNS.map((key) => field(key))}</div>
           </div>
-          <Input label="Provider check or deposit number (optional)" maxLength={255} value={row.provider_payment_reference || ""} onChange={(e) => onChange({ ...row, provider_payment_reference: e.target.value })} />
           {(Object.keys(breakdownLabels) as BreakdownKey[]).map((key) => (
             <BreakdownEditor key={key} field={key} row={row} problem={problems[key]} onChange={onChange} />
           ))}
@@ -941,6 +952,7 @@ function RecordStep({
   const earlier = quarter > 1 ? `Q1${quarter > 2 ? `–Q${quarter - 1}` : ""}` : "";
   return (
     <>
+      <PaymentReferences rows={payload.periods.flatMap((period) => period.paychecks.map((check) => ({ pay_date: period.pay_date, name: check.source_employee_name, reference: check.provider_payment_reference })))} />
       <Input
         label="Attach the provider’s paid registers (up to 10 files, 10 MB each)"
         type="file"
@@ -1054,6 +1066,7 @@ function RecordDialog({ open, payload, employees, files, busy, onClose, onConfir
           </DialogDescription>
         </DialogHeader>
         <EmployeeTotalsTable rows={rows} caption="Year-to-date amounts this history will add" />
+        <PaymentReferences rows={payload.periods.flatMap((period) => period.paychecks.map((check) => ({ pay_date: period.pay_date, name: check.source_employee_name, reference: check.provider_payment_reference })))} />
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-neutral-700">
           <li>Saves these pay dates as payroll the previous provider already paid, with your register files.</li>
           <li>The original runs stay for reference and can’t be paid again. No checks, payments, deposits or emails are created.</li>
@@ -1158,6 +1171,7 @@ function SavedHistory({
   onDownload,
   onActivate,
   onReverse,
+  readinessGaps,
 }: {
   record: HistoryOnboarding;
   employees: HistoryEmployee[];
@@ -1167,6 +1181,7 @@ function SavedHistory({
   onDownload: (record: HistoryOnboarding, file: HistoryOnboarding["source_files"][number]) => void;
   onActivate: () => void;
   onReverse: () => void;
+  readinessGaps: NonNullable<HistoryPage["readiness_gaps"]>;
 }) {
   const checks = record.periods.reduce((sum, period) => sum + period.paycheck_count, 0);
   const quarter = takeoverQuarter(record.takeover_on);
@@ -1192,9 +1207,7 @@ function SavedHistory({
         <div className="space-y-2 rounded-xl border border-success-200 bg-success-50 p-4 text-sm text-success-900">
           <p className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-5 w-5" aria-hidden /> Included in year-to-date and filings</p>
           <p>{quarter > 1 ? `Q1${quarter > 2 ? `–Q${quarter - 1}` : ""}: previous provider’s filings (for reference). ` : ""}Q{quarter} and year-end W-2GU/W-3SS: Cornerstone, including this history.</p>
-          <Link to={`/companies/${companyId}/pay-runs`} className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline sm:min-h-0">
-            Go to pay runs
-          </Link>
+          <LivePayrollNextSteps record={record} companyId={companyId} readinessGaps={readinessGaps} />
         </div>
       )}
       {(record.employee_totals ?? []).length > 0 && (
@@ -1229,6 +1242,7 @@ function SavedHistory({
           </table>
         </div>
       </div>
+      <PaymentReferences rows={(record.payment_references ?? []).map((row) => ({ ...row, name: employees.find((employee) => employee.id === row.employee_id)?.name ?? `Employee ${row.employee_id}` }))} />
       <div className="space-y-2">
         <h3 className="font-semibold">Register files</h3>
         {record.source_files.map((file) => (
@@ -1250,4 +1264,40 @@ function SavedHistory({
       )}
     </section>
   );
+}
+
+function PaymentReferences({ rows }: { rows: Array<{ pay_date: string; name: string; reference?: string | null }> }) {
+  if (!rows.length) return null;
+  return <div className="space-y-2">
+    <h3 className="font-semibold">Checks from the previous provider</h3>
+    <div className="max-h-64 overflow-auto rounded-xl border border-neutral-200">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-neutral-50"><tr>{["Paid", "Employee", "Check # from previous provider"].map((label) => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={index} className="border-t border-neutral-100"><td className="whitespace-nowrap px-3 py-2">{shortDate(row.pay_date)}</td><td className="px-3 py-2">{row.name}</td><td className="max-w-48 break-all px-3 py-2 font-mono">{row.reference || "Not recorded"}</td></tr>)}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function LivePayrollNextSteps({ record, companyId, readinessGaps }: { record: HistoryOnboarding; companyId: number | null; readinessGaps: NonNullable<HistoryPage["readiness_gaps"]> }) {
+  const numericReferences = (record.payment_references ?? []).map((row) => row.reference?.trim() ?? "").filter((value) => /^\d+$/.test(value)).map(Number).filter((value) => Number.isSafeInteger(value) && value >= 0 && value < 2_147_483_647);
+  const nextNumber = numericReferences.length ? Math.max(...numericReferences) + 1 : undefined;
+  const lastEnd = record.periods.map((period) => period.end_date).sort().at(-1);
+  const lastPayDate = record.periods.map((period) => period.pay_date).sort().at(-1);
+  const lastBoundary = [lastEnd, lastPayDate].filter(Boolean).sort().at(-1);
+  return <div className="space-y-3 border-t border-success-200 pt-3">
+    <h3 className="font-semibold">Before the first live payroll</h3>
+    <p>Confirm these settings before paying employees through Cornerstone.</p>
+    {record.can_reverse && <>
+      <Link to={`/check-settings?company_id=${companyId}${nextNumber ? `&suggested_next=${nextNumber}` : ""}#next-check-number`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Set the next live check number{nextNumber ? ` (suggested: ${nextNumber})` : ""}</Link>
+      <p>Use the next number on the client’s actual check stock. You can edit the suggestion before saving.</p>
+      <Link to={`/companies/${companyId}/pay-runs${lastBoundary ? `?new_after=${lastBoundary}` : ""}`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Create the first live pay period</Link>
+      <p>Start after the last historical period and pay date. Confirm the period end and first unpaid pay date with the client.</p>
+    </>}
+    {readinessGaps.length > 0 ? <div className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-warning-950">
+      <p className="font-semibold">Employee documents to resolve before approval ({readinessGaps.length})</p>
+      <ul className="mt-2 space-y-2">{readinessGaps.map((gap, index) => <li key={index}><Link className="inline-block min-h-11 py-2 underline" to={`/companies/${companyId}/employees/${gap.employee_id}/edit?return_to=${encodeURIComponent(`/companies/${companyId}/prior-provider-history`)}#employee-documents`}>{gap.employee_name}: {gap.label} ({gap.status.replaceAll("_", " ")})</Link></li>)}</ul>
+    </div> : <p>Required employee documents have no outstanding checklist gaps. Normal payroll setup and approval checks still apply.</p>}
+    <Link to={`/companies/${companyId}/pay-runs`} className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline">Go to pay runs</Link>
+  </div>;
 }

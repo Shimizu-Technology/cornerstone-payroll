@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,23 +27,41 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe('selected client check controls', () => {
+  it('prefills an editable historical check suggestion for the selected client without saving it automatically', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mocks.next.mockResolvedValue({ check_settings: { ...settings, next_check_number: 709 } });
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    expect(number.value).toBe('708');
+    expect(mocks.next).not.toHaveBeenCalled();
+    await user.clear(number);
+    await user.type(number, '709');
+    await user.click(screen.getByRole('button', { name: 'Update Next Number' }));
+    expect(mocks.next).toHaveBeenCalledWith(709);
+  });
+  it('ignores a check suggestion addressed to another client', async () => {
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=2&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    expect((await screen.findByLabelText('Next Check Number') as HTMLInputElement).value).toBe('1001');
+  });
+
   it('allows a delegated accountant to save client check settings without granting printer-library management', async () => {
     const user = userEvent.setup();
-    render(<CheckSettingsPage />);
+    render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     await user.click(await screen.findByRole('button', { name: 'Save Client Check Settings' }));
     await screen.findByText('Client check settings saved. Select a printer profile to keep calibration with your printer.');
     expect(mocks.update).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Edit details' })).toBeNull();
   });
   it('removes client controls immediately on client switch and fails closed until the new client grants access', async () => {
-    const view = render(<CheckSettingsPage />);
+    const view = render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Save Client Check Settings' });
     mocks.id = 2;
-    view.rerender(<CheckSettingsPage />);
+    view.rerender(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Update Next Number' })).toBeNull();
     mocks.company = { id: 2 } as CompanyListItem;
-    view.rerender(<CheckSettingsPage />);
+    view.rerender(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
     expect(mocks.update).not.toHaveBeenCalled();
   });
@@ -52,7 +71,7 @@ describe('selected client check controls', () => {
     { test_workspace_expired: true }, { test_workspace_sealed_at: '2026-10-01T00:00:00Z' },
   ])('retains workspace write restrictions despite a client grant: %j', async restrictions => {
     mocks.company = { ...mocks.company!, ...restrictions };
-    render(<CheckSettingsPage />);
+    render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Save Calibration as New Profile' });
     expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Update Next Number' })).toBeNull();

@@ -5723,6 +5723,7 @@ export interface HistoricalPaycheck {
   period_type: 'regular' | 'opening_summary';
   payment_method?: string | null;
   check_number?: string | null;
+  provider_payment_reference?: string | null;
   source_status: string;
   reconciliation_status: 'matched' | 'opening_summary' | 'unmatched';
   hours_total: string;
@@ -5877,8 +5878,8 @@ export const payrollHistoryApi = {
   list: (
     params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
