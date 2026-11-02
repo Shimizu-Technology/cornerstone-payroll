@@ -113,7 +113,8 @@ export function CheckSettingsPage() {
   const [searchParams] = useSearchParams();
   const suggestion = searchParams.get('company_id') === String(scopeCompanyId) ? searchParams.get('suggested_next') ?? '' : '';
   const suggestedNumber = /^\d+$/.test(suggestion) && Number(suggestion) > 0 && Number(suggestion) <= 2_147_483_647 ? suggestion : '';
-  const suggestionApplied = useRef(false);
+  // The suggestion last applied; a new suggestion on the same page applies again.
+  const appliedSuggestion = useRef('');
   const hasClientCheckAccess = useSelectedCompanyCapability('manage_client_check_settings', scopeCompanyId);
   const canManageClientCheckSettings = hasClientCheckAccess && canWriteCompany(activeCompany, 'manage_client_check_settings');
   const skipNextLayoutEffectRef = useRef(false);
@@ -194,9 +195,9 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(nextLayoutOverridesJson);
     setMemoTemplate(nextMemoTemplate);
     setAutoCreateFitCheck(nextAutoCreateFitCheck);
-    if (suggestedNumber && !suggestionApplied.current) {
+    if (suggestedNumber && appliedSuggestion.current !== suggestedNumber) {
       setNextCheckNumber(suggestedNumber);
-      suggestionApplied.current = true;
+      appliedSuggestion.current = suggestedNumber;
     } else if (!preserveNextNumber) {
       setNextCheckNumber(String(s.next_check_number));
     }

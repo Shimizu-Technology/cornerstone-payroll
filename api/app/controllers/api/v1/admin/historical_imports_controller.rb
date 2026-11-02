@@ -388,6 +388,8 @@ module Api
             scope = scope.where("historical_import_batches.source_label ILIKE ? OR historical_import_batches.bundle_digest ILIKE ?", query, query)
           end
           scope = scope.where(status: params[:status]) if params[:status].present?
+          # Filter before counting and paging so totals and pages match the list.
+          scope = scope.where.not(source_system: params[:exclude_source_system].to_s) if params[:exclude_source_system].present?
           if params[:department_id].present?
             scope = scope.joins(historical_workers: :employee)
                          .where(employees: { department_id: params[:department_id] })

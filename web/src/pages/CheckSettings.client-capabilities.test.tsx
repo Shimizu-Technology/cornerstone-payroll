@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,6 +58,19 @@ describe('selected client check controls', () => {
     await screen.findByText(/is now your selected printer profile/);
     expect(mocks.select).toHaveBeenCalledWith('top_check', 9);
     expect(number.value).toBe('712');
+    expect(mocks.next).not.toHaveBeenCalled();
+  });
+  it('applies a new suggestion that arrives while the page stays open', async () => {
+    const user = userEvent.setup();
+    function NextSuggestion() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate('/check-settings?company_id=1&suggested_next=715')}>Newer suggestion</button>;
+    }
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /><NextSuggestion /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    expect(number.value).toBe('708');
+    await user.click(screen.getByRole('button', { name: 'Newer suggestion' }));
+    await vi.waitFor(() => expect(number.value).toBe('715'));
     expect(mocks.next).not.toHaveBeenCalled();
   });
   it('ignores a check suggestion addressed to another client', async () => {

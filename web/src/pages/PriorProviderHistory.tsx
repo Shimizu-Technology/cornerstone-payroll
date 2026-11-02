@@ -95,6 +95,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const loadRequestId = useRef(0);
   const dirty = useRef(false);
   const requestBusy = useRef(false);
+  const requestKeyPrefix = `prior-provider-history:${userId}:${companyId}:request:`;
 
   useEffect(() => {
     mounted.current = true;
@@ -356,12 +357,25 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
               onConfirm={() =>
                 void perform(async () => {
                   if (!preview?.ready) return;
-                  const requestKey = `prior-provider-history:${userId}:${companyId}:request:${preview.digest}`;
+                  const requestKey = `${requestKeyPrefix}${preview.digest}`;
                   const key = sessionStorage.getItem(requestKey) || crypto.randomUUID();
                   sessionStorage.setItem(requestKey, key);
-                  await priorProviderHistoryApi.convert(payload, preview.digest, key, files, RECORD_ACK);
+                  let recorded: HistoryOnboarding;
+                  try {
+                    ({ onboarding: recorded } = await priorProviderHistoryApi.convert(payload, preview.digest, key, files, RECORD_ACK));
+                  } catch (err) {
+                    // A 4xx means nothing was recorded under this key (or its
+                    // recording was undone), so the next attempt needs a new key.
+                    // Keep it after network/5xx errors so a retry stays idempotent.
+                    if (err instanceof ApiError && err.status >= 400 && err.status < 500) sessionStorage.removeItem(requestKey);
+                    throw err;
+                  }
                   sessionStorage.removeItem(requestKey);
                   if (!mounted.current) return;
+                  if (recorded.status === "reversed") {
+                    await load();
+                    throw new Error("This history was recorded and then undone. Preview it again to record it as a new request.");
+                  }
                   setDialog(null);
                   setNotice("History recorded. Review it below, then turn on year-to-date totals.");
                   await load();
@@ -393,6 +407,8 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                   onConfirm={(reason) =>
                     void perform(async () => {
                       await priorProviderHistoryApi.reverse(active.id, reason, REVERSE_ACK);
+                      // Recording the same history again after an undo must use a new request key.
+                      Object.keys(sessionStorage).filter((name) => name.startsWith(requestKeyPrefix)).forEach((name) => sessionStorage.removeItem(name));
                       if (!mounted.current) return;
                       setDialog(null);
                       setNotice("History undone. The original pay dates are back and still marked as paid by the previous provider; record them again before running live payroll.");

@@ -19,7 +19,7 @@ module PriorProviderHistory
         @actor = Authorization.ensure_authorized!(actor: actor, company_id: company.id, lock: true)
         next onboarding if onboarding.status == "reversed"
         if company.pay_periods.committed.exists?
-          raise ArgumentError, "History cannot be reversed after the first live payroll commitment; use a reviewed historical amendment"
+          raise ArgumentError, "History cannot be reversed after the first live payroll commitment. Cornerstone has no in-app correction for recorded prior-provider history; escalate the correction for review"
         end
         if company.pay_periods.where.not(status: "retired_history").exists?
           raise ArgumentError, "Remove downstream uncommitted payroll before reversal so no stale calculation or approval remains"

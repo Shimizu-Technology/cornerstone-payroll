@@ -761,12 +761,20 @@ class PayPeriod < ApplicationRecord
     end
     boundary_period_end = boundaries.map(&:first).max
     boundary_pay_date = boundaries.map(&:last).max
+    history_label = historical_boundary_label(batches.select(&:latest_applied_historical_ytd_bridge))
     if start_date.present? && start_date <= boundary_period_end
-      errors.add(:start_date, "must be after the imported QuickBooks history ending #{boundary_period_end.strftime('%m/%d/%Y')}")
+      errors.add(:start_date, "must be after the #{history_label} ending #{boundary_period_end.strftime('%m/%d/%Y')}")
     end
     if pay_date.present? && pay_date <= boundary_pay_date
-      errors.add(:pay_date, "must be after the imported QuickBooks history paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
+      errors.add(:pay_date, "must be after the #{history_label} paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
     end
+  end
+
+  def historical_boundary_label(batches)
+    sources = batches.map(&:source_system).uniq
+    return "imported QuickBooks history" unless sources.include?("prior_provider")
+
+    sources == [ "prior_provider" ] ? "recorded prior-provider history" : "recorded historical payroll"
   end
 
   def uses_current_historical_ytd_revision

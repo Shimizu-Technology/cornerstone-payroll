@@ -197,6 +197,20 @@ RSpec.describe "Api::V1::Admin::HistoricalImports", type: :request do
 
     get "/api/v1/admin/historical_imports", params: { department_id: department.id }
     expect(JSON.parse(response.body).fetch("data").sole.fetch("id")).to eq(imported.id)
+
+    # Prior-provider history is excluded before counting and paging, so a page
+    # can never fill with hidden rows and strand the remaining batches.
+    provider = HistoricalImportBatch.create!(company: company, source_system: "prior_provider", source_label: "Prior provider",
+      bundle_digest: "provider-digest", importer_version: "test", status: "applied")
+    get "/api/v1/admin/historical_imports", params: { page: 1, per_page: 1, exclude_source_system: "prior_provider" }
+    excluded = JSON.parse(response.body)
+    expect(excluded.dig("meta", "total_count")).to eq(3)
+    expect(excluded.dig("meta", "total_pages")).to eq(3)
+    expect(excluded.fetch("data").pluck("id")).to eq([ gamma.id ])
+    get "/api/v1/admin/historical_imports", params: { per_page: 10, exclude_source_system: "prior_provider" }
+    expect(JSON.parse(response.body).fetch("data").pluck("id")).to contain_exactly(imported.id, beta.id, gamma.id)
+    get "/api/v1/admin/historical_imports", params: { per_page: 10 }
+    expect(JSON.parse(response.body).fetch("data").pluck("id")).to include(provider.id)
   end
 
   it "previews and applies clean-client employee preparation without applying historical payroll" do

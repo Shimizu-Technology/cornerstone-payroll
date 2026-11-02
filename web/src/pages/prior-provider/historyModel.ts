@@ -163,9 +163,18 @@ export function setPaycheckAmount(row: HistoryCheck, key: AmountKey, value: stri
   return next;
 }
 
+/** Taxable wage bases are never assumed; the operator enters each one (0 if none). */
+const WAGE_BASE_KEYS: readonly AmountKey[] = [
+  "fit_taxable_wages",
+  "social_security_taxable_wages",
+  "social_security_taxable_tips",
+  "medicare_taxable_wages",
+  "additional_medicare_taxable_wages",
+];
+
 export function emptyCheck(employee: HistoryEmployee): HistoryCheck {
   return {
-    ...(Object.fromEntries(AMOUNT_KEYS.map((key) => [key, "0.00"])) as Record<AmountKey, string>),
+    ...(Object.fromEntries(AMOUNT_KEYS.map((key) => [key, WAGE_BASE_KEYS.includes(key) ? "" : "0.00"])) as Record<AmountKey, string>),
     employee_id: employee.id,
     source_employee_name: employee.name,
     earnings_breakdown: [],

@@ -62,4 +62,73 @@ RSpec.describe "Prior-provider report compatibility" do
     expect(mixed[:source_statement]).to include("Prior-provider payments were already paid")
     expect(mixed[:source_statement]).not_to include("QuickBooks source values")
   end
+
+  it "derives the Form 941 mode from every source that feeds the quarter, including earlier-quarter provider wages" do
+    quarterly = lambda do |earlier_systems|
+      source = double(metadata: {}, opening_summary_count: 0)
+      # Only earlier quarters hold history; the requested Q3 itself has none.
+      allow(source).to receive(:source_systems) { |range:| range.begin < range.begin.change(month: 7) ? earlier_systems : [] }
+      aggregator = Form941GuAggregator.allocate
+      allow(aggregator).to receive_messages(include_historical: true, historical_source: source,
+        year: 2026, quarter_start_date: range.begin, quarter_end_date: range.end, committed_pay_periods: [])
+      aggregator.send(:source_summary, [])
+    end
+    provider = quarterly.call([ "prior_provider" ])
+    expect(provider[:mode]).to eq("locked_historical_plus_committed_cornerstone")
+    expect(provider[:historical_source_systems]).to eq([ "prior_provider" ])
+    # Earlier-quarter QuickBooks history keeps the exact legacy summary.
+    [ [], [ "quickbooks_online" ] ].each do |systems|
+      legacy = quarterly.call(systems)
+      expect(legacy.keys).to eq(%i[mode cornerstone quickbooks])
+      expect(legacy[:mode]).to eq("locked_quickbooks_plus_committed_cornerstone")
+    end
+  end
+
+  it "keeps quarterly taxability amounts attributed to their own source and single-source rows unchanged" do
+    record = lambda do |source, gross, tips, non_taxable|
+      double(source_system: source, gross_pay: gross.to_d, reported_tips: tips.to_d, non_taxable_pay: non_taxable.to_d)
+    end
+    rows_for = lambda do |records|
+      packet = QuarterlyCompliancePacketBuilder.new(nil, 2026, 3)
+      allow(packet).to receive(:historical_records).and_return(records)
+      packet.send(:historical_component_taxability).map { |row| row.slice(:category, :label, :amount, :source, :social_security_wages, :non_taxable) }
+    end
+    quickbooks = [ record.call("quickbooks_online", 1_000, 100, 50), record.call("quickbooks_online", 500, 0, 0) ]
+    provider = [ record.call("prior_provider", 2_000, 0, 25) ]
+    expect(rows_for.call(quickbooks)).to eq([
+      { category: "regular", label: "Imported taxable wages", amount: 1_350.0, source: "quickbooks", social_security_wages: true, non_taxable: false },
+      { category: "tips", label: "Imported reported tips", amount: 100.0, source: "quickbooks", social_security_wages: false, non_taxable: false },
+      { category: "non_taxable", label: "Imported non-taxable pay", amount: 50.0, source: "quickbooks", social_security_wages: false, non_taxable: true }
+    ])
+    expect(rows_for.call(provider)).to eq([
+      { category: "regular", label: "Imported taxable wages", amount: 1_975.0, source: "prior_provider", social_security_wages: true, non_taxable: false },
+      { category: "non_taxable", label: "Imported non-taxable pay", amount: 25.0, source: "prior_provider", social_security_wages: false, non_taxable: true }
+    ])
+    expect(rows_for.call(quickbooks + provider)).to eq([
+      { category: "regular", label: "Imported taxable wages (prior provider)", amount: 1_975.0, source: "prior_provider", social_security_wages: true, non_taxable: false },
+      { category: "non_taxable", label: "Imported non-taxable pay (prior provider)", amount: 25.0, source: "prior_provider", social_security_wages: false, non_taxable: true },
+      { category: "regular", label: "Imported taxable wages (QuickBooks)", amount: 1_350.0, source: "quickbooks", social_security_wages: true, non_taxable: false },
+      { category: "tips", label: "Imported reported tips (QuickBooks)", amount: 100.0, source: "quickbooks", social_security_wages: false, non_taxable: false },
+      { category: "non_taxable", label: "Imported non-taxable pay (QuickBooks)", amount: 50.0, source: "quickbooks", social_security_wages: false, non_taxable: true }
+    ])
+  end
+
+  it "labels historical deduction components with their own source and keeps QuickBooks and adjustment entries unchanged" do
+    reporting = UnifiedPayrollReporting.new(company_id: 1, period: nil)
+    paycheck = lambda do |source, employee_id|
+      double(historical_import_batch: double(source_system: source), employee_id: employee_id,
+        pretax_deduction_breakdown: [ { "label" => "401(k) pre-tax retirement", "amount" => "50.00" } ],
+        after_tax_deduction_breakdown: [ { "label" => "Loan", "amount" => "10.00" } ])
+    end
+    adjustment = double(historical_paycheck: double(employee_id: 3),
+      pretax_deduction_breakdown: [ { "label" => "401(k) pre-tax retirement", "amount" => "-5.00" } ], after_tax_deduction_breakdown: [])
+    entries = reporting.historical_deduction_entries([ paycheck.call("quickbooks_online", 1), paycheck.call("prior_provider", 2) ], [ adjustment ])
+    expect(entries).to eq([
+      { employee_id: 1, source: "quickbooks", treatment: "pre_tax_deduction", label: "401(k) pre-tax retirement", amount: BigDecimal("50") },
+      { employee_id: 1, source: "quickbooks", treatment: "post_tax_deduction", label: "Loan", amount: BigDecimal("10") },
+      { employee_id: 2, source: "prior_provider", treatment: "pre_tax_deduction", label: "401(k) pre-tax retirement", amount: BigDecimal("50") },
+      { employee_id: 2, source: "prior_provider", treatment: "post_tax_deduction", label: "Loan", amount: BigDecimal("10") },
+      { employee_id: 3, source: "historical_adjustment", treatment: "pre_tax_deduction", label: "401(k) pre-tax retirement", amount: BigDecimal("-5") }
+    ])
+  end
 end

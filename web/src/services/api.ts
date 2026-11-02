@@ -2685,7 +2685,7 @@ export interface YtdSummaryReport {
       source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
       classification_note: string;
     };
-    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'prior_provider_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
   };
 }
 
@@ -6116,7 +6116,7 @@ export interface HistoricalReportResponse {
 }
 
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
