@@ -12,14 +12,14 @@ function ScopeLoader(): ReactElement {
 
 export function CompanyScopedRoute(): ReactElement {
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
-  const { companies, activeCompanyId, loading, switchCompany } = useCompany();
+  const { companies, activeCompanyId, loading, scopeChangePending, switchCompany } = useCompany();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const company = companies.find((candidate) => candidate.id === companyId);
 
   useLayoutEffect((): void => {
-    if (loading || !company || activeCompanyId === companyId) return;
+    if (loading || scopeChangePending || !company || activeCompanyId === companyId) return;
     switchCompany(companyId);
-  }, [activeCompanyId, company, companyId, loading, switchCompany]);
+  }, [activeCompanyId, company, companyId, loading, scopeChangePending, switchCompany]);
 
   if (loading) return <ScopeLoader />;
 

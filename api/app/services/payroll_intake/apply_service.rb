@@ -22,6 +22,7 @@ module PayrollIntake
       results = { applied: [], skipped: [], errors: [] }
 
       ActiveRecord::Base.transaction do
+        Company.lock.find(company.id)
         pay_period.with_lock do
           raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 

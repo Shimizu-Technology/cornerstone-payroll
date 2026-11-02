@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
+import { confirmPayrollScopeChange } from '@/lib/payroll-scope-change';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -14,8 +16,9 @@ interface CompanyContextValue {
   canViewClientManagement: boolean;
   canSwitchCompany: boolean;
   loading: boolean;
-  switchCompany: (companyId: number) => void;
-  switchOrganization: (organizationId: number) => void;
+  scopeChangePending: boolean;
+  switchCompany: (companyId: number) => boolean;
+  switchOrganization: (organizationId: number) => boolean;
   refreshCompanies: () => Promise<void>;
 }
 
@@ -30,8 +33,9 @@ const CompanyContext = createContext<CompanyContextValue>({
   canViewClientManagement: false,
   canSwitchCompany: false,
   loading: true,
-  switchCompany: () => {},
-  switchOrganization: () => {},
+  scopeChangePending: false,
+  switchCompany: () => false,
+  switchOrganization: () => false,
   refreshCompanies: async () => {},
 });
 
@@ -65,6 +69,8 @@ function applyCompanyResponse(
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const [scopeChangeLocationKey, setScopeChangeLocationKey] = useState<string | null>(null);
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const userId = user?.id ?? null;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -87,6 +93,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     companiesApi.clearActiveCompanyId();
     setCompanies([]);
     setActiveCompanyId(null);
+    setScopeChangeLocationKey(null);
     setCanManageClients(false);
     setCanViewClientManagement(false);
     setCanSwitchCompany(false);
@@ -148,14 +155,17 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const switchCompany = useCallback((companyId: number) => {
     const company = companies.find((candidate) => candidate.id === companyId);
-    if (!company) return;
-    if (companyId === activeCompanyId) {
-      return;
-    }
+    if (!company) return false;
+    if (companyId === activeCompanyId) return true;
+    if (!confirmPayrollScopeChange()) return false;
 
+    // The old route can render again before its accepted redirect commits,
+    // including when AppFeedback remounts it. Do not let it undo this choice.
+    setScopeChangeLocationKey(location.key);
     setActiveCompanyId(companyId);
     companiesApi.switchCompany(companyId, company.organization_id);
-  }, [activeCompanyId, companies]);
+    return true;
+  }, [activeCompanyId, companies, location.key]);
 
   const activeCompany = companies.find(c => c.id === activeCompanyId) || null;
   const activeOrganizationId = activeCompany?.organization_id ?? user?.organization_id ?? null;
@@ -165,10 +175,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     { id: company.organization_id, name: company.organization_name || `Organization #${company.organization_id}` },
   ])).values()).sort((left, right) => left.name.localeCompare(right.name));
   const switchOrganization = (organizationId: number) => {
-    if (organizationId === activeOrganizationId) return;
+    if (organizationId === activeOrganizationId) return true;
     const destination = companies.find((company) => company.organization_id === organizationId && !company.test_workspace)
       || companies.find((company) => company.organization_id === organizationId);
-    if (destination) switchCompany(destination.id);
+    return destination ? switchCompany(destination.id) : false;
   };
 
   return (
@@ -184,6 +194,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         canViewClientManagement,
         canSwitchCompany,
         loading,
+        scopeChangePending: scopeChangeLocationKey === location.key,
         switchCompany,
         switchOrganization,
         refreshCompanies,

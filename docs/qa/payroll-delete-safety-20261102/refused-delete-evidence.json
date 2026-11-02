@@ -1,0 +1,26 @@
+{
+  "desktop": {
+    "unchanged": true,
+    "before_sha256": "e6d0e4bb7af9fa85faf164eaa8a61368e9cb83386950fa1be9585be16c8c77ff",
+    "after_sha256": "e6d0e4bb7af9fa85faf164eaa8a61368e9cb83386950fa1be9585be16c8c77ff",
+    "run_id": 2,
+    "status": "calculated",
+    "hours": 10.0,
+    "earning_count": 1,
+    "field_entry_count": 1,
+    "review_count": 1,
+    "import_count": 1
+  },
+  "phone": {
+    "unchanged": true,
+    "before_sha256": "c600f43ea08d10b44b980e5d26afcb36061b8d4ea20ab6f9f98aa8627715724b",
+    "after_sha256": "c600f43ea08d10b44b980e5d26afcb36061b8d4ea20ab6f9f98aa8627715724b",
+    "run_id": 6,
+    "status": "calculated",
+    "hours": 10.0,
+    "earning_count": 1,
+    "field_entry_count": 1,
+    "review_count": 1,
+    "import_count": 1
+  }
+}

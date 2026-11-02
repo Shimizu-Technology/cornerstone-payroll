@@ -248,7 +248,7 @@ module Api
               source_period_id = nil
               correction_event = nil
 
-              ActiveRecord::Base.transaction do
+              ActiveRecord::Base.transaction(requires_new: true) do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
                 unless locked_run.draft? && locked_run.correction_run?
                   locked_run.errors.add(:base, "Can only delete draft correction run pay periods")
@@ -261,6 +261,8 @@ module Api
                   locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
                   raise ActiveRecord::RecordInvalid.new(locked_run)
                 end
+
+                locked_run.ensure_deletable!
 
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
@@ -316,7 +318,10 @@ module Api
             return render json: { error: "Cannot delete a committed pay period" }, status: :unprocessable_entity
           end
 
-          @pay_period.with_lock do
+          # The action rescues below, inside the financial-lock transaction. A
+          # savepoint must roll back child deletes before that rescue renders 422.
+          @pay_period.with_lock(requires_new: true) do
+            @pay_period.ensure_deletable!
             PayrollImportRecord.where(pay_period_id: @pay_period.id).delete_all
             @pay_period.destroy!
           end
