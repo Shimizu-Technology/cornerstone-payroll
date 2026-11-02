@@ -174,16 +174,25 @@ test('keeps an imported run visible when a native run with the same numeric id i
       },
     });
   });
-  await page.route('**/api/v1/admin/pay_periods/77', (route): Promise<void> => {
+  await page.route('**/api/v1/admin/pay_periods/77**', (route): Promise<void> => {
+    // The delete dialog loads the run's details first; only DELETE removes it.
+    if (route.request().method() !== 'DELETE') {
+      return fulfillJson(route, {
+        pay_period: {
+          id: 77, company_id: 1, start_date: '2024-01-15', end_date: '2024-01-28', pay_date: '2024-02-02',
+          status: 'draft', employee_count: 0, total_gross: 0, payroll_items: [],
+        },
+      });
+    }
     nativeDeleted = true;
     return fulfillJson(route, {});
   });
-  page.on('dialog', (dialog): Promise<void> => dialog.accept());
 
   await page.goto('/companies/1/pay-runs');
 
   const nativeRow = page.getByRole('row').filter({ hasText: 'Cornerstone' });
   await nativeRow.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
 
   await expect(page.getByRole('row').filter({ hasText: 'QuickBooks import' })).toBeVisible();
   await expect(page.getByText('Synthetic refresh failure')).toBeVisible();
