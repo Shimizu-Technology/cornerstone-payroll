@@ -4,7 +4,7 @@ This rollout links each immutable AIRE time-entry adjustment to the Cornerstone 
 
 ## Stage 2 historical packet
 
-Stage 1 stays paused with no rollout configured. The separate [Stage 2 packet procedure](integrations/aire-history-packet.md) adds read-only historical dispositions. Approving an already-processed baseline, pending review, owed work or an evidence hold creates no payment-issued event or allocation and approves no time. The older **Link AIRE Record** workflow below remains a separate exact allocation action; it is not the new baseline disposition.
+Stage 1 stays paused without running rollout configure tasks. Payroll still retains the migration-default Oct 16 boundary; AIRE has no rollout singleton. The separate [Stage 2 packet procedure](integrations/aire-history-packet.md) adds read-only historical dispositions. Approving an already-processed baseline, pending review, owed work or an evidence hold creates no payment-issued event or allocation and approves no time. The older **Link AIRE Record** workflow below remains a separate exact allocation action; it is not the new baseline disposition.
 
 ## Release order
 
