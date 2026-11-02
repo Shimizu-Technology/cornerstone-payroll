@@ -112,14 +112,29 @@ Agent-executed required final scenarios (synthetic local fixtures unless stated)
 
 | ID | Starting conditions → actions → expected saved outcome | Coverage | Status |
 |---|---|---|---|
-| F01 | Past calculated runs, no live commitment → find notice in list/workspace; attempt approval → history link/guidance; live clients hide notice | API + desktop/phone | not_run |
-| F02 | Match registers → tab through old check numbers (leading zeros/blank allowed), save/reload → references retained without check allocation | desktop/phone + API | not_run |
-| F03 | Reconcile register mismatch, recover, record once → 20 periods / 60 paychecks with references in summary, saved view and imported detail | desktop/phone + API | not_run |
-| F04 | Turn on YTD/reload → next-number suggestion (highest numeric + 1), editable existing check settings, no automatic sequence write | desktop/phone + API | not_run |
-| F05 | Active history → create first live period → start after historical end/pay date; operator confirms end/payday; saved new period | desktop/phone + API | not_run |
-| F06 | Six missing document requirements → visible pre-approval links to actual employee document manager; no waiver by activation | desktop/phone + API | not_run |
+| F01 | Past calculated runs, no live commitment → find notice in list/workspace; attempt approval → history link/guidance; live clients hide notice | API + desktop/phone | passed |
+| F02 | Match registers → tab through old check numbers (leading zeros/blank allowed), save/reload → references retained without check allocation | desktop/phone + API | passed |
+| F03 | Reconcile register mismatch, recover, record once → 20 periods / 60 paychecks with references in summary, saved view and imported detail | desktop/phone + API | passed |
+| F04 | Turn on YTD/reload → next-number suggestion (highest numeric + 1), editable existing check settings, no automatic sequence write | desktop/phone + API | passed |
+| F05 | Active history → create first live period → start after historical end/pay date; operator confirms end/payday; saved new period | desktop/phone + API | passed |
+| F06 | Six missing document requirements → visible pre-approval links to actual employee document manager; no waiver by activation | desktop/phone + API | passed |
 | F07 | Fresh contained production copy → record/activate real company-10 shape using stand-in registers → 20/60 once; no historical checks/postings/deposits/loans/jobs/email; correct filing ownership/YTD | services/API | not_run |
 | F08 | Copy-only document waivers → Oct 29–Nov 11 live calculate/approve/commit → normal annual FICA; employee YTD = history + live | services/API | not_run |
 | F09 | Same 356 report requests for companies 1,2,4,5,6,10,11 on staging-v2 vs #407 before conversion → no changed responses for other clients | contained copy | not_run |
 
 Private evidence is under `output/payroll-aire-prod-audit-2026-10-30/pr407-final/` (0600 files). Only synthetic screenshots and redacted counts belong in Git/PR. Real registers, actual document verification, filing/deposit evidence and the first unpaid payday remain operator decisions.
+
+Final browser evidence (application code `590102fd`, synthetic isolated local database, accountant with explicit client-management grant): the complete Record → Turn on YTD journey ran at 1440 and 390 pixels; the saved-result checks also ran at 1280 and 390. All 60 old references retained leading zeros, autosave/reload resumed Match registers, monetary mismatch recovery worked, and 20 periods / 60 paychecks / 3 YTD balances were saved. Six document gaps remained after activation. The existing check settings suggested 7061, accepted an operator-edited 7065 and retained it after reload. The first live draft saved October 29–November 11 with a November 11 payday; the phone form was canceled before the desktop save to avoid duplication. No page errors or document-level horizontal overflow were found.
+
+The initial browser run exposed a stale StrictMode load response that could overwrite recent input; commit `040877a9` fixes it and adds a delayed-response regression. A later harness assertion expected the wrong existing success message after saving the check number; the actual saved value was verified, and the resumed checks passed. Private original captures and scripts retain these failures and retests. Browser coverage used headless Chromium and resized viewports, not physical phones, Clerk sign-in, or CEO acceptance.
+
+The screenshots below use synthetic data. Employee identities and the client label were replaced with neutral example labels in the screenshot DOM only; no SSNs, real payroll identities, credentials or connection URLs are published.
+
+| Desktop | Phone |
+|---|---|
+| ![Post-YTD next steps at 1280](prior-provider-history-final-20261102/next-steps-1280.png) | ![Post-YTD next steps at 390](prior-provider-history-final-20261102/next-steps-390.png) |
+| ![Saved old check numbers at 1280](prior-provider-history-final-20261102/imported-checks-1280.png) | ![Saved old check number at 390](prior-provider-history-final-20261102/imported-checks-390.png) |
+
+![Editable next check number in existing settings](prior-provider-history-final-20261102/check-settings-1280.png)
+
+Independent financial review covered `69c6dc2d` plus the then-pending frontend fixes, followed by `dce8fc75`. It found reversal gating, non-taxable reconciliation and explicit deduction classification issues. Those were fixed in `dce8fc75`; the second round found that loan display consumers still needed a separate aggregate column. Commit `590102fd` adds that column to preview, CSV, PDF and spreadsheet only for verified prior-provider data, without assigning a native loan subtype. CodeRabbit's earlier full-review request was canceled after the head changed; final coverage must be reported separately.

@@ -63,7 +63,7 @@ RSpec.describe "Prior-provider final review regressions" do
       roth_retirement_payment: 20, total_retirement_payment: 120, insurance_payment: 30, loan_payment: 10, historical_loan_deductions_unclassified: 10)
     csv = CSV.parse(PayrollRegisterCsvExporter.new(report).generate, headers: true)
     expect(csv.first["Previous Provider Loans (Type Not Recorded)"]).to eq("10.00")
-    expect(csv.last["Previous Provider Loans (Type Not Recorded)"]).to eq("10.00")
+    expect(csv[-1]["Previous Provider Loans (Type Not Recorded)"]).to eq("10.00")
     expect(csv.first["Straight Loan (One-Time)"]).to eq("0.00")
     expect(csv.first["Installment Loan (Recurring)"]).to eq("0.00")
     pdf = PayrollRegisterPdfGenerator.new(report)
