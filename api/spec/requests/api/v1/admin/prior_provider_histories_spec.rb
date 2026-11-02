@@ -158,6 +158,64 @@ RSpec.describe "Api::V1::Admin::PriorProviderHistories", type: :request do
     expect(response.parsed_body.dig("onboarding", "status")).to eq("reversed")
   end
 
+  it "blocks real lifecycle and every native print/report path for retired and restored paid-source runs without financial effects" do
+    ActiveJob::Base.queue_adapter = :test
+    onboarding = convert_history(@company, @admin, @payload)
+    activate_history(onboarding, @admin)
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user) { @admin }
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id) { @company.id }
+    run = @runs.first
+    effects = lambda do
+      {
+        next_check_number: @company.reload.next_check_number,
+        items: run.payroll_items.order(:id).map(&:attributes),
+        employee_ytd: EmployeeYtdTotal.where(employee_id: @employees.map(&:id)).order(:id).map(&:attributes),
+        company_ytd: CompanyYtdTotal.where(company: @company).order(:id).map(&:attributes),
+        postings: PayrollLiabilityPosting.where(company: @company).count,
+        entries: PayrollLiabilityEntry.count, loans: LoanTransaction.count,
+        deposits: Form500Filing.where(company: @company).count,
+        nonemployee_checks: NonEmployeeCheck.where(company: @company).count,
+        jobs: ActiveJob::Base.queue_adapter.enqueued_jobs.size,
+        emails: ActionMailer::Base.deliveries.size
+      }
+    end
+    %w[retired_history calculated].each do |status|
+      reverse_history(onboarding, @admin) if status == "calculated"
+      expect(run.reload.status).to eq(status)
+      before = effects.call
+      lifecycle = PayPeriodLifecycleService.new(pay_period: run, actor: @admin)
+      expect { lifecycle.approve! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /already paid/)
+      expect { lifecycle.commit! }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /already paid/)
+      %w[transmittal_preview payroll_register payroll_register_csv payroll_register_pdf payroll_register_xlsx payroll_summary_by_employee_pdf full_print_package_pdf].each do |report|
+        get "/api/v1/admin/reports/#{report}", params: { pay_period_id: run.id }
+        expect(response).to have_http_status(:unprocessable_entity), "#{status} #{report}: #{response.body}"
+        expect(response.parsed_body["error"]).to include("already paid")
+      end
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: run.id }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(run.reload.transmittal).to be_nil
+      expect(run.status).to eq(status)
+      expect(effects.call).to eq(before)
+    end
+    expect(@employees).to all(satisfy { |employee| employee.reload.ytd_totals_before(year: 2026, pay_date: Date.new(2027, 1, 1), pay_period_id: 0)[:gross_pay].zero? })
+  end
+
+  it "audits successful source-file downloads with identity and batch context, but never logs a failed download as successful" do
+    onboarding = convert_history(@company, @admin, @payload)
+    file = onboarding.historical_import_batch.historical_import_source_files.first
+    path = "/api/v1/admin/prior_provider_histories/#{onboarding.id}/source_files/#{file.id}"
+    2.times { get path; expect(response).to have_http_status(:ok) }
+    events = AuditLog.where(action: "prior_provider_histories#source_file", record_id: file.id).order(:id)
+    expect(events.count).to eq(2)
+    expect(events.last).to have_attributes(user_id: @admin.id, company_id: @company.id, record_type: "historical_import_source_files")
+    expect(events.last.metadata).to include("prior_provider_history_onboarding_id" => onboarding.id,
+      "historical_import_batch_id" => onboarding.historical_import_batch_id, "sha256" => file.sha256)
+    R2StorageService.new.delete(file.storage_key)
+    get path
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(events.count).to eq(2)
+  end
+
   it "hides foreign-company onboarding records and rechecks revoked access inside services" do
     home = create(:company, organization: @company.organization)
     assigned = create(:user, company: home, organization: @company.organization, role: "accountant")

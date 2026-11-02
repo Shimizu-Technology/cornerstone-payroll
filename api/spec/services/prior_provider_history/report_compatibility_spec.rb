@@ -41,4 +41,25 @@ RSpec.describe "Prior-provider report compatibility" do
     expect(summary[:mode]).to eq("committed_cornerstone_only")
     expect(summary[:source_statement]).to eq(UnifiedPayrollReporting::SOURCE_STATEMENT)
   end
+  it "keeps the exact legacy QuickBooks summary and splits provider counts and statement only when provider rows exist" do
+    reporting = UnifiedPayrollReporting.new(company_id: 1, period: nil)
+    allow(reporting).to receive(:bridge_summary).and_return({ applied: false })
+    row = lambda do |source, id|
+      double(historical_import_batch: double(source_system: source), historical_pay_period: double(period_type: "regular"),
+        historical_pay_period_id: id, employee_id: id, pay_date: Date.new(2026, 10, 28), gross_pay: 100.to_d, net_pay: 80.to_d)
+    end
+    qb = row.call("quickbooks_online", 1)
+    prior = row.call("prior_provider", 2)
+    counts = { payroll_count: 1, paycheck_count: 1, record_count: 1, opening_summary_count: 0,
+      excluded_unlinked_paycheck_count: 0, excluded_unlinked_gross_pay: 0, excluded_unlinked_net_pay: 0 }
+    legacy = reporting.source_summary(native_items: [], historical_paychecks: [ qb ])
+    expect(legacy).to eq(mode: "locked_quickbooks_plus_committed_cornerstone", source_statement: UnifiedPayrollReporting::SOURCE_STATEMENT,
+      cornerstone: { payroll_count: 0, paycheck_count: 0 }, quickbooks: counts,
+      adjustments: { count: 0, gross_pay_delta: 0, net_pay_delta: 0 }, source_overlap: { employee_pay_date_count: 0 }, historical_ytd_bridge: { applied: false })
+    mixed = reporting.source_summary(native_items: [], historical_paychecks: [ qb, prior ])
+    expect(mixed[:quickbooks]).to eq(counts)
+    expect(mixed[:prior_provider]).to eq(counts)
+    expect(mixed[:source_statement]).to include("Prior-provider payments were already paid")
+    expect(mixed[:source_statement]).not_to include("QuickBooks source values")
+  end
 end

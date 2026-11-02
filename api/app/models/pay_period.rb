@@ -375,7 +375,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def unresolved_prior_provider_history?
-    PriorProviderHistoryOnboarding.unresolved_reversed_for(company_id).exists?
+    pay_date.present? && PriorProviderHistoryOnboarding.unresolved_reversed_for(company_id, tax_year: pay_date.year).exists?
   end
 
   def can_edit?

@@ -30,7 +30,8 @@ module PriorProviderHistory
         )
         row.merge(
           "earnings_breakdown" => component("Earnings (verify source classification)", row["gross_pay"]),
-          "pretax_deduction_breakdown" => component("Pre-tax deductions", pretax),
+          "pretax_deduction_breakdown" => component("401(k) pre-tax retirement", item.retirement_payment) +
+            component("Other pre-tax deductions", pretax - item.retirement_payment.to_d),
           "after_tax_deduction_breakdown" => component("Post-tax deductions", aftertax),
           "employer_contribution_breakdown" => component("Employer contributions", row["employer_contributions"])
         )

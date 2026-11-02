@@ -15,9 +15,15 @@ class PriorProviderHistoryOnboarding < ApplicationRecord
   before_update :protect_evidence
   before_destroy :retain_evidence
 
-  def self.unresolved_reversed_for(company_id)
+  def self.unresolved_reversed_for(company_id, tax_year: nil)
     records = where(company_id: company_id)
+    records = records.where(tax_year: tax_year) if tax_year
+    replacement_years = HistoricalEmployeeYtdBalance.joins(historical_ytd_bridge: :historical_import_batch)
+      .where(company_id: company_id, historical_ytd_bridges: { company_id: company_id, status: "applied" },
+        historical_import_batches: { company_id: company_id, status: "locked", importer_version: HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS })
+      .select(:tax_year)
     records.where(status: "reversed").where.not(tax_year: records.where(status: "active").select(:tax_year))
+      .where.not(tax_year: replacement_years)
   end
 
   private

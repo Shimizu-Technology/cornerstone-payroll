@@ -218,9 +218,11 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
         {error && (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">
             <span className="min-w-0">{error}</span>
-            <Button variant="outline" size="sm" onClick={() => { setError(""); void load(); }}>
-              {saveState === "conflict" ? "Load the latest version" : "Reload"}
-            </Button>
+            {saveState !== "error" && (
+              <Button variant="outline" size="sm" onClick={() => { setError(""); void load(); }}>
+                {saveState === "conflict" ? "Load the latest version" : "Reload"}
+              </Button>
+            )}
           </div>
         )}
         {notice && (
