@@ -54,7 +54,7 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
    ```sh
    bin/rails connected_payroll:status          # expect mode: paused
    ```
-3. [ ] **Payroll second.** Merge Payroll `staging-v2` → `main`, deploy web and worker manually. Migrations run in the web predeploy (`db:safe_prepare`). Then for each AIRE source:
+3. [ ] **Payroll second.** Merge Payroll `staging-v2` → `main`, deploy web and worker manually. Migrations run in the web predeploy (`db:safe_prepare`). Then, on web and worker:
    ```sh
    bin/rails connected_payroll:status          # expect mode: paused, on web and worker
    ```
@@ -84,7 +84,7 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
    - Payroll: open a manual client, print a pay stub, the register, and the Q3 941 and W-1. Line 5 of the W-1 should be filled, and amounts should sit on 941 lines 6 and 10.
 8. [ ] **Stop Stage 1 here.** Verify both fleets remain paused, neither rollout configure task was run, AIRE has no rollout singleton and no connected calendar was published. Payroll’s migration-default Oct 16 boundary remains present. Keep entering AIRE hours by hand. Do not run the AIRE paid-history or Payroll historical approval commands as part of Stage 1.
 9. [ ] **Stage 2 is separately held.** After its implementation is reviewed, the exact pair is certified and a fresh contained rehearsal passes, Leon/Chels choose the first connected period. Follow [the ordered maintenance and packet procedure](integrations/aire-history-packet.md): configure later boundaries and reconcile manual history while paused; enable both fleets **unpublished**; pin/link/map; export/review/preview/apply/fresh completion; only then publish and route genuinely owed hours.
-13. [ ] Decide whether to turn production auto-deploy back on.
+10. [ ] Decide whether to turn production auto-deploy back on.
 
 ## 3. After the release
 

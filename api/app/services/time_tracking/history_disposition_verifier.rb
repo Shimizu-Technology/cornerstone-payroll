@@ -15,9 +15,10 @@ module TimeTracking
     }.freeze
     SOURCE_FIELDS = %w[version work_date hours source_user_uuid employee category state history_evidence].freeze
 
-    def initialize(source:, company:, actor:, client:)
+    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [])
       @source, @company, @actor, @client = source, company, actor, client
       @batches = {}
+      @rounding_acknowledgements, @component_bindings = rounding_acknowledgements, component_bindings
     end
 
     def refresh_runs!
@@ -25,9 +26,45 @@ module TimeTracking
       # Do not perform a company/run query for each of thousands of lines.
       @runs = @company.pay_periods.where(status: "committed").index_by { |run| run.id.to_s }
       @employees = @source.time_tracking_employee_mappings.where(company: @company).index_by(&:source_user_uuid)
-      @run_hours = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
-        .group(:pay_period_id, :employee_id).pluck(:pay_period_id, :employee_id, Arel.sql("SUM(hours_worked)"), Arel.sql("SUM(overtime_hours)"))
-        .to_h { |run_id, employee_id, regular, overtime| [ [ run_id.to_s, employee_id ], [ regular, overtime ] ] }
+      @run_items = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
+        .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
+      @run_checksums = @run_items.to_h do |id, items|
+        [ id, CanonicalPayload.checksum({ "run" => @runs.fetch(id).attributes,
+          "items" => items.map { |item| { "item" => item.attributes, "earnings" => item.payroll_item_earnings.sort_by(&:id).map(&:attributes) } } }) ]
+      end
+      @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
+        acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
+      @batches = {}
+      @source_inventory_checksums = nil
+    end
+
+    def discover_rounding_variances!(inventory)
+      refresh_runs!
+      @source_inventory_checksums = inventory.group_by { |row| row.fetch("source_user_uuid") }.transform_values do |rows|
+        CanonicalPayload.checksum(rows.sort_by { |row| row.fetch("id").to_s }.map { |row| row.slice("id", *SOURCE_FIELDS) })
+      end
+      inventory.each do |row|
+        lines = row.dig("history_evidence", "baseline_lines")
+        next if lines.blank?
+
+        legacy = lines.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        unless baseline_verified?(lines, row, legacy_frozen: legacy, discover: true)
+          @rounding_review.blockers << { "source_time_entry_id" => row.fetch("id"), "reason" => "Baseline evidence or earning component requires review" }
+        end
+      end
+      rounding_variances
+    end
+
+    def rounding_variances
+      @rounding_review&.table || []
+    end
+
+    def rounding_review_blockers
+      @rounding_review&.blockers&.uniq || []
+    end
+
+    def rounding_acknowledgements_valid?
+      @rounding_review&.acknowledgements_valid? || (@rounding_acknowledgements == [] && @component_bindings == [])
     end
 
     def verified?(disposition, current)
@@ -85,7 +122,7 @@ module TimeTracking
 
     private
 
-    def baseline_verified?(lines, current, legacy_frozen: false)
+    def baseline_verified?(lines, current, legacy_frozen: false, discover: false)
       refresh_runs! unless @runs
       return false if lines.empty? || lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
       return false unless lines.map { |line| line.fetch("line_key") }.uniq.length == lines.length
@@ -119,19 +156,21 @@ module TimeTracking
         end
         mapping = @employees[current.fetch("source_user_uuid")]
         next false unless source_employee && mapping && mapping.source_user_id == current.dig("employee", "id")
-        hours = @run_hours[[ run_id, mapping.employee_id ]]
-        # Manual runs aggregate multiple source lines into one or more earnings.
-        # Reconcile the complete frozen employee balance, never an entry to a whole item.
         frozen_lines = source_employee.fetch("adjustments")
-        next false unless hours && hours.map { |value| decimal(value) } ==
-          %w[regular_hours overtime_hours].map { |key| frozen_lines.sum { |row| decimal(row.fetch(key)) } }
         frozen = frozen_lines.find do |row|
           row["source_time_entry_id"] == current.fetch("id") && row["line_key"] == line.fetch("line_key")
         end
-        frozen && frozen["source_time_entry_version"] == line.fetch("source_time_entry_version") &&
+        exact_line = frozen && frozen["source_time_entry_version"] == line.fetch("source_time_entry_version") &&
           frozen["original_work_date"] == line.fetch("work_date") && frozen["category"] == line.fetch("category") &&
           frozen["source_kind"] == line.fetch("source_kind") &&
           %w[total_hours regular_hours overtime_hours].all? { |key| decimal(frozen.fetch(key)) == decimal(line.fetch(key)) }
+        next false unless exact_line
+
+        @rounding_review.verify!(batch: payload, run: run, mapping: mapping, source_employee: source_employee,
+          items: Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id },
+          run_checksum: @run_checksums.fetch(run_id),
+          source_inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")) ||
+            CanonicalPayload.checksum([ current.slice("id", *SOURCE_FIELDS) ]), discover: discover)
       end
     end
 

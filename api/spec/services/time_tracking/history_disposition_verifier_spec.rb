@@ -155,6 +155,156 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
       capture("historical_baseline")
     end
 
+    def variance_acknowledgements(instance)
+      instance.rounding_variances.map do |row|
+        row.except("acknowledged", "within_limit").merge("type" => "accountant_reviewed_rounding_variance",
+          "reviewer_id" => actor.id, "reason" => "Reviewed neutral historical rounding within Leon's approved limit",
+          "evidence" => "Synthetic accountant comparison of this exact frozen source and committed register")
+      end
+    end
+
+    def rounding_verifier(acks = [], bindings: [], inventory: [ current ])
+      instance = described_class.new(source: source, company: company, actor: actor, client: client,
+        rounding_acknowledgements: acks, component_bindings: bindings)
+      instance.discover_rounding_variances!(inventory)
+      instance
+    end
+
+    context "with reviewed historical rounding" do
+      it "requires a separate exact signed acknowledgement and preserves the normal baseline disposition" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        instance = rounding_verifier
+        expect(instance.verified?(disposition, current)).to be(false)
+        expect(instance.rounding_variances.sole).to include("category" => "REG", "signed_difference" => "0.03", "acknowledged" => false)
+        reviewed = rounding_verifier(variance_acknowledgements(instance))
+        expect(reviewed.verified?(disposition, current)).to be(true)
+        expect(reviewed.rounding_acknowledgements_valid?).to be(true)
+      end
+
+      [ "4.20", "4.30" ].each do |paid|
+        it "accepts the inclusive 0.05 boundary for #{paid} only with review" do
+          PayrollItem.where(pay_period: run).update_all(hours_worked: paid)
+          instance = rounding_verifier
+          expect(instance.verified?(disposition, current)).to be(false)
+          expect(rounding_verifier(variance_acknowledgements(instance)).verified?(disposition, current)).to be(true)
+        end
+      end
+
+      it "rejects 0.06 even with a correctly bound reviewed acknowledgement" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.31)
+        instance = rounding_verifier
+        expect(instance.rounding_variances.sole.fetch("within_limit")).to be(false)
+        expect(rounding_verifier(variance_acknowledgements(instance)).verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects a changed direction, reviewer, reason, evidence or duplicate acknowledgement" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        original = variance_acknowledgements(rounding_verifier)
+        [ { "signed_difference" => "-0.03" }, { "reviewer_id" => actor.id + 1 }, { "reason" => "" }, { "evidence" => "" } ].each do |tamper|
+          rows = original.deep_dup
+          rows.sole.merge!(tamper)
+          expect(rounding_verifier(rows).verified?(disposition, current)).to be(false)
+        end
+        expect(rounding_verifier(original + original).verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects fresh source state substituted behind an older rounding acknowledgement" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        acks = variance_acknowledgements(rounding_verifier)
+        current["version"] += 1
+        capture("historical_baseline")
+        expect(rounding_verifier(acks).verified?(disposition, current)).to be(false)
+      end
+
+      it "rejects a changed source snapshot even with the acknowledged balances" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        acks = variance_acknowledgements(rounding_verifier)
+        line["current_content_matches"] = false
+        capture("historical_baseline")
+        expect(rounding_verifier(acks).verified?(disposition, current)).to be(false)
+      end
+
+      it "binds the entire run including changes to another employee without netting their hours" do
+        other = create(:employee, company: company)
+        item = create(:payroll_item, company: company, pay_period: run, employee: other, hours_worked: 1)
+        PayrollItem.where(pay_period: run).where.not(id: item.id).update_all(hours_worked: 4.28)
+        acks = variance_acknowledgements(rounding_verifier)
+        item.update_columns(hours_worked: 0.97)
+        expect(rounding_verifier(acks).verified?(disposition, current)).to be(false)
+        expect(rounding_verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "requires each employee's acknowledgement even when their run-level differences cancel" do
+        other_employee = create(:employee, company: company)
+        other_uuid = SecureRandom.uuid
+        TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: other_employee,
+          source_user_id: "92", source_user_uuid: other_uuid)
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        create(:payroll_item, company: company, pay_period: run, employee: other_employee, hours_worked: 3.97, overtime_hours: 0)
+        other = current.deep_dup
+        other.merge!("id" => "1805", "source_user_uuid" => other_uuid, "hours" => 4.0,
+          "employee" => { "id" => "92", "payroll_integration_id" => other_uuid })
+        other_line = other["history_evidence"]["baseline_lines"].sole
+        other_line.merge!("source_time_entry_id" => "1805", "source_user_uuid" => other_uuid, "regular_hours" => "4.0", "total_hours" => "4.0")
+        payload["employees"] << { "source_user_uuid" => other_uuid, "adjustments" => [
+          other_line.slice("source_time_entry_id", "source_time_entry_version", "line_key", "source_kind", "category",
+            "total_hours", "regular_hours", "overtime_hours").merge("original_work_date" => other_line["work_date"]) ] }
+        other_disposition = disposition.deep_dup.merge("source_time_entry_id" => "1805", "source_user_uuid" => other_uuid,
+          "source" => other.slice(*described_class::SOURCE_FIELDS))
+        inventory = [ current, other ]
+        instance = rounding_verifier(inventory: inventory)
+        expect(instance.rounding_variances.map { |row| row.fetch("signed_difference") }).to match_array([ "0.03", "-0.03" ])
+        acks = variance_acknowledgements(instance)
+        partial = rounding_verifier(acks.first(1), inventory: inventory)
+        expect([ partial.verified?(disposition, current), partial.verified?(other_disposition, other) ]).to contain_exactly(true, false)
+        reviewed = rounding_verifier(acks, inventory: inventory)
+        expect(reviewed.verified?(disposition, current)).to be(true)
+        expect(reviewed.verified?(other_disposition, other)).to be(true)
+      end
+
+      it "requires independent REG and OT acknowledgements even when they net to zero" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.22, overtime_hours: 0.03)
+        instance = rounding_verifier
+        expect(instance.rounding_variances.length).to eq(2)
+        acks = variance_acknowledgements(instance)
+        expect(rounding_verifier(acks.first(1)).verified?(disposition, current)).to be(false)
+        expect(rounding_verifier(acks).verified?(disposition, current)).to be(true)
+      end
+
+      it "refuses acknowledgements that are stale, unused or refer to another employee" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
+        acks = variance_acknowledgements(rounding_verifier)
+        acks.sole["employee_id"] += 1
+        instance = rounding_verifier(acks)
+        expect(instance.verified?(disposition, current)).to be(false)
+        expect(instance.rounding_acknowledgements_valid?).to be(false)
+      end
+
+      it "does not net across earning components or infer a source-to-paid component mapping" do
+        category = { "id" => "2", "key" => "other_component", "name" => "Other component" }
+        other_line = line.deep_dup.merge("source_time_entry_id" => "1805", "line_key" => "other", "category" => category,
+          "total_hours" => "4.0", "regular_hours" => "4.0")
+        payload["employees"].sole["adjustments"] << other_line.slice("source_time_entry_id", "source_time_entry_version", "line_key", "source_kind", "category", "total_hours", "regular_hours", "overtime_hours")
+          .merge("original_work_date" => other_line["work_date"])
+        item = PayrollItem.find_by!(pay_period: run)
+        item.update_columns(hours_worked: 8.25, custom_columns_data: { "wage_rate_hours" => [
+          { "employee_wage_rate_id" => 11, "label" => "Admin", "rate" => 10, "regular_hours" => 4.28, "overtime_hours" => 0 },
+          { "employee_wage_rate_id" => 12, "label" => "Other", "rate" => 10, "regular_hours" => 3.97, "overtime_hours" => 0 } ] })
+        instance = rounding_verifier
+        expect(instance.verified?(disposition, current)).to be(false)
+        bindings = instance.rounding_review_blockers.select { |row| row["category"] == "REG" }.map do |row|
+          row.except("reason").merge("type" => "historical_earning_component_binding", "reviewer_id" => actor.id,
+            "earning_component" => row["source_category"] == current["category"] ? "wage_rate:11" : "wage_rate:12",
+            "reason" => "Reviewed this exact historical component identity", "evidence" => "Synthetic frozen category and committed earning component")
+        end
+        bound = rounding_verifier([], bindings: bindings)
+        expect(bound.rounding_variances.map { |row| row.fetch("signed_difference") }).to match_array([ "0.03", "-0.03" ])
+        expect(bound.verified?(disposition, current)).to be(false)
+        reviewed = rounding_verifier(variance_acknowledgements(bound), bindings: bindings)
+        expect(reviewed.verified?(disposition, current)).to be(true)
+      end
+    end
+
     context "with separately typed legacy frozen evidence" do
       before do
         current["employee"] = { "id" => "91", "payroll_integration_id" => uuid }
@@ -240,7 +390,7 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
         end
 
         [ [ "75.03", "0", "75.00", "0" ], [ "80", "20.57", "80", "20.60" ] ].each do |frozen_reg, frozen_ot, run_reg, run_ot|
-          it "rejects exact multi-line balance #{frozen_reg}/#{frozen_ot} versus committed #{run_reg}/#{run_ot}" do
+          it "requires a reviewed rounding acknowledgement for multi-line #{frozen_reg}/#{frozen_ot} versus #{run_reg}/#{run_ot}" do
             other = payload["employees"].sole["adjustments"].sole.deep_dup
             regular = frozen_reg.to_d - 4.25.to_d
             other.merge!("source_time_entry_id" => "1805", "line_key" => "other",
@@ -249,6 +399,8 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
             PayrollItem.where(pay_period: run).update_all(hours_worked: run_reg, overtime_hours: run_ot)
             reconcile_payload!
             expect(verifier.verified?(disposition, current)).to be(false)
+            instance = rounding_verifier
+            expect(rounding_verifier(variance_acknowledgements(instance)).verified?(disposition, current)).to be(true)
           end
         end
       end
