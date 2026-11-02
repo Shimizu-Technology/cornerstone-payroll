@@ -347,9 +347,6 @@ class CheckGenerator
     summary_height = summary_box_height(stub_cfg, rendered_height: summary_table.height)
     summary_floor = sect_bot + summary_height + 20.0
     deductions_space = deductions_top - summary_floor - 6.0
-    if deductions_space < 10.0
-      raise ArgumentError, "This printer layout leaves no readable space for deductions and the summary. Adjust the stub layout before printing."
-    end
     deductions_height = draw_section_table(pdf,
       x: rx, y: deductions_top, w: right_w,
       title: "DEDUCTIONS",
