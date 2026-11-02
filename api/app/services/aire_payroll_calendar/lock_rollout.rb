@@ -27,11 +27,16 @@ module AirePayrollCalendar
         end
         if @source.cutoff_enforcement_starts_on != @starts_on
           if @source.lock_rollout_selection || @source.aire_payroll_calendar_periods.exists? ||
-              @source.aire_verified_history_rollout_receipts.where(coverage_verified: true).exists? ||
+              @source.time_tracking_imports.exists? || @source.aire_verified_history_rollout_receipts.exists? ||
               AuditLog.exists?(record_type: "TimeTrackingSource", record_id: @source.id, action: "time_tracking_source#lock_rollout_gate_passed")
             raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
           end
+          old_boundary = @source.cutoff_enforcement_starts_on
           @source.create_lock_rollout_selection!(starts_on: @starts_on, actor: @actor, reason: @reason)
+          AuditLog.create!(actor_name: @actor, actor_role: "operator", company_id: @source.company_id,
+            organization_id: @source.company.organization_id, action: "time_tracking_source#initial_lock_rollout_selected",
+            record_type: "TimeTrackingSource", record_id: @source.id, event_category: "integration",
+            metadata: { old_starts_on: old_boundary.iso8601, new_starts_on: @starts_on.iso8601, reason: @reason })
         end
         unless @source.cutoff_enforcement_starts_on == @starts_on
           raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"

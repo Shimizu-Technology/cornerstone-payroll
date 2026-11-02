@@ -335,7 +335,7 @@ module TimeTracking
       raise Error, "Historical rollout company or actor changed before completion"
     end
 
-    def validate_history_scope!(require_evidence: Array(manifest["reviewed_dispositions"]).any?)
+    def validate_history_scope!(require_evidence: true)
       validate_history_scope_bound!
       return unless @history_through_work_date
 
@@ -350,7 +350,7 @@ module TimeTracking
         response = @client.payroll_cockpit_history_entries(through_work_date: date, page: page)
         raise Error, "AIRE returned incomplete historical source inventory" unless response.is_a?(Hash)
 
-        if require_evidence && (response["history_evidence_version"] != 1 ||
+        if require_evidence && (!@source.remote_identity_pinned? || response["history_evidence_version"] != 1 ||
             response.dig("integration", "source_instance_id") != @source.expected_source_instance_id)
           raise Error, "AIRE historical evidence version or installation differs"
         end

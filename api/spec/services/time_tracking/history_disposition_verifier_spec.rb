@@ -44,6 +44,31 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
     end
   end
 
+  it "requires explicit source dimensions and approval keys, while allowing explicit nulls" do
+    %w[work_date category].each do |field|
+      missing = current.except(field)
+      capture("pending_review")
+      disposition["source"] = missing.slice(*described_class::SOURCE_FIELDS)
+      expect(verifier.verified?(disposition, missing)).to be(false)
+    end
+    current["state"].delete("approval_status")
+    capture("pending_review")
+    expect(verifier.verified?(disposition, current)).to be(false)
+  end
+
+  it "refuses active settlement holds for pending, denied and zero-hour dispositions" do
+    current["history_evidence"]["active_cases"] = [ { "status" => "open" } ]
+    capture("pending_review")
+    expect(verifier.verified?(disposition, current)).to be(false)
+    current["state"]["approval_status"] = "denied"
+    current["lifecycle"]["status"] = "not_payable"
+    capture("not_payable")
+    expect(verifier.verified?(disposition, current)).to be(false)
+    current["hours"] = 0
+    capture("no_payable_hours")
+    expect(verifier.verified?(disposition, current)).to be(false)
+  end
+
   it "rejects a changed version, category, hours, approval, or content behind a prior review" do
     disposition
     [ [ "version", 3 ], [ "hours", 3.0 ], [ "category", nil ], [ "state", {} ], [ "history_evidence", {} ] ].each do |field, value|
@@ -116,6 +141,10 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
     end
 
     before do
+      employee = create(:employee, company: company)
+      create(:time_tracking_employee_mapping, company: company, time_tracking_source: source, employee: employee,
+        source_user_id: "91", source_user_uuid: uuid)
+      create(:payroll_item, company: company, pay_period: run, employee: employee, hours_worked: 4.25, overtime_hours: 0)
       current["state"]["approval_status"] = "approved"
       current["lifecycle"]["status"] = "committed"
       current["history_evidence"]["baseline_lines"] = [ line ]
@@ -128,6 +157,11 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
     it "verifies frozen lines against authenticated batch content and the company-owned committed run" do
       expect(verifier.verified?(disposition, current)).to be(true)
       expect(client).to have_received(:payroll_batch).once
+    end
+
+    it "rejects a committed run without matching employee hours" do
+      PayrollItem.where(pay_period: run).update_all(hours_worked: 5)
+      expect(verifier.verified?(disposition, current)).to be(false)
     end
 
     it "retains baseline provenance for a represented pending source without approving it" do

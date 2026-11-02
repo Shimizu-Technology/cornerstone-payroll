@@ -29,6 +29,20 @@ RSpec.describe TimeTrackingLockRolloutSelection do
       .to raise_error(ActiveRecord::StatementInvalid, /unused, ungated/)
   end
 
+  it "rejects selection after any rollout receipt, including unverified coverage" do
+    source.aire_verified_history_rollout_receipts.create!(company: source.company,
+      manifest_sha256: "a" * 64, coverage_verified: false, identity_count: 0, paid_source_entry_count: 0, completed_at: Time.current)
+    expect { described_class.transaction(requires_new: true) { described_class.create!(attributes) } }
+      .to raise_error(ActiveRecord::StatementInvalid, /unused, ungated/)
+  end
+
+  it "rejects selection after an import, including a preview" do
+    period = create(:pay_period, company: source.company)
+    create(:time_tracking_import, time_tracking_source: source, pay_period: period)
+    expect { described_class.transaction(requires_new: true) { described_class.create!(attributes) } }
+      .to raise_error(ActiveRecord::StatementInvalid, /unused, ungated/)
+  end
+
   it "rejects selection while any source calendar already exists" do
     period = create(:pay_period, company: source.company)
     create(:aire_payroll_calendar_period, company: source.company, time_tracking_source: source, pay_period: period)

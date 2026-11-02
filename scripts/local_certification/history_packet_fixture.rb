@@ -45,7 +45,11 @@ if ENV.fetch("CERTIFICATION_STAGE2_APP") == "aire"
   File.write(ENV.fetch("AIRE_CERTIFICATION_FIXTURE_PATH"), JSON.pretty_generate(aire))
 else
   actor = User.find_by!(email: payroll.fetch("admin_email"))
-  PayPeriod.find(payroll.fetch("previous_pay_period_id")).update!(status: "committed")
+  period = PayPeriod.find(payroll.fetch("previous_pay_period_id"))
+  mapping = TimeTrackingSource.find(payroll.fetch("source_id")).time_tracking_employee_mappings.find_by!(source_user_uuid: aire.fetch("employee_uuid"))
+  PayrollItem.create!(company: period.company, pay_period: period, employee: mapping.employee,
+    hours_worked: 2, overtime_hours: 0, pay_rate: 25, gross_pay: 50, net_pay: 50)
+  period.update!(status: "committed")
   TimeTrackingSource.find(payroll.fetch("source_id")).update!(historical_reconciliation_required: true)
   payroll["history_actor_id"] = actor.id
   File.write(ENV.fetch("CERTIFICATION_FIXTURE_PATH"), JSON.pretty_generate(payroll))

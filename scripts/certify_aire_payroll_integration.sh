@@ -12,9 +12,14 @@ AIRE_PORT="${AIRE_PORT:-44327}"
 CORNERSTONE_PORT="${CORNERSTONE_PORT:-44328}"
 CONNECTED_WEB_PORT="${CONNECTED_WEB_PORT:-44339}"
 KEEP_RUNNING="${KEEP_RUNNING:-false}"
-RUN_ID="$(date +%H%M%S)-$$"
-AIRE_DATABASE="aire_cornerstone_certification_rollout_rehearsal_${RUN_ID//-/_}"
-CORNERSTONE_DATABASE="cornerstone_aire_certification_rollout_rehearsal_${RUN_ID//-/_}"
+RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
+AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
+CORNERSTONE_DATABASE="cornerstone_aire_certification_${RUN_ID//-/_}"
+if [[ "${STAGE2_HISTORY:-false}" == "true" ]]; then
+  RUN_ID="$(date +%H%M%S)-$$"
+  AIRE_DATABASE="aire_cornerstone_certification_rollout_rehearsal_${RUN_ID//-/_}"
+  CORNERSTONE_DATABASE="cornerstone_aire_certification_rollout_rehearsal_${RUN_ID//-/_}"
+fi
 TEMP_PARENT="${TMPDIR:-/tmp}"
 while [[ "$TEMP_PARENT" != "/" && "$TEMP_PARENT" == */ ]]; do
   TEMP_PARENT="${TEMP_PARENT%/}"
