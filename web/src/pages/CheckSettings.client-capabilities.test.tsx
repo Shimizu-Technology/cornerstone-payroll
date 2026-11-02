@@ -37,6 +37,10 @@ describe('selected client check controls', () => {
     expect(mocks.next).not.toHaveBeenCalled();
     await user.clear(number);
     await user.type(number, '709');
+    await user.click(screen.getByRole('button', { name: 'Save Client Check Settings' }));
+    await screen.findByText('Client check settings saved. Select a printer profile to keep calibration with your printer.');
+    expect(number.value).toBe('709');
+    expect(mocks.next).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Update Next Number' }));
     expect(mocks.next).toHaveBeenCalledWith(709);
   });

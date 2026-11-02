@@ -7,11 +7,11 @@ module PriorProviderHistory
     def self.candidates(company)
       company.pay_periods.calculated.where(committed_at: nil, cycle: "regular", run_purpose: "regular",
         parallel_run: false, correction_status: nil, corrects_pay_period_id: nil)
-        .where("pay_date < ?", Date.current)
+        .where("pay_date < ?", PayrollBusinessClock.today)
     end
 
     def self.available?(company, period: nil)
-      return false if period && (!period.calculated? || period.committed_at.present? || period.pay_date >= Date.current ||
+      return false if period && (!period.calculated? || period.committed_at.present? || period.pay_date >= PayrollBusinessClock.today ||
         !period.regular_cycle? || period.run_purpose != "regular" || period.parallel_run? ||
         period.correction_status.present? || period.corrects_pay_period_id.present?)
       return false if company.test_workspace?

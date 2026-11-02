@@ -71,7 +71,7 @@ module PriorProviderHistory
       start_date = Date.iso8601(period.fetch("start_date").to_s)
       end_date = Date.iso8601(period.fetch("end_date").to_s)
       pay_date = Date.iso8601(period.fetch("pay_date").to_s)
-      unless start_date <= end_date && end_date <= pay_date && pay_date < Date.current && pay_date < takeover_on && pay_date.year == tax_year
+      unless start_date <= end_date && end_date <= pay_date && pay_date < PayrollBusinessClock.today && pay_date < takeover_on && pay_date.year == tax_year
         raise ArgumentError, "History requires ordered period dates and a past pay date in the tax year before takeover"
       end
       raise ArgumentError, "Each period needs a provider register/page reference" if period["source_reference"].to_s.strip.blank? || period["source_reference"].to_s.length > 500
