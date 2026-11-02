@@ -686,3 +686,26 @@ FOR EACH ROW EXECUTE FUNCTION prevent_imported_fica_proof_mutation();
 DROP TRIGGER IF EXISTS imported_fica_proofs_no_truncate ON historical_paycheck_fica_basis_proofs;
 CREATE TRIGGER imported_fica_proofs_no_truncate BEFORE TRUNCATE ON historical_paycheck_fica_basis_proofs
 FOR EACH STATEMENT EXECUTE FUNCTION prevent_imported_fica_proof_mutation();
+
+CREATE OR REPLACE FUNCTION retain_published_payroll_reviews()
+RETURNS trigger AS $$
+BEGIN
+  IF OLD.client_payroll_approval_required OR NEW.client_payroll_approval_required THEN
+    UPDATE payroll_review_packages AS review
+    SET sent_for_client_approval_at = COALESCE(review.sent_for_client_approval_at, CURRENT_TIMESTAMP),
+        client_review_history_unknown = FALSE
+    FROM pay_periods
+    WHERE review.company_id = NEW.id
+      AND review.pay_period_id = pay_periods.id
+      AND review.superseded_at IS NULL
+      AND pay_periods.status IN ('calculated', 'approved');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS companies_retain_published_payroll_reviews ON companies;
+CREATE TRIGGER companies_retain_published_payroll_reviews
+BEFORE UPDATE OF client_payroll_approval_required ON companies
+FOR EACH ROW
+EXECUTE FUNCTION retain_published_payroll_reviews();

@@ -95,3 +95,43 @@ describe('PayrollRegisterPreviewContent', () => {
     expect(screen.getByText('Test-only payroll register')).toBeTruthy();
   });
 });
+
+describe('register reconciliation columns', () => {
+  afterEach(cleanup);
+
+  it('renders saved Roth, payroll-field retirement, reimbursements and employee net without employer money', () => {
+    const cases = [
+      { name: 'Roth rate', traditional: 0, roth: 28.8, additions: 0, employer: 0 },
+      { name: 'Roth catch-up', traditional: 0, roth: 1216.35, additions: 0, employer: 0 },
+      { name: 'Field retirement', traditional: 927.91, roth: 0, additions: 0, employer: 100 },
+      { name: 'Reimbursement', traditional: 0, roth: 0, additions: 20, employer: 0 },
+      { name: 'Ordinary', traditional: 0, roth: 0, additions: 0, employer: 0 },
+    ];
+    const workers = cases.map((fixture, index) => ({
+      ...report.employees[0], employee_id: index + 1, employee_name: fixture.name,
+      gross_pay: 2000, non_taxable_additions_total: fixture.additions,
+      retirement_payment: 0, roth_retirement_payment: fixture.roth,
+      traditional_retirement_total: fixture.traditional, roth_retirement_total: fixture.roth,
+      total_deductions: 253 + fixture.traditional + fixture.roth,
+      net_pay: 2000 + fixture.additions - 253 - fixture.traditional - fixture.roth,
+      employer_contributions_total: fixture.employer,
+    }));
+    render(<PayrollRegisterPreviewContent report={{ ...report, employees: workers }} />);
+    const table = screen.getByRole('columnheader', { name: 'Non-Taxable Additions' }).closest('table')!;
+    const headings = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent);
+    for (const fixture of cases) {
+      const row = Array.from(table.querySelectorAll('tbody tr')).find((candidate) => candidate.querySelector('td')?.textContent === fixture.name)!;
+      const cells = Array.from(row.querySelectorAll('td')).map((cell) => Number(cell.textContent?.replace(/[$,]/g, '') || 0));
+      const value = (label: string) => cells[headings.indexOf(label)];
+      expect(value('Pre-Tax Retirement')).toBe(fixture.traditional);
+      expect(value('Roth Retirement')).toBe(fixture.roth);
+      expect(value('Employer Contributions')).toBe(fixture.employer);
+      expect(Math.round((value('Gross Pay') + value('Non-Taxable Additions') - value('Deductions')) * 100)).toBe(Math.round(value('Net Pay') * 100));
+    }
+  });
+
+  it('displays a backend reconciliation failure prominently', () => {
+    render(<PayrollRegisterPreviewContent report={{ ...report, register_review: [{ severity: 'Review', employee: 'Test Employee', issue: 'Payroll row does not reconcile', detail: 'Difference $0.01' }] }} />);
+    expect(screen.getByRole('alert').textContent).toContain('Payroll row does not reconcile');
+  });
+});

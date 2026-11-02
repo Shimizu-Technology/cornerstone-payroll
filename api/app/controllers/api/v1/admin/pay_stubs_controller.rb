@@ -62,9 +62,11 @@ module Api
           # The delivery method can be changed for an unissued committed run.
           # A previously stored PDF may still name the old method or check.
           # Older stored statements may contain accountant-only review notes.
+          # Non-taxable statements need the reconciled payment summary too.
           # Regenerate affected history while preserving other archived PDFs.
+          statement = PayrollStatementYtdBreakdown.new(@payroll_item)
           if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive? &&
-              PayrollStatementYtdBreakdown.new(@payroll_item).review_warnings.empty?
+              statement.review_warnings.empty? && statement.other_pay.empty?
             storage = R2StorageService.new
             key = existing_storage_key(storage: storage)
             pdf_data = storage.download(key) if key.present?

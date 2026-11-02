@@ -51,6 +51,17 @@ function currency(value: unknown) {
   return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
+function nonTaxableAdditions(worker: PayrollWorker) {
+  return worker.non_taxable_additions_total ?? (Number(worker.non_taxable_pay || 0)
+    + Number(worker.payroll_adjustment_non_taxable_additions_total || 0)
+    + Number(worker.payroll_field_non_taxable_additions_total || 0));
+}
+
+function retirementAmount(worker: PayrollWorker, roth = false) {
+  return roth ? worker.roth_retirement_total ?? worker.roth_retirement_payment
+    : worker.traditional_retirement_total ?? worker.retirement_payment;
+}
+
 function decimal(value: unknown) {
   const amount = Number(value ?? 0);
   return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -214,7 +225,7 @@ function payrollFieldHeaderClass(group: PayrollFieldGroup) {
 
 function PayrollFieldHeader({ column }: { column: PayrollFieldColumn }) {
   const inclusion = column.group === 'addition'
-    ? 'Included in gross'
+    ? column.taxTreatment === 'non_taxable_addition' ? 'Added outside gross' : 'Included in gross'
     : column.group === 'deduction'
       ? 'Included in deductions'
       : 'Employer only';
@@ -419,7 +430,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   const additionColumns = fieldColumns.filter((column) => column.group === 'addition');
   const deductionColumns = fieldColumns.filter((column) => column.group === 'deduction');
   const employerColumns = fieldColumns.filter((column) => column.group === 'employer');
-  const columnCount = 19 + fieldColumns.length + adjustmentColumns.length;
+  const columnCount = 22 + fieldColumns.length + adjustmentColumns.length;
   const total = (key: keyof PayrollWorker) => workers.reduce((sum, worker) => sum + Number(worker[key] || 0), 0);
   const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
     sum + (payrollFieldAmount(worker, column) || 0)
@@ -491,10 +502,13 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {additionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Gross Pay</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Non-Taxable Additions</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Withholding</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Add&apos;l W/H</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Social Security</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Medicare</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Pre-Tax Retirement</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Roth Retirement</th>
                 {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentHeader key={column.key} column={column} />)}
                 {deductionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Straight Loan</th>
@@ -527,10 +541,13 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                       {adjustmentAdditionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {additionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(nonTaxableAdditions(worker))}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.withholding_tax)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.additional_withholding)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.social_security_tax)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(retirementAmount(worker))}</td>
+                      <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(retirementAmount(worker, true))}</td>
                       {adjustmentDeductionColumns.map((column) => <PayrollAdjustmentCell key={column.key} worker={worker} column={column} />)}
                       {deductionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.straight_loan_deduction)}</td>
@@ -561,8 +578,13 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 {additionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
-                {(['gross_pay', 'withholding_tax', 'additional_withholding', 'social_security_tax', 'medicare_tax'] as Array<keyof PayrollWorker>).map((key) => (
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('gross_pay'))}</td>
+                <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(workers.reduce((sum, worker) => sum + Number(nonTaxableAdditions(worker)), 0))}</td>
+                {(['withholding_tax', 'additional_withholding', 'social_security_tax', 'medicare_tax'] as Array<keyof PayrollWorker>).map((key) => (
                   <td key={key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total(key))}</td>
+                ))}
+                {[false, true].map((roth) => (
+                  <td key={String(roth)} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(workers.reduce((sum, worker) => sum + Number(retirementAmount(worker, roth) || 0), 0))}</td>
                 ))}
                 {adjustmentDeductionColumns.map((column) => (
                   <td key={column.key} className="border-t-2 border-r border-neutral-300 px-4 py-2 text-right font-bold tabular-nums">{currency(adjustmentTotal(column))}</td>
@@ -711,6 +733,12 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
           <p className="mt-2 text-amber-900">{report.source.statement}</p>
         </div>
       )}
+      <section className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm" aria-label="Register reconciliation">
+        <p>Gross + non-taxable additions − deductions (including employee taxes) = net. Employer contributions do not reduce net. Named fields and adjustments are breakdowns already included in these totals.</p>
+        {report.register_review?.map((entry, index) => (
+          <p key={`${entry.employee}-${index}`} role="alert" className="mt-2 font-semibold text-amber-900">{entry.employee}: {entry.issue}. {entry.detail}</p>
+        ))}
+      </section>
       {register}
       <PayrollComponentsDisclosure report={report} />
     </div>

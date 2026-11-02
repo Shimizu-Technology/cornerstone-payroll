@@ -351,3 +351,29 @@ it.each([true, false])('limits explicit removal to the displayed saved ID still 
     [101, { label: 'Certification Operations', rate: 25, is_primary: true, active: true }, 1],
   ]);
 });
+
+it('saves an existing employee wage change with missing personal details and an inline warning', async () => {
+  await loadEmployee(employee({ employment_type: 'hourly', pay_rate: 25, ssn: '', hire_date: '', address_line1: '', city: '', state: '', zip: '' }));
+  expect(screen.getByText('You can save this employee with missing personal details.')).toBeTruthy();
+  for (const label of [/^Social Security Number/, /^Hire Date/, /^Address Line 1/, /^City/, /^State/, /^ZIP Code/]) {
+    expect((screen.getByLabelText(label) as HTMLInputElement).required).toBe(false);
+  }
+  fireEvent.change(screen.getAllByLabelText(/^Hourly Rate/)[0], { target: { value: '28' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Update Employee' }));
+  await screen.findByText('Saved employee profile');
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ pay_rate: 28, hire_date: '', address_line1: '' });
+});
+
+
+it.each([
+  [/^Hire Date/, 'Hire date is required'],
+  [/^Address Line 1/, 'Address line 1 is required'],
+] as const)('rejects clearing a completed field %s', async (label, message) => {
+  await loadEmployee(employee());
+  const field = screen.getByLabelText(label) as HTMLInputElement;
+  expect(field.required).toBe(true);
+  fireEvent.change(field, { target: { value: '' } });
+  fireEvent.submit(field.closest('form')!);
+  expect(await screen.findByText(message)).toBeTruthy();
+  expect(mocks.updateEmployee).not.toHaveBeenCalled();
+});

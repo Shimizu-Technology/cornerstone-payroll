@@ -42,6 +42,36 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  describe "plain-paper pagination" do
+    [ 3, 8 ].each do |count|
+      it "fits #{count} additional deductions and non-taxable pay on one readable page" do
+        company.update!(address_line2: "Suite 100")
+        payroll_item.update!(bonus: 0, reported_tips: 0, custom_earnings: [], non_taxable_pay: 20,
+          custom_deductions: count.times.map { |index| { "label" => "Deduction #{index + 1}", "amount" => 5 } })
+
+        reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+
+        expect(reader.page_count).to eq(1)
+        expect(reader.pages.first.text).to include("NON-TAXABLE ADDITIONS", "$20.00", "Deduction #{count}",
+          "SUMMARY", "YEAR-TO-DATE SUMMARY", "Net Pay")
+      end
+    end
+
+    [ 10, 12, 15, 20, 25, 30 ].each do |count|
+      it "keeps both summary blocks intact with #{count} additional deductions" do
+        payroll_item.update!(non_taxable_pay: 20,
+          custom_deductions: count.times.map { |index| { "label" => "Deduction #{index + 1}", "amount" => 1 } })
+        pages = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text)
+        expect(pages.length).to eq(2)
+        ytd_page = pages.find { |text| text.include?("YEAR-TO-DATE SUMMARY") }
+        expect(ytd_page).to include("Gross Earnings", "Deductions", "Net Pay")
+        current_page = pages.find { |text| text.match?(/SUMMARY\s+Current/) }
+        expect(current_page).to include("Gross Pay", "NET PAY", "YEAR-TO-DATE SUMMARY", "Gross Earnings", "Net Pay")
+        expect(current_page).to eq(ytd_page)
+      end
+    end
+  end
+
   it "shows historical reimbursements in non-taxable additions without inflating displayed gross earnings" do
     apply_historical_ytd_balance(
       company: company, employee: employee,
@@ -537,6 +567,24 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Cash Advance")
     expect(text).to include("$40.00")
     expect(text).not_to include("$100.00")
+  end
+
+  %w[calculated committed].each do |status|
+    it "reconciles non-taxable pay, deductions and additional withholding in the #{status} YTD summary" do
+      pay_period.update!(status: status, committed_at: status == "committed" ? Time.current : nil)
+      payroll_item.update!(pay_rate: 10, hours_worked: 10, bonus: 0, reported_tips: 0, custom_earnings: [],
+        gross_pay: 100, non_taxable_pay: 20, withholding_tax: 5,
+        social_security_tax: 6.20, medicare_tax: 1.45, additional_withholding: 3,
+        custom_deductions: [ { "label" => "Cash Advance", "amount" => 9 } ],
+        total_deductions: 24.65, net_pay: 95.35, ytd_gross: 100,
+        ytd_withholding_tax: 5, ytd_social_security_tax: 6.20, ytd_medicare_tax: 1.45, ytd_net: 95.35)
+
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+      ytd = reader.pages.map(&:text).join("\n").split("YEAR-TO-DATE SUMMARY").last.gsub(/\s+/, " ")
+      expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Withholding $3.00",
+        "Federal/Guam Tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
+      expect(reader.page_count).to eq(1)
+    end
   end
 
   it "keeps a standard earnings statement to one page" do

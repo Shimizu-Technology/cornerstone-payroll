@@ -2,9 +2,9 @@
 
 import { NamedLoanInputs } from '@/components/payroll/NamedLoanInputs';
 
-import { Fragment } from 'react';
+import { Fragment, useContext, type MouseEvent } from 'react';
 
-import { Link } from 'react-router';
+import { UNSAFE_DataRouterContext, Link } from 'react-router';
 
 import { Card } from '@/components/ui/card';
 
@@ -38,6 +38,7 @@ export function PayRunHoursWorksheet({
   employmentGroupTone,
   estimateWorksheetGross,
   hoursMap,
+  hasStagedWorksheetChanges,
   hoursSortBy,
   hoursSortDirection,
   hoursTableOpen,
@@ -80,6 +81,15 @@ export function PayRunHoursWorksheet({
   updateWageRateHours,
   worksheetPayrollFields
 }: PayRunSectionProps<'hours'>) {
+  const dataRouter = useContext(UNSAFE_DataRouterContext);
+  const confirmEmployeeNavigation = (event: MouseEvent<HTMLAnchorElement>): void => {
+    if (dataRouter) return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (hasStagedWorksheetChanges && !window.confirm('You have unsaved payroll changes. Stay here and calculate payroll to save them. Leave without saving?')) {
+      event.preventDefault();
+    }
+  };
+
   return (<>
 {(isDraft || isCalculated) && retainedRetirementEntries.length > 0 && <section className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900" aria-label="Retained manual retirement entries">
           <p className="font-semibold">Saved retirement entries still apply to this paycheck</p>
@@ -235,7 +245,7 @@ export function PayRunHoursWorksheet({
                   : `${formatCurrency(payRate)}${hasHours ? '/hr' : '/period'}`;
                 return <section key={emp.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Payroll entry for ${name}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><Link className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-600">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
+                    <div className="min-w-0"><Link onClick={confirmEmployeeNavigation} className="font-semibold text-primary-800" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{name}</Link><p className="mt-1 text-xs capitalize text-neutral-600">{isHourlyContractor ? '1099 hourly' : isFlatContractor ? '1099 flat fee' : emp.employment_type}{emp.department?.name ? ` · ${emp.department.name}` : ''}</p></div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-700">{rateLabel}</span>
                   </div>
                   <p className="text-sm font-semibold tabular-nums text-neutral-950">{isCalculated || correctionHold ? 'Saved gross' : 'Estimated gross'}: {estimateWorksheetGross(emp) == null ? 'Unavailable — review pay setup' : formatCurrency(estimateWorksheetGross(emp)!)}</p>
@@ -338,7 +348,7 @@ export function PayRunHoursWorksheet({
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <Link className="font-medium text-neutral-900 hover:text-primary-700 hover:underline" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{emp.first_name} {emp.last_name}</Link>
+                              <Link onClick={confirmEmployeeNavigation} className="font-medium text-neutral-900 hover:text-primary-700 hover:underline" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{emp.first_name} {emp.last_name}</Link>
                               {additionalEmployeeIds.has(emp.id) && (
                                 <span className="text-xs font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}

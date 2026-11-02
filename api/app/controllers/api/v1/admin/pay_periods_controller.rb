@@ -248,7 +248,7 @@ module Api
               source_period_id = nil
               correction_event = nil
 
-              ActiveRecord::Base.transaction do
+              ActiveRecord::Base.transaction(requires_new: true) do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
                 unless locked_run.draft? && locked_run.correction_run?
                   locked_run.errors.add(:base, "Can only delete draft correction run pay periods")
@@ -261,6 +261,8 @@ module Api
                   locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
                   raise ActiveRecord::RecordInvalid.new(locked_run)
                 end
+
+                locked_run.ensure_deletable!
 
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
@@ -316,13 +318,19 @@ module Api
             return render json: { error: "Cannot delete a committed pay period" }, status: :unprocessable_entity
           end
 
-          ActiveRecord::Base.transaction do
+          # The action rescues below, inside the financial-lock transaction. A
+          # savepoint must roll back child deletes before that rescue renders 422.
+          @pay_period.with_lock(requires_new: true) do
+            @pay_period.ensure_deletable!
             PayrollImportRecord.where(pay_period_id: @pay_period.id).delete_all
             @pay_period.destroy!
           end
           head :no_content
-        rescue ActiveRecord::InvalidForeignKey, ActiveRecord::RecordNotDestroyed => e
-          render json: { error: "Could not delete pay period: #{e.message}" }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotDestroyed => e
+          reason = e.record.errors.full_messages.to_sentence.presence || "This run has linked payroll records that must be kept."
+          render json: { error: "Could not delete payroll run. #{reason}" }, status: :unprocessable_entity
+        rescue ActiveRecord::InvalidForeignKey, ActiveRecord::DeleteRestrictionError
+          render json: { error: "This payroll run is linked to retained payroll or payment evidence and cannot be deleted. Keep the run for its payroll history." }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/run_payroll
@@ -543,9 +551,7 @@ module Api
               calculated_at: Time.current,
               calculated_by_id: current_user_id,
               approved_at: nil,
-              approved_by_id: nil,
-              unapproved_at: nil,
-              unapproved_by_id: nil
+              approved_by_id: nil
             }
             if @pay_period.intake_stale_session&.status == "applied"
               calculation_attributes.merge!(

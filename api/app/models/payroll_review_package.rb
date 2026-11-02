@@ -32,6 +32,7 @@ class PayrollReviewPackage < ApplicationRecord
   validate :revision_identity_immutable, on: :update
   validate :approval_evidence_immutable, on: :update
   validate :status_transition_allowed, on: :update
+  validate :shared_review_history_immutable, on: :update
 
   scope :current, -> { where(superseded_at: nil) }
 
@@ -47,7 +48,30 @@ class PayrollReviewPackage < ApplicationRecord
     status == "superseded"
   end
 
+  # New automatic revisions can be discarded. Shared, client-authored and
+  # unverified legacy evidence must be retained.
+  def retained_client_evidence?
+    client_review_history_unknown? || sent_for_client_approval_at.present? || approved? ||
+      APPROVAL_EVIDENCE_FIELDS.any? { |field| self[field].present? }
+  end
+
+  before_destroy :preserve_client_evidence
+
   private
+
+  def shared_review_history_immutable
+    return unless sent_for_client_approval_at_in_database.present? && will_save_change_to_sent_for_client_approval_at?
+
+    errors.add(:sent_for_client_approval_at, "cannot change after the review was shared")
+  end
+
+  def preserve_client_evidence
+    return unless retained_client_evidence?
+
+    errors.add(:base, "This client review was shared or has a client decision or comment and must be kept.")
+    throw :abort
+  end
+
 
   def company_matches_pay_period
     return if company_id.blank? || pay_period.blank? || company_id == pay_period.company_id

@@ -1,3 +1,4 @@
+import { needsTimeTrackingAccount, TIME_TRACKING_CONNECTION_MESSAGE } from '@/lib/time-tracking-account';
 import { lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import type { ReactNode } from 'react';
 import { PayLateHours } from './PayLateHours';
@@ -814,6 +815,8 @@ function AirePayrollCockpitWorkspace({
     ? calendar.finalized_batch
     : null;
   const visibleError = commandError || refreshError;
+  const needsAccountConnection = needsTimeTrackingAccount(visibleError);
+  const displayedError = needsAccountConnection ? TIME_TRACKING_CONNECTION_MESSAGE : visibleError;
   const correctionCategories = correction?.entry.available_time_categories
     ?? (correction?.entry.category ? [correction.entry.category] : []);
   const checkpoint = presentation === 'checkpoint';
@@ -900,7 +903,9 @@ function AirePayrollCockpitWorkspace({
 
       {supportsCockpit && calendar.external_pay_period_id && cockpitPublished && (
         <>
-        {visibleError && <ActionFeedback tone="error" message={visibleError} />}
+        {visibleError && <ActionFeedback tone="error" message={displayedError || visibleError}>
+          {needsAccountConnection && <><p>{displayedError}</p><Link className="font-semibold underline" to="/app/aire-account-connection">Settings → Time tracking account</Link></>}
+        </ActionFeedback>}
         <details ref={timecardDetailsRef} open={checkpoint ? undefined : !verifiedBatch} className={checkpoint ? 'border-t border-neutral-200' : 'rounded-2xl border border-neutral-200 bg-white'}>
           <summary className="cursor-pointer px-5 py-4 font-semibold text-primary-800">
             Review timecards, held hours and team

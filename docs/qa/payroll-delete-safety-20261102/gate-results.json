@@ -1,0 +1,75 @@
+{
+  "runtime_commit": "e81a715121b4406adf904c821a2b28a506499490",
+  "frontend_retry_permitted": 1,
+  "initial_frontend_wait_timeouts": 2,
+  "verified_commit": "e81a715121b4406adf904c821a2b28a506499490",
+  "api_tree": "9df4c74681762e5b053c5ec2e8ad42935dab9165",
+  "web_tree": "1d192f4c1238840a885b871f6ef176507560f6a6",
+  "rspec": {
+    "files": 532,
+    "examples": 5810,
+    "failures": 0,
+    "pending": 4,
+    "shards": [
+      {
+        "shard": 1,
+        "files": 133,
+        "examples": 1503,
+        "failures": 0,
+        "pending": 0
+      },
+      {
+        "shard": 2,
+        "files": 133,
+        "examples": 1672,
+        "failures": 0,
+        "pending": 0
+      },
+      {
+        "shard": 3,
+        "files": 133,
+        "examples": 1226,
+        "failures": 0,
+        "pending": 4
+      },
+      {
+        "shard": 4,
+        "files": 133,
+        "examples": 1409,
+        "failures": 0,
+        "pending": 0
+      }
+    ],
+    "conditional_pooler_examples_separately_passed": 13
+  },
+  "frontend": {
+    "files": 143,
+    "tests": 1384,
+    "failures": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "production_build": "passed"
+  },
+  "rubocop": "1597 files, no offenses",
+  "brakeman": "0 warnings",
+  "bundler_audit": "0 vulnerabilities",
+  "all_shard_exit_codes": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "cleanup": {
+    "completed_at_utc": "2026-11-01T23:25:09.291688+00:00",
+    "active_owned_resources": 0,
+    "task_databases": "all dropped",
+    "owned_listener_ports_closed": [
+      4347,
+      5347,
+      55447,
+      56447
+    ],
+    "disposable_pg_directory_removed": "/tmp/payroll-del-review-pg-01a198f5",
+    "shared_postgresql_5432_and_redis_6379": "preserved"
+  }
+}

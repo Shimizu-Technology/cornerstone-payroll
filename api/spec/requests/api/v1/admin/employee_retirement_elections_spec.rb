@@ -42,6 +42,15 @@ RSpec.describe "Api::V1::Admin::EmployeeRetirementElections", type: :request do
       .to receive(:current_user).and_return(user)
   end
 
+  it "explains how to resolve an unconfirmed Roth employer destination" do
+    params[:retirement_election].merge!(employer_match_destination: "roth", employer_roth_available: false)
+    post "/api/v1/admin/employees/#{employee.id}/retirement_elections", params: params
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.to_s).to include("Administrator confirmed employer Roth support", "Employer contribution destination", "Traditional")
+    expect(employee.employee_retirement_elections).to be_empty
+  end
+
   it "creates and returns a dated election" do
     post "/api/v1/admin/employees/#{employee.id}/retirement_elections", params: params
 

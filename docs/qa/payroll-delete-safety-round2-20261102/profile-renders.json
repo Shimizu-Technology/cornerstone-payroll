@@ -1,0 +1,167 @@
+{
+  "baseline": "36d685ce6612262f6fb35da9a922869a1e29b88e",
+  "source": "595c200605a44317a571053a8214b3ccdd5373ca",
+  "fixture": {
+    "employee": "Parker Statement",
+    "hours": 10,
+    "rate": 10,
+    "gross": 100,
+    "non_taxable_pay": 20,
+    "taxes": 12.65,
+    "deduction_amount_each": 1,
+    "dates": [
+      "2026-10-01",
+      "2026-10-15",
+      "2026-10-23"
+    ]
+  },
+  "cases": {
+    "default-bottom": {
+      "stock": "bottom_check",
+      "config": {},
+      "deductions": 0,
+      "expected_net_pay": 107.35,
+      "before": {
+        "pdf": "before-default-bottom.pdf",
+        "png": "before-default-bottom.png",
+        "sha256": "250fd445919f59f87c385b9802ccfbc22006aae1dea56488cb41bef7daaae4c6",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-default-bottom.pdf",
+        "png": "after-default-bottom.png",
+        "sha256": "1862206ddae52f57e5d982bfc1d091bb56b8f7bc60e92bec78c6aabc4dfd8771",
+        "pages": 1
+      }
+    },
+    "default-top": {
+      "stock": "top_check",
+      "config": {},
+      "deductions": 0,
+      "expected_net_pay": 107.35,
+      "before": {
+        "pdf": "before-default-top.pdf",
+        "png": "before-default-top.png",
+        "sha256": "3dc66a7de8ba7bcd09c17a4813e86a466588a66b54b9732a53e144f650938ccf",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-default-top.pdf",
+        "png": "after-default-top.png",
+        "sha256": "2fe8c9365d50c43cc7b44f68c7a1aa4d6f2740b9fe1c09ff15ac14bcaf925abb",
+        "pages": 1
+      }
+    },
+    "95-108pt": {
+      "stock": "bottom_check",
+      "config": {},
+      "deductions": 9,
+      "expected_net_pay": 98.35,
+      "before": {
+        "pdf": "before-95-108pt.pdf",
+        "png": "before-95-108pt.png",
+        "sha256": "d93363376d3d1fb28e09781531441699be8aad4df60bb21b64db4bf3344f303d",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-95-108pt.pdf",
+        "png": "after-95-108pt.png",
+        "sha256": "590e4572122f168d46d62a98448c27bcf76c98e40b5a83608c82e62890a82eb1",
+        "pages": 1
+      }
+    },
+    "many-deductions": {
+      "stock": "bottom_check",
+      "config": {
+        "stub": {
+          "table_padding_y": 2
+        }
+      },
+      "deductions": 10,
+      "expected_net_pay": 97.35,
+      "before": {
+        "pdf": "before-many-deductions.pdf",
+        "png": "before-many-deductions.png",
+        "sha256": "dc50940c7ae7030b1e44377a2c121f1115f4734887bd201de2012331b992ec8e",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-many-deductions.pdf",
+        "png": "after-many-deductions.png",
+        "sha256": "58dbf4d69b5e1f9e2f8da61c174c122495e1485d21f15c748d2d9a75dc364a69",
+        "pages": 1
+      }
+    },
+    "narrow-saved-profile": {
+      "stock": "bottom_check",
+      "config": {
+        "stub": {
+          "left_ratio": 0.75,
+          "summary_padding_y": 2.5,
+          "summary_padding_x": 4
+        }
+      },
+      "deductions": 5,
+      "expected_net_pay": 102.35,
+      "before": {
+        "pdf": "before-narrow-saved-profile.pdf",
+        "png": "before-narrow-saved-profile.png",
+        "sha256": "28874ad692528c824d432044c3a52a6358cfc6a0e75de563f5036354bf6dbabd",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-narrow-saved-profile.pdf",
+        "png": "after-narrow-saved-profile.png",
+        "sha256": "5de92dca3e839d02528163d0912f6f46b005a057db6a3627fdaa477c594ca961",
+        "pages": 1
+      }
+    },
+    "saved-offset-profile": {
+      "stock": "top_check",
+      "config": {
+        "check_face": {
+          "date": {
+            "x": 486,
+            "y": 238
+          }
+        },
+        "stub": {
+          "row1_y": 254,
+          "summary_y_offset": -4,
+          "summary_x_offset": -18
+        }
+      },
+      "deductions": 5,
+      "expected_net_pay": 102.35,
+      "before": {
+        "pdf": "before-saved-offset-profile.pdf",
+        "png": "before-saved-offset-profile.png",
+        "sha256": "d42bb11a7f0630180acedc457f9fb172faed839b098be61abd3a9a29de61193a",
+        "pages": 1
+      },
+      "after": {
+        "pdf": "after-saved-offset-profile.pdf",
+        "png": "after-saved-offset-profile.png",
+        "sha256": "95d12835b3e2fed1793f3bd1055b206ec4be98ede0074a5355697c5fea045264",
+        "pages": 1
+      }
+    }
+  },
+  "production_profiles": "Not accessed; synthetic saved-profile fixtures and stock defaults only.",
+  "empty_deductions_regression": {
+    "source": "29cc2b36bcca4afbfeb70b548d1d0f947d522e28",
+    "config": {
+      "stub": {
+        "row1_y": 160.4,
+        "row2_y": 112,
+        "row3_y": 68
+      }
+    },
+    "deductions_space_points": 9.388,
+    "pdf": "after-empty-deductions.pdf",
+    "png": "after-empty-deductions.png",
+    "pages": 1,
+    "sha256": "38d6f412fe09ee7b3f2bfed0b9bcccbb239e76b1f3327119c69aa47ef8db4bcf",
+    "result": "One page, both NET PAY baselines inside stub; no arbitrary empty-section refusal."
+  }
+}

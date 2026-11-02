@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
-import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod } from '@/types';
 import { PayPeriodDetail as PayPeriodDetailPage } from './PayPeriodDetail';
@@ -987,7 +987,10 @@ async function renderLoanWorksheet(status: 'draft' | 'calculated' | 'approved' =
   apiMocks.runPayroll.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
   apiMocks.comparison.mockResolvedValue(comparisonResponse);
   apiMocks.refreshSetup.mockResolvedValue({ pay_period: { ...period, status: 'calculated' }, results: { success: [{ employee_id: 30 }], skipped: [], errors: [] } });
-  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
+  render(<RouterProvider router={createMemoryRouter([
+    { path: '/companies/:companyId/pay-runs/:id/:tab', element: <><nav><Link to="/employees">Sidebar Employees</Link></nav><PayPeriodDetail initialPayPeriod={period} /></> },
+    { path: '*', element: <p>Left payroll worksheet</p> },
+  ], { initialEntries: ['/companies/7/pay-runs/12/work'] })} />);
   if (status === 'approved') { await screen.findByRole('button', { name: 'Refresh current setup' }); return null; }
   return await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
 }
@@ -2015,4 +2018,33 @@ it('opens the completed Hours step from a blocking loan approval reason', async 
   fireEvent.click(within(results).getByRole('link', { name: 'Review loan inputs', hidden: true }));
   expect(hours.open).toBe(true);
   expect(document.activeElement?.id).toBe('payroll-loan-inputs');
+});
+
+it.each([0, 1])('warns before leaving unsaved draft hours through employee link %s and retains hours on Cancel', async (index) => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    const card = await renderLoanWorksheet('draft');
+    const input = within(card!).getByLabelText(/Regular hours/);
+    fireEvent.change(input, { target: { value: '17' } });
+    fireEvent.click(screen.getAllByRole('link', { name: 'Ana Cruz' })[index]);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('unsaved payroll changes'));
+    expect((input as HTMLInputElement).value).toBe('17');
+    expect(screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' })).toBeTruthy();
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+  } finally { confirm.mockRestore(); }
+});
+
+it.each(['Sidebar Employees', 'Back'])('guards dirty hours through %s, preserving Cancel and honoring Leave', async (link) => {
+  const card = await renderLoanWorksheet('draft');
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  try {
+    const input = within(card!).getByLabelText(/Regular hours/);
+    fireEvent.change(input, { target: { value: '17' } });
+    fireEvent.click(screen.getAllByRole('link', { name: link })[0]);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect((input as HTMLInputElement).value).toBe('17');
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getAllByRole('link', { name: link })[0]);
+    await screen.findByText('Left payroll worksheet');
+  } finally { confirm.mockRestore(); }
 });

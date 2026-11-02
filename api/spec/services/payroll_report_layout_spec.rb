@@ -36,13 +36,13 @@ RSpec.describe "Payroll report layout regressions" do
       employees: employees, summary: summary).generate
     document = reader(bytes)
     all_text = document.pages.map(&:text).join(" ").gsub(/\s+/, " ")
-    expect(all_text).to include("Regular Hours", "Overtime Hours", "Combined Hours", "Base FIT", "Additional FIT Withholding", "$13460.85")
+    expect(all_text).to include("Regular Hours", "Overtime Hours", "Combined Hours", "Base FIT", "Additional FIT Withholding", "$13,460.85")
     # Every worker appears in every detail section; no values are dropped to fit.
     employees.each do |worker|
       expect(all_text.scan(worker[:employee_name]).size).to eq(5)
       expect(all_text).to include(worker[:check_number])
     end
-    %w[3996.67 12.34 23.45 34.56 197.09 10.00 247.79 57.96 123.45 45.67 56.78 512.84 3483.83 67.89 4302.42 78.91 89.12 279657.30].each do |amount|
+    %w[3,996.67 12.34 23.45 34.56 197.09 10.00 247.79 57.96 123.45 45.67 56.78 512.84 3,483.83 67.89 4,302.42 78.91 89.12 279,657.30].each do |amount|
       expect(all_text).to include("$#{amount}")
     end
     summary_pages = document.pages.select { |page| page.text.include?("Summary Totals") }

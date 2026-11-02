@@ -1,3 +1,4 @@
+import { UnsavedPayrollChangesGuard } from '@/components/routing/UnsavedPayrollChangesGuard';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useEffect, useMemo, useRef } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -105,6 +106,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     ...(payPeriod.parallel_run ? [{ text: 'Parallel comparison · cannot commit', href: route('activity') }] : []),
   ];
   return <div>
+    <UnsavedPayrollChangesGuard dirty={(sections.processing.isDraft || sections.processing.isCalculated) && sections.hours.hasStagedWorksheetChanges} />
     <SourceCoverageDialog {...sections.coverage} />
     <PayRunReviewDialogs {...sections.reviewDialogs} />
     <RefreshSetupDialog {...sections.refreshDialog} />
@@ -115,6 +117,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     <h2 className="sr-only">{activeTab === 'checks' ? 'Checks and payments' : activeTab === 'reports' ? 'Reports' : activeTab === 'activity' ? 'Activity' : 'Payroll'}</h2>
     <div className="min-h-[24rem] space-y-4 p-4 sm:p-6 lg:px-8">
       <section hidden={activeTab !== 'work'} aria-label="Payroll workspace" className="space-y-6">
+        {sections.processing.isCalculated && sections.processing.payrollItems.length === 0 && <div role="status" className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900"><p className="font-semibold">This run has no saved pay</p><p>Open Hours and use Enter pay to re-enter each employee’s hours and adjustments from your source records, then calculate payroll. Recalculating alone cannot restore missing hours.</p></div>}
         <PayRunSteps sections={sections} />
         {payPeriod.status === 'committed' && <p className="text-sm text-neutral-700">Check preparation, tax checks, payment holds and manual reconciliation: <Link className="font-semibold text-primary-700 underline" to={route('checks')}>Checks &amp; payments</Link></p>}
         {payPeriod.status !== 'draft' && <p className="text-sm text-neutral-700">Payroll reports, final record, sign-off and liabilities: <Link className="font-semibold text-primary-700 underline" to={route('reports')}>Reports</Link></p>}
