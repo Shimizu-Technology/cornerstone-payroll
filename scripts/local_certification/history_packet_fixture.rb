@@ -47,9 +47,14 @@ else
   actor = User.find_by!(email: payroll.fetch("admin_email"))
   period = PayPeriod.find(payroll.fetch("previous_pay_period_id"))
   mapping = TimeTrackingSource.find(payroll.fetch("source_id")).time_tracking_employee_mappings.find_by!(source_user_uuid: aire.fetch("employee_uuid"))
-  PayrollItem.create!(company: period.company, pay_period: period, employee: mapping.employee,
-    hours_worked: 2, overtime_hours: 0, pay_rate: 25, gross_pay: 50, net_pay: 50)
-  period.update!(status: "committed")
+  item = PayrollItem.create!(company: period.company, pay_period: period, employee: mapping.employee,
+    hours_worked: 2, overtime_hours: 0, pay_rate: 25, gross_pay: 50, net_pay: 50, employment_type: mapping.employee.employment_type)
+  item.calculate!(annual_fica_context: EmployeeYearFicaContext.new(employee: mapping.employee,
+    year: period.pay_date.year, excluding_pay_period_id: period.id))
+  period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: actor.id)
+  lifecycle = PayPeriodLifecycleService.new(pay_period: period, actor: actor)
+  lifecycle.approve!
+  lifecycle.commit!
   TimeTrackingSource.find(payroll.fetch("source_id")).update!(historical_reconciliation_required: true)
   payroll["history_actor_id"] = actor.id
   File.write(ENV.fetch("CERTIFICATION_FIXTURE_PATH"), JSON.pretty_generate(payroll))
