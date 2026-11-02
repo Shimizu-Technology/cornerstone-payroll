@@ -157,6 +157,38 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).not_to include("[field #", "[entry #")
     end
 
+    [ :payroll_field_entries, :payroll_adjustments ].each do |collection|
+      it "avoids literal numbered labels in #{collection} headers and totals" do
+        report_data[:employees].first[collection] = [ "Loan", "Loan", "Loan (1)", "Loan (2)" ].each_with_index.map do |label, index|
+          { id: index + 11, payroll_field_definition_id: index + 21, payroll_item_id: 10, position: index,
+            label: label, kind: "deduction", tax_treatment: "post_tax_deduction", treatment: "post_tax_deduction",
+            source: "manual", amount: BigDecimal((index + 11).to_s), employee_paid: true, employer_paid: false }
+        end
+        columns_method, totals_method = collection == :payroll_field_entries ?
+          [ :payroll_field_columns, :payroll_field_total_rows ] : [ :payroll_adjustment_columns, :payroll_adjustment_total_rows ]
+
+        labels = generator.send(columns_method).map { |column| column[:label] }
+        expect(labels).to contain_exactly("Loan (3)", "Loan (4)", "Loan (1)", "Loan (2)")
+        expect(generator.send(totals_method).map { |row| row[1] }).to contain_exactly(*labels)
+        text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+        { "Loan (3)" => "$11.00", "Loan (4)" => "$12.00", "Loan (1)" => "$13.00", "Loan (2)" => "$14.00" }.each do |label, amount|
+          expect(text).to match(/#{Regexp.escape(label)}[^\n]*#{Regexp.escape(amount)}/)
+        end
+      end
+    end
+
+    it "reserves literal labels across fields and adjustments" do
+      report_data[:employees].first[:payroll_field_entries] = [ 21, 22 ].map do |id|
+        { payroll_field_definition_id: id, label: "Loan", kind: "deduction", tax_treatment: "post_tax_deduction", amount: 10 }
+      end
+      report_data[:employees].first[:payroll_adjustments] = [
+        { payroll_item_id: 10, position: 0, label: "Loan (1)", treatment: "post_tax_deduction", source: "manual", amount: 5 }
+      ]
+
+      labels = (generator.send(:payroll_field_columns) + generator.send(:payroll_adjustment_columns)).map { |column| column[:label] }
+      expect(labels).to contain_exactly("Loan (2)", "Loan (3)", "Loan (1)")
+    end
+
     it "renders named payroll fields beside each worker before the reconciliation summary" do
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 

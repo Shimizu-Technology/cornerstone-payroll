@@ -48,11 +48,8 @@ class PayStubGenerator
     # Employer-paid obligations that do not reduce net pay
     render_employer_contributions(pdf)
 
-    # Net Pay
-    render_net_pay(pdf)
-
-    # YTD Summary
-    render_ytd_summary(pdf)
+    # Keep current and YTD summaries together when the statement paginates.
+    render_summaries(pdf)
 
     render_with_footer(
       pdf,
@@ -433,7 +430,7 @@ class PayStubGenerator
     pdf.move_down 6
   end
 
-  def render_net_pay(pdf)
+  def render_summaries(pdf)
     additions = statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }
     deductions = statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.current.to_d }
     taxes = payroll_item.withholding_tax.to_d + payroll_item.additional_withholding.to_d +
@@ -454,13 +451,19 @@ class PayStubGenerator
         row(-1).font_style = :bold
         row(-1).background_color = "E8F5E9"
       end
-      pdf.start_new_page if pdf.cursor < table.height
+      ytd_table = ytd_summary_table(pdf)
+      heading_height = pdf.height_of("YEAR-TO-DATE SUMMARY", size: 10, style: :bold)
+      summary_height = table.height + 6 + heading_height + 3 + ytd_table.height
+      pdf.start_new_page if pdf.cursor < summary_height
       table.draw
+      pdf.move_down 6
+      pdf.text "YEAR-TO-DATE SUMMARY", size: 10, style: :bold
+      pdf.move_down 3
+      ytd_table.draw
     end
-    pdf.move_down 6
   end
 
-  def render_ytd_summary(pdf)
+  def ytd_summary_table(pdf)
     ytd_data = [
       [ "Gross Earnings", format_currency(pay_ytd_total) ],
       [ "Non-Taxable Pay", format_currency(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
@@ -475,19 +478,12 @@ class PayStubGenerator
       ytd_data.insert(3, [ "Additional Withholding", format_currency(employee_ytd_additional_withholding) ])
     end
 
-    pdf.font_size(8) do
-      table = pdf.make_table(ytd_data, width: 250) do
-        cells.padding = [ 2, 6 ]
-        cells.borders = []
-        column(0).font_style = :bold
-        column(1).align = :right
-        row(-1).background_color = "F5F5F5"
-      end
-      heading_height = pdf.height_of("YEAR-TO-DATE SUMMARY", size: 10, style: :bold)
-      pdf.start_new_page if pdf.cursor < table.height + heading_height + 3
-      pdf.text "YEAR-TO-DATE SUMMARY", size: 10, style: :bold
-      pdf.move_down 3
-      table.draw
+    pdf.make_table(ytd_data, width: 250) do
+      cells.padding = [ 2, 6 ]
+      cells.borders = []
+      column(0).font_style = :bold
+      column(1).align = :right
+      row(-1).background_color = "F5F5F5"
     end
   end
 

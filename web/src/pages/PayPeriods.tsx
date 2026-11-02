@@ -1,6 +1,6 @@
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
@@ -157,6 +157,7 @@ export function PayPeriods() {
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const { dismiss: dismissFeedback } = useFeedback();
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [deletingPeriod, setDeletingPeriod] = useState<PayPeriod | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
@@ -555,6 +556,8 @@ export function PayPeriods() {
     try {
       setActionInFlight(`delete-details-${id}`);
       setError(null);
+      if (deleteSuccess) dismissFeedback({ tone: 'success', message: deleteSuccess });
+      setDeleteSuccess(null);
       const { pay_period } = await payPeriodsApi.get(id, activeCompanyId ?? undefined);
       if (!isCurrentMutation()) return;
       setDeleteAcknowledged(false);

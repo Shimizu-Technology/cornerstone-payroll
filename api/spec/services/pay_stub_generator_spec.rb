@@ -57,16 +57,17 @@ RSpec.describe PayStubGenerator do
       end
     end
 
-    [ 15, 20, 25, 30 ].each do |count|
+    [ 10, 12, 15, 20, 25, 30 ].each do |count|
       it "keeps both summary blocks intact with #{count} additional deductions" do
         payroll_item.update!(non_taxable_pay: 20,
           custom_deductions: count.times.map { |index| { "label" => "Deduction #{index + 1}", "amount" => 1 } })
         pages = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text)
-        expect(pages.length).to be > 1
+        expect(pages.length).to eq(2)
         ytd_page = pages.find { |text| text.include?("YEAR-TO-DATE SUMMARY") }
         expect(ytd_page).to include("Gross Earnings", "Deductions", "Net Pay")
         current_page = pages.find { |text| text.match?(/SUMMARY\s+Current/) }
-        expect(current_page).to include("Gross Pay", "NET PAY")
+        expect(current_page).to include("Gross Pay", "NET PAY", "YEAR-TO-DATE SUMMARY", "Gross Earnings", "Net Pay")
+        expect(current_page).to eq(ytd_page)
       end
     end
   end

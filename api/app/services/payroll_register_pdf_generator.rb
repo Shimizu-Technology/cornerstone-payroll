@@ -280,7 +280,7 @@ class PayrollRegisterPdfGenerator
       .sort_by { |key, _| key.map(&:to_s) }
       .map do |key, grouped|
         first = grouped.first
-        label = payroll_adjustment_label(first, key)
+        label = payroll_adjustment_label(key)
         [ first[:treatment].to_s.humanize, label, adjustment_source_label(first[:source]), fmt(grouped.sum { |entry| entry[:amount].to_d }) ]
       end
   end
@@ -300,7 +300,7 @@ class PayrollRegisterPdfGenerator
         entry = entries.first
         {
           key: key,
-          label: payroll_adjustment_label(entry, key),
+          label: payroll_adjustment_label(key),
           treatment: entry[:treatment].to_s.humanize,
           source: adjustment_source_label(entry[:source])
         }
@@ -377,7 +377,7 @@ class PayrollRegisterPdfGenerator
       .sort_by { |key, _| key.map(&:to_s) }
       .map do |key, grouped|
         entry = grouped.first
-        label = payroll_field_label(entry, key)
+        label = payroll_field_label(key)
         [ entry[:tax_treatment].to_s.humanize, label, entry[:employee_paid] ? "Yes" : "No", entry[:employer_paid] ? "Yes" : "No", fmt(grouped.sum { |item| item[:amount].to_f }) ]
       end
   end
@@ -397,7 +397,7 @@ class PayrollRegisterPdfGenerator
         entry = entries.first
         {
           key: key,
-          label: payroll_field_label(entry, key),
+          label: payroll_field_label(key),
           treatment: entry[:tax_treatment].to_s.humanize,
           group: payroll_field_group(entry)
         }
@@ -417,22 +417,43 @@ class PayrollRegisterPdfGenerator
     end
   end
 
-  def payroll_field_label(entry, key)
-    keys = active_payroll_field_entries_by_worker.select { |row| row[:label] == entry[:label] }
-      .map { |row| payroll_field_column_key(row) }.uniq
-    distinct_label(entry[:label], key, keys)
+  def payroll_field_label(key)
+    component_labels.fetch([ :field, key ])
   end
 
-  def payroll_adjustment_label(entry, key)
-    keys = active_payroll_adjustments_by_worker.select { |row| row[:label] == entry[:label] }
-      .map { |row| payroll_adjustment_column_key(row) }.uniq
-    distinct_label(entry[:label], key, keys)
+  def payroll_adjustment_label(key)
+    component_labels.fetch([ :adjustment, key ])
   end
 
-  # Keep saved identities separate while using human-readable occurrence numbers
-  # only when two distinct components have the same name.
-  def distinct_label(label, key, keys)
-    keys.length > 1 ? "#{label} (#{keys.index(key).to_i + 1})" : label.to_s
+  # Reserve every literal label before assigning suffixes, including names in
+  # the other component section. Headers and totals share this identity map.
+  def component_labels
+    @component_labels ||= begin
+      components = active_payroll_field_entries_by_worker.map do |entry|
+        [ [ :field, payroll_field_column_key(entry) ], entry[:label].to_s ]
+      end + active_payroll_adjustments_by_worker.map do |entry|
+        [ [ :adjustment, payroll_adjustment_column_key(entry) ], entry[:label].to_s ]
+      end
+      components = components.uniq { |identity, _| identity }
+      reserved = components.map(&:last).to_set
+      labels = {}
+      components.group_by(&:last).each do |label, group|
+        suffix = 0
+        group.each do |identity, _|
+          candidate = label
+          if group.length > 1
+            loop do
+              suffix += 1
+              candidate = "#{label} (#{suffix})"
+              break unless reserved.include?(candidate)
+            end
+          end
+          reserved.add(candidate)
+          labels[identity] = candidate
+        end
+      end
+      labels
+    end
   end
 
   def payroll_field_group(entry)
