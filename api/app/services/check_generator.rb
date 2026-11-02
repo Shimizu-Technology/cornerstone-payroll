@@ -410,29 +410,27 @@ class CheckGenerator
     last_idx = data.length - 1
     has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
-    rendered_height = 0.0
-    pdf.bounding_box([ x, y ], width: w) do
-      pdf.font_size(6.5) do
-        table = pdf.make_table(data, column_widths: col_widths, cell_style: {
-          padding: [ padding_y, padding_x ], borders: [], size: 6.5, overflow: :shrink_to_fit
-        }) do
-          row(0).borders = [ :bottom ]
-          row(0).border_color = "999999"
-          row(0).background_color = "EEEEEE"
-          columns(1..-1).align = :right
-          if has_total
-            row(last_idx).borders = [ :top ]
-            row(last_idx).border_color = "999999"
-          end
-        end
-        scale = max_height ? [ 1.0, max_height / table.height ].min : 1.0
-        raise Prawn::Errors::CannotFit if min_scale && scale < min_scale
-
-        pdf.scale(scale, origin: [ 0, pdf.cursor ]) { table.draw }
-        rendered_height = table.height * scale
+    # Validate before entering a Prawn bounding box. An exception escaping its
+    # block leaves Prawn's current bounds changed, corrupting the fallback.
+    table = pdf.make_table(data, column_widths: col_widths, cell_style: {
+      padding: [ padding_y, padding_x ], borders: [], size: 6.5, overflow: :shrink_to_fit
+    }) do
+      row(0).borders = [ :bottom ]
+      row(0).border_color = "999999"
+      row(0).background_color = "EEEEEE"
+      columns(1..-1).align = :right
+      if has_total
+        row(last_idx).borders = [ :top ]
+        row(last_idx).border_color = "999999"
       end
     end
-    rendered_height
+    scale = max_height ? [ 1.0, max_height / table.height ].min : 1.0
+    raise Prawn::Errors::CannotFit if min_scale && scale < min_scale
+
+    pdf.bounding_box([ x, y ], width: w) do
+      pdf.scale(scale, origin: [ 0, pdf.cursor ]) { table.draw }
+    end
+    table.height * scale
   rescue Prawn::Errors::CannotFit
     if title == "DEDUCTIONS"
       return draw_readable_deductions(pdf, x: x, y: y, w: w, data: data, max_height: max_height)
@@ -447,21 +445,16 @@ class CheckGenerator
   # into a printer's stock sequence. Keep every row at a readable size. If even
   # this compact list cannot fit, refuse generation with actionable guidance.
   def draw_readable_deductions(pdf, x:, y:, w:, data:, max_height:)
-    rendered_height = 0.0
-    pdf.bounding_box([ x, y ], width: w) do
-      table = pdf.make_table(data, column_widths: [ w * 0.46, w * 0.27, w * 0.27 ],
-        cell_style: { padding: [ 0, 1 ], borders: [], size: 6.5 }) do
-        row(0).font_style = :bold
-        row(0).borders = [ :bottom ]
-        columns(1..2).align = :right
-      end
-      if max_height && table.height > max_height
-        raise Prawn::Errors::CannotFit
-      end
-      table.draw
-      rendered_height = table.height
+    table = pdf.make_table(data, column_widths: [ w * 0.46, w * 0.27, w * 0.27 ],
+      cell_style: { padding: [ 0, 1 ], borders: [], size: 6.5 }) do
+      row(0).font_style = :bold
+      row(0).borders = [ :bottom ]
+      columns(1..2).align = :right
     end
-    rendered_height
+    raise Prawn::Errors::CannotFit if max_height && table.height > max_height
+
+    pdf.bounding_box([ x, y ], width: w) { table.draw }
+    table.height
   rescue Prawn::Errors::CannotFit
     raise ArgumentError, "The deductions cannot fit readably on this check stock. Adjust the stub layout or use a separate earnings statement before printing. No deductions were omitted."
   end

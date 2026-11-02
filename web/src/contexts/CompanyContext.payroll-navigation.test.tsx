@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { createMemoryRouter, RouterProvider, useNavigate, useLocation } from 'react-router';
+import { createMemoryRouter, RouterProvider, useNavigate, useLocation, Routes, Route } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { CompanyProvider, useCompany } from './CompanyContext';
 import { UnsavedPayrollChangesGuard } from '@/components/routing/UnsavedPayrollChangesGuard';
 import { CompanySwitcher } from '@/components/layout/CompanySwitcher';
 import { OrganizationSwitcher } from '@/components/layout/OrganizationSwitcher';
+import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 
 const mocks = vi.hoisted(() => ({ switchCompany: vi.fn() }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAuthenticated: true, isLoading: false, user: { id: 1, organization_id: 1, role: 'super_admin' } }) }));
@@ -73,6 +74,51 @@ it.each(['client', 'organization'])('keeps the real %s control, route and mounte
   confirm.mockReturnValue(true);
   select();
   await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(scope === 'client' ? '2' : '3'));
+  expect(mocks.switchCompany).toHaveBeenCalledExactlyOnceWith(scope === 'client' ? 2 : 3, scope === 'client' ? 1 : 2);
+  expect(confirm).toHaveBeenCalledTimes(2);
+});
+
+function ScopedApplication() {
+  const { activeCompanyId, activeOrganizationId, loading } = useCompany();
+  if (loading) return <p>Loading</p>;
+  // AppFeedback remounts the route subtree on company/organization changes.
+  return <div key={`${activeOrganizationId}:${activeCompanyId}`}>
+    <span data-testid="scope">{activeCompanyId}</span>
+    <CompanySwitcher /><OrganizationSwitcher />
+    <Routes>
+      <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+        <Route path="pay-runs/:id/work" element={<Worksheet />} />
+        <Route path="pay-runs" element={<p>Pay runs</p>} />
+      </Route>
+      <Route path="app" element={<p>Dashboard</p>} />
+    </Routes>
+  </div>;
+}
+
+it.each(['client', 'organization'])('preserves edits on Stay and retains the accepted %s scope through the route remount', async (scope) => {
+  const router = createMemoryRouter([{ path: '*', element: <CompanyProvider><ScopedApplication /></CompanyProvider> }], { initialEntries: ['/companies/1/pay-runs/4/work'] });
+  render(<RouterProvider router={router} />);
+  const input = await screen.findByLabelText('Hours');
+  fireEvent.change(input, { target: { value: '17' } });
+  mocks.switchCompany.mockClear();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const select = () => {
+    if (scope === 'organization') fireEvent.change(screen.getByLabelText('Organization'), { target: { value: '2' } });
+    else {
+      fireEvent.click(screen.getByRole('button', { name: /First/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Second' }));
+    }
+  };
+  select();
+  expect(screen.getByLabelText('Hours')).toBe(input);
+  expect((input as HTMLInputElement).value).toBe('17');
+  expect(router.state.location.pathname).toBe('/companies/1/pay-runs/4/work');
+  expect(mocks.switchCompany).not.toHaveBeenCalled();
+
+  confirm.mockReturnValue(true);
+  select();
+  await screen.findByText(scope === 'client' ? 'Pay runs' : 'Dashboard');
+  expect(screen.getByTestId('scope').textContent).toBe(scope === 'client' ? '2' : '3');
   expect(mocks.switchCompany).toHaveBeenCalledExactlyOnceWith(scope === 'client' ? 2 : 3, scope === 'client' ? 1 : 2);
   expect(confirm).toHaveBeenCalledTimes(2);
 });
