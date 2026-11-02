@@ -564,7 +564,9 @@ class Form941GuAggregator
 
   def source_summary(items)
     metadata = include_historical ? historical_source.metadata(year: year, range: quarter_start_date..quarter_end_date) : {}
-    systems = include_historical ? historical_source.source_systems(range: quarter_start_date..quarter_end_date) : []
+    # Earlier-quarter history still feeds the prior SS/Medicare wages, so the
+    # source systems span the same Jan 1..quarter-end range.
+    systems = include_historical ? historical_source.source_systems(range: Date.new(year, 1, 1)..quarter_end_date) : []
     {
       mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
       **(systems.include?("prior_provider") ? { historical_source_systems: systems } : {}),

@@ -182,3 +182,20 @@ Verified the six findings against `c8e75518`. Restored-source approval/commit an
 Fixed the remaining prefill label: 401(k) pre-tax retirement now has its own breakdown entry, with other pre-tax amounts separate and the aggregate unchanged. The focused synthetic test verifies 100 retirement + 25 other = 125 total. Also addressed the latest review's verified issues: successful register downloads now record attributable audit events; a reversed-history hold is scoped to the run's tax year and clears only for an active onboarding or a locked compatible applied replacement bridge; the guide states the check-settings grant requirement; a failed-save alert no longer offers a Reload action that discards unsaved edits. The focused UI test verifies retained input and retry while existing conflict-reload coverage remains intact. Browser assertions were extended for CI; no new local browser run is claimed.
 
 Only focused specs and changed-file lint were run locally, as requested because other projects own the machine load. Full suites belong to GitHub CI. Exact focused counts, final head, reviewer requests and cleanup are recorded in the PR body and private follow-up receipt. Existing full-gate/rehearsal counts above describe their original commits, not this follow-up head.
+
+## CodeRabbit thread closure, 2026-11-03
+
+This round replaces part of the residual list above. These items are now fixed, each with a focused test:
+
+- **Replayed request after an undo.** Recording with a request key whose history was later undone is now refused with "preview it again" instead of returning 201. The web drops the stored key after any 4xx, keeps it after a network or 5xx failure so a retry stays idempotent, and clears stored keys after an undo. Before this, re-recording unchanged history in the same tab after an undo reused the old key and showed "History recorded" for an undone record.
+- **Taxable wage bases on an added paycheck.** These now start blank instead of `0.00`, so each FIT, Social Security, Social Security tips, Medicare and Additional Medicare base must be entered (0 if none). Prefilled saved runs are unchanged.
+- **Mixed-source quarterly taxability.** Packet components are calculated per source, and each row carries its own source. Single-source quarters keep their exact labels and amounts. Mixed quarters name the source in the label.
+- **Form 941 source mode.** It now considers Jan 1 through quarter end, the same range that feeds the prior Social Security and Medicare wages. QuickBooks-only output is unchanged.
+- **Source labels.** Prior-provider history now has its own label in the pay-date summary's included runs, the Payroll Sources sheet (rows are added only when provider history is present), deduction component columns ("Prior-provider source"), and first-live boundary errors. QuickBooks-only text and rows are unchanged.
+- **Imported pay run staff note and reversal error.** Neither one points to an amendment workflow that rejects prior-provider rows anymore.
+- **Data Migration list.** The list now excludes prior-provider batches on the server before counting and paging.
+- **Check Settings.** A new `suggested_next` on an open page now applies. An edited number is still kept through calibration and profile refreshes.
+
+Still documented, not fixed: the legacy `quickbooks` count keys in the Form 941, W-2GU and packet JSON `source_summary` (API metadata only, not shown in the UI or exports), evidence IO under the company lock, approval-failure guidance that is not tied to the specific error, and the user-chosen "Check # from previous provider" label.
+
+Only focused specs, typecheck and changed-file lint were run locally, against a disposable local test database that was dropped afterwards. Full suites belong to GitHub CI.

@@ -129,4 +129,82 @@ RSpec.describe "Prior-provider final review regressions" do
       retirement: 100, roth_retirement: 20, health_insurance_deductions: 30, historical_loan_deductions_unclassified: 10)
     expect(HistoricalEmployeeYtdBalance.find_by!(employee: employees.first)).to have_attributes(retirement: 100, roth_retirement: 20, insurance: 30, loans: 10)
   end
+
+  it "refuses a replayed request whose history was undone, then records the same history under a new request" do
+    @company, actor, _employees, runs, payload = history_fixture(period_count: 1)
+    payload["periods"].first.except!("run_id", "source_digest")
+    runs.first.destroy!
+    onboarding = convert_history(@company, actor, payload, key: "undone-request-2026")
+    reverse_history(onboarding, actor)
+    replay = PriorProviderHistory::Conversion.new(company: @company, actor: actor, payload: payload, preview_digest: onboarding.preview_digest,
+      idempotency_key: "undone-request-2026", files: [ history_upload ], acknowledgement: PriorProviderHistory::Conversion::ACKNOWLEDGEMENT)
+    expect { replay.call }.to raise_error(ArgumentError, PriorProviderHistory::Conversion::REVERSED_REPLAY_ERROR)
+    expect(PriorProviderHistoryOnboarding.where(company: @company).pluck(:status)).to eq([ "reversed" ])
+    expect(HistoricalImportBatch.where(company: @company).count).to eq(1)
+    again = convert_history(@company, actor, payload, key: "rerecord-request-2026")
+    expect(again).not_to eq(onboarding)
+    expect(again.status).to eq("converted")
+  end
+
+  it "names recorded prior-provider history, not QuickBooks, in first-live boundary errors" do
+    @company, actor, _employees, runs, payload = history_fixture(period_count: 1)
+    activate_history(convert_history(@company, actor, payload), actor)
+    source = runs.first.reload
+    early = build(:pay_period, company: @company, start_date: source.end_date, end_date: source.end_date + 13, pay_date: source.pay_date)
+    expect(early).not_to be_valid
+    expect(early.errors[:start_date]).to include("must be after the recorded prior-provider history ending #{source.end_date.strftime('%m/%d/%Y')}")
+    expect(early.errors[:pay_date]).to include("must be after the recorded prior-provider history paid through #{source.pay_date.strftime('%m/%d/%Y')}")
+    expect(early.errors.full_messages.join).not_to include("QuickBooks")
+  end
+
+  describe "report source labels" do
+    let(:controller) { Api::V1::Admin::ReportsController.new }
+    let(:legacy_sheet_fields) do
+      [ "Field", "Basis", "Cornerstone payrolls", "Cornerstone paychecks", "QuickBooks payrolls", "QuickBooks paychecks",
+        "QuickBooks opening summaries", "Excluded unlinked QuickBooks paychecks", "Excluded unlinked QuickBooks gross pay",
+        "Excluded unlinked QuickBooks net pay", "Historical ledger adjustments", "Historical adjustment gross delta",
+        "Historical adjustment net delta", "Historical YTD bridge applied", "Historical YTD through pay date", "Source handling" ]
+    end
+    let(:counts) do
+      { payroll_count: 2, paycheck_count: 6, record_count: 6, opening_summary_count: 0,
+        excluded_unlinked_paycheck_count: 1, excluded_unlinked_gross_pay: 10, excluded_unlinked_net_pay: 8 }
+    end
+
+    it "adds prior-provider rows to the Payroll Sources sheet only when the report has provider history" do
+      summary = { mode: "locked_quickbooks_plus_committed_cornerstone", cornerstone: {}, quickbooks: counts, adjustments: {}, historical_ytd_bridge: {} }
+      legacy = controller.send(:payroll_source_summary_sheet, { source_summary: summary })
+      expect(legacy[:rows].map(&:first)).to eq(legacy_sheet_fields)
+      expect(legacy[:rows].assoc("QuickBooks paychecks")).to eq([ "QuickBooks paychecks", 6 ])
+      provider = controller.send(:payroll_source_summary_sheet, { source_summary: summary.merge(prior_provider: counts.merge(paycheck_count: 60)) })
+      expect(provider[:rows].map(&:first) - legacy_sheet_fields).to eq([
+        "Prior-provider payrolls", "Prior-provider paychecks", "Prior-provider opening summaries",
+        "Excluded unlinked prior-provider paychecks", "Excluded unlinked prior-provider gross pay", "Excluded unlinked prior-provider net pay"
+      ])
+      expect(provider[:rows].assoc("Prior-provider paychecks")).to eq([ "Prior-provider paychecks", 60 ])
+      expect(provider[:rows] - provider[:rows].select { |row| row.first.to_s.match?(/prior-provider/i) }).to eq(legacy[:rows])
+    end
+
+    it "labels prior-provider pay runs and deduction columns by their source" do
+      batch = ->(source) { double(source_system: source) }
+      period = ->(id) { double(id: id, period_type: "regular", start_date: Date.new(2026, 1, id), end_date: Date.new(2026, 1, id + 1), pay_date: Date.new(2026, 1, id + 2)) }
+      paychecks = [
+        double(historical_pay_period: period.call(1), historical_pay_period_id: 1, historical_import_batch: batch.call("quickbooks_online")),
+        double(historical_pay_period: period.call(5), historical_pay_period_id: 5, historical_import_batch: batch.call("prior_provider")),
+        double(historical_pay_period: period.call(5), historical_pay_period_id: 5, historical_import_batch: batch.call("prior_provider"))
+      ]
+      allow(controller).to receive(:reportable_pay_periods).and_return(PayPeriod.none)
+      runs = controller.send(:included_payroll_runs, nil, paychecks)
+      expect(runs.map { |run| run.slice(:key, :source) }).to eq([
+        { key: "imported:1", source: "QuickBooks import" }, { key: "imported:5", source: "Prior-provider history" }
+      ])
+
+      entry = ->(source, employee_id) { { employee_id: employee_id, source: source, treatment: "pre_tax_deduction", label: "401(k) pre-tax retirement", amount: BigDecimal("50") } }
+      columns = controller.send(:period_summary_component_columns, [ entry.call("quickbooks", 1), entry.call("prior_provider", 2), entry.call("historical_adjustment", 3) ], [ 1, 2, 3 ])
+      expect(columns.map { |column| column.slice(:label, :identity_label, :source_group) }).to contain_exactly(
+        { label: "QuickBooks source - 401(k) pre-tax retirement (Pre tax deduction; QuickBooks source)", identity_label: "QuickBooks source", source_group: "quickbooks_history" },
+        { label: "Prior-provider source - 401(k) pre-tax retirement (Pre tax deduction; Prior-provider source)", identity_label: "Prior-provider source", source_group: "prior_provider_history" },
+        { label: "Historical adjustment - 401(k) pre-tax retirement (Pre tax deduction; Historical adjustment)", identity_label: "Historical adjustment", source_group: "historical_adjustment" }
+      )
+    end
+  end
 end

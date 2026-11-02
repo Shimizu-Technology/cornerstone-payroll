@@ -720,19 +720,25 @@ class QuarterlyCompliancePacketBuilder
     federal_liability_for_items(native).to_d + imported_liability
   end
 
+  # Each source keeps its own amounts. A single-source quarter keeps the
+  # original labels; a mixed quarter names the source on every row.
   def historical_component_taxability
-    tips = historical_records.sum(0.to_d, &:reported_tips)
-    non_taxable = historical_records.sum(0.to_d, &:non_taxable_pay)
-    other_taxable = historical_records.sum(0.to_d, &:gross_pay) - tips - non_taxable
+    groups = historical_records.group_by { |record| record.source_system == "prior_provider" ? "prior_provider" : "quickbooks" }
+    groups.sort.flat_map do |source, records|
+      suffix = groups.size > 1 ? (source == "prior_provider" ? " (prior provider)" : " (QuickBooks)") : ""
+      tips = records.sum(0.to_d, &:reported_tips)
+      non_taxable = records.sum(0.to_d, &:non_taxable_pay)
+      other_taxable = records.sum(0.to_d, &:gross_pay) - tips - non_taxable
 
-    [
-      imported_component("regular", "Imported taxable wages", other_taxable),
-      imported_component("tips", "Imported reported tips", tips),
-      imported_component("non_taxable", "Imported non-taxable pay", non_taxable)
-    ].compact
+      [
+        imported_component("regular", "Imported taxable wages#{suffix}", other_taxable, source),
+        imported_component("tips", "Imported reported tips#{suffix}", tips, source),
+        imported_component("non_taxable", "Imported non-taxable pay#{suffix}", non_taxable, source)
+      ].compact
+    end
   end
 
-  def imported_component(category, label, amount)
+  def imported_component(category, label, amount, source)
     return if amount.zero?
 
     {
@@ -745,7 +751,7 @@ class QuarterlyCompliancePacketBuilder
       social_security_tips: category == "tips",
       medicare_wages_tips: taxable_earning_category?(category),
       non_taxable: non_taxable_category?(category),
-      source: historical_records.any? { |record| record.source_system == "prior_provider" } ? "prior_provider" : "quickbooks"
+      source: source
     }
   end
 

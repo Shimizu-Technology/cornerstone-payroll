@@ -101,6 +101,36 @@ function onboarding(status: "converted" | "active" = "converted"): HistoryOnboar
   };
 }
 
+function recordablePage(): HistoryPage {
+  const data = page();
+  data.draft = {
+    payload: {
+      tax_year: 2026,
+      takeover_on: "2026-11-01",
+      provider_name: "Prior Payroll Inc.",
+      complete_history_confirmed: true,
+      same_employer_confirmed: true,
+      identities: { 1: { source_name: "Ana Cruz", ssn_last4: "1111" }, 2: { source_name: "Ben Diaz", ssn_last4: "2222" } },
+      periods: data.candidates.map((period) => ({ ...period, source_reference: "Register", register_totals: {
+        gross_pay: "2900.00", federal_income_tax: "200.00", social_security_tax: "179.80", medicare_tax: "42.05", deductions: "0.00", net_pay: "2478.15", employer_taxes: "221.85", employer_contributions: "0.00",
+      } })),
+    },
+    step: 3,
+    lock_version: 4,
+    updated_at: "2026-11-02T01:00:00Z",
+    updated_by_name: "Benjo",
+  };
+  return data;
+}
+
+async function openRecordDialog() {
+  fireEvent.change(screen.getByLabelText(/Attach the provider’s paid registers/), { target: { files: [new File(["x"], "register.pdf")] } });
+  fireEvent.click(screen.getByRole("button", { name: "Check everything" }));
+  await screen.findByText(/Everything checks out/);
+  fireEvent.click(screen.getByRole("button", { name: "Record history…" }));
+  return screen.findByRole("dialog");
+}
+
 function open() {
   return render(
     <MemoryRouter>
@@ -186,35 +216,14 @@ describe("Prior-provider history", () => {
   });
 
   it("records through a summary dialog with a checkbox instead of a typed phrase", async () => {
-    const data = page();
-    data.draft = {
-      payload: {
-        tax_year: 2026,
-        takeover_on: "2026-11-01",
-        provider_name: "Prior Payroll Inc.",
-        complete_history_confirmed: true,
-        same_employer_confirmed: true,
-        identities: { 1: { source_name: "Ana Cruz", ssn_last4: "1111" }, 2: { source_name: "Ben Diaz", ssn_last4: "2222" } },
-        periods: data.candidates.map((period) => ({ ...period, source_reference: "Register", register_totals: {
-          gross_pay: "2900.00", federal_income_tax: "200.00", social_security_tax: "179.80", medicare_tax: "42.05", deductions: "0.00", net_pay: "2478.15", employer_taxes: "221.85", employer_contributions: "0.00",
-        } })),
-      },
-      step: 3,
-      lock_version: 4,
-      updated_at: "2026-11-02T01:00:00Z",
-      updated_by_name: "Benjo",
-    };
+    const data = recordablePage();
     vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(data);
     vi.spyOn(priorProviderHistoryApi, "preview").mockResolvedValue({ ready: true, errors: [], digest: "d", totals: { gross_pay: "5800" } });
     const convert = vi.spyOn(priorProviderHistoryApi, "convert").mockResolvedValue({ onboarding: onboarding() });
     open();
     await screen.findByText(/Saved .* by Benjo/);
     expect(screen.getByRole("heading", { name: "4. Record" })).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(/Attach the provider’s paid registers/), { target: { files: [new File(["x"], "register.pdf")] } });
-    fireEvent.click(screen.getByRole("button", { name: "Check everything" }));
-    await screen.findByText(/Everything checks out/);
-    fireEvent.click(screen.getByRole("button", { name: "Record history…" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await openRecordDialog();
     expect(within(dialog).getByText(/2 pay dates .* 4 paychecks · \$5,800.00 gross/)).toBeTruthy();
     expect(within(dialog).getByRole("rowheader", { name: "Ana Cruz" })).toBeTruthy();
     expect(within(dialog).getAllByText("$3,000.00").length).toBe(3);
@@ -225,6 +234,49 @@ describe("Prior-provider history", () => {
     fireEvent.click(record);
     await screen.findByText(/History recorded/);
     expect(convert).toHaveBeenCalledWith(expect.objectContaining({ provider_name: "Prior Payroll Inc." }), "d", expect.any(String), expect.any(Array), "RECORD ALREADY PAID HISTORY");
+  });
+
+  it("keeps the request key across a lost response but never reports an undone recording as recorded", async () => {
+    vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(recordablePage());
+    vi.spyOn(priorProviderHistoryApi, "preview").mockResolvedValue({ ready: true, errors: [], digest: "d", totals: { gross_pay: "5800" } });
+    const undone = "This history was recorded and then undone. Preview it again to record it as a new request";
+    const convert = vi.spyOn(priorProviderHistoryApi, "convert")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new ApiError(undone, 422))
+      .mockResolvedValueOnce({ onboarding: { ...onboarding(), status: "reversed" } });
+    open();
+    await screen.findByText(/Saved .* by Benjo/);
+    const dialog = await openRecordDialog();
+    fireEvent.click(within(dialog).getByLabelText(/I checked these amounts/));
+    const record = within(dialog).getByRole("button", { name: "Record history" });
+    fireEvent.click(record);
+    await screen.findByText("Failed to fetch");
+    fireEvent.click(record);
+    await screen.findByText(undone);
+    fireEvent.click(record);
+    await screen.findByText(/recorded and then undone\. Preview it again/);
+    expect(screen.queryByText(/History recorded/)).toBeNull();
+    const keys = convert.mock.calls.map((call) => call[2]);
+    // The retry after a lost response reuses its key; after the rejection a new key is used.
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("forgets stored request keys after an undo so recording again starts a new request", async () => {
+    sessionStorage.setItem("prior-provider-history:1:10:request:d", "stale-key-from-before-undo");
+    sessionStorage.setItem("unrelated", "kept");
+    vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...page(), candidates: [], onboardings: [onboarding("active")] });
+    vi.spyOn(priorProviderHistoryApi, "reverse").mockResolvedValue({ onboarding: { ...onboarding(), status: "reversed" } });
+    open();
+    fireEvent.click(await screen.findByRole("button", { name: /Undo this history/ }));
+    const dialog = await screen.findByRole("dialog");
+    const reason = within(dialog).getByRole("textbox");
+    fireEvent.change(reason, { target: { value: "Correct register evidence" } });
+    within(dialog).queryAllByRole("checkbox").forEach((box) => fireEvent.click(box));
+    fireEvent.click(within(dialog).getByRole("button", { name: /Undo/ }));
+    await screen.findByText(/History undone/);
+    expect(sessionStorage.getItem("prior-provider-history:1:10:request:d")).toBeNull();
+    expect(sessionStorage.getItem("unrelated")).toBe("kept");
   });
 
   it("turns on year-to-date through a confirm dialog that shows each employee’s totals", async () => {

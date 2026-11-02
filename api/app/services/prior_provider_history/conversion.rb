@@ -6,6 +6,7 @@ module PriorProviderHistory
   class Conversion
     ACKNOWLEDGEMENT = "RECORD ALREADY PAID HISTORY"
     MAX_FILE_BYTES = 10.megabytes
+    REVERSED_REPLAY_ERROR = "This history was recorded and then undone. Preview it again to record it as a new request"
 
     def initialize(company:, actor:, payload:, preview_digest:, idempotency_key:, files:, acknowledgement:)
       @company, @actor, @payload = company, actor, payload.deep_stringify_keys
@@ -24,6 +25,9 @@ module PriorProviderHistory
         existing = PriorProviderHistoryOnboarding.find_by(company: company, idempotency_key: idempotency_key)
         if existing
           raise ArgumentError, "This request key belongs to different history" unless existing.preview_digest == preview_digest && existing.evidence.fetch("payload") == payload
+          # Replaying a recording that was later undone must not report success.
+          raise ArgumentError, REVERSED_REPLAY_ERROR if existing.status == "reversed"
+
           next existing
         end
         ids = Array(payload["periods"]).filter_map { |row| row["run_id"] }

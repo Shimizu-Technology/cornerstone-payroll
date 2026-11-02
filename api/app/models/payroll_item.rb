@@ -644,13 +644,6 @@ class PayrollItem < ApplicationRecord
   end
 
   # Calculate and store all values
-  def prevent_retired_history_mutation
-    return unless PayPeriod.where(id: pay_period_id, status: "retired_history").exists?
-
-    errors.add(:base, "Retired prior-provider payroll is read-only evidence")
-    throw :abort
-  end
-
   def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
       PayrollCorrectionPayBasisGuard.validate!(self)
@@ -725,6 +718,13 @@ class PayrollItem < ApplicationRecord
   end
 
   private
+
+  def prevent_retired_history_mutation
+    return unless PayPeriod.where(id: pay_period_id, status: "retired_history").exists?
+
+    errors.add(:base, "Retired prior-provider payroll is read-only evidence")
+    throw :abort
+  end
 
   def retained_correction_pay_basis_reconciles
     inputs = %w[employment_type pay_rate hours_worked overtime_hours holiday_hours pto_hours scheduled_hours

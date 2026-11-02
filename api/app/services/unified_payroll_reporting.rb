@@ -124,9 +124,14 @@ class UnifiedPayrollReporting
   # Keep the source's tax bucket and label intact. A label alone cannot prove
   # whether a historical loan was straight/installment or a 401(k) was post-tax.
   def historical_deduction_entries(paychecks, adjustments = [])
-    [ [ paychecks, "quickbooks" ], [ adjustments, "historical_adjustment" ] ].flat_map do |rows, source|
+    [ [ paychecks, :paycheck ], [ adjustments, "historical_adjustment" ] ].flat_map do |rows, kind|
       rows.flat_map do |row|
-        employee_id = source == "quickbooks" ? row.employee_id : row.historical_paycheck.employee_id
+        source = if kind == :paycheck
+          row.historical_import_batch.source_system == "prior_provider" ? "prior_provider" : "quickbooks"
+        else
+          kind
+        end
+        employee_id = kind == :paycheck ? row.employee_id : row.historical_paycheck.employee_id
         %i[pretax_deduction_breakdown after_tax_deduction_breakdown].flat_map do |field|
           bucket = field == :pretax_deduction_breakdown ? "pre_tax_deduction" : "post_tax_deduction"
           Array(row.public_send(field)).filter_map do |raw|

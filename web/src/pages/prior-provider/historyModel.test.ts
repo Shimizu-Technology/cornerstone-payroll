@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage } from "@/services/priorProviderHistory";
-import { initialPayload, paycheckProblems, periodState, remainingWork, setPaycheckAmount } from "./historyModel";
+import { emptyCheck, initialPayload, paycheckProblems, periodState, remainingWork, setPaycheckAmount } from "./historyModel";
 
 function row(overrides: Partial<Record<AmountKey, string>> = {}): HistoryCheck {
   const zero = Object.fromEntries(Object.keys(amountLabels).map((key) => [key, "0.00"])) as Record<AmountKey, string>;
@@ -22,6 +22,17 @@ describe("prior-provider history model", () => {
 
   it("requires an explicit amount instead of treating a blank as zero", () => {
     expect(paycheckProblems(row({ employer_contributions: "" })).employer_contributions).toMatch(/enter 0 if none/);
+  });
+
+  it("leaves every taxable wage base blank on an added paycheck so each one is entered explicitly", () => {
+    const added = emptyCheck({ id: 1, name: "Ana Cruz", ssn_last_four: "1111" });
+    const bases: AmountKey[] = ["fit_taxable_wages", "social_security_taxable_wages", "social_security_taxable_tips", "medicare_taxable_wages", "additional_medicare_taxable_wages"];
+    bases.forEach((key) => {
+      expect(added[key]).toBe("");
+      expect(paycheckProblems(added)[key]).toMatch(/enter 0 if none/);
+    });
+    expect(added.gross_pay).toBe("0.00");
+    expect(added.net_pay).toBe("0.00");
   });
 
   it("keeps a single detail line in step with its total but flags split lines that no longer add up", () => {

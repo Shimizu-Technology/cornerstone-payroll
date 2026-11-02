@@ -52,6 +52,7 @@ function fmt(n: number | string) {
 
 function sourceGroupLabel(group?: string) {
   if (group === 'quickbooks_history') return 'QuickBooks history';
+  if (group === 'prior_provider_history') return 'Prior-provider history';
   if (group === 'historical_adjustment') return 'History adjustment';
   if (group === 'cornerstone_adjustment') return 'Cornerstone adjustment';
   return 'Cornerstone field';
