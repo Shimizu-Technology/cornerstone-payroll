@@ -3708,4 +3708,23 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(rows.map { |row| row["Payment method"] }).to eq([ "Direct deposit", "Direct deposit", "Not recorded" ])
     end
   end
+  it "formats YTD PDF company totals and basis without changing spreadsheet numbers" do
+    period = create(:pay_period, :committed, company: company,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: company, employee: employee, pay_period: period,
+      hours_worked: 1000, gross_pay: 181_113.23, net_pay: 166_498.1)
+
+    get "/api/v1/admin/reports/ytd_summary_pdf", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    totals = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text)
+      .drop_while { |text| !text.include?("Company Totals") }
+      .take_while { |text| !text.include?("Payroll Sources") }.join("\n")
+    expect(totals).to include("$181,113.23", "$166,498.10", "1,000.00", "Pay date", "Federal/Guam income tax")
+    expect(totals).not_to include("pay_date", "$2,026.00", "166498.1", "Source labeled after tax 401k")
+
+    get "/api/v1/admin/reports/ytd_summary_xlsx", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    workbook = Roo::Spreadsheet.open(StringIO.new(response.body), extension: :xlsx)
+    expect(workbook.sheet("Company Totals").to_a).to include([ "Gross pay", 181_113.23 ], [ "Net pay", 166_498.1 ])
+  end
 end

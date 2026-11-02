@@ -94,7 +94,7 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
       assert_reconciles(gross: actual[:gross_pay], other: actual[:non_taxable_additions_total], deductions: actual[:total_deductions], net: actual[:net_pay])
     end
     totals = text.lines.select { |line| line.lstrip.start_with?("TOTALS") }.join(" ")
-    expect(totals).to include("$927.91", "$1245.15")
+    expect(totals).to include("$927.91", "$1,245.15")
   end
 
   it "exports reconciling XLSX detail and simple-register rows" do

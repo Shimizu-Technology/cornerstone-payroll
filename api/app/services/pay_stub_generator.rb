@@ -48,11 +48,8 @@ class PayStubGenerator
     # Employer-paid obligations that do not reduce net pay
     render_employer_contributions(pdf)
 
-    # Net Pay
-    render_net_pay(pdf)
-
-    # YTD Summary
-    render_ytd_summary(pdf)
+    # Keep current and YTD summaries together when the statement paginates.
+    render_summaries(pdf)
 
     render_with_footer(
       pdf,
@@ -84,12 +81,12 @@ class PayStubGenerator
 
     pdf.move_down 6
     pdf.stroke_horizontal_rule
-    pdf.move_down 10
+    pdf.move_down 6
 
     pdf.font_size(13) do
       pdf.text "EARNINGS STATEMENT", style: :bold, align: :center
     end
-    pdf.move_down 10
+    pdf.move_down 6
   end
 
   def render_employee_info(pdf)
@@ -101,12 +98,12 @@ class PayStubGenerator
         [ "Department:", employee.department&.name || "N/A" ]
       ]
 
-      pdf.table(data, cell_style: { borders: [], padding: [ 2, 10, 2, 0 ] }) do
+      pdf.table(data, cell_style: { borders: [], padding: [ 1, 10, 1, 0 ] }) do
         column(0).font_style = :bold
         column(0).width = 100
       end
     end
-    pdf.move_down 10
+    pdf.move_down 6
   end
 
   def render_pay_period_info(pdf)
@@ -126,12 +123,12 @@ class PayStubGenerator
         data << [ "Check reference:", payroll_item.check_number ]
       end
 
-      pdf.table(data, cell_style: { borders: [], padding: [ 2, 10, 2, 0 ] }) do
+      pdf.table(data, cell_style: { borders: [], padding: [ 1, 10, 1, 0 ] }) do
         column(0).font_style = :bold
         column(0).width = 100
       end
     end
-    pdf.move_down 12
+    pdf.move_down 6
   end
 
   def render_earnings(pdf)
@@ -292,13 +289,13 @@ class PayStubGenerator
       pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 3, 6 ]
+        cells.padding = [ 2, 6 ]
         columns(1..4).align = :right
         row(-1).background_color = "F5F5F5"
       end
     end
 
-    pdf.move_down 12
+    pdf.move_down 6
   end
 
   def render_deductions(pdf)
@@ -368,13 +365,13 @@ class PayStubGenerator
       pdf.table(deductions_data, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 3, 6 ]
+        cells.padding = [ 2, 6 ]
         columns(1..2).align = :right
         row(-1).background_color = "F5F5F5"
       end
     end
 
-    pdf.move_down 12
+    pdf.move_down 6
   end
 
   def render_non_taxable_additions(pdf)
@@ -394,12 +391,12 @@ class PayStubGenerator
       pdf.table(additions_data, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 3, 6 ]
+        cells.padding = [ 2, 6 ]
         columns(1..2).align = :right
       end
     end
 
-    pdf.move_down 12
+    pdf.move_down 6
   end
 
   def render_employer_contributions(pdf)
@@ -424,16 +421,16 @@ class PayStubGenerator
       pdf.table(rows, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 3, 6 ]
+        cells.padding = [ 2, 6 ]
         columns(1..2).align = :right
         row(-1).background_color = "F5F5F5"
       end
     end
 
-    pdf.move_down 12
+    pdf.move_down 6
   end
 
-  def render_net_pay(pdf)
+  def render_summaries(pdf)
     additions = statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.current.to_d }
     deductions = statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.current.to_d }
     taxes = payroll_item.withholding_tax.to_d + payroll_item.additional_withholding.to_d +
@@ -447,23 +444,26 @@ class PayStubGenerator
       [ "NET PAY", format_currency(payroll_item.net_pay) ]
     ]
     pdf.font_size(8) do
-      pdf.table(data, width: 250, position: :right) do
+      table = pdf.make_table(data, width: 250, position: :right) do
         cells.padding = [ 2, 8 ]
         column(1).align = :right
         row(0).font_style = :bold
         row(-1).font_style = :bold
         row(-1).background_color = "E8F5E9"
       end
+      ytd_table = ytd_summary_table(pdf)
+      heading_height = pdf.height_of("YEAR-TO-DATE SUMMARY", size: 10, style: :bold)
+      summary_height = table.height + 6 + heading_height + 3 + ytd_table.height
+      pdf.start_new_page if pdf.cursor < summary_height
+      table.draw
+      pdf.move_down 6
+      pdf.text "YEAR-TO-DATE SUMMARY", size: 10, style: :bold
+      pdf.move_down 3
+      ytd_table.draw
     end
-    pdf.move_down 10
   end
 
-  def render_ytd_summary(pdf)
-    pdf.font_size(10) do
-      pdf.text "YEAR-TO-DATE SUMMARY", style: :bold
-    end
-    pdf.move_down 3
-
+  def ytd_summary_table(pdf)
     ytd_data = [
       [ "Gross Earnings", format_currency(pay_ytd_total) ],
       [ "Non-Taxable Pay", format_currency(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
@@ -478,14 +478,12 @@ class PayStubGenerator
       ytd_data.insert(3, [ "Additional Withholding", format_currency(employee_ytd_additional_withholding) ])
     end
 
-    pdf.font_size(8) do
-      pdf.table(ytd_data, width: 250) do
-        cells.padding = [ 2, 6 ]
-        cells.borders = []
-        column(0).font_style = :bold
-        column(1).align = :right
-        row(-1).background_color = "F5F5F5"
-      end
+    pdf.make_table(ytd_data, width: 250) do
+      cells.padding = [ 2, 6 ]
+      cells.borders = []
+      column(0).font_style = :bold
+      column(1).align = :right
+      row(-1).background_color = "F5F5F5"
     end
   end
 
