@@ -148,7 +148,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                           <p className="font-medium text-neutral-950">{paycheck.employee_name || paycheck.source_employee_name}</p>
                           {paycheck.employee_name && paycheck.employee_name !== paycheck.source_employee_name && <p className="mt-1 text-xs text-neutral-500">Source: {paycheck.source_employee_name}</p>}
                         </TableCell>
-                        <TableCell>{audience === 'client' ? (paycheck.payment_method || '—') : (paycheck.provider_payment_reference || paycheck.check_number || paycheck.payment_method || '—')}</TableCell>
+                        <TableCell>{audience === 'client' ? (paycheck.payment_method === 'paid_by_prior_provider' ? 'Paid by previous provider' : paycheck.payment_method || '—') : record.source.system === 'prior_provider' ? (paycheck.provider_payment_reference || 'Not recorded') : (paycheck.check_number || paycheck.payment_method || '—')}</TableCell>
                         <TableCell className="text-right tabular-nums">{Number(paycheck.hours_total).toFixed(2)}</TableCell>
                         <TableCell className="text-right font-medium tabular-nums">{formatCurrency(Number(paycheck.gross_pay))}</TableCell>
                         <TableCell className="text-right tabular-nums">{formatCurrency(Number(paycheck.employee_taxes))}</TableCell>
@@ -165,7 +165,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                 {record.paychecks.map((paycheck) => (
                   <div key={paycheck.id} className="space-y-3 px-4 py-5">
                     <div className="flex items-start justify-between gap-3">
-                      <div><p className="font-semibold text-neutral-950">{paycheck.employee_name || paycheck.source_employee_name}</p><p className="mt-1 text-xs text-neutral-500">{audience === 'client' ? (paycheck.payment_method || 'Payment method not recorded') : (paycheck.provider_payment_reference ? `Check # from previous provider: ${paycheck.provider_payment_reference}` : paycheck.check_number ? `Check ${paycheck.check_number}` : paycheck.payment_method || 'No check number')}</p></div>
+                      <div><p className="font-semibold text-neutral-950">{paycheck.employee_name || paycheck.source_employee_name}</p><p className="mt-1 text-xs text-neutral-500">{audience === 'client' ? (paycheck.payment_method === 'paid_by_prior_provider' ? 'Paid by previous provider' : paycheck.payment_method || 'Payment method not recorded') : record.source.system === 'prior_provider' ? `Check # from previous provider: ${paycheck.provider_payment_reference || 'Not recorded'}` : (paycheck.check_number ? `Check ${paycheck.check_number}` : paycheck.payment_method || 'No check number')}</p></div>
                       <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(paycheck.net_pay))}</p>
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-sm"><Metric label="Hours" value={Number(paycheck.hours_total).toFixed(2)} /><Metric label="Gross" value={formatCurrency(Number(paycheck.gross_pay))} /><Metric label="Taxes" value={formatCurrency(Number(paycheck.employee_taxes))} /></div>

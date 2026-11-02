@@ -92,6 +92,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<"record" | "activate" | "reverse" | "discard" | null>(null);
   const mounted = useRef(true);
+  const loadRequestId = useRef(0);
   const dirty = useRef(false);
   const requestBusy = useRef(false);
 
@@ -99,13 +100,15 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
     mounted.current = true;
     return () => {
       mounted.current = false;
+      loadRequestId.current += 1;
     };
   }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestId.current;
     try {
       const result = await priorProviderHistoryApi.get();
-      if (!mounted.current || result.company_id !== companyId) return;
+      if (!mounted.current || requestId !== loadRequestId.current || result.company_id !== companyId) return;
       setPage(result);
       setPayload(initialPayload(result));
       setStep(result.draft?.step ?? 0);
@@ -114,7 +117,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       setSaveState(result.draft ? "saved" : "idle");
       dirty.current = false;
     } catch (err) {
-      if (mounted.current) setError(err instanceof Error ? err.message : "Couldn’t load this client’s history. Try again.");
+      if (mounted.current && requestId === loadRequestId.current) setError(err instanceof Error ? err.message : "Couldn’t load this client’s history. Try again.");
     }
   }, [companyId]);
 
