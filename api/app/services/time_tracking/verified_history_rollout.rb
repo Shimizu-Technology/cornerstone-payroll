@@ -354,6 +354,9 @@ module TimeTracking
             response.dig("integration", "source_instance_id") != @source.expected_source_instance_id)
           raise Error, "AIRE historical evidence version or installation differs"
         end
+        unless response["unresolved_historical_obligation_count"] == 0
+          raise Error, "AIRE historical obligations are missing or moved beyond the review scope"
+        end
         rows = response.fetch("time_entries")
         pagination = response.fetch("pagination")
         unless response["source_state"] == "current" && response["through_work_date"] == date &&

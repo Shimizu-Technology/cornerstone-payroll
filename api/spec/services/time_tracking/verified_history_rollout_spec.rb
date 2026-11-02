@@ -342,7 +342,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     inventory_entry = { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.2 }
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ inventory_entry ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
@@ -372,7 +372,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 },
                           { "id" => "99", "source_user_uuid" => uuid, "version" => 3, "hours" => 2 } ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     rollout = described_class.new(manifest: manifest, actor: actor)
@@ -389,7 +389,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
         "active_manual_allocation_ids" => [], "active_cases" => [], "payment_attestation" => nil } }
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 }, extra ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     manifest["reviewed_dispositions"] = [ pending_disposition(extra) ]
@@ -437,7 +437,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       end
       allow(client).to receive(:payroll_cockpit_history_entries).and_return(
         "time_entries" => [ inventory_entry ],
-        "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+        "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     end
@@ -446,6 +446,15 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       digest = Digest::SHA256.hexdigest(JSON.generate(manifest))
       described_class.new(manifest: manifest, actor: actor).apply!(
         accepted_manifest_sha256: digest, release_owner: "Approved test owner")
+    end
+
+    it "refuses a recaptured inventory with missing or moved historical obligations" do
+      response = { "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+        "unresolved_historical_obligation_count" => 1 }
+      allow(client).to receive(:payroll_cockpit_history_entries).and_return(response)
+      expect { described_class.new(manifest: manifest, actor: actor).preview! }
+        .to raise_error(described_class::Error, /historical obligations are missing or moved/)
+      expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
     end
 
     it "requires authenticated versioned installation evidence for paid-only inventory" do
@@ -509,7 +518,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
     it "holds completion when total hours drift in the fresh final source read" do
       initial = { "time_entries" => [ inventory_entry ],
-        "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+        "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
       changed = initial.deep_dup
@@ -571,7 +580,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
 
     def history_page(page)
       pages = [ (row_count.to_f / page_size).ceil, 1 ].max
-      { "source_state" => "current", "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      { "source_state" => "current", "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
         "through_work_date" => manifest.fetch("history_through_work_date"),
         "time_entries" => source_rows.slice((page - 1) * page_size, page_size) || [],
         "pagination" => { "current_page" => page, "per_page" => page_size, "total_count" => row_count,
@@ -782,7 +791,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["history_through_work_date"] = period.end_date.iso8601
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
       "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 2, "truncated" => false })
     expect { described_class.new(manifest: manifest, actor: actor).preview! }
@@ -799,7 +808,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     manifest["history_through_work_date"] = period.end_date.iso8601
     manifest["issued_entries"].first["source_time_entry_version"] = 2
     initial = { "time_entries" => [ { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 6.1 } ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false } }
     changed = initial.deep_dup
@@ -846,7 +855,7 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
     allow(client).to receive(:payroll_cockpit_time_entry).and_return("time_entry" => { "id" => "41", "version" => 2,
       "work_date" => "2026-08-14", "hours" => 6.1, "employee" => { "id" => "91", "payroll_integration_id" => uuid, "name" => employee.full_name } })
     allow(client).to receive(:payroll_cockpit_history_entries).and_return("time_entries" => [ { "id" => "41", "version" => 2, "source_user_uuid" => uuid, "hours" => 6.1 } ],
-      "history_evidence_version" => 1, "integration" => { "source_instance_id" => source.expected_source_instance_id },
+      "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0, "integration" => { "source_instance_id" => source.expected_source_instance_id },
       "source_state" => "current", "through_work_date" => manifest["history_through_work_date"],
       "pagination" => { "per_page" => 250, "current_page" => 1, "total_pages" => 1, "total_count" => 1, "truncated" => false })
     allow(client).to receive(:record_payroll_entry_processing_event).and_return("ok" => true)
