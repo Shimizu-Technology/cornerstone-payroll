@@ -14,7 +14,7 @@ module AirePayrollCalendar
     end
 
     def configure!
-      unless @source.source_type == "aire_services" && [ 1, 16 ].include?(@starts_on.day) && @actor.present? && @reason.present?
+      unless @source.source_type == "aire_services" && [ 1, 16 ].include?(@starts_on.day) && @actor.present? && @reason.length >= 10
         raise Error, "An AIRE source, semimonthly STARTS_ON, ACTOR and REASON are required"
       end
 
@@ -22,6 +22,17 @@ module AirePayrollCalendar
         # Also protect an empty inventory from concurrent legacy writers. Old
         # publishers/delivery workers must remain quiesced after this transaction.
         ApplicationRecord.connection.execute("LOCK TABLE aire_payroll_calendar_periods, aire_payroll_calendar_publications IN SHARE MODE")
+        if @starts_on < @source.cutoff_enforcement_starts_on
+          raise Error, "The initial rollout boundary may only move later"
+        end
+        if @source.cutoff_enforcement_starts_on != @starts_on
+          if @source.lock_rollout_selection || @source.aire_payroll_calendar_periods.exists? ||
+              @source.aire_verified_history_rollout_receipts.where(coverage_verified: true).exists? ||
+              AuditLog.exists?(record_type: "TimeTrackingSource", record_id: @source.id, action: "time_tracking_source#lock_rollout_gate_passed")
+            raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
+          end
+          @source.create_lock_rollout_selection!(starts_on: @starts_on, actor: @actor, reason: @reason)
+        end
         unless @source.cutoff_enforcement_starts_on == @starts_on
           raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
         end

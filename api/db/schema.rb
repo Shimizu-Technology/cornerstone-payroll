@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_02_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3707,6 +3707,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
     t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'ambiguous'::character varying, 'reconciliation_required'::character varying, 'applied'::character varying, 'rejected'::character varying, 'cancelled'::character varying]::text[])", name: "late_hours_recovery_state"
   end
 
+  create_table "time_tracking_lock_rollout_selections", force: :cascade do |t|
+    t.string "actor", null: false
+    t.datetime "created_at", null: false
+    t.text "reason", null: false
+    t.date "starts_on", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.index [ "time_tracking_source_id" ], name: "idx_on_time_tracking_source_id_398dd57ac0", unique: true
+    t.check_constraint "(EXTRACT(day FROM starts_on) = ANY (ARRAY[1::numeric, 16::numeric])) AND length(TRIM(BOTH FROM actor)) > 0 AND length(TRIM(BOTH FROM reason)) >= 10", name: "initial_time_tracking_lock_rollout_valid"
+  end
+
   create_table "time_tracking_manual_allocations", force: :cascade do |t|
     t.bigint "classification_reconciliation_id"
     t.uuid "commit_command_id", null: false
@@ -4428,6 +4438,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
   add_foreign_key "time_tracking_late_hours_runs", "time_tracking_sources"
   add_foreign_key "time_tracking_late_hours_runs", "users", column: "created_by_id"
   add_foreign_key "time_tracking_late_hours_runs", "users", column: "resolved_by_id"
+  add_foreign_key "time_tracking_lock_rollout_selections", "time_tracking_sources"
   add_foreign_key "time_tracking_manual_allocations", "companies"
   add_foreign_key "time_tracking_manual_allocations", "employees"
   add_foreign_key "time_tracking_manual_allocations", "pay_periods"

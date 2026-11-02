@@ -16,7 +16,7 @@ module LocalCertificationClock
     refuse unless %w[postgres postgresql].include?(database.scheme) &&
                   [nil, "", "localhost", "127.0.0.1", "::1", "[::1]"].include?(database.host) &&
                   database.userinfo.nil? && database.query.nil? && database.fragment.nil? &&
-                  database.path.match?(%r{\A/(?:aire_cornerstone|cornerstone_aire)_certification_\d+_\d+\z})
+                  database.path.match?(%r{\A/(?:aire_cornerstone|cornerstone_aire)_certification_(?:rollout_rehearsal_)?\d+_\d+\z})
     path = ENV.fetch("CERTIFICATION_CLOCK_FILE", "")
     refuse unless File.absolute_path(path) == path &&
                   File.basename(File.dirname(path)).start_with?("cornerstone-aire-certification.")
