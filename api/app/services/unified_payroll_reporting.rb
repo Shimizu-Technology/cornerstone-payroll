@@ -239,7 +239,7 @@ class UnifiedPayrollReporting
         paycheck_count: native_items.length
       },
       quickbooks: historical_source_counts(quickbooks, qb_unlinked),
-      prior_provider: historical_source_counts(prior, prior_unlinked),
+      **(sources.include?("prior_provider") ? { prior_provider: historical_source_counts(prior, prior_unlinked) } : {}),
       adjustments: {
         count: historical_adjustments.length,
         gross_pay_delta: sum(historical_adjustments, :gross_pay),

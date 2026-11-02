@@ -359,7 +359,7 @@ class W2GuAggregator
     systems = include_historical ? historical_source.source_systems(range: year_range) : []
     {
       mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
-      historical_source_systems: systems,
+      **(systems.include?("prior_provider") ? { historical_source_systems: systems } : {}),
       cornerstone: {
         payroll_item_count: aggregated_items.values.sum { |item| item.payroll_item_count.to_i }
       },
@@ -374,8 +374,9 @@ class W2GuAggregator
   def historical_caveats
     return [] unless include_historical
 
+    label = historical_source.source_systems(range: year_range).include?("prior_provider") ? "Historical" : "QuickBooks"
     [
-      "Historical values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
+      "#{label} values come from the latest applied historical YTD bridge for each locked import and are not recalculated by Cornerstone.",
       "Historical opening summaries and reviewed adjustments are included through the bridge exactly once; raw historical paychecks are not added again.",
       "QuickBooks history does not classify 2026 cash tips or qualified overtime for W-2 Box 12; affected employees remain flagged for review."
     ]
