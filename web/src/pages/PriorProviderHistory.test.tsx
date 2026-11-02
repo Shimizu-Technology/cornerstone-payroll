@@ -275,6 +275,8 @@ describe("Prior-provider history", () => {
     fireEvent.change(screen.getByLabelText("Previous payroll provider"), { target: { value: "ADP" } });
     await act(async () => { vi.advanceTimersByTime(1500); });
     await screen.findByText(/Register notes are too long/);
+    expect(screen.queryByRole("button", { name: "Reload", exact: true })).toBeNull();
+    expect((screen.getByLabelText("Previous payroll provider") as HTMLInputElement).value).toBe("ADP");
     await act(async () => { vi.advanceTimersByTime(6000); });
     expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }));

@@ -11,7 +11,7 @@ The clean-client QuickBooks import remains available in Data Migration. An exist
 3. Obtain Q1–Q3 Form 941, Guam W-1 and SW-2/SWICA returns, DRT/EFTPS deposit receipts and agency notices, and October deposit/payment evidence. Confirm who filed/paid each period. The 2026 import does not establish the legal deposit schedule; obtain the relevant lookback returns/notices separately.
 4. Confirm the same legal employer/EIN, first genuinely unpaid period/pay date, and one owner for Q4 and the annual W-2GU/W-3SS. The intended Kasperbauer takeover is November 2026; Q4 includes the provider’s October payments plus later live payroll.
 5. Resolve the three employees’ actual signed-document/W-4 readiness and salary/payment setup. The audit found six missing document checklist entries. Historical activation does not waive employee document, workweek, schedule, tax-table, retirement, or client-approval gates.
-6. Assign a named operator. Mark or Benjo (accountants assigned to the client) can complete the whole workflow. Recording history turns on Historical payroll for the client automatically; no separate client-settings change is needed.
+6. Assign a named operator. Mark or Benjo (accountants assigned to the client) can record, activate and undo history. Setting the next live check number also requires the client check-settings grant; without it, a manager or administrator must perform that step. Recording history turns on Historical payroll for the client automatically; no separate client-settings change is needed.
 
 ## Operator procedure
 

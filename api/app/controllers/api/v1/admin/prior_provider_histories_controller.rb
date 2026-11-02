@@ -103,6 +103,10 @@ module Api
           batch = record.historical_import_batch
           file = batch.historical_import_source_files.find(params[:source_file_id])
           bytes = QuickbooksHistory::SourceFileVerificationService.new(batch: batch, actor: current_user).verified_bytes!(file)
+          AuditLog.record!(user: current_user, organization_id: current_company.organization_id, company_id: current_company_id,
+            action: "prior_provider_histories#source_file", record_type: "historical_import_source_files", record_id: file.id,
+            subject_name: file.original_filename,
+            metadata: { prior_provider_history_onboarding_id: record.id, historical_import_batch_id: batch.id, sha256: file.sha256 })
           send_data bytes, filename: file.original_filename, type: file.content_type, disposition: "attachment"
         rescue R2StorageService::DownloadError => error
           render json: { error: error.message }, status: :unprocessable_entity

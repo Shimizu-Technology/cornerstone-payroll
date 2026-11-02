@@ -44,6 +44,8 @@ for (const width of [1280, 390]) {
     const provider = page.getByLabel('Previous payroll provider');
     await provider.fill('Example previous provider');
     await expect(page.getByText('Register notes are too long. Shorten them and retry.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reload', exact: true })).toHaveCount(0);
+    await expect(provider).toHaveValue('Example previous provider');
     await page.clock.install();
     await page.clock.fastForward(6000);
     expect(writes()).toBe(1);

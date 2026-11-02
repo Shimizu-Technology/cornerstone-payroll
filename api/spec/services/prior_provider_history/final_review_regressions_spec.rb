@@ -4,6 +4,7 @@ require "rails_helper"
 
 RSpec.describe "Prior-provider final review regressions" do
   include ActiveSupport::Testing::TimeHelpers
+  include HistoricalYtdBridgeFixtureHelper
 
   around { |example| travel_to(Time.utc(2026, 11, 2, 2)) { example.run } }
 
@@ -39,6 +40,53 @@ RSpec.describe "Prior-provider final review regressions" do
       expect(PriorProviderHistoryOnboarding.unresolved_reversed_for(@company.id)).not_to exist
       expect { create(:pay_period, company: @company, start_date: "2026-10-29", end_date: "2026-11-11", pay_date: "2026-11-11") }.not_to raise_error
     end
+  end
+
+  it "scopes reversed-history holds to the payroll tax year and accepts only an applied compatible replacement bridge" do
+    @company, actor, employees, runs, payload = history_fixture(period_count: 1)
+    onboarding = convert_history(@company, actor, payload)
+    activate_history(onboarding, actor)
+    reverse_history(onboarding, actor)
+    current = build(:pay_period, company: @company, start_date: "2026-10-29", end_date: "2026-11-11", pay_date: "2026-11-11")
+    future = build(:pay_period, company: @company, start_date: "2027-01-01", end_date: "2027-01-14", pay_date: "2027-01-14")
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    expect(future.unresolved_prior_provider_history?).to be(false)
+    expect(future).to be_valid
+    balance = apply_historical_ytd_balance(company: @company, employee: employees.first, through_pay_date: runs.first.pay_date)
+    bridge = balance.historical_ytd_bridge
+    batch = bridge.historical_import_batch
+    applied_attributes = bridge.attributes.slice("status", "applied_at", "applied_by_id", "apply_acknowledgement")
+    bridge.update_columns(status: "previewed", applied_at: nil, applied_by_id: nil, apply_acknowledgement: nil)
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    bridge.update_columns(applied_attributes)
+    batch.update_columns(importer_version: "unsupported-version")
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    batch.update_columns(importer_version: "quickbooks-online-payroll-v5", status: "applied")
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    batch.update_columns(status: "locked")
+    expect(current.unresolved_prior_provider_history?).to be(false)
+    expect(current).to be_valid
+    # Replacement YTD can clear a fresh run's hold, never paid-source provenance.
+    expect(runs.first.reload.paid_prior_provider_source?).to be(true)
+    expect { PayPeriodLifecycleService.new(pay_period: runs.first, actor: actor).approve! }
+      .to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /already paid/)
+  end
+
+  it "prefills 401(k) separately from other pre-tax deductions without changing the total" do
+    @company, _actor, _employees, runs, = history_fixture(period_count: 1)
+    item = runs.first.payroll_items.first
+    type = DeductionType.create!(company: @company, name: "Example pre-tax benefit", category: "pre_tax")
+    item.payroll_item_deductions.create!(deduction_type: type, label: type.name, category: "pre_tax", amount: 25)
+    item.update!(retirement_payment: 100, total_deductions: 478, net_pay: 1522)
+    row = PriorProviderHistory::SourceAdapter.candidate(runs.first).fetch("paychecks").find { |check| check["employee_id"] == item.employee_id }
+    expect(row["pretax_deductions"].to_d).to eq(125)
+    expect(row["pretax_deduction_breakdown"]).to eq([
+      { "label" => "401(k) pre-tax retirement", "amount" => "100.0" },
+      { "label" => "Other pre-tax deductions", "amount" => "25.0" }
+    ])
+    expect(row["pretax_deduction_breakdown"].sum { |part| part["amount"].to_d }).to eq(row["pretax_deductions"].to_d)
+    expect(row["retirement"].to_d).to eq(100)
+    expect(row["after_tax_deduction_breakdown"]).to eq([])
   end
 
   it "reconciles inclusive source gross and reports explicit deductions even with generic register labels" do
