@@ -1856,6 +1856,7 @@ export function YtdSummaryPanel() {
                     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                       <TotalBox label="Bonus (in gross)" value={report.company_totals.bonus ?? 0} />
                       <TotalBox label="Pre-tax 401(k) (in deductions)" value={report.company_totals.retirement} />
+                      <TotalBox label="Non-Taxable Additions" value={report.company_totals.non_taxable_additions_total ?? 0} />
                       <TotalBox label="Roth 401(k) (in deductions)" value={report.company_totals.roth_retirement ?? 0} />
                       <TotalBox label="All loan deductions (in deductions)" value={Number(report.company_totals.straight_loan_deductions ?? 0) + Number(report.company_totals.installment_loan_payments ?? 0) + Number(report.company_totals.historical_loan_deductions_unclassified ?? 0)} />
                     </div>
@@ -1923,6 +1924,7 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Hours</th>
                     <th className="py-2 pr-4 text-right font-medium">OT Hours</th>
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    <th className="py-2 pr-4 text-right font-medium">Non-Taxable Additions</th>
                     {showCategoryColumns && <>
                     <th className="py-2 pr-4 text-right font-medium">Bonus</th>
                     <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
@@ -1930,7 +1932,8 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
                     <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
                     <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
-                    <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
+                    <SortableTh label="Pre-Tax Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
+                    <th className="py-2 pr-4 text-right font-medium">Roth Retirement</th>
                     <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
                     <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
@@ -1970,6 +1973,7 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_overtime_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.non_taxable_additions_total ?? 0)}</td>
                       {showCategoryColumns && <>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.bonus ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
@@ -1978,6 +1982,7 @@ export function YtdSummaryPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.roth_retirement ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(Number(emp.payroll_field_pre_tax_deductions_total ?? 0) + Number(emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.straight_loan_deductions ?? 0)}</td>

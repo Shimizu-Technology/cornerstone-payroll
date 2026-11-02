@@ -1097,7 +1097,7 @@ module Api
             title: report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Summary by Pay Date" : "Payroll Summary by Pay Date",
             subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}#{report.dig(:meta, :provisional) ? ' — calculated, not paid' : ''}",
             filename: "#{report.dig(:meta, :provisional) ? 'test_only_' : ''}payroll_summary_#{period.filename_token}#{period_summary_visibility_suffix}.pdf",
-            sheets: ytd_summary_sheets(report).each_with_index.map do |sheet, index|
+            sheets: ytd_summary_pdf_sheets(report).each_with_index.map do |sheet, index|
               index.zero? ? sheet.merge(pdf_frozen_columns: 3, pdf_max_columns: 9) : sheet
             end
           )
@@ -1420,6 +1420,7 @@ module Api
               company_id: current_company_id,
               historical_pay_period_id: record_id
             ).call
+            report[:register_review] = PayrollRegisterReconciliation.review_rows(report)
             remember_audit_report_target!(report)
             return [ report, nil ]
           end
@@ -1483,6 +1484,7 @@ module Api
               total_hours: w2_items.sum { |item| item.hours_worked.to_f },
               total_overtime_hours: w2_items.sum { |item| item.overtime_hours.to_f },
               total_gross: w2_items.sum(&:gross_pay),
+              total_non_taxable_additions: w2_items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
               total_reported_tips: w2_items.sum(&:reported_tips),
               total_tips_paid_out: w2_items.sum(&:tips_paid_out),
               total_bonus: w2_items.sum(&:bonus),
@@ -1504,9 +1506,9 @@ module Api
               total_medicare: w2_items.sum(&:medicare_tax),
               total_employer_social_security: w2_items.sum(&:employer_social_security_tax),
               total_employer_medicare: w2_items.sum(&:employer_medicare_tax),
-              total_traditional_retirement: w2_items.sum(&:retirement_payment),
-              total_roth_retirement: w2_items.sum(&:roth_retirement_payment),
-              total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_traditional_retirement: payroll_summary_retirement_totals(w2_items)[:retirement],
+              total_roth_retirement: payroll_summary_retirement_totals(w2_items)[:roth_retirement],
+              total_retirement: payroll_summary_retirement_totals(w2_items).values.sum,
               total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
               total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
               total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
@@ -1528,6 +1530,7 @@ module Api
             employees: w2_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) },
             contractors: contractor_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) }
           }
+          report_data[:register_review] = PayrollRegisterReconciliation.review_rows(report_data)
           if report_data[:simple_payroll_register_enabled]
             report_data[:simple_register] = simple_payroll_register_payload(report_data)
           end
@@ -2165,6 +2168,7 @@ module Api
             imported_payroll_count: 0,
             imported_opening_summary_count: 0,
             gross_pay: items.sum { |item| item.gross_pay.to_f },
+            non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum { |item| item.hours_worked.to_f },
             total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
             custom_earnings_total: custom_totals[:custom_earnings_total],
@@ -2174,7 +2178,7 @@ module Api
             payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
             health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
-            withholding_tax: items.sum { |item| item.withholding_tax.to_f },
+            withholding_tax: items.sum(0.to_d) { |item| item.total_income_tax_withheld.to_d }.round(2).to_f,
             social_security_tax: items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: items.sum { |item| item.medicare_tax.to_f },
             retirement: retirement_totals[:retirement].to_f,
@@ -2208,6 +2212,7 @@ module Api
             end_date: period.end_date,
             period_basis: "pay_date",
             gross_pay: items.sum { |item| item.gross_pay.to_f },
+            non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum { |item| item.hours_worked.to_f },
             total_overtime_hours: items.sum { |item| item.overtime_hours.to_f },
             bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
@@ -2300,6 +2305,7 @@ module Api
         end
 
         def payroll_item_detail(item, fallback_tip_components: nil)
+          retirement = PayrollRetirementTotals.for_item(item, for_reporting: true)
           {
             employee_id: item.employee_id,
             employee_first_name: item.employee&.first_name,
@@ -2320,6 +2326,7 @@ module Api
             tips_paid_out: item.tips_paid_out.to_f,
             bonus: item.bonus.to_f,
             non_taxable_pay: item.non_taxable_pay,
+            non_taxable_additions_total: non_taxable_additions_total(item),
             total_additions: item.total_additions,
             custom_earnings: item.custom_earnings || [],
             custom_earnings_total: custom_earnings_total(item),
@@ -2350,7 +2357,9 @@ module Api
             employer_medicare_tax: item.employer_medicare_tax,
             retirement_payment: item.retirement_payment.to_f,
             roth_retirement_payment: item.roth_retirement_payment.to_f,
-            total_retirement_payment: item.retirement_payment.to_f + item.roth_retirement_payment.to_f,
+            traditional_retirement_total: retirement[:retirement].to_f,
+            roth_retirement_total: retirement[:roth_retirement].to_f,
+            total_retirement_payment: retirement.values.sum.to_f,
             employer_retirement_match: item.employer_retirement_match.to_f,
             employer_roth_retirement_match: item.employer_roth_retirement_match.to_f,
             total_employer_retirement_match: item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f,
@@ -2581,6 +2590,7 @@ module Api
             summary: {
               employee_count: w2_items.size,
               total_gross: w2_items.sum(&:gross_pay),
+              total_non_taxable_additions: w2_items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
               total_reported_tips: w2_items.sum(&:reported_tips),
               total_tips_paid_out: w2_items.sum(&:tips_paid_out),
               total_bonus: w2_items.sum(&:bonus),
@@ -2599,9 +2609,9 @@ module Api
               total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
-              total_traditional_retirement: w2_items.sum(&:retirement_payment),
-              total_roth_retirement: w2_items.sum(&:roth_retirement_payment),
-              total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_traditional_retirement: payroll_summary_retirement_totals(w2_items)[:retirement],
+              total_roth_retirement: payroll_summary_retirement_totals(w2_items)[:roth_retirement],
+              total_retirement: payroll_summary_retirement_totals(w2_items).values.sum,
               total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
               total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
               total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
@@ -2795,6 +2805,10 @@ module Api
 
         def straight_loan_amount(item)
           BigDecimal(item[:loan_deduction].to_s.presence || "0")
+        end
+
+        def non_taxable_additions_total(item)
+          quickbooks_report_data_for(item).other_pay_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }.round(2)
         end
 
         def payroll_summary_retirement_totals(items)
@@ -3040,7 +3054,7 @@ module Api
           "Gross Pay", "Base FIT", "Additional W/H", "SS Tax", "Medicare Tax",
           "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
           "Employer Match", "Employer Roth Match", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
-          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date", "Rate Basis", "Total FIT (Base + Additional)", "Combined Hours"
+          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date", "Rate Basis", "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)"
         ].freeze
 
         CEO_PAYROLL_REGISTER_HINTS = [
@@ -3049,23 +3063,23 @@ module Api
           "For salary employees only", "Hourly Pay + Salary", "", "", "Tips 1 + Tips 2",
           "One-time bonus", "Total hourly/salary pay + total tips + bonus", "Tips paid out daily",
           "Stored calculated FIT", "Stored additional withholding", "Stored calculated Social Security", "Stored calculated Medicare",
-          "Employee retirement", "One-time loan deduction", "Recurring installment loan deduction",
+          "Employee pre-tax and Roth retirement, including saved deduction rows", "One-time loan deduction", "Recurring installment loan deduction",
           "Employer-paid retirement and payroll-field contributions", "Stored total deductions", "Stored net pay",
-          "Gross pay + employer taxes + employer contributions", ""
+          "Gross pay + employer taxes + employer contributions", "", "Non-taxable pay and reimbursements, including saved fields and adjustments"
         ].freeze
         CEO_PAYROLL_REGISTER_HEADERS = [
           "#", "Employee", "Type", "Rate", "Regular Hours", "OT Hours", "Hourly Pay", "Salary",
           "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Bonus", "Gross Pay", "Tips Out",
-          "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (401k)",
-          "Straight Loan", "Installment Loan", "Employer Contributions", "Total Deductions", "Net Pay", "Employer Cost", "Check #"
+          "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (Pre-Tax + Roth)",
+          "Straight Loan", "Installment Loan", "Employer Contributions", "Total Deductions", "Net Pay", "Employer Cost", "Check #", "Non-Taxable Additions"
         ].freeze
         CEO_PAYROLL_REGISTER_KEYS = %i[
           count employee type rate regular_hours overtime_hours hourly_pay salary_pay
           total_hourly_salary tips_1 tips_2 total_tips bonus gross_pay tips_out withholding
           additional_withholding social_security medicare retirement straight_loan installment_loan
-          employer_contributions total_deductions net_pay employer_cost check_number
+          employer_contributions total_deductions net_pay employer_cost check_number non_taxable_additions
         ].freeze
-        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 14, 16, 18, 16, 14, 16, 12 ].freeze
+        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 14, 16, 18, 16, 14, 16, 12, 18 ].freeze
         CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 13, 23, 24, 25 ].freeze
 
         def payroll_register_sheets(report)
@@ -3088,7 +3102,7 @@ module Api
           sheets << payroll_adjustment_totals_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
-          sheets << payroll_register_review_sheet(simple_register) if simple_register
+          sheets << payroll_register_review_sheet(simple_register || { review: report[:register_review].presence || [ { severity: "OK", issue: "No register exceptions detected" } ] })
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
         end
@@ -3097,7 +3111,7 @@ module Api
           pp = report[:pay_period] || {}
           context = "Work period: #{pp[:start_date]} to #{pp[:end_date]} | Pay date: #{pp[:pay_date]}"
           # Sum saved numeric amounts, hours, and disclosure columns, never rates/IDs.
-          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours" ]
+          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)" ]
           totals = headers.each_with_index.map do |header, index|
             if header == "Employee Name"
               "TOTALS"
@@ -3460,7 +3474,8 @@ module Api
             money(emp[:total_deductions]),
             money(emp[:net_pay]),
             money(emp[:employer_payroll_cost]),
-            emp[:check_number]
+            emp[:check_number],
+            money(PayrollRegisterReconciliation.non_taxable_additions(emp))
           ]
         end
 
@@ -3489,7 +3504,8 @@ module Api
             sum_column(rows, 23),
             sum_column(rows, 24),
             sum_column(rows, 25),
-            nil
+            nil,
+            sum_column(rows, 27)
           ]
         end
 
@@ -3579,7 +3595,7 @@ module Api
         end
 
         def payroll_register_review_rows(report, ceo_rows)
-          rows = []
+          rows = PayrollRegisterReconciliation.review_rows(report).map { |entry| entry.values_at(:severity, :employee, :issue, :detail) }
           Array(report[:contractors]).each do |contractor|
             rows << [ "Info", contractor[:employee_name], "Contractor shown separately from employee register", "Contractors remain available on the Contractors/detail sheets." ]
           end
@@ -3588,13 +3604,13 @@ module Api
             row = ceo_rows[index]
             displayed_gross = row[8].to_f + row[11].to_f + row[12].to_f
             gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
-            if gross_diff.abs > 0.01
+            if gross_diff.nonzero?
               rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, recurring/manual adjustments, payroll fields, or non-taxable pay on detail sheets." ]
             end
 
             displayed_deductions = simple_register_deductions_total(emp)
             deduction_diff = money(emp[:total_deductions].to_f - displayed_deductions)
-            if deduction_diff.abs > 0.01
+            if deduction_diff.nonzero?
               rows << [ "Review", emp[:employee_name], "Total deductions include components outside the displayed columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, recurring/manual adjustments, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
             end
 
@@ -3630,7 +3646,7 @@ module Api
           "Base FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
           "Loan Deduction", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay",
           "Employer SS", "Employer Medicare", "Employer Match",
-          "Employer Roth Match", "Total Payroll Cost", "Additional FIT Withholding", "Total FIT (Base + Additional)"
+          "Employer Roth Match", "Total Payroll Cost", "Additional FIT Withholding", "Total FIT (Base + Additional)", "Non-Taxable Additions (Total)"
         ].freeze
 
         def payroll_summary_by_employee_sheets(report, pay_period = nil)
@@ -3732,12 +3748,13 @@ module Api
             emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
             employment_type_label(emp[:employment_type]), emp[:gross_pay], emp[:reported_tips], emp[:tips_paid_out],
             emp[:bonus], emp[:custom_earnings_total], emp[:withholding_tax],
-            emp[:social_security_tax], emp[:medicare_tax], emp[:retirement_payment],
-            emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
+            emp[:social_security_tax], emp[:medicare_tax], PayrollRegisterReconciliation.traditional_retirement(emp),
+            PayrollRegisterReconciliation.roth_retirement(emp), emp[:loan_deduction], emp[:insurance_payment],
             emp[:custom_deductions_total], emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
             emp[:employer_medicare_tax], emp[:employer_retirement_match],
             emp[:employer_roth_retirement_match], total_payroll_cost, emp[:additional_withholding],
-            money(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d)
+            money(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
+            PayrollRegisterReconciliation.non_taxable_additions(emp)
           ]
         end
 
@@ -3746,6 +3763,7 @@ module Api
             [ "Metric", "Amount" ],
             [ count_label, summary[:employee_count] ],
             [ "Gross Pay", summary[:total_gross] ],
+            [ "Non-Taxable Additions (Total)", summary[:total_non_taxable_additions] ],
             [ "Reported Tips", summary[:total_reported_tips] ],
             [ "Tips Paid Out", summary[:total_tips_paid_out] ],
             [ "Bonus", summary[:total_bonus] ],
@@ -3775,6 +3793,7 @@ module Api
           {
             employee_count: items.length,
             total_gross: items.sum { |item| item[:gross_pay].to_f },
+            total_non_taxable_additions: items.sum(0.to_d) { |item| PayrollRegisterReconciliation.non_taxable_additions(item) },
             total_reported_tips: items.sum { |item| item[:reported_tips].to_f },
             total_tips_paid_out: items.sum { |item| item[:tips_paid_out].to_f },
             total_bonus: items.sum { |item| item[:bonus].to_f },
@@ -3789,8 +3808,8 @@ module Api
             total_additional_withholding: items.sum { |item| item[:additional_withholding].to_f },
             total_social_security: items.sum { |item| item[:social_security_tax].to_f },
             total_medicare: items.sum { |item| item[:medicare_tax].to_f },
-            total_traditional_retirement: items.sum { |item| item[:retirement_payment].to_f },
-            total_roth_retirement: items.sum { |item| item[:roth_retirement_payment].to_f },
+            total_traditional_retirement: items.sum(0.to_d) { |item| PayrollRegisterReconciliation.traditional_retirement(item) },
+            total_roth_retirement: items.sum(0.to_d) { |item| PayrollRegisterReconciliation.roth_retirement(item) },
             total_employer_traditional_retirement: items.sum { |item| item[:employer_retirement_match].to_f },
             total_employer_roth_retirement: items.sum { |item| item[:employer_roth_retirement_match].to_f },
             total_deductions: items.sum { |item| item[:total_deductions].to_f },
@@ -3806,13 +3825,14 @@ module Api
             emp[:reported_tips], emp[:tips_paid_out], emp[:bonus], emp[:custom_earnings_total],
             emp[:non_taxable_pay], emp[:gross_pay], emp[:withholding_tax], emp[:additional_withholding],
             emp[:social_security_tax], emp[:medicare_tax], emp[:employer_social_security_tax],
-            emp[:employer_medicare_tax], emp[:retirement_payment], emp[:roth_retirement_payment],
+            emp[:employer_medicare_tax], PayrollRegisterReconciliation.traditional_retirement(emp), PayrollRegisterReconciliation.roth_retirement(emp),
             emp[:employer_retirement_match], emp[:employer_roth_retirement_match],
             emp[:straight_loan_deduction], emp[:installment_loan_payment], emp[:employer_contributions_total], emp[:employer_payroll_cost],
             emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
             emp[:net_pay], emp[:check_number], emp[:check_date],
             payroll_rate_basis(emp), money(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
-            emp[:hours_worked].to_f + emp[:overtime_hours].to_f + emp[:holiday_hours].to_f + emp[:pto_hours].to_f
+            emp[:hours_worked].to_f + emp[:overtime_hours].to_f + emp[:holiday_hours].to_f + emp[:pto_hours].to_f,
+            PayrollRegisterReconciliation.non_taxable_additions(emp)
           ]
         end
 
@@ -4046,6 +4066,36 @@ module Api
           year.presence || "report"
         end
 
+        # Presentation only: spreadsheet exports retain their numeric cells.
+        def ytd_summary_pdf_sheets(report)
+          ytd_summary_sheets(report).map do |sheet|
+            next sheet unless sheet[:name] == "Company Totals"
+
+            rows = (report[:company_totals] || {}).map do |key, value|
+              label = case key.to_sym
+              when :source_labeled_after_tax_401k_in_pretax_bucket
+                "Historical 401(k) labeled after-tax (source pre-tax bucket)"
+              when :withholding_tax then "Federal/Guam income tax"
+              when :social_security_tax then "Social Security tax"
+              when :medicare_tax then "Medicare tax"
+              when :retirement then "Traditional 401(k)"
+              when :roth_retirement then "Roth 401(k)"
+              else key.to_s.humanize
+              end
+              display = case key.to_sym
+              when :period_basis then value.to_s.humanize
+              when :year, :start_date, :end_date then value
+              when :total_hours, :total_overtime_hours
+                ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", value.to_d))
+              else
+                key.to_s.end_with?("_count") ? value : ActiveSupport::NumberHelper.number_to_currency(value.to_d, precision: 2)
+              end
+              [ label, display ]
+            end
+            sheet.merge(rows: [ [ "Field", "Value" ], *rows ])
+          end
+        end
+
         def ytd_summary_sheets(report)
           component_columns = Array(report[:component_columns])
           provisional_column = report.dig(:meta, :provisional) ? [ "Payroll status" ] : []
@@ -4059,7 +4109,7 @@ module Api
             "Employer Social Security", "Employer Medicare", "Other Employer Taxes", "Employer Taxes Total",
             "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match", "Other Employer Contributions",
             "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
-            "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
+            "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay", "Non-Taxable Additions (Total)"
           ] + component_columns.map { |column| "Breakdown Already Included - #{column[:label]}" } + provisional_column ]
           Array(report[:employees]).each do |emp|
             rows << [
@@ -4073,14 +4123,14 @@ module Api
               emp[:employer_traditional_401k_match], emp[:employer_roth_401k_match], emp[:other_employer_contributions],
               emp[:employer_contributions], emp[:employer_taxes_and_contributions_total], emp[:employer_payroll_cost],
               emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
-              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay],
+              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay], emp[:non_taxable_additions_total],
               *component_columns.map { |column| emp.fetch(:component_values, {})[column[:key]] },
               *(provisional_column.empty? ? [] : [ "TEST ONLY — calculated, not paid" ])
             ]
           end
           [
             { name: "Payroll Summary", rows: rows },
-            { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).map { |key, value| [ key.to_s.humanize, value ] } },
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),

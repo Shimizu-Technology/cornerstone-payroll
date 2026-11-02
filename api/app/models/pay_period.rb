@@ -52,12 +52,13 @@ class PayPeriod < ApplicationRecord
   has_many :origin_late_hours_runs, class_name: "TimeTrackingLateHoursRun", foreign_key: :origin_pay_period_id, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
   has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
+  # Source rows reference payroll items; remove them first, newest revision first.
+  has_many :payroll_intake_sessions, -> { order(package_revision: :desc) }, dependent: :destroy
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
-  has_many :payroll_intake_sessions, dependent: :destroy
-  has_many :payroll_review_packages, dependent: :restrict_with_error
+  has_many :payroll_review_packages, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
   has_many :check_print_generations, dependent: :restrict_with_error
@@ -225,7 +226,74 @@ class PayPeriod < ApplicationRecord
     errors.add(:base, "Reconcile the saved reported-payment match before revising or voiding this payroll. Its hours remain reserved.")
     throw :abort
   end
+  before_destroy :prevent_finalized_run_deletion, prepend: true
   before_destroy :prevent_training_baseline_mutation
+
+  def previously_approved?
+    approved? || approved_at.present? || unapproved_at.present? ||
+      payroll_review_packages.where.not(approved_at: nil).exists? ||
+      AuditLog.where(company_id: company_id, record_type: [ "pay_periods", "PayPeriod" ], record_id: id,
+        action: %w[pay_periods#approve pay_periods#unapprove]).exists?
+  end
+
+  def deletable_unapproved_run?
+    status.in?(%w[draft calculated]) && committed_at.nil? && !previously_approved?
+  end
+
+  # Run before any import/source/paycheck write, and again from before_destroy.
+  def ensure_deletable!
+    reason = deletion_blocker
+    return true unless reason
+
+    errors.add(:base, reason)
+    raise ActiveRecord::RecordNotDestroyed.new(reason, self)
+  end
+
+  def prevent_finalized_run_deletion
+    reason = deletion_blocker
+    return unless reason
+
+    errors.add(:base, reason)
+    throw :abort
+  end
+
+  def deletion_blocker
+    return "This run was approved before. Keep it and correct it instead, or ask an admin." if previously_approved?
+    unless deletable_unapproved_run?
+      return "Only unapproved payroll runs that have never been committed can be deleted. Keep this run and correct it instead, or ask an admin."
+    end
+    if training_baseline?
+      return "This run is a protected training baseline and cannot be deleted."
+    end
+    if payroll_review_packages.any?(&:client_review_history_unknown?)
+      return "This run has older client review records with unverified sharing history. Keep it and correct it instead, or ask an admin."
+    end
+    if payroll_review_packages.any?(&:retained_client_evidence?)
+      return "This run has client review history: it was shared for approval or has a client decision or comment. Keep it and correct it instead, or ask an admin."
+    end
+    deferred = PayrollIntakeRow.joins(:payroll_intake_session)
+      .where(payroll_intake_sessions: { pay_period_id: id }, disposition: "deferred")
+      .where.not(target_pay_period_id: [ nil, id ]).includes(:target_pay_period).order(:id).first
+    if deferred
+      target = deferred.target_pay_period
+      return "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded."
+    end
+
+    if non_employee_checks.any? { |check| check.paid_at.present? || check.printed? || check.prepared_at.present? || check.payroll_liability_check_allocations.exists? }
+      return "This run has payment checks that were paid, printed, or prepared. Keep it for its payment history, or ask an admin."
+    end
+
+    # Check all declared retained associations before dependent destroy callbacks
+    # can touch source documents, paychecks or their entered hours.
+    retained = self.class.reflect_on_all_associations.select { |association| association.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) }
+    if retained.any? { |reflection| association(reflection.name).scope.exists? }
+      return "This run is linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    if PayrollItem.reflect_on_all_associations.any? { |reflection| reflection.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) && payroll_items.joins(reflection.name).exists? }
+      return "This run has paychecks linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    nil
+  end
 
   scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }
   scope :draft, -> { where(status: "draft") }
@@ -321,10 +389,11 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: at,
         intake_stale_reason: reason,
         intake_stale_session: session
@@ -341,10 +410,11 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
-        approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        approved_by_id: nil
       )
       invalidate_later_rehearsal_calculations!
     end
@@ -362,8 +432,8 @@ class PayPeriod < ApplicationRecord
         )
         later.update!(
           status: "draft", calculated_at: nil, calculated_by_id: nil,
-          approved_at: nil, approved_by_id: nil,
-          unapproved_at: nil, unapproved_by_id: nil
+          unapproved_at: later.unapproved_at || (later.approved_at && Time.current),
+          approved_at: nil, approved_by_id: nil
         )
       end
   end

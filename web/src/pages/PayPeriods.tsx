@@ -1,6 +1,6 @@
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
@@ -157,6 +157,10 @@ export function PayPeriods() {
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const { dismiss: dismissFeedback } = useFeedback();
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+  const [deletingPeriod, setDeletingPeriod] = useState<PayPeriod | null>(null);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [calculationResult, setCalculationResult] = useState<{ id: number; summary: string; failed: boolean; failures: PayrollCalculationFailure[]; year: number; names: Map<number, string> } | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
@@ -223,6 +227,9 @@ export function PayPeriods() {
     mutationGenerationRef.current += 1;
     setIsCreateOpen(false);
     setIsEditOpen(false);
+    setDeletingPeriod(null);
+    setDeleteAcknowledged(false);
+    setDeleteSuccess(null);
     setIsSubmitting(false);
     setIsEditSubmitting(false);
     setActionInFlight(null);
@@ -543,11 +550,45 @@ export function PayPeriods() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (readOnlyWorkspace) return;
-    if (!confirm('Are you sure you want to delete this pay period?')) {
-      return;
+  const openDeleteDialog = async (id: number) => {
+    if (readOnlyWorkspace || actionInFlight !== null) return;
+    const isCurrentMutation = currentMutationGuard();
+    try {
+      setActionInFlight(`delete-details-${id}`);
+      setError(null);
+      if (deleteSuccess) dismissFeedback({ tone: 'success', message: deleteSuccess });
+      setDeleteSuccess(null);
+      const { pay_period } = await payPeriodsApi.get(id, activeCompanyId ?? undefined);
+      if (!isCurrentMutation()) return;
+      setDeleteAcknowledged(false);
+      setDeletingPeriod(pay_period);
+    } catch (err) {
+      if (isCurrentMutation()) setError(err instanceof Error ? err.message : 'Could not load the pay run. Try again.');
+    } finally {
+      if (isCurrentMutation()) setActionInFlight(null);
     }
+  };
+
+  // Missing item details must never bypass the entered-hours acknowledgement.
+  const deleteNeedsAcknowledgement = deletingPeriod !== null && (
+    (deletingPeriod.employee_count ?? 0) >= 10
+    || !Array.isArray(deletingPeriod.payroll_items)
+    || deletingPeriod.payroll_items.some((item) =>
+      [item.total_hours, item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours]
+        .some((hours) => Number(hours) !== 0 && Number.isFinite(Number(hours)))
+      || item.wage_rate_hours?.some((rate) =>
+        [rate.regular_hours, rate.overtime_hours, rate.holiday_hours, rate.pto_hours]
+          .some((hours) => Number(hours) !== 0 && Number.isFinite(Number(hours))))
+    )
+  );
+  const deletedRunName = deletingPeriod
+    ? `${activeCompany?.name ?? 'Client'} — ${formatDateRange(deletingPeriod.start_date, deletingPeriod.end_date)} (pay date ${formatDate(deletingPeriod.pay_date)})`
+    : '';
+
+  const handleDelete = async () => {
+    if (readOnlyWorkspace || !deletingPeriod || actionInFlight !== null
+      || (deleteNeedsAcknowledgement && !deleteAcknowledged)) return;
+    const { id } = deletingPeriod;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`delete-${id}`);
@@ -555,10 +596,13 @@ export function PayPeriods() {
       await payPeriodsApi.delete(id);
       if (!isCurrentMutation()) return;
       setPayPeriods((prev) => prev.filter((period) => period.key !== `native:${id}`));
+      setDeleteSuccess(`Deleted ${deletedRunName}.`);
+      setDeletingPeriod(null);
+      setDeleteAcknowledged(false);
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
-      setError(err instanceof Error ? err.message : 'Failed to delete pay period');
+      setError(err instanceof Error ? err.message : 'Failed to delete pay run');
     } finally {
       if (isCurrentMutation()) setActionInFlight(null);
     }
@@ -769,6 +813,7 @@ export function PayPeriods() {
           </div>
         )}
         {/* Error display */}
+        {deleteSuccess && <ActionFeedback tone="success" message={deleteSuccess} />}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {calculationResult && <ActionFeedback tone={calculationResult.failed ? 'error' : 'success'} message={calculationResult.summary}>
           <p>{calculationResult.summary}</p>
@@ -896,7 +941,7 @@ export function PayPeriods() {
                     onView={() => navigate(recordDestination(period, 'overview'))}
                     onEnterHours={() => navigate(recordDestination(period, 'work'))}
                     onEdit={() => openEditModal(period as PayPeriod)}
-                    onDelete={() => handleDelete(period.id)}
+                    onDelete={() => openDeleteDialog(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
                     onApprove={() => handleApprove(period.id)}
                     onCommit={() => handleCommit(period.id)}
@@ -1010,7 +1055,7 @@ export function PayPeriods() {
                               View
                             </button>
                             {!periodReadOnly && period.capabilities.edit && <><span className="text-neutral-300">·</span><button className="text-neutral-600 hover:text-neutral-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => openDeleteDialog(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
                           {!periodReadOnly && period.capabilities.enter_hours && (
@@ -1127,6 +1172,41 @@ export function PayPeriods() {
       </div>
 
       {/* Create Pay Period Modal */}
+      <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
+        if (!open && actionInFlight === null) {
+          setDeletingPeriod(null);
+          setDeleteAcknowledged(false);
+        }
+      }}>
+        <DialogContent className="w-full max-w-lg" aria-describedby="delete-pay-run-description">
+          <DialogHeader>
+            <DialogTitle>Delete unfinished pay run?</DialogTitle>
+            <DialogDescription id="delete-pay-run-description">
+              This permanently deletes this unfinished run and its entered hours. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deletingPeriod && <dl className="my-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>dd]:break-words">
+            <dt className="font-medium">Client</dt><dd>{activeCompany?.name ?? 'Client'}</dd>
+            <dt className="font-medium">Period</dt><dd>{formatDateRange(deletingPeriod.start_date, deletingPeriod.end_date)}</dd>
+            <dt className="font-medium">Pay date</dt><dd>{formatDate(deletingPeriod.pay_date)}</dd>
+            <dt className="font-medium">Status</dt><dd>{payPeriodStatusConfig[deletingPeriod.status]?.label ?? deletingPeriod.status}</dd>
+            <dt className="font-medium">Employees</dt><dd>{deletingPeriod.employee_count ?? deletingPeriod.payroll_items?.length ?? 'Unavailable'}</dd>
+            <dt className="font-medium">Gross pay</dt><dd>{formatCurrency(deletingPeriod.total_gross ?? 0)}</dd>
+          </dl>}
+          {deleteNeedsAcknowledgement && <label className="mb-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0" checked={deleteAcknowledged}
+              disabled={actionInFlight !== null} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />
+            I understand this deletes the entered hours
+          </label>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeletingPeriod(null); setDeleteAcknowledged(false); }} disabled={actionInFlight !== null}>Cancel</Button>
+            <Button variant="danger" onClick={() => void handleDelete()} disabled={actionInFlight !== null || (deleteNeedsAcknowledgement && !deleteAcknowledged)}>
+              {actionInFlight?.startsWith('delete-') ? 'Deleting…' : 'Delete pay run'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isCreateOpen && !readOnlyWorkspace} onOpenChange={handleCreateOpenChange}>
         <DialogContent>
           <form onSubmit={handleCreate}>

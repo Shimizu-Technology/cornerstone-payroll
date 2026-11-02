@@ -118,7 +118,7 @@ class EmployeeRetirementElection < ApplicationRecord
       errors.add(:plan_source_reference, "is required to verify Roth availability") if plan_source_reference.blank?
     end
     if employer_match_mode != "none" && employer_match_destination == "roth"
-      errors.add(:employer_roth_available, "must confirm the plan accepts designated Roth employer contributions") unless employer_roth_available?
+      errors.add(:employer_roth_available, 'must be confirmed for designated Roth employer contributions: check "Administrator confirmed employer Roth support" after verifying the plan, or change "Employer contribution destination" to Traditional') unless employer_roth_available?
       errors.add(:plan_source_reference, "is required to verify employer Roth availability and provider reporting") if plan_source_reference.blank?
     end
   end

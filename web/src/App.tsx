@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { useSelectedCompanyCapability, type ClientCapability } from '@/hooks/useSelectedCompanyCapability';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -399,9 +399,9 @@ function AppFeedback({ children }: { children: ReactNode }) {
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
 }
 
-function App() {
+function AppContents() {
   return (
-    <BrowserRouter>
+    <>
       <PostHogPageView />
       <AppWithClerk>
         <AuthProvider>
@@ -411,8 +411,14 @@ function App() {
           </CompanyProvider>
         </AuthProvider>
       </AppWithClerk>
-    </BrowserRouter>
+    </>
   );
+}
+
+const router = createBrowserRouter([{ path: '*', element: <AppContents /> }]);
+
+function App() {
+  return <RouterProvider router={router} />;
 }
 
 export default App;

@@ -103,6 +103,44 @@ RSpec.describe "Check print runs", type: :request do
     expect(R2StorageService).not_to have_received(:new)
   end
 
+  [ 0, 20 ].each do |non_taxable_pay|
+    it "invalidates the old summary digest with #{non_taxable_pay} non-taxable pay while preserving confirmed PDFs" do
+      company.update!(check_stock_type: "bottom_check")
+      item = create(:payroll_item, :with_check, company: company, pay_period: pay_period,
+        employee: create(:employee, company: company), non_taxable_pay: non_taxable_pay)
+      payload = CheckGenerator.new(item).render_input_payload
+      expect(payload.fetch("summary")).to include("non_taxable_pay" => format("%.2f", non_taxable_pay), "ytd_non_taxable_pay" => format("%.2f", non_taxable_pay))
+      payload.fetch("summary").except!("non_taxable_pay", "ytd_non_taxable_pay")
+      bytes = "%PDF-1.4 original saved check"
+      run = CheckPrintRun.create!(company: company, pay_period: pay_period, created_by: admin_user,
+        status: "prepared", check_stock_type: company.check_stock_type, starting_slot: 1, selected_count: 1,
+        storage_key: "check-print-runs/old-summary.pdf", filename: "old-summary.pdf", generated_at: Time.current,
+        sha256: Digest::SHA256.hexdigest(bytes), byte_size: bytes.bytesize,
+        manifest: [ {
+          "key" => "payroll_item:#{item.id}", "source_type" => "payroll_item", "source_id" => item.id,
+          "check_number" => item.check_number, "payee" => item.employee.full_name,
+          "amount" => format("%.2f", item.net_pay), "source_updated_at" => item.updated_at.iso8601(6),
+          "printed_at" => nil, "print_count" => 0,
+          "render_input_digest" => CheckPrintRenderFingerprint.for_payload(payload)
+        } ])
+      storage = instance_double(R2StorageService)
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      allow(storage).to receive(:download).and_return(bytes)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_runs"
+      expect(response.parsed_body.fetch("check_print_runs").sole.fetch("confirmation_state")).to eq("outdated")
+      get "/api/v1/admin/check_print_runs/#{run.id}/pdf"
+      expect(response).to have_http_status(:conflict)
+      expect(storage).not_to have_received(:download)
+
+      run.update!(status: "confirmed", confirmed_at: Time.current, confirmed_by: admin_user)
+      get "/api/v1/admin/check_print_runs/#{run.id}/pdf"
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to eq(bytes)
+      expect(storage).to have_received(:download).with(run.storage_key).once
+    end
+  end
+
   it "forbids client-portal users from listing saved packages" do
     client_user = create(:user, company: company, organization: company.organization, role: "client")
     allow_any_instance_of(Api::V1::Admin::CheckPrintRunsController)

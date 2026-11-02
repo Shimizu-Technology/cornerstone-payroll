@@ -22,6 +22,7 @@ module PayrollIntake
       results = { applied: [], skipped: [], errors: [] }
 
       ActiveRecord::Base.transaction do
+        Company.lock.find(company.id)
         pay_period.with_lock do
           raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 
@@ -275,8 +276,6 @@ module PayrollIntake
         calculated_by_id: actor&.id,
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: nil,
         intake_stale_reason: nil,
         intake_stale_session: nil

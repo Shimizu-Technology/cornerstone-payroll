@@ -51,7 +51,8 @@ class PayrollRegisterCsvExporter
     "Check Number",
     "Rate Basis",
     "Total FIT (Base + Additional)",
-    "Combined Hours"
+    "Combined Hours",
+    "Non-Taxable Additions (Total)"
   ].freeze
 
   attr_reader :report
@@ -186,8 +187,8 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:medicare_tax]),
       format_currency(emp[:employer_social_security_tax]),
       format_currency(emp[:employer_medicare_tax]),
-      format_currency(emp[:retirement_payment]),
-      format_currency(emp[:roth_retirement_payment]),
+      format_currency(PayrollRegisterReconciliation.traditional_retirement(emp)),
+      format_currency(PayrollRegisterReconciliation.roth_retirement(emp)),
       format_currency(emp[:employer_retirement_match]),
       format_currency(emp[:employer_roth_retirement_match]),
       format_currency(emp[:straight_loan_deduction]),
@@ -201,7 +202,8 @@ class PayrollRegisterCsvExporter
       sanitize_csv_field(emp[:check_number]),
       rate_basis(emp),
       format_currency(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
-      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| emp[key].to_f }
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| emp[key].to_f },
+      format_currency(PayrollRegisterReconciliation.non_taxable_additions(emp))
     ]
     (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + payroll_adjustment_export.values_for(emp).map do |amount|
       amount.nil? ? "" : format_currency(amount)
@@ -237,8 +239,8 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:medicare_tax)),
       format_currency(total_for(:employer_social_security_tax)),
       format_currency(total_for(:employer_medicare_tax)),
-      format_currency(total_for(:retirement_payment)),
-      format_currency(total_for(:roth_retirement_payment)),
+      format_currency(payroll_rows.sum(0.to_d) { |worker| PayrollRegisterReconciliation.traditional_retirement(worker) }),
+      format_currency(payroll_rows.sum(0.to_d) { |worker| PayrollRegisterReconciliation.roth_retirement(worker) }),
       format_currency(total_for(:employer_retirement_match)),
       format_currency(total_for(:employer_roth_retirement_match)),
       format_currency(total_for(:straight_loan_deduction)),
@@ -251,7 +253,8 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:net_pay)),
       "", "",
       format_currency(total_for(:withholding_tax) + total_for(:additional_withholding)),
-      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| total_for(key) }
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| total_for(key) },
+      format_currency(payroll_rows.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) })
     ] + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
       payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
   end

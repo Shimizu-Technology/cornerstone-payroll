@@ -103,7 +103,9 @@ class PayrollIntakeSession < ApplicationRecord
   end
 
   def prevent_destroy
-    errors.add(:base, "Payroll source packages cannot be deleted")
+    return if destroyed_by_association&.active_record == PayPeriod && pay_period.deletable_unapproved_run?
+
+    errors.add(:base, "Payroll source packages can only be removed when deleting their unapproved payroll run")
     throw(:abort)
   end
 

@@ -3133,6 +3133,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
     t.bigint "approved_by_id"
     t.string "calculation_checksum", null: false
     t.jsonb "calculation_snapshot", default: {}, null: false
+    t.boolean "client_review_history_unknown", default: true, null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.datetime "generated_at", null: false
@@ -3141,6 +3142,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_010000) do
     t.integer "revision", null: false
     t.string "schema_version", default: "v1", null: false
     t.jsonb "source_manifest", default: {}, null: false
+    t.datetime "sent_for_client_approval_at"
     t.string "status", default: "pending", null: false
     t.datetime "superseded_at"
     t.text "supersession_reason"

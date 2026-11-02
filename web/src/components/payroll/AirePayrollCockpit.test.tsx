@@ -297,6 +297,14 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks(); });
 
 describe('AirePayrollCockpit', () => {
+  it('replaces missing delegation headers with an account connection message and Settings link', async () => {
+    apiMocks.overview.mockRejectedValue(new ApiError('Missing X-Aire-Delegation-Token header', 401));
+    render(<MemoryRouter><FeedbackProvider><AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={async () => undefined} /></FeedbackProvider></MemoryRouter>);
+    expect(await screen.findByText('Connect your time tracking account to review AIRE hours for this payroll.')).toBeTruthy();
+    expect(screen.queryByText(/Missing X-Aire-Delegation-Token/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Settings → Time tracking account' }).getAttribute('href')).toBe('/app/aire-account-connection');
+  });
+
   it.each([false, true])('keeps a batch-only connection usable with published=%s without requesting optional live features', async (published) => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={{
       ...calendar,

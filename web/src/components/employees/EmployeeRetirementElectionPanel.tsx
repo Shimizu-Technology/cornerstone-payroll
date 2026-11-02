@@ -115,8 +115,12 @@ export function EmployeeRetirementElectionPanel({ employee, onSaved }: Props): R
       setError('Verify the employee’s date of birth in employee details before enabling catch-up.');
       return;
     }
+    if (draft.participating && draft.employer_match_mode !== 'none' && draft.employer_match_destination === 'roth' && !draft.employer_roth_available) {
+      setError('For Roth employer contributions, check “Administrator confirmed employer Roth support” after verifying the plan, or change “Employer contribution destination” to Traditional.');
+      return;
+    }
     const rothConfigured = Number(draft.roth_rate) > 0 || Number(draft.roth_amount) > 0;
-    if (draft.participating && (draft.catch_up_enabled || rothConfigured || draft.employer_match_destination === 'roth') && !draft.plan_source_reference?.trim()) {
+    if (draft.participating && (draft.catch_up_enabled || rothConfigured || (draft.employer_match_mode !== 'none' && draft.employer_match_destination === 'roth')) && !draft.plan_source_reference?.trim()) {
       setError('Add the verified plan document or administrator reference for catch-up and Roth features.');
       return;
     }

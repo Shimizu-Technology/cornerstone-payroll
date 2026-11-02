@@ -1,0 +1,14 @@
+{
+  "single-stub.pdf": {
+    "sha256": "96d8d78de57e2dc0a7c4105726f2301eac72b992608af86ab52e379f949e205b",
+    "bytes": 22761
+  },
+  "check-preview.pdf": {
+    "sha256": "b57b7c2ac0ca13d6dfe65dda7e615a81676a879a9b9bc8a644e3e3fecd4b7f4b",
+    "bytes": 17731
+  },
+  "batch-stubs.pdf": {
+    "sha256": "96d8d78de57e2dc0a7c4105726f2301eac72b992608af86ab52e379f949e205b",
+    "bytes": 22761
+  }
+}
