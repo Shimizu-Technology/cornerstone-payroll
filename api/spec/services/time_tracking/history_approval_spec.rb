@@ -63,6 +63,9 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect do
       AireHistoryReview.transaction(requires_new: true) { AireHistoryReview.where(id: review.id).update_all(attestation: "changed") }
     end.to raise_error(ActiveRecord::StatementInvalid, /immutable/)
+    expect do
+      AireHistoryReview.transaction(requires_new: true) { ActiveRecord::Base.connection.execute("TRUNCATE aire_history_reviews") }
+    end.to raise_error(ActiveRecord::StatementInvalid, /cannot be truncated/)
   end
 
   it "reports the exact source entry that changed and applies nothing" do
@@ -115,6 +118,72 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(CheckEvent.count).to eq(0)
   end
 
+  [ "not_payable", "no_payable_hours", "payment_evidence_pending" ].each do |type|
+    it "prefills the strict #{type} disposition without converting it to a paid or approved entry" do
+      row["history_evidence"]["baseline_lines"] = []
+      case type
+      when "not_payable"
+        row["state"]["approval_status"] = "denied"
+        row["lifecycle"] = { "status" => "not_payable" }
+      when "no_payable_hours"
+        row["hours"] = 0
+      when "payment_evidence_pending"
+        row["history_evidence"]["payment_attestation"] = { "id" => 7, "source_changed" => false, "hours" => row["hours"] }
+        row["lifecycle"] = { "status" => "payment_attested_pending_evidence" }
+      end
+      state = row.fetch("state").deep_dup
+      page = history_service.prepare!
+      expect(page["dispositions"].sole).to include("type" => type)
+      expect(page["history_coverage_verified"]).to be(true)
+      approve_review(page)
+      expect(row.fetch("state")).to eq(state)
+      expect(CheckEvent.count).to eq(0)
+      expect(TimeTrackingManualAllocation.count).to eq(0)
+    end
+  end
+
+  it "shows only the exact frozen pending-OT remainder beside represented regular history" do
+    row["hours"] = 6.4
+    row["state"]["overtime_status"] = "pending"
+    row["history_evidence"]["payable_segments"].sole["total_hours"] = "6.4"
+    payload["exclusions"] = [ { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => row["work_date"], "category" => category, "reason" => "pending_overtime",
+      "held_total_hours" => "0.3", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.3" } ]
+    payload["summary"]["exclusion_count"] = 1
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["baseline_lines"].sole["batch_checksum"] = payload.dig("export", "checksum")
+    page = history_service.prepare!
+    expect(page["dispositions"].sole).to include("type" => "historical_baseline_pending_overtime", "hours" => "6.4")
+    expect(page["pending_review"].sole).to include("hours" => "0.3")
+    expect(page["history_coverage_verified"]).to be(true)
+    approve_review(page)
+    expect(row.dig("state", "overtime_status")).to eq("pending")
+  end
+
+  it "keeps a whole frozen overtime exclusion pending when no regular lines were represented" do
+    row["hours"] = 0.3
+    row["state"]["overtime_status"] = "pending"
+    row["history_evidence"]["baseline_lines"] = []
+    hold = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => row["work_date"], "category" => category, "reason" => "pending_overtime",
+      "held_total_hours" => "0.3", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.3" }
+    payload["employees"] = []
+    payload["exclusions"] = [ hold ]
+    payload["summary"].merge!("employee_count" => 0, "adjustment_count" => 0, "exclusion_count" => 1, "total_hours" => 0,
+      "regular_hours" => 0, "overtime_hours" => 0, "current_count" => 0)
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["pending_overtime"] = { "kind" => "pending_overtime", "source_time_entry_version" => 2,
+      "payable_content_checksum" => row.dig("history_evidence", "payable_content_checksum"), "represented_regular_hours" => "0.0",
+      "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"), "frozen_exclusion" => hold }
+    page = history_service.prepare!
+    expect(page["dispositions"].sole).to include("type" => "pending_overtime")
+    expect(page["history_coverage_verified"]).to be(true)
+    approve_review(page)
+    expect(CheckEvent.count).to eq(0)
+  end
+
   it "suggests an exact directory/Payroll match and only saves it on approval" do
     source.time_tracking_employee_mappings.delete_all
     page = history_service.prepare!
@@ -148,6 +217,17 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect { approve_review(page) }.to raise_error(described_class::Error, /Explicitly confirm/)
     expect(source.time_tracking_employee_mappings).not_to exist
     expect(approve_review(page, confirmed_mapping_uuids: [ uuid ])["approved_at"]).to be_present
+  end
+
+  it "does not erase accents or punctuation to classify different names as an exact employee match" do
+    source.time_tracking_employee_mappings.delete_all
+    employee.update!(first_name: "José", last_name: "Person", email: nil)
+    allow(client).to receive(:payroll_cockpit_employees).and_return(
+      "employees" => [ { "id" => "91", "payroll_integration_id" => uuid, "full_name" => "Jos Person", "email" => nil } ],
+      "pagination" => { "current_page" => 1, "per_page" => 100, "total_count" => 1, "total_pages" => 1, "truncated" => false })
+    page = history_service.prepare!(mapping_selections: [ { "source_user_uuid" => uuid, "employee_id" => employee.id } ])
+    expect(page["mappings"].sole["confirmation_required"]).to be(true)
+    expect { approve_review(page) }.to raise_error(described_class::Error, /Explicitly confirm/)
   end
 
   it "blocks a saved numeric owner mismatch instead of trusting its permanent UUID alone" do

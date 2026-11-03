@@ -36,6 +36,9 @@ class CreateAireHistoryReviews < ActiveRecord::Migration[8.1]
         execute <<~SQL
           CREATE OR REPLACE FUNCTION protect_aire_history_review() RETURNS trigger AS $$
           BEGIN
+            IF TG_OP = 'TRUNCATE' THEN
+              RAISE EXCEPTION 'AIRE history review audit cannot be truncated';
+            END IF;
             IF OLD.approved_at IS NOT NULL THEN
               RAISE EXCEPTION 'Approved AIRE history reviews are immutable';
             END IF;
@@ -45,10 +48,13 @@ class CreateAireHistoryReviews < ActiveRecord::Migration[8.1]
           $$ LANGUAGE plpgsql;
           CREATE TRIGGER aire_history_review_integrity BEFORE UPDATE OR DELETE ON aire_history_reviews
           FOR EACH ROW EXECUTE FUNCTION protect_aire_history_review();
+          CREATE TRIGGER aire_history_review_prevent_truncate BEFORE TRUNCATE ON aire_history_reviews
+          FOR EACH STATEMENT EXECUTE FUNCTION protect_aire_history_review();
         SQL
       end
       direction.down do
         execute "DROP TRIGGER IF EXISTS aire_history_review_integrity ON aire_history_reviews"
+        execute "DROP TRIGGER IF EXISTS aire_history_review_prevent_truncate ON aire_history_reviews"
         execute "DROP FUNCTION IF EXISTS protect_aire_history_review()"
       end
     end

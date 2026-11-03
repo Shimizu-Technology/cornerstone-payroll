@@ -102,7 +102,7 @@ module TimeTracking
       when "historical_baseline"
         unallocated && !pending && baseline_verified?(baseline, current)
       when "historical_baseline_pending_overtime"
-        unallocated && unheld && overtime_hold_verified?(current)
+        unallocated && unheld && baseline.any? && overtime_hold_verified?(current)
       when "legacy_frozen_batch_baseline"
         unallocated && baseline_verified?(baseline, current, legacy_frozen: true)
       when "pending_overtime"
