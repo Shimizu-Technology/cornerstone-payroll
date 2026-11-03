@@ -416,7 +416,7 @@ RSpec.describe TimeTracking::HistoryApproval do
     row["hours"] = 10.0
     row["history_evidence"]["payable_segments"].sole["total_hours"] = "10.0"
     row["history_evidence"]["baseline_lines"].sole.merge!("total_hours" => 10.0, "regular_hours" => 10.0,
-      "batch_checksum" => payload.dig("export", "checksum"), "snapshot_checksum" => "f" * 64)
+      "batch_checksum" => payload.dig("export", "checksum"), "snapshot_checksum" => "f" * 64, "source_user_id" => "91")
     input = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
       "version" => 2, "work_date" => row["work_date"], "hours" => "10.0", "payable_content_checksum" => "a" * 64,
       "frozen_rows" => [ { "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
