@@ -381,9 +381,12 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
   end
 
-  it "rolls back when the bounded business-lock phase exceeds its deadline" do
+  it "rolls back after the lock deadline even if an asynchronous timeout is swallowed" do
     page = history_service.prepare!
     stub_const("TimeTracking::HistoryApproval::LOCK_BUDGET_SECONDS", 0.05)
+    # A dependency may rescue StandardError. The in-transaction elapsed check
+    # must still roll back already-written mappings, receipt and approval audit.
+    allow(Timeout).to receive(:timeout).and_yield
     allow_any_instance_of(TimeTracking::VerifiedHistoryRollout).to receive(:ensure_complete!).and_wrap_original do |method|
       sleep 0.1
       method.call
