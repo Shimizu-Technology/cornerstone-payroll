@@ -80,6 +80,39 @@ RSpec.describe "Reviewed historical rounding packet" do
     TimeTracking::VerifiedHistoryRollout.new(manifest: packet, actor: actor)
   end
 
+  it "keeps a whole frozen overtime exclusion pending with no historical payment claim" do
+    row["hours"] = 0.3
+    row["state"]["overtime_status"] = "pending"
+    row["history_evidence"]["baseline_lines"] = []
+    payload["employees"] = []
+    payload["exclusions"] = [ {
+      "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => "2026-08-14", "category" => category, "reason" => "pending_overtime",
+      "held_total_hours" => 0.3, "held_regular_hours" => 0, "held_overtime_hours" => 0.3
+    } ]
+    payload["summary"].merge!("employee_count" => 0, "adjustment_count" => 0, "exclusion_count" => 1,
+      "total_hours" => 0, "regular_hours" => 0, "overtime_hours" => 0, "current_count" => 0)
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["pending_overtime"] = { "kind" => "pending_overtime", "source_time_entry_version" => 2,
+      "payable_content_checksum" => "a" * 64, "represented_regular_hours" => "0.0",
+      "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+      "frozen_exclusion" => payload["exclusions"].sole.deep_dup }
+    packet = rollout(manifest).capture_review_packet!
+    packet["reviewed_dispositions"].sole.merge!("disposition" => "pending_overtime",
+      "reason" => "Keep this exact whole frozen overtime exclusion pending for approval",
+      "evidence" => "Synthetic authenticated frozen hold; no payment or allocation evidence")
+    expect(rollout(packet).preview!).to include(history_coverage_verified: true, disposition_counts: { "pending_overtime" => 1 })
+    pristine = row.deep_dup
+    [ [ "hours", 0.4 ], [ "state", row["state"].merge("overtime_status" => "approved") ],
+      [ "history_evidence", row["history_evidence"].merge("pending_overtime" => nil) ] ].each do |key, value|
+      row.replace(pristine.deep_dup.merge(key => value))
+      recaptured = rollout(manifest).capture_review_packet!
+      recaptured["reviewed_dispositions"].sole.merge!(packet["reviewed_dispositions"].sole.except("source"))
+      expect(rollout(recaptured).preview!).to include(history_coverage_verified: false)
+    end
+  end
+
   it "verifies a complete checksum-bound regular baseline plus an exact pending overtime exclusion" do
     item.update_columns(hours_worked: 6.1)
     row["hours"] = 6.4
