@@ -31,6 +31,7 @@ class HistoricalPaycheckAdjustment < ApplicationRecord
   validates :filing_year, inclusion: { in: 2000..2200 }
   validates :filing_quarter, inclusion: { in: 1..4 }
   validates :idempotency_key, uniqueness: { scope: :company_id }
+  validate :prior_provider_amendment_supported
   validate :tenant_and_source_are_consistent
   validate :filing_period_matches_effective_date
   validate :effective_date_matches_source_coverage
@@ -76,6 +77,12 @@ class HistoricalPaycheckAdjustment < ApplicationRecord
   end
 
   private
+
+  def prior_provider_amendment_supported
+    return unless historical_paycheck&.historical_import_batch&.source_system == "prior_provider"
+
+    errors.add(:base, "Prior-provider amendments require explicit wage-base evidence; reverse onboarding before live commitment or arrange a reviewed amendment")
+  end
 
   def tenant_and_source_are_consistent
     errors.add(:company, "must match the historical paycheck") if historical_paycheck && historical_paycheck.company_id != company_id

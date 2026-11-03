@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 class HistoricalYtdBridge < ApplicationRecord
-  STATUSES = %w[previewed applied].freeze
+  STATUSES = %w[previewed applied reversed].freeze
   BOUNDARY_KEYS = %w[through_period_end through_pay_date].freeze
 
   belongs_to :company
   belongs_to :historical_import_batch
-  belongs_to :historical_client_bootstrap
+  belongs_to :prior_provider_history_onboarding, optional: true
+  belongs_to :historical_client_bootstrap, optional: true
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :applied_by, class_name: "User", optional: true
   belongs_to :supersedes_historical_ytd_bridge, class_name: "HistoricalYtdBridge", optional: true
@@ -21,6 +22,7 @@ class HistoricalYtdBridge < ApplicationRecord
   validates :revision, uniqueness: { scope: :historical_import_batch_id }
   validates :status, inclusion: { in: STATUSES }
   validates :plan_digest, presence: true
+  validate :roster_contract
   validate :tenant_and_sources_match
   validate :preview_summary_declares_boundary
   validate :boundary_unchanged_after_balances, on: :update
@@ -34,6 +36,19 @@ class HistoricalYtdBridge < ApplicationRecord
   def ready_to_apply? = previewed? && Array(validation_errors).empty?
 
   private
+
+  def roster_contract
+    if prior_provider_history_onboarding
+      unless historical_client_bootstrap.nil? && historical_import_batch&.source_system == "prior_provider" &&
+          prior_provider_history_onboarding.company_id == company_id &&
+          prior_provider_history_onboarding.historical_import_batch_id == historical_import_batch_id &&
+          prior_provider_history_onboarding.status.in?(%w[converted active])
+        errors.add(:base, "An attributable existing-roster onboarding for this batch is required")
+      end
+    elsif historical_client_bootstrap.nil?
+      errors.add(:historical_client_bootstrap, "is required for clean-client history")
+    end
+  end
 
   def tenant_and_sources_match
     if historical_import_batch && historical_import_batch.company_id != company_id
@@ -95,7 +110,7 @@ class HistoricalYtdBridge < ApplicationRecord
 
   def prevent_applied_update
     persisted_status = self.class.lock.where(id: id).pick(:status)
-    return unless persisted_status == "applied"
+    return unless persisted_status.in?(%w[applied reversed])
 
     errors.add(:base, "Applied historical YTD bridges cannot be changed")
     throw(:abort)

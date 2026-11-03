@@ -1,3 +1,4 @@
+import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
@@ -176,6 +177,14 @@ export function PayRunWorkspace(): ReactElement {
     );
   }
 
+  if (payRun.status === 'retired_history') return <div className="p-4 sm:p-6 lg:p-8">
+    <Card><CardContent className="space-y-4 p-6">
+      <h1 className="text-xl font-semibold">Paid by the previous provider</h1>
+      <p className="text-sm leading-6">The previous provider already paid this payroll, so it is kept for reference and recorded in this client’s payroll history instead. It can’t be calculated, approved, committed or printed again here.</p>
+      <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline" to={`/companies/${companyId}/prior-provider-history`}>Review prior-provider history</Link>
+    </CardContent></Card>
+  </div>;
+
   const isTrainingBaseline = payRun.test_workspace_role === 'baseline';
   const readOnlyWorkspace = activeCompany?.id === companyId && !canWriteCompany(activeCompany);
   const readOnlyMode: 'training_baseline' | 'backup_snapshot' | 'workspace_access' | null = isTrainingBaseline
@@ -206,6 +215,7 @@ export function PayRunWorkspace(): ReactElement {
   </div>;
 
   return <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
+    {payRun.prior_provider_history_available && <div className="px-4 pt-4 sm:px-6 lg:px-8"><PriorProviderHistoryNotice companyId={companyId} /></div>}
     <PayPeriodDetail key={`${companyId}:${payRunId}`} activeTab={activeTab} initialPayPeriod={payRun} onPayPeriodChange={handlePayRunChange} refreshToken={processingRefreshToken} navigation={navigation} checksContent={({ searchTerm, onChecksLoaded, refreshToken }) => <PayRunChecks readOnly={false} companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} onChanged={handleChecksChange} isRehearsal={activeCompany?.id === companyId && activeCompany.payroll_environment === 'migration_rehearsal'} searchTerm={searchTerm} onChecksLoaded={onChecksLoaded} externalRefreshToken={refreshToken} showDraftPaymentControls={false} />} activityContent={activity} />
   </Suspense>;
 }

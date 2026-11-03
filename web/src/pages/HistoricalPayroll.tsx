@@ -347,14 +347,17 @@ export function HistoricalPayroll(): ReactElement {
   ): Promise<void> => {
     const requestId = ++listRequestIdRef.current;
     const selectionAtRequestStart = selectedBatchIdRef.current;
-    const response = await historicalImportsApi.list({ page: requestedPage, per_page: EMPTY_META.per_page });
+    // Prior-provider history has its own workflow; the server excludes it
+    // before paging so every page and total matches this list.
+    const response = await historicalImportsApi.list({ page: requestedPage, per_page: EMPTY_META.per_page, exclude_source_system: 'prior_provider' });
     if (requestId !== listRequestIdRef.current) return;
 
     const currentPreferredBatchId = selectedBatchIdRef.current !== selectionAtRequestStart
       ? selectedBatchIdRef.current
       : preferredBatchId;
-    const providers = response.meta.import_providers || [];
-    setBatches(response.data);
+    const providers = (response.meta.import_providers || []).filter(provider => provider.key !== 'prior_provider');
+    const listedBatches = response.data.filter((batch) => batch.source_system !== 'prior_provider');
+    setBatches(listedBatches);
     setArchive(response.meta.archive);
     setImportProviders(providers);
     if (providers.length > 0) setSelectedImportProviderKey((current) => (
@@ -365,9 +368,9 @@ export function HistoricalPayroll(): ReactElement {
     setBatchMeta(response.meta);
     selectBatchPage(response.meta.current_page);
     selectBatch(
-      currentPreferredBatchId && response.data.some((batch) => batch.id === currentPreferredBatchId)
+      currentPreferredBatchId && listedBatches.some((batch) => batch.id === currentPreferredBatchId)
         ? currentPreferredBatchId
-        : response.data[0]?.id ?? null,
+        : listedBatches[0]?.id ?? null,
     );
   }, [selectBatch, selectBatchPage]);
 

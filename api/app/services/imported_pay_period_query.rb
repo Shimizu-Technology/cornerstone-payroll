@@ -45,7 +45,7 @@ class ImportedPayPeriodQuery
     batch = period.historical_import_batch
     source = {
       system: batch.source_system,
-      label: "QuickBooks import",
+      label: batch.source_system == "prior_provider" ? "Prior-provider history" : "QuickBooks import",
       detail: period.source_label,
       locked: true,
       locked_at: batch.locked_at
@@ -111,6 +111,7 @@ class ImportedPayPeriodQuery
       period_end: paycheck.period_end,
       period_type: paycheck.historical_pay_period.period_type,
       check_number: @audience == :staff ? paycheck.check_number : nil,
+      provider_payment_reference: @audience == :staff ? paycheck.source_metadata["provider_payment_reference"] : nil,
       payment_method: paycheck.payment_method,
       source_status: paycheck.source_status,
       reconciliation_status: paycheck.reconciliation_status,
