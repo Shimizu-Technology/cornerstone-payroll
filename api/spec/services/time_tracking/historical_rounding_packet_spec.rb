@@ -80,6 +80,35 @@ RSpec.describe "Reviewed historical rounding packet" do
     TimeTracking::VerifiedHistoryRollout.new(manifest: packet, actor: actor)
   end
 
+  it "verifies a complete checksum-bound regular baseline plus an exact pending overtime exclusion" do
+    item.update_columns(hours_worked: 6.1)
+    row["hours"] = 6.4
+    row["state"]["overtime_status"] = "none"
+    payload["exclusions"] = [ {
+      "source_time_entry_id" => "41", "source_time_entry_version" => 2, "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => "2026-08-14", "original_week_start" => "2026-08-09", "category" => category,
+      "source_category_id" => "1", "reason" => "pending_overtime", "held_total_hours" => 0.3,
+      "held_regular_hours" => 0, "held_overtime_hours" => 0.3
+    } ]
+    payload["summary"]["exclusion_count"] = 1
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["baseline_lines"].sole["batch_checksum"] = payload.dig("export", "checksum")
+    packet = rollout(manifest).capture_review_packet!
+    packet["reviewed_dispositions"].sole.merge!("disposition" => "historical_baseline_pending_overtime",
+      "reason" => "Review represented regular hours and preserve the frozen overtime hold",
+      "evidence" => "Synthetic authenticated batch, exact pending exclusion and committed run")
+    expect(rollout(packet).preview!).to include(history_coverage_verified: true,
+      disposition_counts: { "historical_baseline_pending_overtime" => 1 })
+    expect {
+      rollout(packet).apply!(accepted_manifest_sha256: Digest::SHA256.hexdigest(JSON.generate(packet)), release_owner: "Synthetic rehearsal reviewer")
+    }.to change(AireVerifiedHistoryRolloutReceipt, :count).by(1)
+      .and change(TimeTrackingManualAllocation, :count).by(0)
+      .and change(CheckEvent, :count).by(0)
+    row["state"]["overtime_status"] = "approved"
+    expect(rollout(packet).preview!).to include(history_coverage_verified: false)
+  end
+
   it "exports unsigned variances, requires each signed review, applies coverage only, and refuses a stale run receipt" do
     packet = rollout(manifest).capture_review_packet!
     expect(packet.fetch("rounding_variance_acknowledgements")).to eq([])
