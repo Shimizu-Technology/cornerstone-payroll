@@ -282,6 +282,7 @@ Rails.application.routes.draw do
           resource :history_approval, only: [], controller: :aire_history_approvals do
             post :preview
             post :approve
+            get "operations/:operation_id", action: :operation
           end
           member do
             post :test_connection

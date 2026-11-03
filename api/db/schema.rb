@@ -10,9 +10,31 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "aire_history_operations", force: :cascade do |t|
+    t.bigint "actor_id", null: false
+    t.jsonb "arguments", default: {}, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.datetime "finished_at"
+    t.string "kind", null: false
+    t.string "request_key", null: false
+    t.jsonb "result"
+    t.jsonb "source_changes", default: [], null: false
+    t.string "status", default: "queued", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "actor_id", "time_tracking_source_id", "request_key" ], name: "idx_aire_history_operation_request", unique: true
+    t.index [ "actor_id" ], name: "index_aire_history_operations_on_actor_id"
+    t.index [ "company_id" ], name: "index_aire_history_operations_on_company_id"
+    t.index [ "time_tracking_source_id" ], name: "index_aire_history_operations_on_time_tracking_source_id"
+    t.check_constraint "kind::text = ANY (ARRAY['preview'::character varying, 'approve'::character varying]::text[])", name: "aire_history_operation_kind"
+    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying, 'completed'::character varying, 'failed'::character varying]::text[])", name: "aire_history_operation_status"
+  end
 
   create_table "aire_history_reviews", force: :cascade do |t|
     t.bigint "actor_id", null: false
@@ -4576,6 +4598,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
   add_foreign_key "prior_provider_history_onboardings", "users", column: "activated_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "created_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "reversed_by_id"
+  add_foreign_key "aire_history_operations", "companies"
+  add_foreign_key "aire_history_operations", "time_tracking_sources"
+  add_foreign_key "aire_history_operations", "users", column: "actor_id"
   add_foreign_key "aire_history_reviews", "aire_verified_history_rollout_receipts", column: "receipt_id"
   add_foreign_key "aire_history_reviews", "companies"
   add_foreign_key "aire_history_reviews", "time_tracking_sources"

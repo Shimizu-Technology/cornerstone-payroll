@@ -7,7 +7,7 @@ module Api
         include ConnectedPayrollControl
         before_action :set_source
         before_action :require_history_access!
-        before_action :require_connected_payroll!
+        before_action :require_connected_payroll!, except: :operation
         before_action { response.headers["Cache-Control"] = "no-store" }
 
         rescue_from TimeTracking::HistoryApproval::Error, TimeTracking::VerifiedHistoryRollout::Error,
@@ -19,18 +19,41 @@ module Api
         end
 
         def preview
-          render json: service.prepare!(mapping_selections: object_list!(:mapping_selections, :source_user_uuid, :employee_id))
+          arguments = { mapping_selections: object_list!(:mapping_selections, :source_user_uuid, :employee_id) }
+          return enqueue("preview", arguments) if params[:background] == true
+          render json: service.prepare!(**arguments)
         end
 
         def approve
           review = AireHistoryReview.find_by!(id: params[:review_id], company_id: current_company_id,
             time_tracking_source: @source, actor: current_user)
           permitted = params.permit(:digest, :attestation, confirmed_mapping_uuids: [], solo_choices: [ :employee_id, :employee_wage_rate_id ])
-          render json: service.approve!(review: review, digest: permitted[:digest], attestation: permitted[:attestation],
-            confirmed_mapping_uuids: Array(permitted[:confirmed_mapping_uuids]), solo_choices: object_list!(:solo_choices, :employee_id, :employee_wage_rate_id))
+          arguments = { review_id: review.id, digest: permitted[:digest], attestation: permitted[:attestation],
+            confirmed_mapping_uuids: Array(permitted[:confirmed_mapping_uuids]), solo_choices: object_list!(:solo_choices, :employee_id, :employee_wage_rate_id) }
+          return enqueue("approve", arguments) if params[:background] == true
+          render json: service.approve!(review: review, **arguments.except(:review_id))
+        end
+
+        def operation
+          record = AireHistoryOperation.find_by!(id: params[:operation_id], company: @source.company,
+            time_tracking_source: @source, actor: current_user)
+          render json: record.response_payload
         end
 
         private
+
+        def enqueue(kind, arguments)
+          # Retrying a lost approval response reuses its operation, including
+          # its exact Solo/mapping choices. A fresh preview always captures anew.
+          key = kind == "preview" ? SecureRandom.uuid : TimeTracking::CanonicalPayload.checksum(arguments)
+          operation = AireHistoryOperation.create_or_find_by!(actor: current_user, time_tracking_source: @source, request_key: key) do |record|
+            record.company = @source.company
+            record.kind = kind
+            record.arguments = arguments
+          end
+          AireHistoryOperationJob.perform_later(operation.id) if operation.status == "queued"
+          render json: operation.response_payload, status: :accepted
+        end
 
         def object_list!(key, *fields)
           rows = params.fetch(key, [])

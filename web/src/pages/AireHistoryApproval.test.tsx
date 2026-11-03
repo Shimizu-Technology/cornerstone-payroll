@@ -41,7 +41,7 @@ describe('one-summary AIRE history approval', () => {
     expect(screen.getByText('Undetermined')).toBeTruthy();
     expect((screen.getByRole('option', { name: /Decision still open/ }) as HTMLOptionElement).selected).toBe(true);
     expect(screen.getByRole('button', { name: 'Approve history' }).hasAttribute('disabled')).toBe(true);
-    expect(mocks.preview).toHaveBeenCalledWith(1, 2);
+    expect(mocks.preview).toHaveBeenCalledWith(1, 2, [], expect.anything());
   });
 
   it('uses one attestation and one approval, and leaves Solo open without blocking history', async () => {
@@ -49,7 +49,7 @@ describe('one-summary AIRE history approval', () => {
     await user.click(await screen.findByRole('checkbox', { name: /I reviewed/ }));
     await user.click(screen.getByRole('button', { name: 'Approve history' }));
     expect(mocks.approve).toHaveBeenCalledOnce();
-    expect(mocks.approve).toHaveBeenCalledWith(1, 2, { review_id: 5, digest: 'a'.repeat(64), attestation: summary().attestation, confirmed_mapping_uuids: [], solo_choices: [] });
+    expect(mocks.approve).toHaveBeenCalledWith(1, 2, { review_id: 5, digest: 'a'.repeat(64), attestation: summary().attestation, confirmed_mapping_uuids: [], solo_choices: [] }, expect.anything());
     expect(await screen.findByText('History approved')).toBeTruthy();
     expect(screen.getByText(/no calendar was published/)).toBeTruthy();
   });
@@ -100,7 +100,7 @@ describe('one-summary AIRE history approval', () => {
     await user.click(await screen.findByRole('checkbox', { name: /I reviewed/ }));
     await user.click(screen.getByRole('button', { name: 'Approve history' }));
     mocks.companyId = 3; screenView.rerender(<MemoryRouter><AireHistoryApproval /></MemoryRouter>);
-    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(1, 3));
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(1, 3, [], expect.anything()));
     finish({ ...summary(), approved_at: '2026-11-03', approved_by: 'Other client' });
     await waitFor(() => expect(screen.queryByText('History approved')).toBeNull());
   });

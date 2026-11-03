@@ -12,9 +12,33 @@ export type HistoryApprovalSummary = {
   solo_decisions: { employee_id: number | null; employee: string | null; hours: string; options: { id: number; label: string; rate: string }[] }[];
 };
 export type MappingSelection = { source_user_uuid: string; employee_id: number | null };
+type Operation = { operation_id: number; status: 'queued' | 'completed' | 'failed'; result: HistoryApprovalSummary | null; error: string | null };
+
+function pause(signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+    const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, 2000);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+async function completed(sourceId: number, companyId: number, operation: Operation, signal?: AbortSignal): Promise<HistoryApprovalSummary> {
+  while (operation.status === 'queued') {
+    await pause(signal);
+    // Only local operation state is polled, never AIRE. Hidden or unmounted
+    // screens stop issuing reads; the durable worker keeps its transaction.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') continue;
+    operation = await api.get<Operation>(`/admin/time_tracking_sources/${sourceId}/history_approval/operations/${operation.operation_id}`, undefined, { companyId, signal });
+  }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (operation.status === 'failed' || !operation.result) throw new Error(operation.error || 'History processing failed. Refresh the summary.');
+  return operation.result;
+}
+
 export const aireHistoryApprovalApi = {
-  preview: (sourceId: number, companyId: number, mapping_selections: MappingSelection[] = []) =>
-    api.post<HistoryApprovalSummary>(`/admin/time_tracking_sources/${sourceId}/history_approval/preview`, { mapping_selections }, { companyId }),
-  approve: (sourceId: number, companyId: number, data: { review_id: number; digest: string; attestation: string; confirmed_mapping_uuids: string[]; solo_choices: { employee_id: number; employee_wage_rate_id: number }[] }) =>
-    api.post<HistoryApprovalSummary>(`/admin/time_tracking_sources/${sourceId}/history_approval/approve`, data, { companyId }),
+  preview: async (sourceId: number, companyId: number, mapping_selections: MappingSelection[] = [], signal?: AbortSignal) =>
+    completed(sourceId, companyId, await api.post<Operation>(`/admin/time_tracking_sources/${sourceId}/history_approval/preview`, { mapping_selections, background: true }, { companyId }), signal),
+  approve: async (sourceId: number, companyId: number, data: { review_id: number; digest: string; attestation: string; confirmed_mapping_uuids: string[]; solo_choices: { employee_id: number; employee_wage_rate_id: number }[] }, signal?: AbortSignal) =>
+    completed(sourceId, companyId, await api.post<Operation>(`/admin/time_tracking_sources/${sourceId}/history_approval/approve`, { ...data, background: true }, { companyId }), signal),
 };
