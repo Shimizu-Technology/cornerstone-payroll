@@ -114,7 +114,7 @@ RSpec.describe "Historical prior overtime policy packet" do
 
   it "verifies reviewed category attribution with every existing frozen-source fence" do
     TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
-      historical_attribution: true, historical_employee_ids: [employee.id], history_through_on: run.end_date,
+      historical_attribution: true, historical_employee_ids: [ employee.id ], history_through_on: run.end_date,
       reviewed_by: actor, reason: "Reviewed committed historical earning attribution", evidence: "Owner decision and retained authenticated frozen source")
     packet = rollout(manifest).capture_review_packet!
     record = packet["reviewed_dispositions"].sole
