@@ -9,8 +9,10 @@ module TimeTracking
       "workweek_start" => "sunday", "time_zone" => "Pacific/Guam", "allocator_commit" => "6f72a984",
       "effective_from" => "2026-04-01", "effective_before" => "2026-10-16" }.freeze
 
-    def initialize(source:, inventory:)
+    def initialize(source:, inventory:, runs:, batch_loader:, legacy_verifier:)
       @source, @inventory = source, inventory
+      @runs, @batch_loader = runs, batch_loader
+      @legacy_verifier = legacy_verifier
       @cache = {}
     end
 
@@ -43,12 +45,7 @@ module TimeTracking
           current.dig("employee", "id") == row["source_user_id"] && decimal(current.fetch("hours")) == decimal(input.fetch("hours")) &&
           current.fetch("work_date") == input.fetch("work_date") &&
           current.dig("history_evidence", "payable_content_checksum") == input.fetch("payable_content_checksum") &&
-          input.fetch("frozen_rows").all? do |reference|
-            Array(current.dig("history_evidence", "baseline_lines")).any? do |line|
-              reference.all? { |key, value| line[key] == value } &&
-                (line["current_content_matches"] == true || line.dig("legacy_frozen_evidence", "eligible") == true)
-            end
-          end
+          context_verified?(input, current)
       end
       inputs = row.fetch("inputs")
       return unless inputs.any? && inputs.map { |input| input.fetch("source_time_entry_id") }.uniq.length == inputs.length
@@ -77,6 +74,37 @@ module TimeTracking
       { employee: comparison, evidence: evidence }
     rescue KeyError, ArgumentError, TypeError, NoMethodError
       nil
+    end
+
+    def context_verified?(input, current)
+      references = input.fetch("frozen_rows")
+      keys = references.map { |reference| reference.values_at("batch_id", "line_key") }
+      return false unless keys.any? && keys.uniq.length == keys.length
+
+      lines = references.filter_map do |reference|
+        line = Array(current.dig("history_evidence", "baseline_lines")).find { |candidate| reference.all? { |key, value| candidate[key] == value } }
+        next unless line && (line["current_content_matches"] == true ||
+          (line.dig("legacy_frozen_evidence", "eligible") == true && @legacy_verifier.call(line, current)))
+
+        payload = @batch_loader.call(reference.fetch("batch_id"))
+        run = @runs[line.dig("processing", "external_pay_period_id").to_s]
+        next unless run && line.dig("processing", "status") == "committed" && line.dig("processing", "external_system") == "cornerstone_payroll_manual" &&
+          line["processing_conflict"] == false && payload.dig("export", "checksum") == reference.fetch("batch_checksum") &&
+          run.start_date.iso8601 == payload.fetch("start_date") && run.end_date.iso8601 == payload.fetch("end_date")
+
+        employee = payload.fetch("employees").find { |record| record["source_user_id"] == input.fetch("source_user_id") }
+        next unless employee && (employee["source_user_uuid"].blank? || employee["source_user_uuid"] == input.fetch("source_user_uuid"))
+
+        frozen = employee.fetch("adjustments").find do |record|
+          record["source_time_entry_id"] == input.fetch("source_time_entry_id") && record["line_key"] == reference.fetch("line_key")
+        end
+        next unless frozen && frozen["source_kind"] == "current" && frozen["source_time_entry_version"] == line["source_time_entry_version"] &&
+          frozen["category"] == line["category"] && frozen["original_work_date"] == line["work_date"] &&
+          %w[total_hours regular_hours overtime_hours].all? { |key| decimal(frozen.fetch(key)) == decimal(line.fetch(key)) }
+
+        line
+      end
+      lines.length == references.length && lines.sum { |line| decimal(line.fetch("total_hours")) } == decimal(input.fetch("hours"))
     end
 
     def split(lines)

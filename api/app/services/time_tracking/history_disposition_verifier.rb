@@ -41,7 +41,7 @@ module TimeTracking
       end
       @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
         acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
-      @batches = @batch_cache || {}
+      @batches = (@batch_cache || {}).reject { |_, payload| payload.dig("export", "prior_overtime_policy").present? }
       @source_inventory_checksums = nil
     end
 
@@ -50,7 +50,8 @@ module TimeTracking
         Array(row.dig("history_evidence", "baseline_lines")).filter_map { |line| line.dig("processing", "external_pay_period_id") }
       end.uniq
       refresh_runs!(run_ids: run_ids)
-      @prior_policy_review = PriorOvertimePolicyReview.new(source: @source, inventory: inventory.index_by { |row| row.fetch("id") })
+      @prior_policy_review = PriorOvertimePolicyReview.new(source: @source, inventory: inventory.index_by { |row| row.fetch("id") },
+        runs: @runs, batch_loader: method(:batch), legacy_verifier: method(:legacy_frozen_verified?))
       @source_inventory_checksums = inventory.group_by { |row| row.fetch("source_user_uuid") }.transform_values do |rows|
         CanonicalPayload.checksum(rows.sort_by { |row| row.fetch("id").to_s }.map { |row| row.slice("id", *SOURCE_FIELDS) })
       end
@@ -335,6 +336,9 @@ module TimeTracking
           end_date: payload.fetch("end_date"), allow_legacy_uncategorized: true).validate!
         raise ArgumentError, "Historical batch ID differs" unless payload.fetch("batch_id") == id
 
+        # Policy observations include current source/settings evidence. Share
+        # only immutable batch exports between fresh verification passes.
+        @batch_cache[id] = payload if @batch_cache && payload.dig("export", "prior_overtime_policy").nil?
         payload
       end
     end
