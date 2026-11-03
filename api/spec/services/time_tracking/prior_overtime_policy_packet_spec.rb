@@ -112,6 +112,28 @@ RSpec.describe "Historical prior overtime policy packet" do
 
   before { install_policy! }
 
+  it "verifies reviewed category attribution with every existing frozen-source fence" do
+    TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
+      historical_attribution: true, historical_employee_ids: [employee.id], history_through_on: run.end_date,
+      reviewed_by: actor, reason: "Reviewed committed historical earning attribution", evidence: "Owner decision and retained authenticated frozen source")
+    packet = rollout(manifest).capture_review_packet!
+    record = packet["reviewed_dispositions"].sole
+    record.merge!("disposition" => "accountant_attributed_paid_category", "reason" => "Accountant attests the committed category attribution",
+      "evidence" => "Reviewed historical source category and committed Payroll component")
+    expect(record["attributed_categories"]).to be_present
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
+    changed = packet.deep_dup
+    changed["reviewed_dispositions"].sole["attributed_categories"].sole["rows"].sole["source_hours"] = "9.0"
+    expect(rollout(changed).preview![:history_coverage_verified]).to be(false)
+    row["version"] += 1
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    row["version"] -= 1
+    item.update_columns(hours_worked: 8.06)
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    expect(CheckEvent.count).to eq(0)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   it "accepts a truthful prior policy while retaining the immutable weekly split and no payment writes" do
     packet = reviewed_packet
     evidence = packet["reviewed_dispositions"].sole["prior_overtime_policy"].sole
