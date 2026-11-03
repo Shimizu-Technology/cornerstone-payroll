@@ -83,9 +83,20 @@ module TimeTracking
       Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
         payload = batch(id)
         employee = payload.fetch("employees").find { |row| row["source_user_id"] == current.dig("employee", "id") }
-        next unless employee
+        line = current.fetch("history_evidence").fetch("baseline_lines").find { |row| row.fetch("batch_id") == id }
+        run_id = line.dig("processing", "external_pay_period_id").to_s
+        mapping = @employees && @employees[current.fetch("source_user_uuid")]
+        next unless employee && mapping && @runs[run_id] && line.dig("processing", "status") == "committed" &&
+          line.dig("processing", "external_system") == "cornerstone_payroll_manual"
 
-        @prior_policy_review&.call(batch: payload, employee: employee)&.fetch(:evidence)
+        review = @prior_policy_review&.call(batch: payload, employee: employee)
+        next unless review
+
+        items = Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id }
+        review.fetch(:evidence).merge("run_id" => @runs.fetch(run_id).id, "employee_id" => mapping.employee_id,
+          "baseline_evidence_class" => line["legacy_frozen_evidence"].present? ? "legacy_frozen_batch_baseline" : "historical_baseline",
+          "paid_split" => { "regular_hours" => items.sum { |item| decimal(item.hours_worked) }.to_s("F"),
+            "overtime_hours" => items.sum { |item| decimal(item.overtime_hours) }.to_s("F") })
       end
     end
 
