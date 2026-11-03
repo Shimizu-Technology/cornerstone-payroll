@@ -24,6 +24,7 @@ module TimeTracking
     PENDING_TYPES = %w[pending_review pending_overtime historical_baseline_pending_overtime payment_evidence_pending].freeze
     SUMMARY_LABELS = {
       "historical_baseline" => "Hours already represented in manual payroll",
+      "paid_under_prior_daily_weekly_ot_policy" => "Manual payroll under the prior daily8/weekly40 overtime policy",
       "legacy_frozen_batch_baseline" => "Older manual payroll — verified using less detailed frozen records",
       "historical_baseline_pending_overtime" => "Regular hours represented; overtime remains pending",
       "pending_overtime" => "Overtime awaiting approval — kept pending",
@@ -223,7 +224,8 @@ module TimeTracking
       dispositions = inventory.map do |entry|
         draft = packet.fetch("reviewed_dispositions").find { |row| row["source_time_entry_id"] == entry.fetch("id") }
           .merge("reason" => REVIEW_REASON, "evidence" => REVIEW_EVIDENCE)
-        types = %w[historical_baseline legacy_frozen_batch_baseline pending_overtime historical_baseline_pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
+        draft["prior_overtime_policy"] = verifier.prior_policy_review_evidence(entry)
+        types = %w[paid_under_prior_daily_weekly_ot_policy historical_baseline legacy_frozen_batch_baseline pending_overtime historical_baseline_pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
         type = types.find { |candidate| verifier.verified?(draft.merge("disposition" => candidate), entry) }
         blockers << "Entry #{entry.fetch('id')}: source evidence does not support a complete accounting disposition" unless type
         draft.merge("disposition" => type || "pending_review")
@@ -250,6 +252,9 @@ module TimeTracking
             "hours" => rows.sum { |row| BigDecimal(row.fetch("hours")) }.to_s("F") }
         end,
         "rounding_variances" => variances.map { |row| row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name) },
+        "historical_policies" => dispositions.flat_map { |row| row.fetch("prior_overtime_policy") }.uniq.map do |row|
+          row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name)
+        end,
         "owed" => details.select { |row| row["disposition"] == "owed" },
         "pending_review" => details.select do |row|
           PENDING_TYPES.include?(row["disposition"]) || row["approval_status"].in?([ nil, "pending" ])

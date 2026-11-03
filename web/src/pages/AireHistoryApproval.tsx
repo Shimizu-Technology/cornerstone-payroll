@@ -104,9 +104,23 @@ function HistorySummary({ companyId }: { companyId: number }) {
           </div>)}</div>
           {dirty && <Button className="mt-3" onClick={refresh} disabled={busy}>Update summary with these matches</Button>}
         </section>
+        {!!summary.historical_policies?.length && <section className={panel} aria-labelledby="prior-policy-title">
+          <h2 id="prior-policy-title" className="text-lg font-semibold">History under the prior overtime policy</h2>
+          <p className="mt-1 text-sm text-neutral-600">These manual runs used daily overtime after 8 hours and weekly overtime after 40 hours. Weekly-only payroll applies from October 16, 2026. Historical policy differences authorize no new payment.</p>
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><caption className="sr-only">Frozen, prior-policy and committed REG and OT splits</caption>
+            <thead><tr>{['Employee', 'Run', 'Frozen REG / OT h', 'Prior policy REG / OT h', 'Paid REG / OT h', 'Baseline evidence'].map((label) => <th key={label} className={cell}>{label}</th>)}</tr></thead>
+            <tbody>{summary.historical_policies.map((row) => <tr key={`${row.employee_id}:${row.run_id}`}>
+              <td className={cell}>{row.employee}</td><td className={cell}>{row.run_id}</td>
+              <td className={cell}>{hours(row.frozen_split.regular_hours)} / {hours(row.frozen_split.overtime_hours)}</td>
+              <td className={cell}>{hours(row.prior_policy_split.regular_hours)} / {hours(row.prior_policy_split.overtime_hours)}</td>
+              <td className={cell}>{hours(row.paid_split.regular_hours)} / {hours(row.paid_split.overtime_hours)}</td>
+              <td className={cell}>{row.baseline_evidence_class === 'legacy_frozen_batch_baseline' ? 'Older frozen records' : 'Checksummed frozen source'}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </section>}
         <section className={panel} aria-labelledby="rounding-title">
           <h2 id="rounding-title" className="text-lg font-semibold">Rounding differences</h2>
-          <p className="mt-1 text-sm text-neutral-600">Paid minus source, separately for each employee, run and pay category. Each acknowledged difference must be within ±0.05 hours.</p>
+          <p className="mt-1 text-sm text-neutral-600">Paid minus source, separately for each employee, run and pay category. Prior-policy rows use the recomputed historical split shown above. Each acknowledged difference must be within ±0.05 hours.</p>
           {!summary.rounding_variances.length ? <p className="mt-3 text-sm">No rounding differences.</p> : <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><caption className="sr-only">Signed historical rounding differences</caption><thead><tr>{['Employee', 'Run', 'Category', 'Source h', 'Paid h', 'Signed difference h'].map((label) => <th key={label} className={cell}>{label}</th>)}</tr></thead><tbody>{summary.rounding_variances.map((row, index) => <tr key={index} className={row.within_limit ? '' : 'bg-danger-50'}><td className={cell}>{row.employee}</td><td className={cell}>{row.run_id}</td><td className={cell}>{row.source_category?.name} · {row.category}</td><td className={cell}>{hours(row.source_total)}</td><td className={cell}>{hours(row.paid_total)}</td><td className={cell}>{Number(row.signed_difference) > 0 ? '+' : ''}{hours(row.signed_difference)}</td></tr>)}</tbody></table></div>}
         </section>
         <EntryList key={`${summary.review_id}:owed`} title="Owed hours — remain owed" entries={summary.owed} />

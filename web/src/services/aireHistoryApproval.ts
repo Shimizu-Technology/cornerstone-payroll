@@ -8,6 +8,9 @@ export type HistoryApprovalSummary = {
   mappings: EmployeeMatch[]; blockers: string[];
   dispositions: { type: string; label: string; count: number; hours: string }[];
   rounding_variances: { employee: string; employee_id: number; run_id: number; category: string; source_category: { name: string }; source_total: string; paid_total: string; signed_difference: string; within_limit: boolean }[];
+  historical_policies?: { employee: string | null; employee_id: number; run_id: number; baseline_evidence_class: string;
+    frozen_split: { regular_hours: string; overtime_hours: string }; prior_policy_split: { regular_hours: string; overtime_hours: string };
+    paid_split: { regular_hours: string; overtime_hours: string } }[];
   owed: HistoryEntry[]; pending_review: HistoryEntry[];
   solo_decisions: { employee_id: number | null; employee: string | null; hours: string; options: { id: number; label: string; rate: string }[] }[];
 };
