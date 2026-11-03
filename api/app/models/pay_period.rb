@@ -22,6 +22,7 @@ class PayPeriod < ApplicationRecord
   PROMOTION_PAYMENT_DISPOSITIONS = %w[record_only process_in_cornerstone].freeze
 
   belongs_to :company
+  belongs_to :retired_to_historical_import_batch, class_name: "HistoricalImportBatch", optional: true
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
@@ -115,7 +116,7 @@ class PayPeriod < ApplicationRecord
   validates :start_date, presence: true
   validates :end_date, presence: true
   validates :pay_date, presence: true
-  validates :status, inclusion: { in: %w[draft calculated approved committed] }
+  validates :status, inclusion: { in: %w[draft calculated approved committed retired_history] }
   validates :tax_sync_status, inclusion: { in: TAX_SYNC_STATUSES }, allow_nil: true
   validates :correction_status,
             inclusion: { in: CORRECTION_STATUSES },
@@ -211,6 +212,8 @@ class PayPeriod < ApplicationRecord
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
   before_update :guard_pending_payment_resolution
   before_update :prevent_training_baseline_mutation
 
@@ -361,8 +364,22 @@ class PayPeriod < ApplicationRecord
     test_workspace_role == "practice"
   end
 
+  def retired_history? = status == "retired_history"
+
+  # Reversal restores editable source evidence, never authorization to pay again.
+  # Immutable onboarding evidence retains this provenance after the active link
+  # is cleared, including across repeated reversal/reconversion cycles.
+  def paid_prior_provider_source?
+    retired_history? || (persisted? && PriorProviderHistoryOnboarding.where(company_id: company_id)
+      .where("evidence->'source_run_ids' @> ?::jsonb", [ id ].to_json).exists?)
+  end
+
+  def unresolved_prior_provider_history?
+    pay_date.present? && PriorProviderHistoryOnboarding.unresolved_reversed_for(company_id, tax_year: pay_date.year).exists?
+  end
+
   def can_edit?
-    !committed? && !voided? && !training_baseline?
+    !committed? && !voided? && !training_baseline? && !retired_history?
   end
 
   def intake_stale?
@@ -689,7 +706,23 @@ class PayPeriod < ApplicationRecord
     end
   end
 
+  def prevent_retired_history_mutation
+    return unless self.class.where(id: id, status: "retired_history").exists?
+
+    errors.add(:base, "Prior-provider source runs are retired read-only evidence; use the history reversal workflow")
+    throw :abort
+  end
+
   def starts_after_historical_ytd_boundary
+    return if retired_history?
+    if company_id.present? && unresolved_prior_provider_history? && !paid_prior_provider_source?
+      errors.add(:base, "Record and activate replacement prior-provider history before starting live payroll; the previous history was undone")
+      return
+    end
+    if PriorProviderHistoryOnboarding.where(company_id: company_id, status: "converted").exists?
+      errors.add(:base, "Activate or reverse the converted prior-provider history before starting live payroll")
+      return
+    end
     return if company_id.blank?
     return if test_workspace? && validation_context != :payroll_calculation && draft?
 
@@ -708,7 +741,7 @@ class PayPeriod < ApplicationRecord
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end
-    if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
+    if unbridged_batch && !PayPeriod.where(company_id: company_id).where.not(status: "retired_history").exists?
       errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return
     end
@@ -728,12 +761,20 @@ class PayPeriod < ApplicationRecord
     end
     boundary_period_end = boundaries.map(&:first).max
     boundary_pay_date = boundaries.map(&:last).max
+    history_label = historical_boundary_label(batches.select(&:latest_applied_historical_ytd_bridge))
     if start_date.present? && start_date <= boundary_period_end
-      errors.add(:start_date, "must be after the imported QuickBooks history ending #{boundary_period_end.strftime('%m/%d/%Y')}")
+      errors.add(:start_date, "must be after the #{history_label} ending #{boundary_period_end.strftime('%m/%d/%Y')}")
     end
     if pay_date.present? && pay_date <= boundary_pay_date
-      errors.add(:pay_date, "must be after the imported QuickBooks history paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
+      errors.add(:pay_date, "must be after the #{history_label} paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
     end
+  end
+
+  def historical_boundary_label(batches)
+    sources = batches.map(&:source_system).uniq
+    return "imported QuickBooks history" unless sources.include?("prior_provider")
+
+    sources == [ "prior_provider" ] ? "recorded prior-provider history" : "recorded historical payroll"
   end
 
   def uses_current_historical_ytd_revision

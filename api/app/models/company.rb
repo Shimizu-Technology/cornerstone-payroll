@@ -78,6 +78,7 @@ class Company < ApplicationRecord
   has_many :payroll_filing_responsibilities, dependent: :restrict_with_error
   has_many :payroll_filing_records, dependent: :restrict_with_error
   has_many :historical_import_batches, dependent: :restrict_with_error
+  has_one :prior_provider_history_draft, dependent: :delete
   has_many :historical_import_source_files, dependent: :restrict_with_error
   has_many :historical_workers, dependent: :restrict_with_error
   has_many :historical_pay_periods, dependent: :restrict_with_error

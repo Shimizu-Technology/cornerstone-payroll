@@ -135,3 +135,12 @@ describe('register reconciliation columns', () => {
     expect(screen.getByRole('alert').textContent).toContain('Payroll row does not reconcile');
   });
 });
+
+// Provider registers verify the loan total without identifying a native loan subtype.
+it('shows verified previous-provider loans in a separate column and total', () => {
+  const historical = structuredClone(report);
+  historical.employees[0].historical_loan_deductions_unclassified = 10;
+  render(<PayrollRegisterPreviewContent report={historical} />);
+  expect(screen.getAllByText('Previous provider loans (type not recorded)')).toHaveLength(2);
+  expect(screen.getAllByText('$10.00')).toHaveLength(3);
+});

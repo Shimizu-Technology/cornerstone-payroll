@@ -172,6 +172,16 @@ Rails.application.routes.draw do
         end
         resources :annual_retirement_limits, only: [ :index, :create, :update ]
         get "record_activities/:record_type/:record_id", to: "record_activities#index"
+        resources :prior_provider_histories, only: %i[index create] do
+          post :preview, on: :collection
+          put :draft, on: :collection, action: :save_draft
+          delete :draft, on: :collection, action: :discard_draft
+          member do
+            post :activate
+            post :reverse
+            get "source_files/:source_file_id", action: :source_file
+          end
+        end
         resources :historical_imports, only: %i[index show] do
           collection do
             post :preview

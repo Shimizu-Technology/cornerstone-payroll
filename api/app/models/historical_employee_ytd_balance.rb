@@ -18,6 +18,8 @@ class HistoricalEmployeeYtdBalance < ApplicationRecord
   # separate payout in the QuickBooks source. Correct that derived display/YTD
   # value at read time while preserving the immutable source and bridge rows.
   def verified_tips_paid_out
+    return tips_paid_out if source_breakdown.to_h["prior_provider_verified"]
+
     tip_earnings = source_breakdown.to_h.fetch("earnings_breakdown", {}).to_h.any? do |label, _amount|
       label.match?(QuickbooksHistory::YtdBridgePlan::TIPS)
     end

@@ -2261,7 +2261,7 @@ export interface PayrollRegisterReport {
       payroll_status_note?: string | null;
     };
     source?: {
-      system: 'cornerstone' | 'quickbooks_online';
+      system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
       label: string;
       locked: boolean;
       statement: string;
@@ -2327,6 +2327,7 @@ export interface PayrollRegisterReport {
       payroll_field_non_taxable_additions_total?: number;
       traditional_retirement_total?: number;
       roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2339,6 +2340,7 @@ export interface PayrollRegisterReport {
       payroll_field_non_taxable_additions_total?: number;
       traditional_retirement_total?: number;
       roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2433,7 +2435,7 @@ export interface PayrollAdjustmentsDisclosure {
 }
 
 export interface PayrollSourceSummary {
-  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone';
+  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone' | 'locked_historical_plus_committed_cornerstone';
   source_statement: string;
   cornerstone: {
     payroll_count: number;
@@ -2448,6 +2450,7 @@ export interface PayrollSourceSummary {
     excluded_unlinked_gross_pay: number;
     excluded_unlinked_net_pay: number;
   };
+  prior_provider?: PayrollSourceSummary['quickbooks'];
   adjustments: {
     count: number;
     gross_pay_delta: number;
@@ -2499,7 +2502,7 @@ export interface EmployeePayHistoryRecord {
   payment_method?: string | null;
   reason?: string;
   source: {
-    system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider' | 'historical_adjustment';
     label: string;
     locked: boolean;
   };
@@ -2682,7 +2685,7 @@ export interface YtdSummaryReport {
       source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
       classification_note: string;
     };
-    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'prior_provider_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
   };
 }
 
@@ -2896,7 +2899,7 @@ export interface QuarterlyCompliancePacketReport {
   } | null;
   pay_periods: {
     id: number | string;
-    source: 'cornerstone' | 'quickbooks';
+    source: 'cornerstone' | 'quickbooks' | 'prior_provider';
     read_only: boolean;
     payment_status?: 'paid_before_cornerstone';
     record_type?: string;
@@ -5722,6 +5725,7 @@ export interface HistoricalPaycheck {
   period_type: 'regular' | 'opening_summary';
   payment_method?: string | null;
   check_number?: string | null;
+  provider_payment_reference?: string | null;
   source_status: string;
   reconciliation_status: 'matched' | 'opening_summary' | 'unmatched';
   hours_total: string;
@@ -5845,7 +5849,7 @@ export interface PayrollHistoryRecord {
   processed_at?: string | null;
   processed_by_name?: string | null;
   source: {
-    system: 'cornerstone' | 'quickbooks_online';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
     label: string;
     detail: string;
     locked: boolean;
@@ -5874,10 +5878,10 @@ export interface ClientPayrollHistoryResponse {
 
 export const payrollHistoryApi = {
   list: (
-    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks'; register_eligible?: boolean },
+    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
@@ -6112,7 +6116,7 @@ export interface HistoricalReportResponse {
 }
 
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
@@ -6310,6 +6314,15 @@ export const expensesApi = {
 };
 
 // Auth
+export function clearPriorProviderDrafts(): void {
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith('prior-provider-history:')) sessionStorage.removeItem(key);
+    }
+  } catch { /* Storage can be unavailable in restricted browser contexts. */ }
+}
+
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
   createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId }),
@@ -6318,6 +6331,7 @@ export const authApi = {
     return api.get<{ user: AuthApiUser }>('/auth/me');
   },
   logout: () => {
+    clearPriorProviderDrafts();
     api.setAuthToken(null);
     companiesApi.clearActiveCompanyId();
   },
