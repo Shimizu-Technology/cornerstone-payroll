@@ -64,6 +64,21 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(TimeTrackingEntryAllocation.count).to eq(0)
   end
 
+  it "rediscovers bindings from proposed mappings instead of retaining obsolete export candidates" do
+    item.payroll_item_earnings.create!(category: "regular", label: "Maintenance", hours: 6.13, rate: 20, amount: 122.6)
+    allow_any_instance_of(TimeTracking::VerifiedHistoryRollout).to receive(:capture_review_packet!).and_wrap_original do |original, *args|
+      packet = original.call(*args)
+      obsolete = packet.fetch("rounding_variances").sole.except("within_limit", "acknowledged", "source_total", "paid_total", "signed_difference")
+      packet.merge("rounding_review_blockers" => [ obsolete.merge("reason" => "Earlier export candidate needs an earning component binding") ])
+    end
+    page = history_service.prepare!
+    expect(page).to include("history_coverage_verified" => true, "blockers" => [])
+    approve_review(page)
+    packet = AireHistoryReview.find(page["review_id"]).approved_packet
+    expect(packet.fetch("historical_earning_component_bindings")).to eq([])
+    expect(packet.fetch("rounding_variance_acknowledgements").sole).to include("signed_difference" => "0.03")
+  end
+
   it "prefills a strict baseline and exact signed rounding acknowledgement without applying anything" do
     expect(client).to receive(:payroll_batch).once.and_return(payload)
     page = history_service.prepare!

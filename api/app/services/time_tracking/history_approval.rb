@@ -212,7 +212,10 @@ module TimeTracking
       packet = export.capture_review_packet!
       inventory = export.captured_history_entries
       @mappings, mapping_rows, mapping_blockers = plan_mappings(inventory, mapping_selections)
-      bindings = exact_component_bindings(packet.fetch("rounding_review_blockers"))
+      # Export discovery used saved mappings. Proposed identities and typed
+      # attributions can replace those candidates; never carry obsolete generated
+      # bindings into a packet that correctly rejects unused coverage claims.
+      bindings = []
       verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: @actor, client: @client,
         employee_mappings: @mappings, component_bindings: bindings, batch_cache: @batch_cache)
       verifier.discover_rounding_variances!(inventory)
