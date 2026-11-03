@@ -46,7 +46,7 @@ RSpec.describe "Historical prior overtime policy packet" do
         "active_cases" => [], "payment_attestation" => nil, "baseline_lines" => [ {
           "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
           "batch_start_date" => payload["start_date"], "batch_end_date" => payload["end_date"],
-          "source_time_entry_id" => "41", "source_time_entry_version" => 2, "source_user_uuid" => uuid,
+          "source_time_entry_id" => "41", "source_time_entry_version" => 2, "source_user_uuid" => uuid, "source_user_id" => "91",
           "line_key" => "maintenance", "source_kind" => "current", "work_date" => "2026-08-14", "category" => category,
           "regular_hours" => 10.0, "overtime_hours" => 0, "total_hours" => 10.0,
           "snapshot_checksum" => "f" * 64, "current_content_matches" => true, "processing_conflict" => false,
@@ -136,7 +136,9 @@ RSpec.describe "Historical prior overtime policy packet" do
     item.update_columns(hours_worked: 8.06, overtime_hours: 1.94)
     expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
     item.update_columns(hours_worked: 8.03, overtime_hours: 2)
-    expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
+    preview = rollout(reviewed_packet).preview!
+    expect(preview[:history_coverage_verified]).to be(false)
+    expect(preview[:rounding_review_blockers]).to include(a_hash_including("reason" => "Prior-policy employee total differs from committed run"))
   end
 
   it "refuses stale sources or committed registers after acknowledgement and never trusts a manifest policy label" do
@@ -218,4 +220,38 @@ RSpec.describe "Historical prior overtime policy packet" do
     expect(preview[:history_coverage_verified]).to be(false)
     expect(preview[:rounding_variances]).to include(a_hash_including("source_category" => category, "source_total" => "0.6", "paid_total" => "3.1", "signed_difference" => "2.5"))
   end
+  it "rejects an authenticated calculation that omits a real preceding-period frozen context line" do
+    prior_evidence = reviewed_packet["reviewed_dispositions"].sole["prior_overtime_policy"]
+    previous_run = create(:pay_period, :committed, company: company, start_date: "2026-07-16", end_date: "2026-07-31", pay_date: "2026-08-15")
+    create(:payroll_item, company: company, employee: employee, pay_period: previous_run, hours_worked: 5, overtime_hours: 0)
+    previous_payload = payload.deep_dup
+    previous_payload.merge!("batch_id" => "FROZEN-PRECEDING-CONTEXT", "start_date" => "2026-07-16", "end_date" => "2026-07-31")
+    previous_payload["employees"].sole.merge!("total_hours" => 5.0, "regular_hours" => 5.0)
+    previous_payload["employees"].sole["adjustments"].sole.merge!("source_time_entry_id" => "40", "line_key" => "preceding",
+      "original_work_date" => "2026-07-31", "original_week_start" => "2026-07-26", "total_hours" => 5.0, "regular_hours" => 5.0)
+    previous_payload["summary"].merge!("total_hours" => 5.0, "regular_hours" => 5.0)
+    previous_payload["export"].delete("prior_overtime_policy")
+    previous_payload["export"].merge!("id" => previous_payload["batch_id"], "batch_id" => previous_payload["batch_id"],
+      "checksum" => TimeTracking::CanonicalPayload.checksum(previous_payload.except("export")))
+    previous = row.deep_dup.merge("id" => "40", "work_date" => "2026-07-31", "hours" => 5.0)
+    previous["history_evidence"]["payable_segments"] = [ { "work_date" => "2026-07-31", "total_hours" => "5.0" } ]
+    previous["history_evidence"]["baseline_lines"].sole.merge!("source_time_entry_id" => "40", "line_key" => "preceding", "work_date" => "2026-07-31",
+      "batch_id" => previous_payload["batch_id"], "batch_checksum" => previous_payload.dig("export", "checksum"),
+      "batch_start_date" => "2026-07-16", "batch_end_date" => "2026-07-31", "total_hours" => 5.0, "regular_hours" => 5.0,
+      "processing" => { "status" => "committed", "external_system" => "cornerstone_payroll_manual", "external_pay_period_id" => previous_run.id.to_s })
+    allow(client).to receive(:payroll_batch) { |batch_id:| batch_id == previous_payload["batch_id"] ? previous_payload : payload }
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "source_state" => "current", "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0,
+      "integration" => { "source_instance_id" => source.expected_source_instance_id }, "through_work_date" => "2026-08-15",
+      "time_entries" => [ previous, row ], "pagination" => { "current_page" => 1, "per_page" => 50, "total_count" => 2, "total_pages" => 1, "truncated" => false })
+    packet = rollout(manifest).capture_review_packet!
+    packet["reviewed_dispositions"].each do |record|
+      record.merge!("reason" => "Review complete preceding-period context without omitting worked hours",
+        "evidence" => "Synthetic two authenticated frozen batches and committed employee registers")
+      record["disposition"] = record["source_time_entry_id"] == "40" ? "historical_baseline" : "paid_under_prior_daily_weekly_ot_policy"
+      record["prior_overtime_policy"] = prior_evidence if record["source_time_entry_id"] == "41"
+    end
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+  end
+
 end
