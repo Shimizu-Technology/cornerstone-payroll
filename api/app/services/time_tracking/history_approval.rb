@@ -132,6 +132,7 @@ module TimeTracking
     private
 
     def with_approval_locks(review)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + LOCK_BUDGET_SECONDS
       Timeout.timeout(LOCK_BUDGET_SECONDS, LockBudgetExceeded,
         "Historical approval exceeded its ten-minute lock budget. Nothing was applied. Refresh the summary before retrying.") do
         AireHistoryReview.transaction do
@@ -151,7 +152,13 @@ module TimeTracking
           @source.lock!
           @source.time_tracking_employee_mappings.order(:id).lock("FOR SHARE").load
           review.lock!
-          yield
+          result = yield
+          # StandardError handlers (including logging) can swallow Ruby's
+          # asynchronous timeout. Enforce the elapsed budget before committing.
+          if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+            raise LockBudgetExceeded, "Historical approval exceeded its ten-minute lock budget. Nothing was applied. Refresh the summary before retrying."
+          end
+          result
         end
       end
     end
