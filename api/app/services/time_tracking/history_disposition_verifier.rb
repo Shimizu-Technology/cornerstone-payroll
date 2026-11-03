@@ -135,9 +135,12 @@ module TimeTracking
 
     def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false)
       refresh_runs! unless @runs
-      return false if lines.empty? || lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
+      # A multi-day source may be represented across adjacent batches. Each
+      # line still verifies against its own batch, run and employee balance.
+      return false if lines.empty?
       return false unless lines.map { |line| line.fetch("line_key") }.uniq.length == lines.length
       return false unless lines.sum { |line| decimal(line.fetch("total_hours")) } == decimal(covered_hours || current.fetch("hours"))
+      return false unless segments_represented?(lines, current, partial: allow_overtime_hold) && lines.all? { |line| line_inside_batch?(line) }
 
       lines.all? do |line|
         processing = line.fetch("processing")
@@ -147,12 +150,13 @@ module TimeTracking
           processing["external_system"] == "cornerstone_payroll_manual" && line["processing_conflict"] == false &&
           (legacy_frozen ? legacy_frozen_verified?(line, current) : line["current_content_matches"] == true) &&
           line["source_user_uuid"] == current.fetch("source_user_uuid") &&
-          line["source_time_entry_id"] == current.fetch("id") && line["work_date"] == current.fetch("work_date") &&
+          line["source_time_entry_id"] == current.fetch("id") &&
           run.start_date.iso8601 == line.fetch("batch_start_date") && run.end_date.iso8601 == line.fetch("batch_end_date") &&
           decimal(line.fetch("regular_hours")) + decimal(line.fetch("overtime_hours")) == decimal(line.fetch("total_hours"))
 
         payload = batch(line.fetch("batch_id"))
-        next false unless payload.dig("export", "checksum") == line.fetch("batch_checksum")
+        next false unless payload.dig("export", "checksum") == line.fetch("batch_checksum") &&
+          payload.fetch("start_date") == line.fetch("batch_start_date") && payload.fetch("end_date") == line.fetch("batch_end_date")
         unless allow_overtime_hold
           next false if Array(payload["exclusions"]).any? do |exclusion|
             exclusion["source_time_entry_id"] == current.fetch("id") && decimal(exclusion.fetch("held_total_hours")).positive?
@@ -188,6 +192,39 @@ module TimeTracking
           source_inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")) ||
             CanonicalPayload.checksum([ current.slice("id", *SOURCE_FIELDS) ]), discover: discover)
       end
+    end
+
+    # AIRE splits overnight work into payable segments at Guam midnight, so a
+    # later segment carries the next day's date. Each represented line must
+    # equal one current segment, or not exceed it beside a frozen overtime hold.
+    def segments_represented?(lines, current, partial:)
+      segments = current.fetch("history_evidence")["payable_segments"]
+      return false unless segments.is_a?(Array) && segments.any? && segments.all?(Hash)
+
+      hours = segments.to_h { |segment| [ Date.iso8601(segment.fetch("work_date")).iso8601, decimal(segment.fetch("total_hours")) ] }
+      return false unless hours.length == segments.length && hours.values.sum == decimal(current.fetch("hours"))
+
+      dates = lines.map { |line| line.fetch("work_date") }
+      return false unless dates.uniq.length == dates.length
+
+      lines.all? do |line|
+        segment = hours[line.fetch("work_date")]
+        represented = decimal(line.fetch("total_hours"))
+        segment && (partial ? represented <= segment : represented == segment)
+      end
+    rescue KeyError, ArgumentError, TypeError, NoMethodError
+      false
+    end
+
+    # Mirrors the batch payload rule: current work falls inside its batch, and
+    # carried or corrected work may be earlier but never later.
+    def line_inside_batch?(line)
+      date = Date.iso8601(line.fetch("work_date"))
+      return false if date > Date.iso8601(line.fetch("batch_end_date"))
+
+      line.fetch("source_kind") != "current" || date >= Date.iso8601(line.fetch("batch_start_date"))
+    rescue KeyError, ArgumentError, TypeError
+      false
     end
 
     def overtime_hold_verified?(current, discover: false)

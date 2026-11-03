@@ -16,6 +16,7 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
       "state" => { "status" => "completed", "approval_status" => "pending", "entry_method" => "manual" },
       "lifecycle" => { "status" => "awaiting_approval" },
       "history_evidence" => { "payable_content_checksum" => "a" * 64, "baseline_lines" => [],
+        "payable_segments" => [ { "work_date" => "2026-09-15", "total_hours" => "4.25" } ],
         "active_manual_allocation_ids" => [], "payment_attestation" => nil, "active_cases" => [] } }
   end
   let(:disposition) do
@@ -340,6 +341,7 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
         other = current.deep_dup
         other.merge!("id" => "1805", "source_user_uuid" => other_uuid, "hours" => 4.0,
           "employee" => { "id" => "92", "payroll_integration_id" => other_uuid })
+        other["history_evidence"]["payable_segments"].sole["total_hours"] = "4.0"
         other_line = other["history_evidence"]["baseline_lines"].sole
         other_line.merge!("source_time_entry_id" => "1805", "source_user_uuid" => other_uuid, "regular_hours" => "4.0", "total_hours" => "4.0")
         payload["employees"] << { "source_user_uuid" => other_uuid, "adjustments" => [
@@ -549,6 +551,214 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
     it "rejects a frozen line whose category differs from the source provenance" do
       payload["employees"].first["adjustments"].first["category"] = nil
       expect(verifier.verified?(disposition, current)).to be(false)
+    end
+  end
+
+  # AIRE splits payable work at Guam midnight (PayableIntervals). A later
+  # segment carries the next day's date and may fall in the next batch.
+  context "with a multi-day source represented at its AIRE payable segment dates" do
+    let(:employee) { create(:employee, company: company) }
+    let(:first_half) { create(:pay_period, :committed, company: company, start_date: "2026-09-01", end_date: "2026-09-15", pay_date: "2026-09-30") }
+    let(:second_half) { create(:pay_period, :committed, company: company, start_date: "2026-09-16", end_date: "2026-09-30", pay_date: "2026-10-15") }
+    let(:payloads) { {} }
+
+    before do
+      TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee,
+        source_user_id: "91", source_user_uuid: uuid)
+      current["state"]["approval_status"] = "approved"
+      current["lifecycle"]["status"] = "committed"
+      allow(client).to receive(:payroll_batch) { |batch_id:| payloads.fetch(batch_id) }
+    end
+
+    # Freezes one canonical AIRE batch per run and returns AIRE's matching
+    # baseline lines. Each placement is one represented segment line.
+    def represent!(work_date:, hours:, segments:, placements:, exclusions: {})
+      current.merge!("work_date" => work_date, "hours" => hours)
+      current["history_evidence"]["payable_segments"] = segments.map { |date, total| { "work_date" => date, "total_hours" => total } }
+      lines = placements.group_by { |row| row.fetch(:run) }.flat_map do |run, rows|
+        frozen_batch(run, rows, exclusions.fetch(run, []))
+      end
+      current["history_evidence"]["baseline_lines"] = lines
+      capture(exclusions.empty? ? "historical_baseline" : "historical_baseline_pending_overtime")
+      lines
+    end
+
+    def frozen_batch(run, rows, exclusions)
+      batch_id = "AIRE-HISTORY-#{run.start_date.iso8601}"
+      cutoff = "#{(run.end_date + 3).iso8601}T07:00:00Z"
+      adjustments = rows.map do |row|
+        regular, overtime = row.fetch(:regular).to_d, row.fetch(:overtime, 0).to_d
+        { "source_time_entry_id" => current["id"], "source_time_entry_version" => current["version"],
+          "line_key" => "category:1|user:91|date:#{row.fetch(:date)}", "source_kind" => row.fetch(:kind, "current"),
+          "category" => current["category"], "source_category_id" => "1", "original_work_date" => row.fetch(:date),
+          "original_week_start" => Date.iso8601(row.fetch(:date)).beginning_of_week(:sunday).iso8601,
+          "total_hours" => (regular + overtime).to_s("F"), "regular_hours" => regular.to_s("F"), "overtime_hours" => overtime.to_s("F") }
+      end
+      totals = %w[total_hours regular_hours overtime_hours].to_h { |key| [ key, adjustments.sum { |row| row.fetch(key).to_d }.to_s("F") ] }
+      body = { "schema_version" => "2.0", "source" => "aire_services", "batch_id" => batch_id,
+        "start_date" => run.start_date.iso8601, "end_date" => run.end_date.iso8601, "cutoff_at" => cutoff, "generated_at" => cutoff,
+        "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, **totals, "adjustments" => adjustments } ],
+        "exclusions" => exclusions,
+        "summary" => totals.merge("employee_count" => 1, "adjustment_count" => adjustments.length, "exclusion_count" => exclusions.length,
+          "current_count" => adjustments.count { |row| row["source_kind"] == "current" },
+          "carryover_count" => adjustments.count { |row| row["source_kind"] == "carryover" }, "correction_count" => 0),
+        "issues" => %w[missing_category_count negative_adjustment_count pending_approval_count denied_approval_count open_clock_count denied_overtime_count].index_with { 0 }
+          .merge("pending_overtime_count" => exclusions.length) }
+      checksum = TimeTracking::CanonicalPayload.checksum(body)
+      payloads[batch_id] = body.merge("export" => { "id" => batch_id, "batch_id" => batch_id, "readiness_status" => "finalized",
+        "checksum" => checksum, "checksum_scope" => "payload_without_export", "checksum_algorithm" => "SHA-256",
+        "cutoff_at" => cutoff, "finalized_at" => cutoff })
+      create(:payroll_item, company: company, pay_period: run, employee: employee,
+        hours_worked: totals.fetch("regular_hours"), overtime_hours: totals.fetch("overtime_hours"))
+      adjustments.map do |row|
+        { "batch_id" => batch_id, "batch_checksum" => checksum, "batch_start_date" => body["start_date"], "batch_end_date" => body["end_date"],
+          "processing" => { "status" => "committed", "external_system" => "cornerstone_payroll_manual", "external_pay_period_id" => run.id.to_s },
+          "processing_conflict" => false, "current_content_matches" => true, "source_user_uuid" => uuid, "source_user_id" => "91",
+          "identity_basis" => "frozen_uuid", "work_date" => row["original_work_date"],
+          **row.slice("source_time_entry_id", "source_time_entry_version", "line_key", "source_kind", "category",
+            "total_hours", "regular_hours", "overtime_hours") }
+      end
+    end
+
+    def overnight!(**changes)
+      # Saturday 22:00 to Sunday 02:00 Guam, split at Sunday 00:00.
+      represent!(work_date: "2026-09-12", hours: 4.0, segments: [ [ "2026-09-12", "2.0" ], [ "2026-09-13", "2.0" ] ],
+        placements: [ { run: first_half, date: "2026-09-12", regular: "2.0" }, { run: first_half, date: "2026-09-13", regular: "2.0" } ], **changes)
+    end
+
+    def split_shift!(placements: nil)
+      # Tuesday 20:00 to Wednesday 03:00 with a 23:00-00:00 break: 3h + 3h,
+      # straddling the semi-monthly boundary into the next batch and run.
+      represent!(work_date: "2026-09-15", hours: 6.0, segments: [ [ "2026-09-15", "3.0" ], [ "2026-09-16", "3.0" ] ],
+        placements: placements || [ { run: first_half, date: "2026-09-15", regular: "3.0" }, { run: second_half, date: "2026-09-16", regular: "3.0" } ])
+    end
+
+    def write_counts
+      [ PayrollItem.count, PayrollItem.sum(:hours_worked), PayrollItem.sum(:overtime_hours), PayPeriod.where(status: "committed").count,
+        TimeTrackingEntryAllocation.count, TimeTrackingManualAllocation.count, PayrollTimeAllocation.count, TimeTrackingImport.count ]
+    end
+
+    # The verifier has no write API; the instance_double client also refuses
+    # any unstubbed (write) command. Only authenticated batch reads occur.
+    def verify_without_writes(expected)
+      source_before = current.deep_dup
+      expect { expect(verifier.verified?(disposition, current)).to be(expected) }.not_to change { write_counts }
+      expect(current).to eq(source_before)
+      expect(current.dig("state", "approval_status")).to eq("approved")
+    end
+
+    it "accepts an overnight Saturday-to-Sunday source represented at both segment dates in one batch" do
+      lines = overnight!
+      expect(lines.map { |line| line["work_date"] }).to eq(%w[2026-09-12 2026-09-13])
+      verify_without_writes(true)
+      expect(client).to have_received(:payroll_batch).with(batch_id: "AIRE-HISTORY-2026-09-01").once
+    end
+
+    it "accepts a split shift whose next-day segment is represented in the following batch and run" do
+      lines = split_shift!
+      expect(lines.map { |line| [ line["work_date"], line["batch_id"] ] }).to eq([
+        [ "2026-09-15", "AIRE-HISTORY-2026-09-01" ], [ "2026-09-16", "AIRE-HISTORY-2026-09-16" ] ])
+      verify_without_writes(true)
+      discovered = rounding_verifier_for([ current ])
+      expect(discovered.rounding_variances).to eq([])
+      expect(discovered.rounding_review_blockers).to eq([])
+    end
+
+    def rounding_verifier_for(inventory)
+      described_class.new(source: source, company: company, actor: actor, client: client).tap do |instance|
+        instance.discover_rounding_variances!(inventory)
+      end
+    end
+
+    it "keeps each segment run's employee balance exact and requires its own rounding acknowledgement" do
+      split_shift!
+      PayrollItem.find_by!(pay_period: second_half).update_columns(hours_worked: 3.03)
+      instance = rounding_verifier_for([ current ])
+      expect(instance.rounding_variances.sole).to include("run_id" => second_half.id, "category" => "REG", "signed_difference" => "0.03")
+      verify_without_writes(false)
+    end
+
+    it "rejects a segment date outside the batch that represents it" do
+      split_shift!(placements: [ { run: first_half, date: "2026-09-15", regular: "3.0" }, { run: first_half, date: "2026-09-16", regular: "3.0", kind: "carryover" } ])
+      verify_without_writes(false)
+      current["history_evidence"]["baseline_lines"].last["source_kind"] = "current"
+      capture("historical_baseline")
+      verify_without_writes(false)
+    end
+
+    it "rejects a line whose claimed batch dates differ from the authenticated batch" do
+      split_shift!
+      current["history_evidence"]["baseline_lines"].first["batch_end_date"] = "2026-09-16"
+      capture("historical_baseline")
+      verify_without_writes(false)
+    end
+
+    it "rejects a changed current segment even when the review is recaptured" do
+      overnight!
+      current["history_evidence"]["payable_segments"] = [ { "work_date" => "2026-09-12", "total_hours" => "1.5" },
+        { "work_date" => "2026-09-13", "total_hours" => "2.5" } ]
+      verify_without_writes(false)
+      capture("historical_baseline")
+      verify_without_writes(false)
+      current["history_evidence"]["payable_segments"] = [ { "work_date" => "2026-09-13", "total_hours" => "2.0" },
+        { "work_date" => "2026-09-14", "total_hours" => "2.0" } ]
+      capture("historical_baseline")
+      verify_without_writes(false)
+    end
+
+    it "rejects missing, duplicated or unbalanced segment evidence" do
+      overnight!
+      [ nil, [], [ { "work_date" => "2026-09-12", "total_hours" => "2.0" } ] * 2,
+        [ { "work_date" => "2026-09-12", "total_hours" => "2.0" }, { "work_date" => "2026-09-13", "total_hours" => "2.5" } ],
+        [ { "work_date" => "not-a-date", "total_hours" => "2.0" }, { "work_date" => "2026-09-13", "total_hours" => "2.0" } ] ].each do |segments|
+        current["history_evidence"]["payable_segments"] = segments
+        capture("historical_baseline")
+        verify_without_writes(false)
+        expect(rounding_verifier_for([ current ]).rounding_review_blockers.sole)
+          .to include("source_time_entry_id" => current["id"], "reason" => "Baseline evidence or earning component requires review")
+      end
+    end
+
+    it "rejects one segment counted twice across batches" do
+      split_shift!(placements: [ { run: first_half, date: "2026-09-15", regular: "3.0" },
+        { run: second_half, date: "2026-09-15", regular: "3.0", kind: "carryover" } ])
+      expect(current["history_evidence"]["baseline_lines"].sum { |line| line["total_hours"].to_d }).to eq(current["hours"])
+      verify_without_writes(false)
+    end
+
+    it "rejects a nominal-date line whose hours differ from that segment" do
+      represent!(work_date: "2026-09-12", hours: 4.0, segments: [ [ "2026-09-12", "2.0" ], [ "2026-09-13", "2.0" ] ],
+        placements: [ { run: first_half, date: "2026-09-12", regular: "4.0" } ])
+      verify_without_writes(false)
+    end
+
+    context "with represented regular segments and a frozen overtime hold" do
+      let(:hold) do
+        { "source_time_entry_id" => current["id"], "source_user_id" => "91", "source_user_uuid" => uuid,
+          "original_work_date" => "2026-09-12", "category" => current["category"], "reason" => "pending_overtime",
+          "allocation_review_reason" => nil, "held_total_hours" => "1.0", "held_regular_hours" => "0.0", "held_overtime_hours" => "1.0" }
+      end
+
+      before { current["state"].merge!("status" => "completed", "overtime_status" => "pending") }
+
+      def held_overnight!(saturday:, sunday:)
+        represent!(work_date: "2026-09-12", hours: 4.0, segments: [ [ "2026-09-12", "2.0" ], [ "2026-09-13", "2.0" ] ],
+          placements: [ { run: first_half, date: "2026-09-12", regular: saturday }, { run: first_half, date: "2026-09-13", regular: sunday } ],
+          exclusions: { first_half => [ hold ] })
+      end
+
+      it "accounts for Saturday REG, Sunday REG and the held Saturday overtime without approving it" do
+        held_overnight!(saturday: "1.0", sunday: "2.0")
+        verify_without_writes(true)
+        expect(current.dig("state", "overtime_status")).to eq("pending")
+        capture("historical_baseline")
+        verify_without_writes(false)
+      end
+
+      it "rejects a represented segment larger than its current payable hours" do
+        held_overnight!(saturday: "2.5", sunday: "0.5")
+        verify_without_writes(false)
+      end
     end
   end
 end
