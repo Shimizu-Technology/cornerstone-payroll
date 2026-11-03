@@ -198,6 +198,74 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
       expect(instantiated).to eq(1)
     end
 
+    context "with represented regular hours and a frozen overtime hold" do
+      let(:hold) do
+        { "source_time_entry_id" => current["id"], "source_user_id" => "91", "source_user_uuid" => uuid,
+          "original_work_date" => current["work_date"], "category" => current["category"],
+          "reason" => "pending_overtime", "allocation_review_reason" => nil,
+          "held_total_hours" => "0.30", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.30" }
+      end
+
+      before do
+        current["state"].merge!("status" => "completed", "overtime_status" => "none")
+        line.merge!("regular_hours" => "3.95", "total_hours" => "3.95")
+        payload["employees"].sole["adjustments"].sole.merge!("regular_hours" => "3.95", "total_hours" => "3.95")
+        payload["exclusions"] = [ hold ]
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 3.95)
+        capture("historical_baseline_pending_overtime")
+      end
+
+      it "accounts for both exact parts without approving or paying the held overtime" do
+        expect(verifier.verified?(disposition, current)).to be(true)
+        capture("historical_baseline")
+        expect(verifier.verified?(disposition, current)).to be(false)
+        expect(current.dig("state", "overtime_status")).to eq("none")
+      end
+
+      [ { "held_total_hours" => "0.29" }, { "held_regular_hours" => "0.30" }, { "held_overtime_hours" => "0.29" },
+        { "reason" => "pending_approval" }, { "source_user_id" => "92" }, { "source_user_uuid" => "other" },
+        { "original_work_date" => "2026-09-14" }, { "category" => nil }, { "allocation_review_reason" => "conflict" } ].each do |change|
+        it "rejects mismatched frozen hold #{change.keys.join(', ')}" do
+          hold.merge!(change)
+          capture("historical_baseline_pending_overtime")
+          expect(verifier.verified?(disposition, current)).to be(false)
+        end
+      end
+
+      it "rejects missing or overlapping exclusions" do
+        [ [], [ hold, hold.deep_dup ] ].each do |holds|
+          payload["exclusions"] = holds
+          expect(verifier.verified?(disposition, current)).to be(false)
+        end
+      end
+
+      it "rejects changed source content, approved overtime, active cases and allocations" do
+        line["current_content_matches"] = false
+        capture("historical_baseline_pending_overtime")
+        expect(verifier.verified?(disposition, current)).to be(false)
+        line["current_content_matches"] = true
+        current["state"]["overtime_status"] = "approved"
+        capture("historical_baseline_pending_overtime")
+        expect(verifier.verified?(disposition, current)).to be(false)
+        current["state"]["overtime_status"] = "none"
+        current["history_evidence"]["active_cases"] = [ { "status" => "open" } ]
+        capture("historical_baseline_pending_overtime")
+        expect(verifier.verified?(disposition, current)).to be(false)
+        current["history_evidence"]["active_cases"] = []
+        current["history_evidence"]["active_manual_allocation_ids"] = [ "1" ]
+        capture("historical_baseline_pending_overtime")
+        expect(verifier.verified?(disposition, current)).to be(false)
+      end
+
+      it "discovers separate run variances for the represented regular portion only" do
+        PayrollItem.where(pay_period: run).update_all(hours_worked: 3.98)
+        instance = rounding_verifier
+        expect(instance.rounding_variances.sole).to include("category" => "REG", "source_total" => "3.95", "signed_difference" => "0.03")
+        expect(instance.rounding_review_blockers).to be_empty
+        expect(rounding_verifier(variance_acknowledgements(instance)).verified?(disposition, current)).to be(true)
+      end
+    end
+
     context "with reviewed historical rounding" do
       it "requires a separate exact signed acknowledgement and preserves the normal baseline disposition" do
         PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)
