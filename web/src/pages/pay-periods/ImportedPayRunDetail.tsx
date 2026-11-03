@@ -32,6 +32,8 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPaycheckId, setSelectedPaycheckId] = useState<number | null>(null);
+  // Prior-provider history rejects every adjustment, so staff get no adjustment action.
+  const adjustable = audience === 'staff' && record?.source.system !== 'prior_provider';
   const requestIdRef = useRef(0);
 
   useLayoutEffect((): void => {
@@ -138,7 +140,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                       <TableHead className="text-right">Employee taxes</TableHead>
                       <TableHead className="text-right">Deductions</TableHead>
                       <TableHead className="text-right">Net</TableHead>
-                      {audience === 'staff' && <TableHead className="text-right">Ledger</TableHead>}
+                      {adjustable && <TableHead className="text-right">Ledger</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -154,10 +156,10 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                         <TableCell className="text-right tabular-nums">{formatCurrency(Number(paycheck.employee_taxes))}</TableCell>
                         <TableCell className="text-right tabular-nums">{formatCurrency(Number(paycheck.pretax_deductions) + Number(paycheck.after_tax_deductions))}</TableCell>
                         <TableCell className="text-right font-semibold tabular-nums">{formatCurrency(Number(paycheck.net_pay))}</TableCell>
-                        {audience === 'staff' && <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setSelectedPaycheckId(paycheck.id)}><FilePenLine className="mr-2 h-4 w-4" />Adjustments</Button></TableCell>}
+                        {adjustable && <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setSelectedPaycheckId(paycheck.id)}><FilePenLine className="mr-2 h-4 w-4" />Adjustments</Button></TableCell>}
                       </TableRow>
                     ))}
-                    {record.paychecks.length === 0 && <TableRow><TableCell colSpan={audience === 'staff' ? 8 : 7} className="py-12 text-center text-sm text-neutral-500">No payroll records were stored for this imported pay run.</TableCell></TableRow>}
+                    {record.paychecks.length === 0 && <TableRow><TableCell colSpan={adjustable ? 8 : 7} className="py-12 text-center text-sm text-neutral-500">No payroll records were stored for this imported pay run.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </div>
@@ -169,7 +171,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
                       <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(paycheck.net_pay))}</p>
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-sm"><Metric label="Hours" value={Number(paycheck.hours_total).toFixed(2)} /><Metric label="Gross" value={formatCurrency(Number(paycheck.gross_pay))} /><Metric label="Taxes" value={formatCurrency(Number(paycheck.employee_taxes))} /></div>
-                    {audience === 'staff' && <Button variant="outline" size="sm" onClick={() => setSelectedPaycheckId(paycheck.id)}><FilePenLine className="mr-2 h-4 w-4" />Review adjustments</Button>}
+                    {adjustable && <Button variant="outline" size="sm" onClick={() => setSelectedPaycheckId(paycheck.id)}><FilePenLine className="mr-2 h-4 w-4" />Review adjustments</Button>}
                   </div>
                 ))}
                 {record.paychecks.length === 0 && <p className="px-4 py-12 text-center text-sm text-neutral-500">No payroll records were stored for this imported pay run.</p>}
@@ -182,7 +184,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
               )}
             </Card>
 
-            {audience === 'staff' && selectedPaycheckId && record.paychecks.find((paycheck) => paycheck.id === selectedPaycheckId) && (
+            {adjustable && selectedPaycheckId && record.paychecks.find((paycheck) => paycheck.id === selectedPaycheckId) && (
               <HistoricalAdjustmentPanel companyId={routeCompanyId!} paycheck={record.paychecks.find((paycheck) => paycheck.id === selectedPaycheckId)!} />
             )}
 

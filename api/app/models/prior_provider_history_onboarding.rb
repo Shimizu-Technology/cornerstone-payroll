@@ -18,12 +18,23 @@ class PriorProviderHistoryOnboarding < ApplicationRecord
   def self.unresolved_reversed_for(company_id, tax_year: nil)
     records = where(company_id: company_id)
     records = records.where(tax_year: tax_year) if tax_year
-    replacement_years = HistoricalEmployeeYtdBalance.joins(historical_ytd_bridge: :historical_import_batch)
-      .where(company_id: company_id, historical_ytd_bridges: { company_id: company_id, status: "applied" },
+    reversed = records.where(status: "reversed").where.not(tax_year: records.where(status: "active").select(:tax_year)).to_a
+    where(id: reversed.reject(&:replaced_by_applied_ytd?).map(&:id))
+  end
+
+  # A replacement opening balance clears the hold only when it covers every
+  # employee the undone history paid, through that employee's last paid date.
+  # A partial replacement would let live payroll omit the others' wages.
+  def replaced_by_applied_ytd?
+    reversed_through = HistoricalPaycheck.where(historical_import_batch_id: historical_import_batch_id)
+      .where.not(employee_id: nil).group(:employee_id).maximum(:pay_date)
+    replacement = HistoricalEmployeeYtdBalance.joins(historical_ytd_bridge: :historical_import_batch)
+      .where(company_id: company_id, tax_year: tax_year, historical_ytd_bridges: { company_id: company_id, status: "applied" },
         historical_import_batches: { company_id: company_id, status: "locked", importer_version: HistoricalImportBatch::YTD_BRIDGE_IMPORTER_VERSIONS })
-      .select(:tax_year)
-    records.where(status: "reversed").where.not(tax_year: records.where(status: "active").select(:tax_year))
-      .where.not(tax_year: replacement_years)
+    return replacement.exists? if reversed_through.empty?
+
+    covered_through = replacement.where(employee_id: reversed_through.keys).group(:employee_id).maximum(:through_pay_date)
+    reversed_through.all? { |employee_id, last_paid| covered_through[employee_id].present? && covered_through[employee_id] >= last_paid }
   end
 
   private

@@ -52,7 +52,17 @@ RSpec.describe "Prior-provider final review regressions" do
     expect(current.unresolved_prior_provider_history?).to be(true)
     expect(future.unresolved_prior_provider_history?).to be(false)
     expect(future).to be_valid
-    balance = apply_historical_ytd_balance(company: @company, employee: employees.first, through_pay_date: runs.first.pay_date)
+    last_paid = runs.first.pay_date
+    balance = apply_historical_ytd_balance(company: @company, employee: employees.first, through_pay_date: last_paid)
+    # A replacement covering only some employees, or stopping short of the
+    # undone history's last pay date, must keep the hold.
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    apply_historical_ytd_balance(company: @company, employee: employees.second, through_pay_date: last_paid)
+    apply_historical_ytd_balance(company: @company, employee: employees.third, through_pay_date: last_paid - 1)
+    expect(current.unresolved_prior_provider_history?).to be(true)
+    expect(current).not_to be_valid
+    apply_historical_ytd_balance(company: @company, employee: employees.third, through_pay_date: last_paid)
+    expect(current.unresolved_prior_provider_history?).to be(false)
     bridge = balance.historical_ytd_bridge
     batch = bridge.historical_import_batch
     applied_attributes = bridge.attributes.slice("status", "applied_at", "applied_by_id", "apply_acknowledgement")

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link } from "react-router";
 import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, FileDown, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { UnsavedPayrollChangesGuard } from "@/components/routing/UnsavedPayrollChangesGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -47,6 +48,9 @@ import {
   takeoverQuarter,
   type EmployeeTotals,
   type PeriodState,
+  takeoverProblem,
+  periodDatesValid,
+  registerTotalValid,
 } from "./prior-provider/historyModel";
 
 // The server keeps these phrases as its audit acknowledgement; people confirm
@@ -71,6 +75,8 @@ const OTHER_COLUMNS: AmountKey[] = ["non_taxable_pay", "reported_tips", "tips_pa
 const AUTOSAVE_MS = 1200;
 
 type SaveState = "idle" | "saving" | "saved" | "unsaved" | "conflict" | "error";
+const UNSAVED_STATES: SaveState[] = ["unsaved", "saving", "error", "conflict"];
+export const UNSAVED_HISTORY_MESSAGE = "Your prior-provider history edits haven’t been saved yet. Leave this page and lose them?";
 
 export function PriorProviderHistory() {
   const { activeCompanyId } = useCompany();
@@ -202,9 +208,13 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
     });
 
   const remaining = page && payload ? remainingWork(payload, page.employees, files.length > 0) : [];
+  // State, not the dirty ref, so the guard re-renders. "saving" counts because
+  // edits made during a save don't change the save state.
+  const leaveLosesEdits = canManage && !active && UNSAVED_STATES.includes(saveState);
 
   return (
     <>
+      <UnsavedPayrollChangesGuard dirty={leaveLosesEdits} message={UNSAVED_HISTORY_MESSAGE} />
       <Header
         title="Prior-provider history"
         subtitle="Record payroll the previous provider already paid this year, so year-to-date totals and year-end forms include it."
@@ -538,6 +548,7 @@ function PayDatesStep({ page, payload, onChange }: { page: HistoryPage; payload:
           label="Cornerstone takes over on"
           type="date"
           helperText={`History covers ${payload.tax_year} pay dates before this date.`}
+          error={takeoverProblem(payload) ?? undefined}
           value={payload.takeover_on}
           onChange={(e) => onChange({ ...payload, takeover_on: e.target.value, tax_year: Number(e.target.value.slice(0, 4)) || payload.tax_year })}
         />
@@ -562,9 +573,14 @@ function PayDatesStep({ page, payload, onChange }: { page: HistoryPage; payload:
               onClick={() =>
                 onChange({
                   ...payload,
+                  // Only listed runs change here. Manual and unavailable saved
+                  // dates stay; "Remove" is the only way to discard the latter.
                   periods: allSelected
-                    ? payload.periods.filter((period) => !period.run_id)
-                    : [...page.candidates.map((candidate) => payload.periods.find((p) => p.key === candidate.key) ?? normalizeCandidate(candidate)), ...payload.periods.filter((p) => !p.run_id)],
+                    ? payload.periods.filter((period) => !candidateKeys.has(period.key))
+                    : [
+                        ...page.candidates.map((candidate) => payload.periods.find((p) => p.key === candidate.key) ?? normalizeCandidate(candidate)),
+                        ...payload.periods.filter((p) => !candidateKeys.has(p.key)),
+                      ].sort((a, b) => a.pay_date.localeCompare(b.pay_date)),
                 })
               }
             >
@@ -760,6 +776,10 @@ function PeriodEditor({
   const hasProblems = problems.some((row) => Object.keys(row).length > 0);
   const changeCheck = (rowIndex: number, next: HistoryCheck) =>
     onChange({ ...period, paychecks: period.paychecks.map((row, i) => (i === rowIndex ? next : row)), register_totals: enterTotals ? period.register_totals : {} });
+  // With "Totals are different" open, every register amount must be entered;
+  // otherwise confirming would record a match for a value never entered.
+  const invalidTotals = enterTotals ? REGISTER_KEYS.filter((key) => !registerTotalValid(period, key)) : [];
+  const datesValid = periodDatesValid(period);
   const confirmMatch = () => onMatched({ ...period, register_totals: { ...totals } });
   const manual = !period.run_id;
   return (
@@ -816,7 +836,7 @@ function PeriodEditor({
                   label={registerLabels[key]}
                   inputMode="decimal"
                   value={period.register_totals[key] ?? ""}
-                  error={differences[key] ? `Paychecks total ${money(totals[key])} (${signedMoney(differences[key]!)})` : undefined}
+                  error={invalidTotals.includes(key) ? "Enter the register amount like 1234.56 (0 if none)" : differences[key] ? `Paychecks total ${money(totals[key])} (${signedMoney(differences[key]!)})` : undefined}
                   onChange={(e) => onChange({ ...period, register_totals: { ...period.register_totals, [key]: e.target.value } })}
                 />
               ) : (
@@ -829,7 +849,7 @@ function PeriodEditor({
           ))}
         </dl>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button disabled={hasProblems || !period.source_reference.trim() || Object.keys(differences).length > 0} onClick={confirmMatch}>
+          <Button disabled={hasProblems || !datesValid || !period.source_reference.trim() || invalidTotals.length > 0 || Object.keys(differences).length > 0} onClick={confirmMatch}>
             <Check className="mr-2 h-4 w-4" aria-hidden /> Matches the register
           </Button>
           {!enterTotals && (
@@ -844,6 +864,7 @@ function PeriodEditor({
           )}
         </div>
         {hasProblems && <p className="mt-2 text-sm text-danger-700">Fix the highlighted paycheck amounts first.</p>}
+        {!datesValid && <p className="mt-2 text-sm text-danger-700">Enter real dates with the period start on or before its end, and the end on or before the pay date.</p>}
         {!hasProblems && Object.keys(differences).length > 0 && (
           <p className="mt-2 text-sm text-danger-700">The paychecks don’t add up to the register. Correct the paycheck that’s different.</p>
         )}

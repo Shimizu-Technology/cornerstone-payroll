@@ -18,6 +18,7 @@ vi.mock('@/services/api', () => ({
   checksApi: { getSettings: mocks.get, updateSettings: mocks.update, getLayout: mocks.layout, updateNextCheckNumber: mocks.next },
   printerProfilesApi: { list: mocks.profiles, selectForMe: mocks.select },
 }));
+const BANK_LABEL = 'Bank Name (printed on check face)';
 const settings = { check_stock_type: 'top_check', check_offset_x: 0, check_offset_y: 0, bank_name: 'Synthetic bank', bank_address: '', check_layout_config: {}, next_check_number: 1001 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.id = 1;
@@ -60,17 +61,28 @@ describe('selected client check controls', () => {
     expect(number.value).toBe('712');
     expect(mocks.next).not.toHaveBeenCalled();
   });
-  it('applies a new suggestion that arrives while the page stays open', async () => {
+  it('applies a new suggestion that arrives while the page stays open without reloading over unsaved edits', async () => {
     const user = userEvent.setup();
-    function NextSuggestion() {
+    function Navigation() {
       const navigate = useNavigate();
-      return <button type="button" onClick={() => navigate('/check-settings?company_id=1&suggested_next=715')}>Newer suggestion</button>;
+      return <>
+        <button type="button" onClick={() => navigate('/check-settings?company_id=1&suggested_next=715')}>Newer suggestion</button>
+        <button type="button" onClick={() => navigate('/check-settings')}>Without suggestion</button>
+      </>;
     }
-    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /><NextSuggestion /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /><Navigation /></MemoryRouter>);
     const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
     expect(number.value).toBe('708');
+    const bank = screen.getByLabelText(BANK_LABEL) as HTMLInputElement;
+    await user.clear(bank);
+    await user.type(bank, 'Unsaved bank');
     await user.click(screen.getByRole('button', { name: 'Newer suggestion' }));
     await vi.waitFor(() => expect(number.value).toBe('715'));
+    await user.click(screen.getByRole('button', { name: 'Without suggestion' }));
+    expect(number.value).toBe('715');
+    expect(bank.value).toBe('Unsaved bank');
+    // The settings were loaded once; a suggestion change never refetches them.
+    expect(mocks.get).toHaveBeenCalledOnce();
     expect(mocks.next).not.toHaveBeenCalled();
   });
   it('ignores a check suggestion addressed to another client', async () => {

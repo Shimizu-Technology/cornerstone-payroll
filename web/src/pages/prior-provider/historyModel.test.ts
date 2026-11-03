@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage } from "@/services/priorProviderHistory";
-import { emptyCheck, initialPayload, paycheckProblems, periodState, remainingWork, setPaycheckAmount } from "./historyModel";
+import { defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
 
 function row(overrides: Partial<Record<AmountKey, string>> = {}): HistoryCheck {
   const zero = Object.fromEntries(Object.keys(amountLabels).map((key) => [key, "0.00"])) as Record<AmountKey, string>;
@@ -48,5 +48,32 @@ describe("prior-provider history model", () => {
     expect(payload).toMatchObject({ takeover_on: "2026-11-01", tax_year: 2026 });
     expect(periodState(payload.periods[0])).toBe("to_check");
     expect(remainingWork(payload, [{ id: 1, name: "Ana Cruz", ssn_last_four: "1111" }], false).map((item) => item.step)).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it("reports a pay date as matched only with real, ordered period dates", () => {
+    const totals = { gross_pay: "1000.00", federal_income_tax: "100.00", social_security_tax: "0.00", medicare_tax: "0.00", deductions: "0.00", net_pay: "900.00", employer_taxes: "0.00", employer_contributions: "0.00" };
+    const period = { key: "manual-1", start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "Register p1", register_totals: totals, paychecks: [row()] };
+    expect(periodMatched(period)).toBe(true);
+    expect(periodState(period)).toBe("matched");
+    [{ pay_date: "" }, { start_date: "" }, { end_date: "2026-02-30" }, { start_date: "2026-10-22" }, { pay_date: "2026-10-20" }].forEach((dates) => {
+      expect(periodMatched({ ...period, ...dates })).toBe(false);
+      expect(periodState({ ...period, ...dates })).toBe("to_check");
+    });
+  });
+
+  it("keeps the default takeover inside the pay dates' tax year and explains when none is left", () => {
+    expect(defaultTakeover("2026-10-28")).toBe("2026-11-01");
+    expect(defaultTakeover("2026-12-15")).toBe("2026-12-31");
+    const december = { key: "run-9", run_id: 9, start_date: "2026-12-01", end_date: "2026-12-14", pay_date: "2026-12-15", source_reference: "", register_totals: {}, paychecks: [row()] };
+    const payload = initialPayload({ candidates: [december], draft: null } as unknown as HistoryPage);
+    expect(payload).toMatchObject({ tax_year: 2026, takeover_on: "2026-12-31" });
+    expect(takeoverProblem(payload)).toBeNull();
+    const yearEnd = { ...december, pay_date: "2026-12-31", end_date: "2026-12-31" };
+    const full = initialPayload({ candidates: [yearEnd], draft: null } as unknown as HistoryPage);
+    expect(full).toMatchObject({ tax_year: 2026, takeover_on: "2026-12-31" });
+    expect(takeoverProblem(full)).toMatch(/December 31.*covers all of 2026/);
+    expect(remainingWork(full, [], false).map((item) => item.text)).toContain(takeoverProblem(full));
+    expect(takeoverProblem({ ...payload, takeover_on: "2026-12-10" })).toMatch(/after the last pay date/);
+    expect(takeoverProblem({ ...payload, takeover_on: "2027-01-01" })).toBe("Choose a takeover date in 2026.");
   });
 });
