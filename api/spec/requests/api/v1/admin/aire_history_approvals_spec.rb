@@ -102,11 +102,37 @@ RSpec.describe "AIRE one-summary history approval", type: :request do
     2.times { post endpoint("approve"), params: arguments, as: :json }
     expect(AireHistoryOperation.where(kind: "approve").count).to eq(1)
     approval = AireHistoryOperation.find_by!(kind: "approve")
-    expect(enqueued_jobs.count { |job| job[:job] == AireHistoryOperationJob && job[:args] == [ approval.id ] }).to eq(1)
+    expect(enqueued_jobs.count { |job| job[:job] == AireHistoryOperationJob && job[:args] == [ approval.id ] }).to eq(2)
     expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
     AireHistoryOperation.find(pending.fetch("operation_id")).update!(actor: create(:user, company: company, role: "admin"))
     get endpoint("operations/#{pending.fetch('operation_id')}")
     expect(response).to have_http_status(:not_found)
+  end
+
+  it "recovers a committed queued approval whose delivery was lost and never re-enqueues a terminal result" do
+    page = history_service.prepare!
+    arguments = page.slice("review_id", "digest", "attestation").merge(background: true)
+    post endpoint("approve"), params: arguments, as: :json
+    operation = AireHistoryOperation.find(response.parsed_body.fetch("operation_id"))
+    clear_enqueued_jobs # Simulate the row surviving while its delivery is absent.
+
+    expect { post endpoint("approve"), params: arguments, as: :json }
+      .not_to change(AireHistoryOperation, :count)
+    expect(enqueued_jobs.count { |job| job[:job] == AireHistoryOperationJob && job[:args] == [ operation.id ] }).to eq(1)
+    AireHistoryOperationJob.perform_now(operation.id)
+    expect(operation.reload.status).to eq("completed")
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(1)
+    clear_enqueued_jobs
+
+    post endpoint("approve"), params: arguments, as: :json
+    expect(response.parsed_body.fetch("status")).to eq("completed")
+    expect(enqueued_jobs).to be_empty
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(1)
+
+    operation.update!(status: "failed")
+    post endpoint("approve"), params: arguments, as: :json
+    expect(response.parsed_body.fetch("status")).to eq("failed")
+    expect(enqueued_jobs).to be_empty
   end
 
   context "as an accountant" do

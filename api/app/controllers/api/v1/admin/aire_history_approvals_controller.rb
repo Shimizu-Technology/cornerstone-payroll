@@ -51,7 +51,10 @@ module Api
             record.kind = kind
             record.arguments = arguments
           end
-          if operation.previously_new_record?
+          # A process can stop after committing this row but before enqueueing.
+          # Retrying a queued operation recovers that gap. The job's row lock
+          # and terminal-status check make duplicate deliveries harmless.
+          if operation.status == "queued"
             job = AireHistoryOperationJob.perform_later(operation.id)
             unless job&.successfully_enqueued?
               operation.with_lock do
