@@ -43,13 +43,13 @@ class TimeTrackingCategoryMapping < ApplicationRecord
 
   def valid_scope
     errors.add(:company, "must own the AIRE source") unless time_tracking_source&.company_id == company_id && time_tracking_source&.source_type == "aire_services"
+    ids = historical_employee_ids
     limits = historical_run_limits
-    valid_limits = limits.is_a?(Hash) && limits.all? do |id, runs|
-      historical_employee_ids.include?(id.to_i) && runs.is_a?(Array) && runs.any? && runs.uniq == runs && runs.all? { |run| run.is_a?(Integer) && run.positive? } &&
+    valid_limits = ids.is_a?(Array) && limits.is_a?(Hash) && limits.all? do |id, runs|
+      ids.include?(id.to_i) && runs.is_a?(Array) && runs.any? && runs.uniq == runs && runs.all? { |run| run.is_a?(Integer) && run.positive? } &&
         PayPeriod.where(company_id: company_id, status: "committed", id: runs).count == runs.length
     end
     errors.add(:historical_run_limits, "must identify committed company-owned runs in the employee scope") unless valid_limits
-    ids = historical_employee_ids
     unless ids.is_a?(Array) && ids.all? { |id| id.is_a?(Integer) } && ids.uniq == ids && Employee.where(company_id: company_id, id: ids).count == ids.length
       errors.add(:historical_employee_ids, "must be distinct employees of this company")
     end
