@@ -3,8 +3,9 @@
 module TimeTracking
   # This approves accounting coverage only. It has no write or payment API.
   class HistoryDispositionVerifier
-    TYPES = %w[historical_baseline paid_under_prior_daily_weekly_ot_policy historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
+    TYPES = %w[accountant_attributed_paid_category historical_baseline paid_under_prior_daily_weekly_ot_policy historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
     LABELS = {
+      "accountant_attributed_paid_category" => "Accountant-attributed categories in committed manual payroll; source and payment unchanged",
       "historical_baseline" => "Already represented in manual payroll; delivery not asserted",
       "paid_under_prior_daily_weekly_ot_policy" => "Represented under the prior daily8/weekly40 policy; source approval and payment delivery unchanged",
       "historical_baseline_pending_overtime" => "Represented regular hours plus exact frozen overtime hold; overtime approval and payment unchanged",
@@ -43,6 +44,7 @@ module TimeTracking
         acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
       @batches = (@batch_cache || {}).reject { |_, payload| payload.dig("export", "prior_overtime_policy").present? }
       @source_inventory_checksums = nil
+      @category_attribution = AccountantPaidCategoryAttribution.new(source: @source, actor: @actor)
     end
 
     def discover_rounding_variances!(inventory)
@@ -58,6 +60,8 @@ module TimeTracking
       inventory.each do |row|
         lines = row.dig("history_evidence", "baseline_lines")
         next if lines.blank?
+
+        next if accountant_category_attributions(row).any?
 
         legacy = lines.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
         prior = prior_policy_review_evidence(row).any?
@@ -78,6 +82,22 @@ module TimeTracking
 
     def rounding_acknowledgements_valid?
       @rounding_review&.acknowledgements_valid? || (@rounding_acknowledgements == [] && @component_bindings == [])
+    end
+
+    def accountant_category_attributions(current)
+      Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
+        line = current.fetch("history_evidence").fetch("baseline_lines").find { |candidate| candidate.fetch("batch_id") == id }
+        next unless line.dig("processing", "status") == "committed" && line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+        run_id = line.dig("processing", "external_pay_period_id").to_s
+        mapping = @employees && @employees[current.fetch("source_user_uuid")]
+        next unless mapping && @runs[run_id] && mapping.source_user_id == current.dig("employee", "id")
+        payload = batch(id)
+        employee = payload.fetch("employees").find { |row| row["source_user_id"] == mapping.source_user_id }
+        next unless employee
+        @category_attribution.call(batch: payload, run: @runs.fetch(run_id), mapping: mapping, employee: employee,
+          items: Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id },
+          run_checksum: @run_checksums.fetch(run_id), inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")))
+      end
     end
 
     def prior_policy_review_evidence(current)
@@ -142,6 +162,11 @@ module TimeTracking
       unheld = evidence.fetch("active_cases").none? { |record| record["status"].in?(%w[open scheduled]) }
       pending = current.dig("state", "approval_status").in?([ nil, "pending" ])
       case disposition.fetch("disposition")
+      when "accountant_attributed_paid_category"
+        expected = accountant_category_attributions(current)
+        legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        unallocated && !pending && expected.any? && disposition["attributed_categories"] == expected &&
+          baseline_verified?(baseline, current, legacy_frozen: legacy, category_attribution: true)
       when "paid_under_prior_daily_weekly_ot_policy"
         legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
         expected = prior_policy_review_evidence(current)
@@ -194,7 +219,7 @@ module TimeTracking
 
     private
 
-    def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false, prior_policy: false)
+    def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false, prior_policy: false, category_attribution: false)
       refresh_runs! unless @runs
       # A multi-day source may be represented across adjacent batches. Each
       # line still verifies against its own batch, run and employee balance.
@@ -249,6 +274,10 @@ module TimeTracking
 
         policy = prior_policy && @prior_policy_review&.call(batch: payload, employee: source_employee)
         next false if prior_policy && !policy
+
+        if category_attribution
+          next accountant_category_attributions(current).any? { |record| record["batch_id"] == payload.fetch("batch_id") }
+        end
 
         @rounding_review.verify!(batch: payload, run: run, mapping: mapping, source_employee: policy ? policy.fetch(:employee) : source_employee,
           policy_evidence: policy ? policy.fetch(:evidence) : nil,
