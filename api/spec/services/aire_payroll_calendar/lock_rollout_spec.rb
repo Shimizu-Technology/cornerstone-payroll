@@ -16,6 +16,32 @@ RSpec.describe AirePayrollCalendar::LockRollout do
     expect(logs.last.metadata).to include("reason" => "Approved rollout", "cutoff_enforcement_starts_on" => "2026-10-16")
   end
 
+  it "appends an initial later boundary only before any explicit gate or calendar, retaining the legacy column" do
+    later = described_class.new(source: source, starts_on: "2026-11-01", actor: "Release operator", reason: "Approved later Stage 2 initial boundary")
+    expect(later.configure!).to include(cutoff_enforcement_starts_on: "2026-11-01")
+    expect(source.reload.cutoff_enforcement_starts_on).to eq(Date.new(2026, 11, 1))
+    expect(source[:cutoff_enforcement_starts_on]).to eq(Date.new(2026, 10, 16))
+    expect { service.configure! }.to raise_error(described_class::Error, /immutable|only move later/)
+    expect(later.configure!).to include(status: "configured")
+    expect(TimeTrackingLockRolloutSelection.count).to eq(1)
+    audit = AuditLog.find_by!(action: "time_tracking_source#initial_lock_rollout_selected", record_id: source.id)
+    expect(audit.metadata).to include("old_starts_on" => "2026-10-16", "new_starts_on" => "2026-11-01")
+    expect(audit.actor_name).to eq("Release operator")
+    selection = source.lock_rollout_selection
+    expect { selection.update!(starts_on: "2026-11-16") }.to raise_error(ActiveRecord::ReadOnlyRecord)
+    expect do
+      TimeTrackingLockRolloutSelection.transaction(requires_new: true) { selection.delete }
+    end.to raise_error(ActiveRecord::StatementInvalid, /immutable/)
+  end
+
+  it "refuses later selection after a prior explicit gate" do
+    service.configure!
+    expect do
+      described_class.new(source: source, starts_on: "2026-11-01", actor: "Release operator", reason: "Approved later Stage 2 initial boundary").configure!
+    end.to raise_error(described_class::Error, /immutable/)
+    expect(TimeTrackingLockRolloutSelection.count).to eq(0)
+  end
+
   it "rejects an orphan preactivation calendar even during an idempotent recheck" do
     service.configure!
     calendar

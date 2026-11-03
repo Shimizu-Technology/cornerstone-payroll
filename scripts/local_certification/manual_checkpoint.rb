@@ -6,7 +6,7 @@ require "digest"
 
 database = ActiveRecord::Base.connection_db_config.database.to_s
 unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" &&
-       database.match?(/\A(?:aire_cornerstone|cornerstone_aire)_certification_\d+_\d+\z/)
+       database.match?(/\A(?:aire_cornerstone|cornerstone_aire)_certification_(?:rollout_rehearsal_)?\d+_\d+\z/)
   abort "Refusing manual checkpoints outside the isolated certification database"
 end
 directory = File.dirname(ENV.fetch("CERTIFICATION_CLOCK_FILE"))

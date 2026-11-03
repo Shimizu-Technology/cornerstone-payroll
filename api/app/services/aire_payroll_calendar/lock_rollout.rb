@@ -4,24 +4,44 @@ module AirePayrollCalendar
   class LockRollout
     class Error < StandardError; end
 
-    def initialize(source:, starts_on:, actor:, reason:)
+    def initialize(source:, starts_on:, actor:, reason:, historical_imports_sha256: nil)
       @source = source
       @starts_on = Date.iso8601(starts_on.to_s)
       @actor = actor.to_s.strip
       @reason = reason.to_s.strip
+      @historical_imports_sha256 = historical_imports_sha256
     rescue Date::Error
       raise Error, "STARTS_ON must be an ISO date"
     end
 
     def configure!
-      unless @source.source_type == "aire_services" && [ 1, 16 ].include?(@starts_on.day) && @actor.present? && @reason.present?
+      unless @source.source_type == "aire_services" && [ 1, 16 ].include?(@starts_on.day) && @actor.present? && @reason.length >= 10
         raise Error, "An AIRE source, semimonthly STARTS_ON, ACTOR and REASON are required"
       end
 
       @source.with_lock do
         # Also protect an empty inventory from concurrent legacy writers. Old
         # publishers/delivery workers must remain quiesced after this transaction.
-        ApplicationRecord.connection.execute("LOCK TABLE aire_payroll_calendar_periods, aire_payroll_calendar_publications IN SHARE MODE")
+        ApplicationRecord.connection.execute("LOCK TABLE aire_payroll_calendar_periods, aire_payroll_calendar_publications, time_tracking_imports, pay_periods IN SHARE MODE")
+        if @starts_on < @source.cutoff_enforcement_starts_on
+          raise Error, "The initial rollout boundary may only move later"
+        end
+        if @source.cutoff_enforcement_starts_on != @starts_on
+          if @source.lock_rollout_selection || @source.aire_payroll_calendar_periods.exists? ||
+              @source.aire_verified_history_rollout_receipts.exists? ||
+              AuditLog.exists?(record_type: "TimeTrackingSource", record_id: @source.id, action: "time_tracking_source#lock_rollout_gate_passed")
+            raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
+          end
+          old_boundary = @source.cutoff_enforcement_starts_on
+          historical_review = HistoricalImportBoundaryReview.new(source: @source).verify!(accepted_sha256: @historical_imports_sha256)
+          @source.create_lock_rollout_selection!(starts_on: @starts_on, actor: @actor, reason: @reason,
+            historical_import_review: historical_review)
+          AuditLog.create!(actor_name: @actor, actor_role: "operator", company_id: @source.company_id,
+            organization_id: @source.company.organization_id, action: "time_tracking_source#initial_lock_rollout_selected",
+            record_type: "TimeTrackingSource", record_id: @source.id, event_category: "integration",
+            metadata: { old_starts_on: old_boundary.iso8601, new_starts_on: @starts_on.iso8601, reason: @reason,
+              historical_import_review: historical_review })
+        end
         unless @source.cutoff_enforcement_starts_on == @starts_on
           raise Error, "STARTS_ON must match the immutable configured boundary; a change requires a reviewed migration"
         end
@@ -32,6 +52,8 @@ module AirePayrollCalendar
           event_category: "integration", metadata: { cutoff_enforcement_starts_on: @starts_on.iso8601, reason: @reason })
         { source_id: @source.id, cutoff_enforcement_starts_on: @starts_on.iso8601, status: "configured" }
       end
+    rescue HistoricalImportBoundaryReview::Error => error
+      raise Error, error.message
     end
 
     private

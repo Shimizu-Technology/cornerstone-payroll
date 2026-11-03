@@ -315,11 +315,14 @@ module TimeTracking
       employee_period_request(employee_id, query, period_id: period_id)
     end
 
-    def payroll_cockpit_history_entries(through_work_date:, page: 1)
+    def payroll_cockpit_history_entries(through_work_date:, page: 1, per_page: nil, read_timeout: nil)
+      per_page = history_option(per_page || ENV.fetch("AIRE_HISTORY_PAGE_SIZE", "50"), maximum: 250, name: "page size")
+      read_timeout = history_option(read_timeout || ENV.fetch("AIRE_HISTORY_READ_TIMEOUT_SECONDS", "60"), maximum: 120, name: "read timeout")
       require_capability!(:payroll_cockpit)
-      uri = payroll_cockpit_uri("/history_entries", through_work_date: through_work_date, page: page, per_page: 250)
+      uri = payroll_cockpit_uri("/history_entries", through_work_date: through_work_date, page: page, per_page: per_page)
       require_secure_payroll_transport!(uri)
-      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true)
+      request_json(uri, validate_source: false, headers: payroll_actor_headers, surface_remote_error: true,
+        read_timeout: read_timeout, total_response_timeout: read_timeout)
     end
 
     def payroll_payment_attestations(source_user_uuid: nil, page: 1, start_date: nil, end_date: nil)
@@ -605,7 +608,8 @@ module TimeTracking
     private
 
     def request_json(uri, validate_source:, method: :get, body: nil, headers: {}, surface_remote_error: false,
-                     historical_manual_issue: false)
+                     historical_manual_issue: false, read_timeout: READ_TIMEOUT_SECONDS,
+                     total_response_timeout: TOTAL_RESPONSE_TIMEOUT_SECONDS)
       ConnectedPayrollMode.require_enabled!
       StagingOutboundPolicy.integration!(uri.to_s)
       request = case method
@@ -628,7 +632,8 @@ module TimeTracking
 
       connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
       pinned_ips = resolve_public_addresses(uri, connection_deadline)
-      response, body = perform_request(uri, request, pinned_ips, connection_deadline)
+      response, body = perform_request(uri, request, pinned_ips, connection_deadline,
+        read_timeout: read_timeout, total_response_timeout: total_response_timeout)
 
       unless response.is_a?(Net::HTTPSuccess)
         message = surface_remote_error ? remote_error_message(response, body) : nil
@@ -656,6 +661,14 @@ module TimeTracking
     rescue Timeout::Error, SystemCallError, SocketError, IOError, Net::OpenTimeout, Net::ReadTimeout,
            OpenSSL::SSL::SSLError
       raise Error, "Could not securely reach #{@source.name}"
+    end
+
+    def history_option(value, maximum:, name:)
+      unless value.to_s.match?(/\A[1-9]\d*\z/) && value.to_i <= maximum
+        raise Error, "History #{name} must be an integer from 1 to #{maximum}"
+      end
+
+      value.to_i
     end
 
     def time_summary_uri(start_date:, end_date:)
@@ -874,14 +887,14 @@ module TimeTracking
       end
     end
 
-    def perform_request(uri, request, pinned_ips, connection_deadline)
+    def perform_request(uri, request, pinned_ips, connection_deadline, read_timeout:, total_response_timeout:)
       last_connection_error = nil
 
       pinned_ips.each do |pinned_ip|
         remaining_open_timeout = remaining_timeout(connection_deadline)
         break unless remaining_open_timeout&.positive?
 
-        http = build_http(uri, pinned_ip, open_timeout: remaining_open_timeout)
+        http = build_http(uri, pinned_ip, open_timeout: remaining_open_timeout, read_timeout: read_timeout)
         begin
           http.start
         rescue SystemCallError, SocketError, Net::OpenTimeout, OpenSSL::SSL::SSLError => e
@@ -890,7 +903,7 @@ module TimeTracking
         end
 
         begin
-          return read_response(http, request)
+          return read_response(http, request, total_response_timeout: total_response_timeout)
         ensure
           http.finish if http.started?
         end
@@ -910,7 +923,7 @@ module TimeTracking
       remaining
     end
 
-    def build_http(uri, pinned_ip, open_timeout:)
+    def build_http(uri, pinned_ip, open_timeout:, read_timeout:)
       # Pass nil as the proxy address so HTTP_PROXY cannot reroute a request
       # carrying the shared integration secret. `ipaddr` pins the connection
       # to the address that the destination policy inspected, while `address`
@@ -924,19 +937,19 @@ module TimeTracking
         http.min_version = OpenSSL::SSL::TLS1_2_VERSION
       end
       http.open_timeout = open_timeout
-      http.read_timeout = READ_TIMEOUT_SECONDS
+      http.read_timeout = read_timeout
       http.write_timeout = WRITE_TIMEOUT_SECONDS
       http.max_retries = 0
       http
     end
 
-    def read_response(http, request)
+    def read_response(http, request, total_response_timeout:)
       response = nil
       body = +""
       # Per-read timeouts reset on each chunk; cap the whole request/body while
       # calendar callers hold the source lock. Timeout is translated to the same
       # retryable transport error, and perform_request always closes the socket.
-      Timeout.timeout(TOTAL_RESPONSE_TIMEOUT_SECONDS, Net::ReadTimeout) do
+      Timeout.timeout(total_response_timeout, Net::ReadTimeout) do
         http.request(request) do |streamed_response|
           response = streamed_response
           declared_size = streamed_response["Content-Length"].presence&.to_i

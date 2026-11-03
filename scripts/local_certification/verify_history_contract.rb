@@ -13,11 +13,11 @@ actor = User.find_by!(email: "cornerstone-certification-admin@example.test")
 abort "Fixture installation identity was not pinned" unless source.remote_identity_pinned?
 client = TimeTracking::Client.for_payroll_actor(source, actor: actor)
 history = client.payroll_cockpit_history_entries(through_work_date: fixture.fetch("end_date"))
-expected_ids = fixture.values_at("ordinary_entry_id", "approved_manual_entry_id", "held_manual_entry_id").map(&:to_s)
+expected_ids = (fixture.values_at("ordinary_entry_id", "approved_manual_entry_id", "held_manual_entry_id") + fixture.fetch("history_entry_ids", [])).map(&:to_s)
 entries = history.fetch("time_entries")
 pagination = history.fetch("pagination")
 abort "Historical inventory lost source entries" unless entries.map { |entry| entry.fetch("id").to_s }.sort == expected_ids.sort
-unless pagination.fetch("total_count") == 3 && pagination.fetch("total_pages") == 1 && pagination.fetch("truncated") == false
+unless pagination.fetch("total_count") == expected_ids.length && pagination.fetch("total_pages") == 1 && pagination.fetch("truncated") == false
   abort "Historical pagination contract is incomplete"
 end
 unless entries.all? { |entry| entry.fetch("source_user_uuid") == fixture.fetch("employee_uuid") && entry.fetch("version").is_a?(Integer) }

@@ -663,6 +663,36 @@ RSpec.describe TimeTracking::Client do
     end
   end
 
+  describe "bounded history reads" do
+    let(:history_source) { create(:time_tracking_source, source_type: "aire_services", base_url: "https://time.example.com", shared_secret: "secret") }
+    let(:delegation) { instance_double(TimeTrackingDelegation, token: "grant") }
+
+    it "uses a 50-row default and configurable 60-second per-page budget without changing ordinary requests" do
+      response = instance_double(Net::HTTPOK)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(response).to receive(:[]).with("Content-Type").and_return("application/json")
+      allow(response).to receive(:[]).with("Content-Length").and_return(nil)
+      allow(response).to receive(:read_body).and_yield({ time_entries: [] }.to_json)
+      http = instance_double(Net::HTTP)
+      configure_http_double(http, pinned_ip: "8.8.8.8", response: response)
+      factory = ->(_host, _port) { http }
+      client = client_for(history_source, delegation: delegation, http_factory: factory)
+      expect(http).to receive(:request).with(have_attributes(path: "/api/v1/payroll/cockpit/history_entries?through_work_date=2026-09-15&page=1&per_page=50")).and_yield(response)
+      expect(http).to receive(:read_timeout=).with(60)
+      expect(client.payroll_cockpit_history_entries(through_work_date: "2026-09-15")).to eq("time_entries" => [])
+      expect(http).to receive(:read_timeout=).with(90)
+      client.payroll_cockpit_history_entries(through_work_date: "2026-09-15", per_page: 25, read_timeout: 90)
+    end
+
+    [ { per_page: 0 }, { per_page: 251 }, { per_page: "1.5" }, { read_timeout: 121 }, { read_timeout: "NaN" } ].each do |options|
+      it "rejects unsafe history options #{options.inspect} before connecting" do
+        expect do
+          client_for(history_source, delegation: delegation).payroll_cockpit_history_entries(through_work_date: "2026-09-15", **options)
+        end.to raise_error(TimeTracking::Client::Error, /History/)
+      end
+    end
+  end
+
   def configure_http_double(http, pinned_ip:, start_error: nil, response: nil)
     allow(http).to receive(:ipaddr=).with(pinned_ip)
     allow(http).to receive(:use_ssl=).with(true)

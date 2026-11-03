@@ -73,6 +73,12 @@ class LocalCertificationClockTest < Minitest::Test
     assert_includes stdout, "locked gem and clock loaded"
   end
 
+  def test_accepts_the_named_local_history_rehearsal_database
+    stdout, stderr, status = run_shim("print Time.now.to_i", "TEST_DATABASE_URL" => "postgresql:///cornerstone_aire_certification_rollout_rehearsal_214500_123")
+    assert status.success?, stderr
+    assert_equal "1792648800", stdout
+  end
+
   def test_reads_shared_atomic_updates_without_changing_monotonic_clock
     code = <<~'CODE'
       first = Time.now.to_i

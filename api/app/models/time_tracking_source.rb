@@ -4,6 +4,8 @@ class TimeTrackingSource < ApplicationRecord
   SOURCE_TYPES = %w[aire_services cornerstone_tax custom].freeze
   UUID_PATTERN = /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i
 
+  has_one :lock_rollout_selection, class_name: "TimeTrackingLockRolloutSelection", dependent: :restrict_with_error
+
   belongs_to :company
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :time_tracking_legacy_identity_bindings, dependent: :restrict_with_error
@@ -48,6 +50,12 @@ class TimeTrackingSource < ApplicationRecord
 
   def supports?(capability)
     connector.supports?(capability)
+  end
+
+  # The original migration default is retained as immutable legacy evidence.
+  # Only an unused, ungated source can append its first explicit later decision.
+  def cutoff_enforcement_starts_on
+    lock_rollout_selection&.starts_on || super
   end
 
   def historical_reconciliation_complete?
