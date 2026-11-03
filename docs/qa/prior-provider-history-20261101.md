@@ -196,6 +196,6 @@ This round replaces part of the residual list above. These items are now fixed, 
 - **Data Migration list.** The list now excludes prior-provider batches on the server before counting and paging.
 - **Check Settings.** A new `suggested_next` on an open page now applies. An edited number is still kept through calibration and profile refreshes.
 
-Still documented, not fixed: the legacy `quickbooks` count keys in the Form 941, W-2GU and packet JSON `source_summary` (API metadata only, not shown in the UI or exports), evidence IO under the company lock, approval-failure guidance that is not tied to the specific error, and the user-chosen "Check # from previous provider" label.
+Still documented, not fixed: the legacy `quickbooks` count keys in the Form 941, W-2GU and packet JSON `source_summary` (API metadata only, not shown in the UI or exports), evidence IO under the company lock, and approval-failure guidance that is not tied to the specific error. The reference column was renamed to "Check # / payment reference" with Leon's approval on Nov 3 (direct deposits carry a deposit/trace number).
 
 Only focused specs, typecheck and changed-file lint were run locally, against a disposable local test database that was dropped afterwards. Full suites belong to GitHub CI.
