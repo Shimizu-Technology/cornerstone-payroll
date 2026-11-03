@@ -40,7 +40,7 @@ RSpec.describe TimeTrackingLockRolloutSelection do
     period = create(:pay_period, company: source.company)
     create(:time_tracking_import, time_tracking_source: source, pay_period: period)
     expect { described_class.transaction(requires_new: true) { described_class.create!(attributes) } }
-      .to raise_error(ActiveRecord::StatementInvalid, /unused, ungated/)
+      .to raise_error(ActiveRecord::StatementInvalid, /exact reviewed/)
   end
 
   it "rejects selection while any source calendar already exists" do

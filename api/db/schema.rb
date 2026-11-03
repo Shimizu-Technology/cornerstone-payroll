@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3708,6 +3708,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_130000) do
   end
 
   create_table "time_tracking_lock_rollout_selections", force: :cascade do |t|
+    t.jsonb "historical_import_review", default: {}, null: false
     t.string "actor", null: false
     t.datetime "created_at", null: false
     t.text "reason", null: false
