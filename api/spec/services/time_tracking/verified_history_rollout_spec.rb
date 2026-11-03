@@ -83,6 +83,17 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
       .to raise_error(described_class::Error, /History scope is required/)
   end
 
+  [ nil, {}, "invalid", [ nil ], [ "pending_review" ], [ {} ], [ { "disposition" => nil } ], [ { "disposition" => "" } ] ].each do |invalid|
+    it "rejects malformed reviewed dispositions #{invalid.inspect} before reading or writing accounting evidence" do
+      manifest["reviewed_dispositions"] = invalid
+      expect(client).not_to receive(:payroll_account_link)
+      expect { described_class.new(manifest: manifest, actor: actor).preview! }
+        .to raise_error(described_class::Error, /reviewed_dispositions must be a list of objects with a disposition/)
+      expect(TimeTrackingManualAllocation.count).to eq(0)
+      expect(CheckEvent.count).to eq(0)
+    end
+  end
+
   it "preflights exact identities, checks, and source entries without writing" do
     rollout = described_class.new(manifest: manifest, actor: actor)
 
@@ -617,6 +628,22 @@ RSpec.describe TimeTracking::VerifiedHistoryRollout do
         @inventory_pages << page
         history_page(page)
       end
+    end
+
+    it "exports every row unapproved and requires removal of an exact paid tuple's generated disposition" do
+      packet = described_class.new(manifest: manifest, actor: actor).capture_review_packet!
+      expect(packet["reviewed_dispositions"].length).to eq(row_count)
+      packet["reviewed_dispositions"] = source_rows.map { |row| pending_disposition(row) }
+      # The source's first row already uses verified delivered-check evidence.
+      expect(described_class.new(manifest: packet, actor: actor).preview!).to include(history_coverage_verified: false)
+      paid = manifest.fetch("issued_entries").sole
+      packet["reviewed_dispositions"].reject! do |row|
+        row.values_at("source_user_uuid", "source_time_entry_id", "source_time_entry_version") ==
+          paid.values_at("source_user_uuid", "source_time_entry_id", "source_time_entry_version")
+      end
+      expect(described_class.new(manifest: packet, actor: actor).preview!).to include(history_coverage_verified: true)
+      packet["reviewed_dispositions"].pop
+      expect(described_class.new(manifest: packet, actor: actor).preview!).to include(history_coverage_verified: false)
     end
 
     it "accepts all 51 rows and reads both pages again outside the completion transaction" do

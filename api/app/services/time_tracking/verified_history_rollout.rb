@@ -107,7 +107,8 @@ module TimeTracking
       raise Error, "Pin the source installation before exporting a review packet" unless @source.remote_identity_pinned? &&
         manifest["source_instance_id"] == @source.expected_source_instance_id
 
-      verifier = history_disposition_verifier
+      verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
+        rounding_acknowledgements: [], component_bindings: [])
       verifier.discover_rounding_variances!(@history_inventory)
       manifest.merge("rounding_variances" => verifier.rounding_variances,
         "rounding_review_blockers" => verifier.rounding_review_blockers,
@@ -208,6 +209,10 @@ module TimeTracking
       raise Error, "The rollout actor differs from the verified manifest" unless manifest["actor_id"].to_i == actor.id
       %w[identity_links delivered_checks issued_entries classification_cases finalized_batch_entries].each do |key|
         raise Error, "AIRE rollout #{key} must be a list" unless manifest[key].is_a?(Array)
+      end
+      reviewed = manifest.fetch("reviewed_dispositions", [])
+      unless reviewed.is_a?(Array) && reviewed.all? { |row| row.is_a?(Hash) && row["disposition"].is_a?(String) && row["disposition"].present? }
+        raise Error, "AIRE rollout reviewed_dispositions must be a list of objects with a disposition"
       end
       raise Error, "AIRE rollout identity list contains duplicates" unless unique?(identities.map { |row| row.fetch("source_user_uuid") }) &&
         unique?(identities.map { |row| row.fetch("employee_id") })

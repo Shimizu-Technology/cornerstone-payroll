@@ -277,6 +277,8 @@ module TimeTracking
       }
 
       TimeTrackingImport.transaction do
+        # Match rollout/source writers: source row before import table/row locks.
+        source.lock!
         existing = TimeTrackingImport.lock.find_by(time_tracking_source: source, external_batch_id: batch_id)
         return validate_existing_import!(existing, checksum) if existing
 
