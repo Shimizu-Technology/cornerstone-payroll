@@ -78,3 +78,14 @@ Keep the complete fresh variance table privately for Chels's sign-off, including
 9. Explicitly route 1804's owed case once after delivery of the eligible calendar. Observe the real controlled-cutoff frozen batch/import/calculation in the disposable rehearsal. Reconcile per employee/category against the approved ledger; pending time stays excluded, OT holds remain visible and post-lock approval opens a late-hours case. Do not invent a Solo earning rate to complete acceptance.
 
 Production requires its own fresh packet, accountant decisions and exact-pair acceptance. Clone evidence and synthetic regression tests never authorize production approval.
+
+
+### Historical daily plus weekly overtime evidence
+
+For previously processed periods from April1 through October15,2026, authenticated AIRE batch exports can provide `paid_under_prior_daily_weekly_ot_policy` evidence. AIRE preserves the actual production allocator from commit`6f72a984` in a historical-only class: daily8 plus weekly40, nominal work dates and Sunday–Saturday Guam weeks. The current weekly-only allocator is unchanged. October16–31 and later periods cannot use this path.
+
+Evidence covers all effective frozen current lines in the relevant workweeks through the batch end, including preceding-period frozen context. Every input binds frozen rows, source identity/version/content and ordering from unchanged source. Missing/changed/partial/conflicting context or unsupported corrections block this path. Unfrozen owed or pending sources are not declared represented by this evidence.
+
+The retained settings and available setting-audit digest are recorded. With no versioned threshold history, the approved8/40 policy is explicitly recorded as the owner-reviewed fallback; contrary historical settings or retained threshold audits require individual review. Payroll verifies the authenticated evidence, original immutable payload/lines, permanent employee mapping and the company-owned committed run. It retains both frozen and recomputed splits. Employee total hours must tie exactly; REG and OT are compared separately, with each nonzero difference within±0.05 requiring its own signed acknowledgement. No netting between employees, categories or earning components is permitted. Genuine component/quantity differences remain blocked.
+
+This is accounting coverage only. It creates no payment event, allocation, time approval or delivery assertion and performs no publication or activation.
