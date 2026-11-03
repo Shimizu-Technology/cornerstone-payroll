@@ -1,0 +1,169 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+require "tempfile"
+require "rake"
+
+RSpec.describe "Historical prior overtime policy packet" do
+  let(:company) { create(:company) }
+  let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
+  let(:employee) { create(:employee, company: company) }
+  let(:uuid) { SecureRandom.uuid }
+  let(:source) do
+    create(:time_tracking_source, company: company, source_type: "aire_services",
+      expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES)
+  end
+  let(:run) { create(:pay_period, :committed, company: company, start_date: "2026-08-01", end_date: "2026-08-15", pay_date: "2026-08-31") }
+  let(:item) { create(:payroll_item, company: company, employee: employee, pay_period: run, hours_worked: 8, overtime_hours: 2) }
+  let(:client) { instance_double(TimeTracking::Client) }
+  let(:category) { { "id" => "1", "key" => "maintenance", "name" => "Maintenance" } }
+  let(:adjustment) do
+    { "source_time_entry_id" => "41", "source_time_entry_version" => 2, "line_key" => "maintenance", "source_kind" => "current",
+      "original_work_date" => "2026-08-14", "original_week_start" => "2026-08-09", "category" => category,
+      "source_category_id" => "1", "total_hours" => 10.0, "regular_hours" => 10.0, "overtime_hours" => 0 }
+  end
+  let(:payload) do
+    body = { "batch_id" => "AIRE-HISTORY-SYNTHETIC", "schema_version" => "2.0", "source" => "aire_services",
+      "start_date" => "2026-08-01", "end_date" => "2026-08-15", "cutoff_at" => "2026-08-31T03:00:00Z",
+      "generated_at" => "2026-08-31T03:00:00Z", "exclusions" => [],
+      "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, "total_hours" => 10.0,
+        "regular_hours" => 10.0, "overtime_hours" => 0, "adjustments" => [ adjustment ] } ],
+      "summary" => { "employee_count" => 1, "adjustment_count" => 1, "exclusion_count" => 0, "total_hours" => 10.0,
+        "regular_hours" => 10.0, "overtime_hours" => 0, "current_count" => 1, "carryover_count" => 0, "correction_count" => 0 },
+      "issues" => %w[missing_category_count negative_adjustment_count pending_approval_count denied_approval_count open_clock_count pending_overtime_count denied_overtime_count].index_with { 0 } }
+    body.merge("export" => { "id" => body["batch_id"], "batch_id" => body["batch_id"], "readiness_status" => "finalized",
+      "checksum" => TimeTracking::CanonicalPayload.checksum(body), "checksum_scope" => "payload_without_export",
+      "checksum_algorithm" => "SHA-256", "cutoff_at" => body["cutoff_at"], "finalized_at" => body["cutoff_at"] })
+  end
+  let(:row) do
+    { "id" => "41", "source_user_uuid" => uuid, "version" => 2, "hours" => 10.0, "work_date" => "2026-08-14",
+      "employee" => { "id" => "91" }, "category" => category,
+      "state" => { "status" => "completed", "approval_status" => "approved" },
+      "history_evidence" => { "payable_content_checksum" => "a" * 64, "active_manual_allocation_ids" => [],
+        "payable_segments" => [ { "work_date" => "2026-08-14", "total_hours" => "10.0" } ],
+        "active_cases" => [], "payment_attestation" => nil, "baseline_lines" => [ {
+          "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+          "batch_start_date" => payload["start_date"], "batch_end_date" => payload["end_date"],
+          "source_time_entry_id" => "41", "source_time_entry_version" => 2, "source_user_uuid" => uuid,
+          "line_key" => "maintenance", "source_kind" => "current", "work_date" => "2026-08-14", "category" => category,
+          "regular_hours" => 10.0, "overtime_hours" => 0, "total_hours" => 10.0,
+          "snapshot_checksum" => "f" * 64, "current_content_matches" => true, "processing_conflict" => false,
+          "processing" => { "status" => "committed", "external_system" => "cornerstone_payroll_manual", "external_pay_period_id" => run.id.to_s }
+        } ] } }
+  end
+  let(:manifest) do
+    { "version" => 1, "company_id" => company.id, "company_name" => company.name, "source_id" => source.id,
+      "source_instance_id" => source.expected_source_instance_id, "actor_id" => actor.id,
+      "history_through_work_date" => "2026-08-15", "identity_links" => [], "delivered_checks" => [],
+      "issued_entries" => [], "classification_cases" => [], "finalized_batch_entries" => [] }
+  end
+
+  before do
+    item
+    source.update_column(:historical_reconciliation_required, true)
+    TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: employee, source_user_id: "91", source_user_uuid: uuid)
+    allow(TimeTracking::Client).to receive(:new).and_return(client)
+    allow(TimeTracking::Client).to receive(:for_payroll_actor).and_return(client)
+    allow(client).to receive(:payroll_account_link).and_return("account_link" => {
+      "connected" => true, "aire_user_email" => actor.email
+    })
+    allow(client).to receive(:payroll_batch).and_return(payload)
+    allow(client).to receive(:payroll_cockpit_history_entries) do
+      { "source_state" => "current", "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0,
+        "integration" => { "source_instance_id" => source.expected_source_instance_id }, "through_work_date" => "2026-08-15",
+        "time_entries" => [ row ], "pagination" => { "current_page" => 1, "per_page" => 50, "total_count" => 1, "total_pages" => 1, "truncated" => false } }
+    end
+  end
+
+  def rollout(packet)
+    TimeTracking::VerifiedHistoryRollout.new(manifest: packet, actor: actor)
+  end
+
+
+  def install_policy!
+    input = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "version" => 2, "work_date" => row["work_date"], "hours" => "10.0", "payable_content_checksum" => "a" * 64,
+      "frozen_rows" => [ { "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+        "line_key" => "maintenance", "snapshot_checksum" => "f" * 64 } ] }
+    proof = { "kind" => TimeTracking::PriorOvertimePolicyReview::KIND, "policy" => TimeTracking::PriorOvertimePolicyReview::POLICY,
+      "threshold_evidence" => { "basis" => "owner_reviewed_8_40_fallback_no_versioned_setting_history" },
+      "input_scope" => "all_effective_frozen_current_lines_in_workweek_through_batch_end",
+      "source_instance_id" => source.expected_source_instance_id, "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+      "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, "eligible" => true, "blockers" => [],
+        "inputs" => [ input ], "inputs_checksum" => TimeTracking::CanonicalPayload.checksum([ input ]),
+        "allocations" => [ { "source_time_entry_id" => "41", "line_key" => "maintenance", "regular_hours" => "8.0", "overtime_hours" => "2.0" } ] } ] }
+    payload["export"]["prior_overtime_policy"] = proof.merge("evidence_checksum" => TimeTracking::CanonicalPayload.checksum(proof))
+  end
+
+  def reviewed_packet
+    packet = rollout(manifest).capture_review_packet!
+    packet["reviewed_dispositions"].sole.merge!("disposition" => "paid_under_prior_daily_weekly_ot_policy",
+      "reason" => "Review the preserved daily8 weekly40 historical accounting policy",
+      "evidence" => "Authenticated frozen source, original allocator and committed register")
+    packet["rounding_variance_acknowledgements"] = packet["rounding_variances"].map do |variance|
+      variance.except("within_limit", "acknowledged").merge("type" => "accountant_reviewed_rounding_variance", "reviewer_id" => actor.id,
+        "reason" => "Review the exact signed historical policy rounding difference",
+        "evidence" => "Authenticated source and committed employee category totals")
+    end
+    packet
+  end
+
+  before { install_policy! }
+
+  it "accepts a truthful prior policy while retaining the immutable weekly split and no payment writes" do
+    packet = reviewed_packet
+    evidence = packet["reviewed_dispositions"].sole["prior_overtime_policy"].sole
+    expect(evidence).to include("frozen_split" => { "regular_hours" => "10.0", "overtime_hours" => "0.0" },
+      "prior_policy_split" => { "regular_hours" => "8.0", "overtime_hours" => "2.0" })
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
+    expect {
+      rollout(packet).apply!(accepted_manifest_sha256: Digest::SHA256.hexdigest(JSON.generate(packet)), release_owner: "Rehearsal reviewer")
+    }.to change(AireVerifiedHistoryRolloutReceipt, :count).by(1)
+      .and change(CheckEvent, :count).by(0).and change(TimeTrackingManualAllocation, :count).by(0)
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
+    expect(payload["employees"].sole["regular_hours"]).to eq(10.0)
+  end
+
+  it "requires exact employee total tie and separately acknowledged bounded REG and OT rounding" do
+    item.update_columns(hours_worked: 8.03, overtime_hours: 1.97)
+    packet = reviewed_packet
+    expect(packet["rounding_variances"].pluck("signed_difference")).to contain_exactly("0.03", "-0.03")
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
+    packet["rounding_variance_acknowledgements"] = []
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    item.update_columns(hours_worked: 8.06, overtime_hours: 1.94)
+    expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
+    item.update_columns(hours_worked: 8.03, overtime_hours: 2)
+    expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
+  end
+
+  it "refuses stale sources or committed registers after acknowledgement and never trusts a manifest policy label" do
+    packet = reviewed_packet
+    item.update_columns(hours_worked: 7, overtime_hours: 3)
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    item.update_columns(hours_worked: 8, overtime_hours: 2)
+    row["version"] = 3
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    row["version"] = 2
+    packet["reviewed_dispositions"].sole["prior_overtime_policy"].sole["policy"] = { "name" => "invented_policy" }
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+  end
+
+  it "refuses missing context, changed identity, tampered export and thresholds outside the authenticated contract" do
+    pristine = payload["export"]["prior_overtime_policy"].deep_dup
+    [ :context, :identity, :threshold, :digest ].each do |kind|
+      proof = pristine.deep_dup
+      case kind
+      when :context then proof["employees"].sole["inputs"].sole["source_time_entry_id"] = "missing"
+      when :identity then proof["employees"].sole["source_user_uuid"] = SecureRandom.uuid
+      when :threshold then proof["policy"] = proof["policy"].merge("daily_threshold_hours" => "6.0")
+      when :digest then proof["evidence_checksum"] = "0" * 64
+      end
+      proof["evidence_checksum"] = TimeTracking::CanonicalPayload.checksum(proof.except("evidence_checksum")) unless kind == :digest
+      payload["export"]["prior_overtime_policy"] = proof
+      expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
+    end
+  end
+end

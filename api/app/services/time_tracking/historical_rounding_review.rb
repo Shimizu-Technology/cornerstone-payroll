@@ -14,7 +14,7 @@ module TimeTracking
       @variances, @blockers, @known_bindings, @used_variances = {}, [], {}, {}
     end
 
-    def verify!(batch:, run:, mapping:, source_employee:, items:, source_inventory_checksum:, run_checksum:, discover: false)
+    def verify!(batch:, run:, mapping:, source_employee:, items:, source_inventory_checksum:, run_checksum:, discover: false, policy_evidence: nil)
       raise ArgumentError, "Committed employee hours missing" if items.empty?
 
       base = {
@@ -25,6 +25,7 @@ module TimeTracking
         "employee_id" => mapping.employee_id, "source_user_id" => mapping.source_user_id,
         "source_user_uuid" => mapping.source_user_uuid, "source_inventory_checksum" => source_inventory_checksum
       }
+      base["prior_overtime_policy"] = policy_evidence if policy_evidence
       groups = source_employee.fetch("adjustments").group_by { |line| line["category"] }
       paid = paid_components(items)
       aggregate = groups.length == 1 && PAY_CATEGORIES.keys.all? { |category| paid.values.count { |hours| hours.fetch(category).nonzero? } <= 1 }
@@ -70,7 +71,11 @@ module TimeTracking
       accounted = paid.all? do |component, hours|
         hours.all? { |category, value| value.zero? || used.include?([ category, component ]) }
       end
-      results.all? && accounted
+      # A policy reclassification must preserve this employee's total exactly.
+      # Category rounding still needs its individually signed acknowledgement.
+      totals_tie = !policy_evidence || source_employee.fetch("adjustments").sum { |line| decimal(line.fetch("total_hours")) } ==
+        paid.values.sum { |hours| hours.values.sum }
+      results.all? && accounted && (discover || totals_tie)
     rescue KeyError, ArgumentError, TypeError, NoMethodError => error
       @blockers << { "reason" => "Historical earning evidence invalid: #{error.message}" }
       false
