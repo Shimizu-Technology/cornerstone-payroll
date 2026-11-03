@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_04_012000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3496,6 +3496,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
     t.check_constraint "verification_status::text = ANY (ARRAY['draft'::character varying::text, 'verified'::character varying::text])", name: "legacy_tax_verification_status"
   end
 
+  create_table "time_tracking_category_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "earning_label"
+    t.text "evidence", null: false
+    t.string "fallback_earning_label"
+    t.boolean "historical_attribution", default: false, null: false
+    t.jsonb "historical_run_limits", default: {}, null: false
+    t.jsonb "historical_employee_ids", default: [], null: false
+    t.date "history_through_on"
+    t.boolean "import_enabled", default: false, null: false
+    t.text "reason", null: false
+    t.bigint "reviewed_by_id", null: false
+    t.string "source_category_key", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_time_tracking_category_mappings_on_company_id"
+    t.index [ "reviewed_by_id" ], name: "index_time_tracking_category_mappings_on_reviewed_by_id"
+    t.index [ "time_tracking_source_id", "source_category_key" ], name: "idx_source_category_mapping", unique: true
+    t.index [ "time_tracking_source_id" ], name: "idx_on_time_tracking_source_id_8ce84bd549"
+  end
+
   create_table "time_tracking_classification_reconciliations", force: :cascade do |t|
     t.string "check_number", null: false
     t.bigint "company_id", null: false
@@ -4540,4 +4562,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
   add_foreign_key "prior_provider_history_onboardings", "users", column: "activated_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "created_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "reversed_by_id"
+  add_foreign_key "time_tracking_category_mappings", "companies"
+  add_foreign_key "time_tracking_category_mappings", "time_tracking_sources"
+  add_foreign_key "time_tracking_category_mappings", "users", column: "reviewed_by_id"
 end

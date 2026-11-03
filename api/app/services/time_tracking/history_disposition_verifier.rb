@@ -273,7 +273,7 @@ module TimeTracking
         policy = prior_policy && @prior_policy_review&.call(batch: payload, employee: source_employee)
         next false if prior_policy && !policy
 
-        if category_attribution
+        if category_attribution || (allow_overtime_hold && accountant_category_attributions(current).any?)
           next accountant_category_attributions(current).any? { |record| record["batch_id"] == payload.fetch("batch_id") }
         end
 

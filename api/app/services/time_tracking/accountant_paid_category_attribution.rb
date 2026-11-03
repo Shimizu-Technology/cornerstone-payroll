@@ -13,7 +13,7 @@ module TimeTracking
     end
 
     def call(batch:, run:, mapping:, employee:, items:, run_checksum:, inventory_checksum:)
-      key = [batch.fetch("batch_id"), mapping.source_user_uuid]
+      key = [ batch.fetch("batch_id"), mapping.source_user_uuid ]
       return @cache[key] if @cache.key?(key)
 
       @cache[key] = build(batch, run, mapping, employee, items, run_checksum, inventory_checksum)
@@ -22,10 +22,10 @@ module TimeTracking
     private
 
     def build(batch, run, mapping, employee, items, run_checksum, inventory_checksum)
-      return if items.empty? || items.any? { |item| !item.payroll_included? }
+      return if items.empty? || items.any? { |item| !item.payroll_included? || item.employee_id != mapping.employee_id || item.pay_period_id != run.id || item.company_id != @source.company_id }
       groups = employee.fetch("adjustments").group_by { |line| line["category"] }
       policies = groups.to_h do |category, _|
-        [category, @policies.find { |policy| policy.source_category_key == TimeTrackingCategoryMapping.category_key(category) && policy.historical_for?(mapping.employee_id, run.end_date) }]
+        [ category, @policies.find { |policy| policy.source_category_key == TimeTrackingCategoryMapping.category_key(category) && policy.historical_for?(mapping.employee_id, run.end_date, run_id: run.id) } ]
       end
       return unless policies.values.any?
 
@@ -46,8 +46,9 @@ module TimeTracking
         next if hours.zero?
         policy = policies[category]
         label = policy&.earning_label
+        configured_labels = [ policy&.earning_label, policy&.fallback_earning_label ].compact_blank
         matches = paid.keys.select do |component|
-          names = label.present? ? [label] : [category&.fetch("key", nil), category&.fetch("name", nil)]
+          names = label.present? ? configured_labels : [ category&.fetch("key", nil), category&.fetch("name", nil) ]
           names.compact.any? { |name| normalize(name) == normalize(paid.fetch(component).fetch("label")) }
         end
         matches = paid.keys if policy && matches.empty? && paid.one? && label.blank?
@@ -56,7 +57,7 @@ module TimeTracking
 
         left = hours
         matches.each do |component|
-          take = [left, remaining.fetch(component)].min
+          take = [ left, remaining.fetch(component) ].min
           next unless take.positive?
           rows << { "source_category" => category, "source_hours" => take.to_s("F"),
             "earning_component" => component, "paid_component" => paid.fetch(component).fetch("label"),
@@ -104,13 +105,13 @@ module TimeTracking
       items.each do |item|
         earnings = item.payroll_item_earnings.select { |earning| earning.category.in?(%w[regular overtime]) }
         components = if earnings.any?
-          earnings.map { |earning| ["earning:#{earning.label}", earning.label, earning.category == "regular" ? "REG" : "OT", decimal(earning.hours)] }
+          earnings.map { |earning| [ "earning:#{earning.label}", earning.label, earning.category == "regular" ? "REG" : "OT", decimal(earning.hours) ] }
         elsif item.wage_rate_hours.any?
           item.wage_rate_hours.select { |row| row.fetch("active") }.flat_map do |row|
-            HistoricalRoundingReview::PAY_CATEGORIES.map { |category, field| ["wage_rate:#{row.fetch('employee_wage_rate_id')}", row.fetch("label"), category, decimal(row.fetch(field))] }
+            HistoricalRoundingReview::PAY_CATEGORIES.map { |category, field| [ "wage_rate:#{row.fetch('employee_wage_rate_id')}", row.fetch("label"), category, decimal(row.fetch(field)) ] }
           end
         else
-          [["aggregate", "Regular", "REG", decimal(item.hours_worked)], ["aggregate", "Regular", "OT", decimal(item.overtime_hours)]]
+          [ [ "aggregate", "Regular", "REG", decimal(item.hours_worked) ], [ "aggregate", "Regular", "OT", decimal(item.overtime_hours) ] ]
         end
         return unless components.select { |row| row[2] == "REG" }.sum(&:last) == decimal(item.hours_worked) && components.select { |row| row[2] == "OT" }.sum(&:last) == decimal(item.overtime_hours)
         components.each do |identity, label, _, hours|
