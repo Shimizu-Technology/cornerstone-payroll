@@ -1,7 +1,10 @@
 import Decimal from "decimal.js";
 import {
   amountLabels,
+  breakdownLabels,
   registerLabels,
+  type BulkConfirmFailure,
+  type BulkConfirmSummary,
   type AmountKey,
   type BreakdownKey,
   type HistoryCheck,
@@ -313,4 +316,65 @@ export function remainingWork(payload: HistoryPayload, employees: HistoryEmploye
   if (!filesAttached) items.push({ step: 3, text: "Attach the provider’s paid register files" });
   if (!payload.complete_history_confirmed || !payload.same_employer_confirmed) items.push({ step: 3, text: "Tick both statements before recording" });
   return items;
+}
+
+/** Fills a blank register reference the same way as "Fill blank references". */
+export function filledReference(registerName: string, payDate: string): string {
+  return `${registerName.trim()} — paid ${payDate || "date"}`;
+}
+
+export function withFilledReferences(payload: HistoryPayload, registerName: string): HistoryPayload {
+  if (!registerName.trim()) return payload;
+  return {
+    ...payload,
+    periods: payload.periods.map((period) => (period.source_reference.trim() ? period : { ...period, source_reference: filledReference(registerName, period.pay_date) })),
+  };
+}
+
+const FIELD_LABELS: Record<string, string> = { ...amountLabels, ...breakdownLabels };
+
+/** Why a pay date can't be confirmed in bulk; the server applies the same rules. */
+export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryPayload, "tax_year" | "takeover_on">): string[] {
+  const reasons: string[] = [];
+  if (!periodDatesValid(period)) reasons.push("Needs real dates in order: period start, period end, then pay date");
+  else if (Number(period.pay_date.slice(0, 4)) !== payload.tax_year || period.pay_date >= payload.takeover_on) {
+    reasons.push(`Pay date is not in ${payload.tax_year} before the takeover date`);
+  }
+  if (!period.source_reference.trim()) reasons.push("Needs a register reference (enter the register name above to fill it)");
+  if (!period.paychecks.length) reasons.push("Has no paychecks");
+  period.paychecks.forEach((row) => {
+    Object.entries(paycheckProblems(row)).forEach(([key, message]) => {
+      reasons.push(`${row.source_employee_name}: ${FIELD_LABELS[key] ?? key} — ${message}`);
+    });
+  });
+  if (reasons.length) return reasons;
+  const differences = registerDifferences(period);
+  REGISTER_KEYS.forEach((key) => {
+    const entered = period.register_totals[key];
+    if (entered === undefined || entered === "") return;
+    if (!registerTotalValid(period, key)) reasons.push(`Register ${registerLabels[key].toLowerCase()} is not a valid amount`);
+    else if (differences[key]) reasons.push(`Doesn’t match the register ${registerLabels[key].toLowerCase()} (register ${money(entered)}, paychecks ${money(periodTotals(period)[key])})`);
+  });
+  return reasons;
+}
+
+export type BulkConfirmCheck = { failures: BulkConfirmFailure[]; summary: BulkConfirmSummary };
+
+/** Every listed pay date must pass before all can be confirmed at once. */
+export function bulkConfirmCheck(payload: HistoryPayload, registerName: string): BulkConfirmCheck {
+  const filled = withFilledReferences(payload, registerName);
+  const failures = filled.periods
+    .map((period) => ({ key: period.key, pay_date: period.pay_date, reasons: bulkConfirmReasons(period, filled) }))
+    .filter((failure) => failure.reasons.length > 0);
+  const checks = filled.periods.flatMap((period) => period.paychecks);
+  const sum = (key: AmountKey) => checks.reduce((total, row) => total.plus(decimal(row[key])), new Decimal(0)).toFixed(2);
+  return {
+    failures,
+    summary: { period_count: filled.periods.length, paycheck_count: checks.length, gross_pay: sum("gross_pay"), net_pay: sum("net_pay") },
+  };
+}
+
+/** The attestation shown in the dialog; the server stores the same wording. */
+export function bulkConfirmStatement(summary: BulkConfirmSummary): string {
+  return `I confirm these ${summary.period_count} pay dates / ${summary.paycheck_count} paychecks totaling ${money(summary.gross_pay)} gross / ${money(summary.net_pay)} net match the previous provider’s paid registers.`;
 }
