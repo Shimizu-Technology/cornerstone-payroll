@@ -61,12 +61,14 @@ module TimeTracking
       raise Error, "AIRE rollout encrypted manifest cannot be authenticated"
     end
 
-    def initialize(manifest:, actor:)
+    def initialize(manifest:, actor:, employee_mappings: nil, batch_cache: nil)
       @manifest = manifest
       @actor = actor
       @manifest_sha256 = manifest["_verified_sha256"] || Digest::SHA256.hexdigest(JSON.generate(manifest))
       @reviews = {}
       @live_entries = {}
+      @employee_mappings = employee_mappings
+      @history_batch_cache = batch_cache
     end
 
     def preview!
@@ -108,7 +110,7 @@ module TimeTracking
         manifest["source_instance_id"] == @source.expected_source_instance_id
 
       verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
-        rounding_acknowledgements: [], component_bindings: [])
+        rounding_acknowledgements: [], component_bindings: [], employee_mappings: @employee_mappings, batch_cache: @history_batch_cache)
       verifier.discover_rounding_variances!(@history_inventory)
       manifest.merge("rounding_variances" => verifier.rounding_variances,
         "rounding_review_blockers" => verifier.rounding_review_blockers,
@@ -122,7 +124,26 @@ module TimeTracking
       end).except("_verified_sha256")
     end
 
+    def captured_history_entries
+      @history_inventory&.deep_dup
+    end
+
+    # Shared by the operator task and the accounting-only summary approval.
+    # A durable receipt never substitutes for fresh source coverage.
+    def ensure_complete!
+      unless preview!.fetch(:history_coverage_verified) == true
+        raise Error, "Fresh AIRE historical coverage is incomplete; the prior receipt cannot authorize completion"
+      end
+      unless @source.historical_reconciliation_complete? && AireVerifiedHistoryRolloutReceipt.exists?(
+        coverage_verified: true, source_instance_id: @source.expected_source_instance_id,
+        company_id: @company.id, time_tracking_source_id: @source.id, manifest_sha256: @manifest_sha256)
+        raise Error, "Verified AIRE history has not been applied"
+      end
+      true
+    end
+
     def apply!(accepted_manifest_sha256: nil, release_owner: nil)
+      raise Error, "Proposed employee mappings are for read-only preview" unless @employee_mappings.nil?
       if Rails.env.production?
         unless accepted_manifest_sha256.to_s.downcase == @manifest_sha256 && release_owner.to_s.strip.present? &&
                manifest["source_instance_id"].present?
@@ -448,6 +469,7 @@ module TimeTracking
 
     def history_disposition_verifier
       @history_disposition_verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
+        employee_mappings: @employee_mappings, batch_cache: @history_batch_cache,
         rounding_acknowledgements: manifest.fetch("rounding_variance_acknowledgements", []),
         component_bindings: manifest.fetch("historical_earning_component_bindings", []))
     end

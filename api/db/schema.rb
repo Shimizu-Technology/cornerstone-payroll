@@ -10,9 +10,29 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "aire_history_reviews", force: :cascade do |t|
+    t.bigint "actor_id", null: false
+    t.datetime "approved_at"
+    t.jsonb "approved_packet"
+    t.text "attestation"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "digest", null: false
+    t.bigint "receipt_id"
+    t.jsonb "snapshot", default: {}, null: false
+    t.jsonb "summary", default: {}, null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "actor_id" ], name: "index_aire_history_reviews_on_actor_id"
+    t.index [ "company_id" ], name: "index_aire_history_reviews_on_company_id"
+    t.index [ "receipt_id" ], name: "index_aire_history_reviews_on_receipt_id"
+    t.index [ "time_tracking_source_id" ], name: "index_aire_history_reviews_on_time_tracking_source_id"
+    t.check_constraint "approved_at IS NULL AND receipt_id IS NULL AND attestation IS NULL AND approved_packet IS NULL OR approved_at IS NOT NULL AND receipt_id IS NOT NULL AND attestation IS NOT NULL AND approved_packet IS NOT NULL", name: "aire_history_review_approval_shape"
+  end
 
   create_table "aire_payroll_acknowledgements", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -2834,9 +2854,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
     t.string "plan_digest", null: false
     t.string "review_reference", null: false
     t.integer "tax_year", null: false
-    t.index ["company_id"], name: "index_payroll_item_fica_basis_proofs_on_company_id"
-    t.index ["created_by_id"], name: "index_payroll_item_fica_basis_proofs_on_created_by_id"
-    t.index ["payroll_item_id"], name: "index_payroll_item_fica_basis_proofs_on_payroll_item_id", unique: true
+    t.index [ "company_id" ], name: "index_payroll_item_fica_basis_proofs_on_company_id"
+    t.index [ "created_by_id" ], name: "index_payroll_item_fica_basis_proofs_on_created_by_id"
+    t.index [ "payroll_item_id" ], name: "index_payroll_item_fica_basis_proofs_on_payroll_item_id", unique: true
   end
 
   create_table "payroll_item_field_entries", force: :cascade do |t|
@@ -3587,6 +3607,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
     t.index [ "user_id" ], name: "index_time_tracking_delegations_on_user_id"
   end
 
+  create_table "time_tracking_earning_choices", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_wage_rate_id", null: false
+    t.jsonb "rate_snapshot", null: false
+    t.bigint "reviewed_by_id", null: false
+    t.string "source_category_key", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "employee_id" ], name: "index_time_tracking_earning_choices_on_employee_id"
+    t.index [ "employee_wage_rate_id" ], name: "index_time_tracking_earning_choices_on_employee_wage_rate_id"
+    t.index [ "reviewed_by_id" ], name: "index_time_tracking_earning_choices_on_reviewed_by_id"
+    t.index [ "time_tracking_source_id", "employee_id", "source_category_key" ], name: "idx_time_earning_choice_dimension", unique: true
+    t.index [ "time_tracking_source_id" ], name: "index_time_tracking_earning_choices_on_time_tracking_source_id"
+  end
+
   create_table "time_tracking_employee_mappings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -3747,13 +3783,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
     t.string "state", default: "pending", null: false
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["adjustment_pay_period_id"], name: "idx_on_adjustment_pay_period_id_961c392589", unique: true
-    t.index ["company_id"], name: "index_time_tracking_late_hours_runs_on_company_id"
-    t.index ["created_by_id"], name: "index_time_tracking_late_hours_runs_on_created_by_id"
-    t.index ["origin_pay_period_id"], name: "index_time_tracking_late_hours_runs_on_origin_pay_period_id"
-    t.index ["resolved_by_id"], name: "index_time_tracking_late_hours_runs_on_resolved_by_id"
-    t.index ["time_tracking_source_id", "command_id"], name: "idx_late_hours_source_command", unique: true
-    t.index ["time_tracking_source_id"], name: "index_time_tracking_late_hours_runs_on_time_tracking_source_id"
+    t.index [ "adjustment_pay_period_id" ], name: "idx_on_adjustment_pay_period_id_961c392589", unique: true
+    t.index [ "company_id" ], name: "index_time_tracking_late_hours_runs_on_company_id"
+    t.index [ "created_by_id" ], name: "index_time_tracking_late_hours_runs_on_created_by_id"
+    t.index [ "origin_pay_period_id" ], name: "index_time_tracking_late_hours_runs_on_origin_pay_period_id"
+    t.index [ "resolved_by_id" ], name: "index_time_tracking_late_hours_runs_on_resolved_by_id"
+    t.index [ "time_tracking_source_id", "command_id" ], name: "idx_late_hours_source_command", unique: true
+    t.index [ "time_tracking_source_id" ], name: "index_time_tracking_late_hours_runs_on_time_tracking_source_id"
     t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'ambiguous'::character varying, 'reconciliation_required'::character varying, 'applied'::character varying, 'rejected'::character varying, 'cancelled'::character varying]::text[])", name: "late_hours_recovery_state"
   end
 
@@ -4540,4 +4576,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_010000) do
   add_foreign_key "prior_provider_history_onboardings", "users", column: "activated_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "created_by_id"
   add_foreign_key "prior_provider_history_onboardings", "users", column: "reversed_by_id"
+  add_foreign_key "aire_history_reviews", "aire_verified_history_rollout_receipts", column: "receipt_id"
+  add_foreign_key "aire_history_reviews", "companies"
+  add_foreign_key "aire_history_reviews", "time_tracking_sources"
+  add_foreign_key "aire_history_reviews", "users", column: "actor_id"
+  add_foreign_key "time_tracking_earning_choices", "employee_wage_rates"
+  add_foreign_key "time_tracking_earning_choices", "employees"
+  add_foreign_key "time_tracking_earning_choices", "time_tracking_sources"
+  add_foreign_key "time_tracking_earning_choices", "users", column: "reviewed_by_id"
 end

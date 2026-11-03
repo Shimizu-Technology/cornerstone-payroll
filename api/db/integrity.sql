@@ -821,3 +821,16 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- One-summary approval retains the exact reviewed evidence and attestation.
+CREATE OR REPLACE FUNCTION protect_aire_history_review() RETURNS trigger AS $$
+BEGIN
+  IF OLD.approved_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Approved AIRE history reviews are immutable';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS aire_history_review_integrity ON aire_history_reviews;
+CREATE TRIGGER aire_history_review_integrity BEFORE UPDATE OR DELETE ON aire_history_reviews
+FOR EACH ROW EXECUTE FUNCTION protect_aire_history_review();
