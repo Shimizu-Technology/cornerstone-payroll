@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PriorProviderHistory } from "./PriorProviderHistory";
+import { PriorProviderHistory, UNSAVED_HISTORY_MESSAGE } from "./PriorProviderHistory";
 import { ApiError } from "@/services/api";
 import {
   amountLabels,
@@ -15,6 +15,9 @@ import {
 } from "@/services/priorProviderHistory";
 
 const context = vi.hoisted(() => ({ companyId: 10 }));
+vi.mock("@/components/routing/UnsavedPayrollChangesGuard", () => ({
+  UnsavedPayrollChangesGuard: ({ dirty, message }: { dirty: boolean; message?: string }) => <span data-testid="leave-guard" data-dirty={String(dirty)} data-message={message} />,
+}));
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: 1 } }) }));
 vi.mock("@/contexts/CompanyContext", () => ({
   useCompany: () => ({ activeCompanyId: context.companyId, activeCompany: { id: context.companyId, name: "Kasperbauer-shaped fixture" } }),
@@ -357,6 +360,59 @@ describe("Prior-provider history", () => {
       </MemoryRouter>
     );
     await waitFor(() => expect((screen.getByLabelText("Previous payroll provider") as HTMLInputElement).value).toBe(""));
+  });
+
+  it("keeps “Matches the register” disabled while an entered register total is blank or invalid", async () => {
+    open();
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    fireEvent.click(screen.getByRole("button", { name: /Match registers/ }));
+    fireEvent.change(screen.getByLabelText("Where this is on the register"), { target: { value: "Register page 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Totals are different" }));
+    const matches = screen.getByRole("button", { name: "Matches the register" }) as HTMLButtonElement;
+    expect(matches.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Gross pay"), { target: { value: "" } });
+    expect(matches.disabled).toBe(true);
+    expect(screen.getByText("Enter the register amount like 1234.56 (0 if none)")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Gross pay"), { target: { value: "12.3.4" } });
+    expect(matches.disabled).toBe(true);
+  });
+
+  it("keeps saved pay dates that are no longer listed when selecting or clearing all", async () => {
+    const data = page();
+    const stale = { ...data.candidates[0], key: "run-99", run_id: 99, start_date: "2026-08-28", end_date: "2026-09-10", pay_date: "2026-09-10" };
+    data.draft = {
+      payload: { tax_year: 2026, takeover_on: "2026-11-01", provider_name: "", periods: [stale], identities: {}, complete_history_confirmed: false, same_employer_confirmed: false },
+      step: 0, lock_version: 1, updated_at: "2026-11-02T01:00:00Z", updated_by_name: "Benjo",
+    };
+    vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(data);
+    open();
+    await screen.findByText(/1 saved pay date is no longer available/);
+    fireEvent.click(screen.getByRole("button", { name: "Select all (2)" }));
+    expect(screen.getByText(/3 pay dates · 6 paychecks/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.getByText(/1 pay date · 2 paychecks/)).toBeTruthy();
+    expect(screen.getByText(/1 saved pay date is no longer available/)).toBeTruthy();
+  });
+
+  it("asks before leaving while edits are unsaved or failed to save, and stops once they are saved", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(priorProviderHistoryApi.saveDraft).mockRejectedValueOnce(new ApiError("Couldn’t save progress.", 500));
+    open();
+    await screen.findByText(/2 pay dates · 4 paychecks/);
+    const guard = () => screen.getByTestId("leave-guard");
+    expect(guard().dataset.dirty).toBe("false");
+    expect(guard().dataset.message).toBe(UNSAVED_HISTORY_MESSAGE);
+    fireEvent.change(screen.getByLabelText("Previous payroll provider"), { target: { value: "ADP" } });
+    expect(guard().dataset.dirty).toBe("true");
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await screen.findByText("Couldn’t save progress.");
+    // A failed save still holds unsaved edits.
+    expect(guard().dataset.dirty).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    await screen.findByText(/^Saved/);
+    expect(guard().dataset.dirty).toBe("false");
   });
 
   it("selects the remaining runs, not clears, when a manual pay date is also added", async () => {

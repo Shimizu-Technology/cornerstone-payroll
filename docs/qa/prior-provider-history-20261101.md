@@ -199,3 +199,15 @@ This round replaces part of the residual list above. These items are now fixed, 
 Still documented, not fixed: the legacy `quickbooks` count keys in the Form 941, W-2GU and packet JSON `source_summary` (API metadata only, not shown in the UI or exports), evidence IO under the company lock, and approval-failure guidance that is not tied to the specific error. The reference column was renamed to "Check # / payment reference" with Leon's approval on Nov 3 (direct deposits carry a deposit/trace number).
 
 Only focused specs, typecheck and changed-file lint were run locally, against a disposable local test database that was dropped afterwards. Full suites belong to GitHub CI.
+
+## Final review round, 2026-11-03 (CodeRabbit on 2f0ffafd)
+
+- **Reversed-year hold (data integrity).** A replacement opening balance clears the hold only when, for every employee the undone history paid, an applied, locked, compatible bridge covers that employee through their last undone pay date. Before this, any applied balance for the year cleared the hold, so a partial replacement could let live payroll omit other employees' paid wages. The regression spec now shows that one-of-three coverage and a short date keep the hold, and that full coverage clears it.
+- **Matched pay dates.** A pay date is reported as matched only with real dates ordered start ≤ end ≤ pay. "Matches the register" stays disabled while dates are invalid or any entered register total is blank or malformed.
+- **Takeover date.** It stays in the pay dates' tax year (`plan.rb` requires `takeover_on.year == tax_year` and every pay date before it). A December pay date defaults to December 31. A December 31 pay date leaves no valid takeover date, so the takeover field and "What's left" block it with an explanation.
+- **Select all / Clear all.** These now change only listed runs. Unavailable saved dates stay until "Remove".
+- **Leaving with unsaved edits.** The history workspace prompts before leaving with unsaved, saving, failed or conflicted edits, using the existing unsaved-changes guard with a page-specific message.
+- **Imported pay run detail.** Prior-provider runs no longer show the adjustment action; the backend rejects those adjustments.
+- **Check Settings.** A suggestion change updates only the check-number input and never refetches settings, so unsaved edits survive and no reload failure can desync the input.
+
+Focused local runs only. The full suites are left to CI.

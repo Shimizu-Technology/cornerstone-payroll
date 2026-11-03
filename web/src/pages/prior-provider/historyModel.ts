@@ -72,9 +72,29 @@ export function registerDifferences(period: HistoryPeriod): Partial<Record<Regis
   return result;
 }
 
+const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/** Real calendar dates ordered start ≤ end ≤ pay date, as the server requires. */
+export function periodDatesValid(period: Pick<HistoryPeriod, "start_date" | "end_date" | "pay_date">): boolean {
+  const dates = [period.start_date, period.end_date, period.pay_date];
+  const real = dates.every((iso) => {
+    if (!ISO_DATE.test(iso ?? "")) return false;
+    const [year, month, day] = iso.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  });
+  return real && period.start_date <= period.end_date && period.end_date <= period.pay_date;
+}
+
+/** True when every register total is a valid amount (blank is not zero). */
+export function registerTotalValid(period: HistoryPeriod, key: RegisterKey): boolean {
+  return MONEY.test(period.register_totals[key] ?? "");
+}
+
 export function periodMatched(period: HistoryPeriod): boolean {
   const totals = periodTotals(period);
   return (
+    periodDatesValid(period) &&
     period.source_reference.trim() !== "" &&
     REGISTER_KEYS.every((key) => MONEY.test(period.register_totals[key] ?? "") && decimal(period.register_totals[key]).equals(decimal(totals[key]))) &&
     period.paychecks.every((row) => Object.keys(paycheckProblems(row)).length === 0)
@@ -204,12 +224,34 @@ function firstOfNextMonth(iso: string): string {
   return next.toISOString().slice(0, 10);
 }
 
+/**
+ * Default takeover: the first of the month after the last paid date. History
+ * and takeover must share one tax year, so a December pay date takes over on
+ * December 31 (a December 31 pay date leaves no valid date; see takeoverProblem).
+ */
+export function defaultTakeover(lastPay: string): string {
+  const next = firstOfNextMonth(lastPay);
+  return next.slice(0, 4) === lastPay.slice(0, 4) ? next : `${lastPay.slice(0, 4)}-12-31`;
+}
+
+/** Why the takeover date can't work with these pay dates, or null. */
+export function takeoverProblem(payload: Pick<HistoryPayload, "takeover_on" | "tax_year" | "periods">): string | null {
+  const year = String(payload.tax_year);
+  const lastPay = payload.periods.map((period) => period.pay_date).filter((iso) => ISO_DATE.test(iso ?? "")).sort().at(-1);
+  if (lastPay?.endsWith("-12-31") && lastPay.slice(0, 4) === year) {
+    return `The last pay date is December 31, so this history covers all of ${year} and there’s no takeover date left in that year. Remove the December 31 pay date, or start ${Number(year) + 1} payroll in Cornerstone without recording ${year} history.`;
+  }
+  if (!ISO_DATE.test(payload.takeover_on ?? "") || payload.takeover_on.slice(0, 4) !== year) return `Choose a takeover date in ${year}.`;
+  if (lastPay && lastPay >= payload.takeover_on) return `Choose a takeover date after the last pay date (${shortDate(lastPay)}).`;
+  return null;
+}
+
 /** Prefill: every eligible run, takeover the month after the last paid date. */
 export function initialPayload(page: HistoryPage): HistoryPayload {
   if (page.draft?.payload) return page.draft.payload;
   const periods = page.candidates.map(normalizeCandidate);
   const lastPay = periods.map((period) => period.pay_date).sort().at(-1);
-  const takeover = lastPay ? firstOfNextMonth(lastPay) : `${new Date().getFullYear()}-11-01`;
+  const takeover = lastPay ? defaultTakeover(lastPay) : `${new Date().getFullYear()}-11-01`;
   return {
     tax_year: Number(takeover.slice(0, 4)),
     takeover_on: takeover,
@@ -258,6 +300,8 @@ export function remainingWork(payload: HistoryPayload, employees: HistoryEmploye
   const items: Remaining[] = [];
   if (!payload.provider_name.trim()) items.push({ step: 0, text: "Enter the previous provider’s name" });
   if (!payload.periods.length) items.push({ step: 0, text: "Choose at least one pay date" });
+  const takeover = takeoverProblem(payload);
+  if (takeover) items.push({ step: 0, text: takeover });
   const ids = employeeIds(payload);
   const unconfirmed = ids.filter((id) => !identityConfirmed(payload, employees.find((employee) => employee.id === id))).length;
   if (unconfirmed) items.push({ step: 1, text: `Confirm ${unconfirmed} ${unconfirmed === 1 ? "employee" : "employees"} against the register` });

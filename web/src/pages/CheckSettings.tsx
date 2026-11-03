@@ -113,7 +113,8 @@ export function CheckSettingsPage() {
   const [searchParams] = useSearchParams();
   const suggestion = searchParams.get('company_id') === String(scopeCompanyId) ? searchParams.get('suggested_next') ?? '' : '';
   const suggestedNumber = /^\d+$/.test(suggestion) && Number(suggestion) > 0 && Number(suggestion) <= 2_147_483_647 ? suggestion : '';
-  // The suggestion last applied; a new suggestion on the same page applies again.
+  // The suggestion last applied; the initial settings load keeps it, and a new
+  // suggestion on the same page applies again.
   const appliedSuggestion = useRef('');
   const hasClientCheckAccess = useSelectedCompanyCapability('manage_client_check_settings', scopeCompanyId);
   const canManageClientCheckSettings = hasClientCheckAccess && canWriteCompany(activeCompany, 'manage_client_check_settings');
@@ -195,12 +196,7 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(nextLayoutOverridesJson);
     setMemoTemplate(nextMemoTemplate);
     setAutoCreateFitCheck(nextAutoCreateFitCheck);
-    if (suggestedNumber && appliedSuggestion.current !== suggestedNumber) {
-      setNextCheckNumber(suggestedNumber);
-      appliedSuggestion.current = suggestedNumber;
-    } else if (!preserveNextNumber) {
-      setNextCheckNumber(String(s.next_check_number));
-    }
+    if (!preserveNextNumber) setNextCheckNumber(appliedSuggestion.current || String(s.next_check_number));
     setActivePrinterProfileId(s.active_printer_profile_id ?? null);
     setActivePrinterProfileName(s.active_printer_profile_name ?? null);
     setSavedSettingsSnapshot(checkSettingsSnapshot({
@@ -213,6 +209,14 @@ export function CheckSettingsPage() {
       memoTemplate: nextMemoTemplate,
       autoCreateFitCheck: nextAutoCreateFitCheck,
     }));
+  }, []);
+
+  // Apply a suggestion to the number input only: never refetch settings, so
+  // unsaved offset, bank, memo and layout edits survive a suggestion change.
+  useEffect(() => {
+    if (!suggestedNumber || appliedSuggestion.current === suggestedNumber) return;
+    appliedSuggestion.current = suggestedNumber;
+    setNextCheckNumber(suggestedNumber);
   }, [suggestedNumber]);
 
   useEffect(() => {
