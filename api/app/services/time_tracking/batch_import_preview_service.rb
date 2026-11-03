@@ -200,7 +200,7 @@ module TimeTracking
       active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates).reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
-        rate, method = find_wage_rate(category, active_rates)
+        rate, method = find_wage_rate(category, active_rates, employee_id: employee_id)
         category.merge(
           employee_wage_rate_id: rate&.id,
           wage_rate_label: rate&.label,
@@ -211,7 +211,12 @@ module TimeTracking
       result
     end
 
-    def find_wage_rate(category, rates)
+    def find_wage_rate(category, rates, employee_id: nil)
+      if source.source_type == "aire_services" && TimeTrackingEarningChoice.solo_category?(category)
+        choice = TimeTrackingEarningChoice.find_by(time_tracking_source: source, employee_id: employee_id, source_category_key: "solo")
+        rate = choice&.current_rate
+        return rate && rates.any? { |candidate| candidate.id == rate.id } ? [ rate, "accountant_choice" ] : [ nil, nil ]
+      end
       label_matches = rates.select do |rate|
         candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize_match_key(value) }
         candidates.include?(normalize_match_key(rate.label))

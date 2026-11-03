@@ -17,10 +17,12 @@ module TimeTracking
     }.freeze
     SOURCE_FIELDS = %w[version work_date hours source_user_uuid employee category state history_evidence].freeze
 
-    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [])
+    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [], employee_mappings: nil, batch_cache: nil)
       @source, @company, @actor, @client = source, company, actor, client
       @batches = {}
       @rounding_acknowledgements, @component_bindings = rounding_acknowledgements, component_bindings
+      @employee_mappings = employee_mappings
+      @batch_cache = batch_cache
     end
 
     def refresh_runs!(run_ids: nil)
@@ -29,7 +31,7 @@ module TimeTracking
       runs = @company.pay_periods.where(status: "committed")
       runs = runs.where(id: run_ids) unless run_ids.nil?
       @runs = runs.index_by { |run| run.id.to_s }
-      @employees = @source.time_tracking_employee_mappings.where(company: @company).index_by(&:source_user_uuid)
+      @employees = (@employee_mappings || @source.time_tracking_employee_mappings.where(company: @company)).index_by(&:source_user_uuid)
       @run_items = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
         .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
       @run_checksums = @run_items.to_h do |id, items|
@@ -38,7 +40,7 @@ module TimeTracking
       end
       @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
         acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
-      @batches = {}
+      @batches = @batch_cache || {}
       @source_inventory_checksums = nil
     end
 
