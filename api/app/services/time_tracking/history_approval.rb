@@ -137,6 +137,7 @@ module TimeTracking
       @directory = directory.index_by { |row| row.fetch("payroll_integration_id") }
       @employees = @company.employees.includes(:employee_wage_rates).order(:id).to_a
       @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
+      @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
       base = { "version" => 1, "company_id" => @company.id, "company_name" => @company.name,
         "source_id" => @source.id, "source_instance_id" => @source.expected_source_instance_id, "actor_id" => @actor.id,
         "history_through_work_date" => @through.iso8601, "identity_links" => [], "delivered_checks" => [],
@@ -243,6 +244,9 @@ module TimeTracking
           next
         end
         saved = @saved_mappings.find { |mapping| mapping.source_user_uuid == uuid }
+        numeric = @saved_mappings.find { |mapping| mapping.source_user_id == remote["id"] }
+        saved ||= numeric if numeric&.source_user_uuid.blank?
+        confirmed = saved&.source_user_uuid.present?
         exact = @employees.select { |employee| normalized(employee.full_name) == normalized(remote["full_name"]) &&
           (employee.email.blank? || remote["email"].blank? || employee.email.casecmp?(remote["email"])) }
         chosen_id = selected[uuid]&.fetch("employee_id", nil) || saved&.employee_id || (exact.one? && exact.sole.id)
@@ -251,13 +255,15 @@ module TimeTracking
         if !employee || conflict || (saved && (saved.employee_id != employee.id || saved.source_user_id != remote["id"]))
           blockers << "Choose an unambiguous Payroll employee for #{remote['full_name']}"
         else
-          planned << (saved || TimeTrackingEmployeeMapping.new(company: @company, time_tracking_source: @source,
+          mapping = saved || TimeTrackingEmployeeMapping.new(company: @company, time_tracking_source: @source,
             employee: employee, source_user_id: remote["id"], source_user_uuid: uuid,
-            source_display_name: remote["full_name"], source_email: remote["email"]))
+            source_display_name: remote["full_name"], source_email: remote["email"])
+          mapping.source_user_uuid = uuid if mapping.source_user_uuid.blank?
+          planned << mapping
         end
         rows << { "source_user_uuid" => uuid, "source_user_id" => remote["id"], "source_name" => remote["full_name"],
           "employee_id" => employee&.id, "employee_name" => employee&.full_name,
-          "existing" => saved.present?, "confirmation_required" => saved.nil? && (!exact.one? || exact.sole.id != employee&.id),
+          "existing" => !!confirmed, "confirmation_required" => !confirmed && (!exact.one? || exact.sole.id != employee&.id),
           "options" => @employees.map { |record| { "id" => record.id, "name" => record.full_name } } }
       end
       if planned.map(&:employee_id).uniq.length != planned.length
@@ -291,7 +297,7 @@ module TimeTracking
 
     def persist_mappings!
       @mappings.each do |mapping|
-        next if mapping.persisted?
+        next if mapping.persisted? && !mapping.has_changes_to_save?
         mapping.save!
         AuditLog.record!(user: @actor, company_id: @company.id, action: "time_tracking_employee_mapping#confirmed",
           record_type: "TimeTrackingEmployeeMapping", record_id: mapping.id, event_category: "payroll",
@@ -334,7 +340,7 @@ module TimeTracking
       { "source" => checksum(@source.attributes.except("shared_secret", "last_synced_at", "updated_at")),
         "boundary" => @source.cutoff_enforcement_starts_on.iso8601,
         "company" => checksum(@company.attributes),
-        "mappings" => checksum(@saved_mappings.map(&:attributes)),
+        "mappings" => @saved_mapping_fingerprint,
         "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.map(&:attributes) ] }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)

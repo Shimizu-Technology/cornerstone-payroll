@@ -125,6 +125,18 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(source.time_tracking_employee_mappings.find_by!(source_user_uuid: uuid).employee_id).to eq(employee.id)
   end
 
+  it "upgrades a verified numeric legacy mapping only during approval without inserting a duplicate person" do
+    mapping = source.time_tracking_employee_mappings.sole
+    mapping.update!(source_user_uuid: nil)
+    page = history_service.prepare!
+    expect(page["history_coverage_verified"]).to be(true)
+    expect(page["mappings"].sole).to include("employee_id" => employee.id, "existing" => false)
+    expect(mapping.reload.source_user_uuid).to be_nil
+    approve_review(page)
+    expect(mapping.reload.source_user_uuid).to eq(uuid)
+    expect(source.time_tracking_employee_mappings.count).to eq(1)
+  end
+
   it "requires explicit confirmation of a nonexact mapping and rolls all changes back on refusal" do
     source.time_tracking_employee_mappings.delete_all
     employee.update!(last_name: "Different")

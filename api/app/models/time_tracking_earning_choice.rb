@@ -9,7 +9,7 @@ class TimeTrackingEarningChoice < ApplicationRecord
 
   def self.solo_category?(category)
     [ category[:key], category["key"], category[:name], category["name"] ].any? do |value|
-      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish.delete_suffix(" hours") == "solo"
+      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish.delete_prefix("aire ").delete_suffix(" hours") == "solo"
     end
   end
 
