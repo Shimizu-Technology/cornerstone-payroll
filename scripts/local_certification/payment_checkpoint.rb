@@ -5,7 +5,7 @@ require "digest"
 
 database = ActiveRecord::Base.connection_db_config.database.to_s
 abort "Unsafe payment checkpoint database" unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" &&
-  database.match?(/\A(?:aire_cornerstone|cornerstone_aire)_certification_\d+_\d+\z/)
+  database.match?(/\A(?:aire_cornerstone|cornerstone_aire)_certification_(?:rollout_rehearsal_)?\d+_\d+\z/)
 directory = File.dirname(ENV.fetch("CERTIFICATION_CLOCK_FILE"))
 stat = File.lstat(directory)
 abort "Unsafe private payment checkpoint" unless stat.directory? && stat.uid == Process.uid &&

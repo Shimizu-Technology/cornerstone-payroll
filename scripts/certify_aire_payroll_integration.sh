@@ -15,6 +15,11 @@ KEEP_RUNNING="${KEEP_RUNNING:-false}"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 AIRE_DATABASE="aire_cornerstone_certification_${RUN_ID//-/_}"
 CORNERSTONE_DATABASE="cornerstone_aire_certification_${RUN_ID//-/_}"
+if [[ "${STAGE2_HISTORY:-false}" == "true" ]]; then
+  RUN_ID="$(date +%H%M%S)-$$"
+  AIRE_DATABASE="aire_cornerstone_certification_rollout_rehearsal_${RUN_ID//-/_}"
+  CORNERSTONE_DATABASE="cornerstone_aire_certification_rollout_rehearsal_${RUN_ID//-/_}"
+fi
 TEMP_PARENT="${TMPDIR:-/tmp}"
 while [[ "$TEMP_PARENT" != "/" && "$TEMP_PARENT" == */ ]]; do
   TEMP_PARENT="${TEMP_PARENT%/}"
@@ -114,6 +119,23 @@ createdb --host 127.0.0.1 "$CORNERSTONE_DATABASE"
     AIRE_BASE_URL="$AIRE_BASE_URL" bundle exec rails runner "$ROOT_DIR/scripts/local_certification/seed_cornerstone.rb"
 )
 
+if [[ "${STAGE2_HISTORY:-false}" == "true" ]]; then
+  (
+    cd "$ROOT_DIR/api"
+    certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+    certification_use_clock "$CORNERSTONE_DATABASE_URL"
+    CERTIFICATION_STAGE2_APP=payroll AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" CERTIFICATION_FIXTURE_PATH="$CORNERSTONE_FIXTURE" \
+      bundle exec rails runner "$ROOT_DIR/scripts/local_certification/history_packet_fixture.rb"
+  )
+  (
+    cd "$AIRE_REPO_PATH/backend"
+    certification_use_ruby "$AIRE_REPO_PATH/backend" "${AIRE_RUBY_BIN_DIR:-}"
+    certification_use_clock "$AIRE_DATABASE_URL"
+    CERTIFICATION_STAGE2_APP=aire AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" CERTIFICATION_FIXTURE_PATH="$CORNERSTONE_FIXTURE" \
+      bundle exec rails runner "$ROOT_DIR/scripts/local_certification/history_packet_fixture.rb"
+  )
+fi
+
 json_value() {
   ruby -rjson -e 'print JSON.parse(File.read(ARGV.fetch(0))).fetch(ARGV.fetch(1))' "$1" "$2"
 }
@@ -143,6 +165,7 @@ echo "Starting isolated AIRE and Cornerstone APIs..."
     bundle exec rails server --binding 127.0.0.1 --port "$AIRE_PORT"
 ) >"$AIRE_LOG" 2>&1 &
 AIRE_PID=$!
+if [[ -n "${DEV_LIFECYCLE_SESSION_ID:-}" ]]; then dev-lifecycle claim process "$AIRE_PID" --session "$DEV_LIFECYCLE_SESSION_ID" --reason "Stage 2 synthetic AIRE HTTP certificate"; fi
 
 (
   cd "$ROOT_DIR/api"
@@ -154,6 +177,7 @@ AIRE_PID=$!
     bundle exec rails server --binding 127.0.0.1 --port "$CORNERSTONE_PORT"
 ) >"$CORNERSTONE_LOG" 2>&1 &
 CORNERSTONE_PID=$!
+if [[ -n "${DEV_LIFECYCLE_SESSION_ID:-}" ]]; then dev-lifecycle claim process "$CORNERSTONE_PID" --session "$DEV_LIFECYCLE_SESSION_ID" --reason "Stage 2 synthetic Payroll HTTP certificate"; fi
 echo "Owned server PIDs: AIRE=$AIRE_PID Cornerstone=$CORNERSTONE_PID"
 
 wait_for_health() {
@@ -193,6 +217,16 @@ api_call() {
   }
   echo "PASS: $label"
 }
+
+if [[ "${STAGE2_HISTORY:-false}" == "true" ]]; then
+  (
+    cd "$ROOT_DIR/api"
+    certification_use_ruby "$ROOT_DIR/api" "${PAYROLL_RUBY_BIN_DIR:-}"
+    certification_use_clock "$CORNERSTONE_DATABASE_URL"
+    AIRE_CERTIFICATION_FIXTURE_PATH="$AIRE_FIXTURE" \
+      bundle exec rails runner "$ROOT_DIR/scripts/local_certification/verify_history_packet.rb"
+  )
+fi
 
 PUBLISH_RESPONSE="$TEMP_DIR/publish.json"
 api_call 201 "publish the previous-regular-payday calendar from Cornerstone to AIRE" POST \

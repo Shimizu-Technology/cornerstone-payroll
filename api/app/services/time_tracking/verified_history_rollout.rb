@@ -78,6 +78,7 @@ module TimeTracking
       validate_checks!
       validate_entries!
       validate_finalized_batch_entries!
+      coverage_verified = history_scope_verified?
       {
         identity_links: identities.length,
         delivered_checks: checks.length,
@@ -85,8 +86,40 @@ module TimeTracking
         historical_classification_cases: classification_cases.length,
         finalized_batch_entries: finalized_batch_entries.length,
         new_source_entries_ignored: ignored_source_entry_count,
-        history_coverage_verified: history_scope_verified?
+        disposition_counts: Array(manifest["reviewed_dispositions"]).group_by { |row| row["disposition"] }.transform_values(&:length),
+        disposition_summary: Array(manifest["reviewed_dispositions"]).group_by { |row| row["disposition"] }.map do |type, rows|
+          { disposition: type, meaning: HistoryDispositionVerifier::LABELS.fetch(type, "Requires individual accounting review"), entries: rows.length }
+        end,
+        manifest_sha256: @manifest_sha256,
+        rounding_variances: @history_disposition_verifier&.rounding_variances || [],
+        rounding_review_blockers: @history_disposition_verifier&.rounding_review_blockers || [],
+        history_coverage_verified: coverage_verified
       }
+    end
+
+    # Produces an unapproved private review packet, never inferred approval.
+    # Every disposition still needs an identified reviewer's reason/evidence.
+    def capture_review_packet!
+      validate_structure!
+      validate_company!
+      validate_history_scope!(require_evidence: true)
+      raise Error, "History scope is required to export a review packet" unless @history_inventory
+      raise Error, "Pin the source installation before exporting a review packet" unless @source.remote_identity_pinned? &&
+        manifest["source_instance_id"] == @source.expected_source_instance_id
+
+      verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
+        rounding_acknowledgements: [], component_bindings: [])
+      verifier.discover_rounding_variances!(@history_inventory)
+      manifest.merge("rounding_variances" => verifier.rounding_variances,
+        "rounding_review_blockers" => verifier.rounding_review_blockers,
+        "rounding_variance_acknowledgements" => [], "historical_earning_component_bindings" => [],
+        "reviewed_dispositions" => @history_inventory.map do |row|
+        { "disposition" => "review_required", "actor_id" => actor.id, "reason" => "", "evidence" => "",
+          "source_instance_id" => @source.expected_source_instance_id,
+          "source_time_entry_id" => row.fetch("id"), "source_user_uuid" => row.fetch("source_user_uuid"),
+          "source_time_entry_version" => row.fetch("version"),
+          "source" => row.slice(*HistoryDispositionVerifier::SOURCE_FIELDS) }
+      end).except("_verified_sha256")
     end
 
     def apply!(accepted_manifest_sha256: nil, release_owner: nil)
@@ -176,6 +209,10 @@ module TimeTracking
       raise Error, "The rollout actor differs from the verified manifest" unless manifest["actor_id"].to_i == actor.id
       %w[identity_links delivered_checks issued_entries classification_cases finalized_batch_entries].each do |key|
         raise Error, "AIRE rollout #{key} must be a list" unless manifest[key].is_a?(Array)
+      end
+      reviewed = manifest.fetch("reviewed_dispositions", [])
+      unless reviewed.is_a?(Array) && reviewed.all? { |row| row.is_a?(Hash) && row["disposition"].is_a?(String) && row["disposition"].present? }
+        raise Error, "AIRE rollout reviewed_dispositions must be a list of objects with a disposition"
       end
       raise Error, "AIRE rollout identity list contains duplicates" unless unique?(identities.map { |row| row.fetch("source_user_uuid") }) &&
         unique?(identities.map { |row| row.fetch("employee_id") })
@@ -312,7 +349,7 @@ module TimeTracking
       raise Error, "Historical rollout company or actor changed before completion"
     end
 
-    def validate_history_scope!
+    def validate_history_scope!(require_evidence: true)
       validate_history_scope_bound!
       return unless @history_through_work_date
 
@@ -327,6 +364,13 @@ module TimeTracking
         response = @client.payroll_cockpit_history_entries(through_work_date: date, page: page)
         raise Error, "AIRE returned incomplete historical source inventory" unless response.is_a?(Hash)
 
+        if require_evidence && (!@source.remote_identity_pinned? || response["history_evidence_version"] != 1 ||
+            response.dig("integration", "source_instance_id") != @source.expected_source_instance_id)
+          raise Error, "AIRE historical evidence version or installation differs"
+        end
+        unless response["unresolved_historical_obligation_count"] == 0
+          raise Error, "AIRE historical obligations are missing or moved beyond the review scope"
+        end
         rows = response.fetch("time_entries")
         pagination = response.fetch("pagination")
         unless response["source_state"] == "current" && response["through_work_date"] == date &&
@@ -370,13 +414,19 @@ module TimeTracking
       end
       paid_by_key = paid.group_by { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row["source_time_entry_version"] ] }
       paid_keys = paid_by_key.keys
-      unpaid = Array(manifest["reviewed_unpaid_entries"])
-      held = Array(manifest["held_source_entries"])
-      unpaid_keys = unpaid.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
-      held_keys = held.map { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
-      dispositions = paid_keys + unpaid_keys + held_keys
+      # Legacy identity-only labels are not accounting evidence.
+      return false if Array(manifest["reviewed_unpaid_entries"]).any? || Array(manifest["held_source_entries"]).any?
+      reviewed = manifest.fetch("reviewed_dispositions", [])
+      return false unless reviewed.is_a?(Array)
+      reviewed_by_key = reviewed.group_by { |row| [ row.fetch("source_user_uuid"), row.fetch("source_time_entry_id").to_s, row.fetch("source_time_entry_version") ] }
+      return false unless reviewed_by_key.values.all?(&:one?)
+      dispositions = paid_keys + reviewed_by_key.keys
       return false unless dispositions.uniq.length == dispositions.length
-      @history_inventory.all? do |row|
+      inventory_keys = @history_inventory.map { |row| [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ] }
+      return false unless (dispositions - inventory_keys).empty?
+      verifier = history_disposition_verifier
+      verifier.discover_rounding_variances!(@history_inventory)
+      covered = @history_inventory.all? do |row|
         key = [ row.fetch("source_user_uuid"), row.fetch("id").to_s, row.fetch("version") ]
         next false unless dispositions.include?(key)
         total = coverage_hours(row.fetch("hours"))
@@ -389,10 +439,17 @@ module TimeTracking
                               overtime == coverage_hours(row.fetch("overtime_hours"))
           end
         end
-        !held_keys.include?(key) || row.dig("lifecycle", "status") == "payment_attested_pending_evidence"
+        paid_by_key.key?(key) || verifier.verified?(reviewed_by_key.fetch(key).sole, row)
       end
+      covered && verifier.rounding_acknowledgements_valid?
     rescue KeyError, ArgumentError, TypeError
       false
+    end
+
+    def history_disposition_verifier
+      @history_disposition_verifier = HistoryDispositionVerifier.new(source: @source, company: @company, actor: actor, client: @client,
+        rounding_acknowledgements: manifest.fetch("rounding_variance_acknowledgements", []),
+        component_bindings: manifest.fetch("historical_earning_component_bindings", []))
     end
 
     def coverage_hours(value)
