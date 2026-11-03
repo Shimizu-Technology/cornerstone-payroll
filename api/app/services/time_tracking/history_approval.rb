@@ -93,7 +93,9 @@ module TimeTracking
         # attests the same visible identities/totals; no client packet is trusted.
         approved = capture(mapping_selections: review.snapshot.fetch("mapping_selections"))
         raise Error, "Fresh history coverage is incomplete; nothing was applied" unless approved[:summary]["history_coverage_verified"]
-        packet = approved.fetch(:packet)
+        # JSONB does not preserve hash insertion order. Canonical bytes keep
+        # the approved packet digest reproducible from its immutable record.
+        packet = CanonicalPayload.canonicalize(approved.fetch(:packet))
         assert_accounting_only!(packet)
         rollout = VerifiedHistoryRollout.new(manifest: packet, actor: @actor, batch_cache: @batch_cache)
         packet_digest = Digest::SHA256.hexdigest(JSON.generate(packet))
@@ -114,6 +116,7 @@ module TimeTracking
         AuditLog.record!(user: @actor, company_id: @company.id, organization_id: @company.organization_id,
           action: "aire_history#approved", record_type: "AireHistoryReview", record_id: review.id, event_category: "payroll",
           metadata: { summary_digest: review.digest, packet_digest: packet_digest, receipt_id: receipt.id,
+            packet_digest_contract: "canonical_payload_v1",
             approved_at: review.approved_at.iso8601(6), attestation: ATTESTATION })
         response(review)
       end
