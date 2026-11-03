@@ -18,11 +18,12 @@ module TimeTracking
       end
     end
 
-    ATTESTATION = "I reviewed this history summary, employee matches, pending items and signed rounding differences. I approve accounting coverage only; this authorizes no payment of pending or owed hours."
+    ATTESTATION = "I reviewed this history summary, employee matches, historical category attributions, pending items and signed rounding differences. I approve accounting coverage only; this authorizes no payment of pending or owed hours."
     REVIEW_REASON = "Accountant reviewed the exact one-summary historical accounting evidence"
     REVIEW_EVIDENCE = "Authenticated AIRE history, immutable batch evidence and linked committed Payroll register; one-summary attestation"
     PENDING_TYPES = %w[pending_review pending_overtime historical_baseline_pending_overtime payment_evidence_pending].freeze
     SUMMARY_LABELS = {
+      "accountant_attributed_paid_category" => "Historical categories attributed to committed payroll by the accountant",
       "historical_baseline" => "Hours already represented in manual payroll",
       "paid_under_prior_daily_weekly_ot_policy" => "Manual payroll under the prior daily8/weekly40 overtime policy",
       "legacy_frozen_batch_baseline" => "Older manual payroll — verified using less detailed frozen records",
@@ -151,6 +152,7 @@ module TimeTracking
           @company.company_assignments.where(user: @actor).lock("FOR SHARE").load
           @source.lock!
           @source.time_tracking_employee_mappings.order(:id).lock("FOR SHARE").load
+          TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).lock("FOR SHARE").load
           review.lock!
           result = yield
           # StandardError handlers (including logging) can swallow Ruby's
@@ -232,7 +234,8 @@ module TimeTracking
         draft = packet.fetch("reviewed_dispositions").find { |row| row["source_time_entry_id"] == entry.fetch("id") }
           .merge("reason" => REVIEW_REASON, "evidence" => REVIEW_EVIDENCE)
         draft["prior_overtime_policy"] = verifier.prior_policy_review_evidence(entry)
-        types = %w[paid_under_prior_daily_weekly_ot_policy historical_baseline legacy_frozen_batch_baseline pending_overtime historical_baseline_pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
+        draft["attributed_categories"] = verifier.accountant_category_attributions(entry)
+        types = %w[accountant_attributed_paid_category paid_under_prior_daily_weekly_ot_policy historical_baseline legacy_frozen_batch_baseline pending_overtime historical_baseline_pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
         type = types.find { |candidate| verifier.verified?(draft.merge("disposition" => candidate), entry) }
         blockers << "Entry #{entry.fetch('id')}: source evidence does not support a complete accounting disposition" unless type
         draft.merge("disposition" => type || "pending_review")
@@ -259,6 +262,10 @@ module TimeTracking
             "hours" => rows.sum { |row| BigDecimal(row.fetch("hours")) }.to_s("F") }
         end,
         "rounding_variances" => variances.map { |row| row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name) },
+        "attributed_categories" => dispositions.select { |row| row["disposition"].in?(%w[accountant_attributed_paid_category historical_baseline_pending_overtime]) && row["attributed_categories"].present? }
+          .flat_map { |row| row.fetch("attributed_categories") }.uniq.map do |row|
+            row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name)
+          end,
         "historical_policies" => dispositions.flat_map { |row| row.fetch("prior_overtime_policy") }.uniq.map do |row|
           row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name)
         end,
@@ -266,7 +273,7 @@ module TimeTracking
         "pending_review" => details.select do |row|
           PENDING_TYPES.include?(row["disposition"]) || row["approval_status"].in?([ nil, "pending" ])
         end.map { |row| row.merge("hours" => row.fetch("pending_hours")) },
-        "blockers" => blockers.uniq, "solo_decisions" => solo_decisions(inventory), "attestation" => ATTESTATION }
+        "category_configuration" => category_mapping_review(inventory), "blockers" => blockers.uniq, "solo_decisions" => solo_decisions(inventory), "attestation" => ATTESTATION }
       snapshot = { "entry_checksums" => inventory.sort_by { |row| row.fetch("id") }.to_h { |row| [ row.fetch("id"), checksum(row) ] },
         "entry_observations" => inventory.to_h { |row| [ row.fetch("id"), row.slice("version", "hours", "work_date", "source_user_uuid", "state", "category") ] },
         "directory" => checksum(directory.map { |row| row.slice("id", "payroll_integration_id", "full_name", "email", "active", "role") }), "local" => local_fingerprint(inventory),
@@ -365,6 +372,24 @@ module TimeTracking
       end.uniq
     end
 
+    def category_mapping_review(inventory)
+      policies = TimeTrackingCategoryMapping.where(time_tracking_source: @source, import_enabled: true).to_a
+      inventory.group_by { |entry| entry.fetch("source_user_uuid") }.flat_map do |uuid, entries|
+        mapping = @mappings.find { |row| row.source_user_uuid == uuid }
+        employee = @employees.find { |row| row.id == mapping&.employee_id }
+        next [] unless employee
+        entries.map { |entry| entry["category"] }.uniq.filter_map do |category|
+          policy = policies.find { |row| row.source_category_key == TimeTrackingCategoryMapping.category_key(category) }
+          next unless policy
+          rate = policy.matching_rate(employee.employee_wage_rates.to_a)
+          { "employee" => employee.full_name, "employee_id" => employee.id, "source_category" => category&.fetch("name", nil),
+            "configured_components" => policy.required_rate_description, "resolved_component" => rate&.label,
+            "employee_wage_rate_id" => rate&.id, "rate" => rate&.rate&.to_s("F"),
+            "blocked" => rate.nil? }
+        end
+      end
+    end
+
     def persist_mappings!
       @mappings.each do |mapping|
         next if mapping.persisted? && !mapping.has_changes_to_save?
@@ -376,6 +401,7 @@ module TimeTracking
     end
 
     def solo_decisions(inventory)
+      return [] if TimeTrackingCategoryMapping.exists?(time_tracking_source: @source, source_category_key: "solo", import_enabled: true)
       inventory.select { |entry| TimeTrackingEarningChoice.solo_category?(entry["category"] || {}) }
         .group_by { |entry| entry["source_user_uuid"] }.map do |uuid, entries|
         mapping = @mappings.find { |record| record.source_user_uuid == uuid }
@@ -409,6 +435,7 @@ module TimeTracking
       run_ids = inventory.flat_map { |entry| entry.dig("history_evidence", "baseline_lines").to_a.map { |line| line.dig("processing", "external_pay_period_id") } }.compact.uniq
       { "source" => checksum(@source.attributes.except("shared_secret", "last_synced_at", "updated_at")),
         "boundary" => @source.cutoff_enforcement_starts_on.iso8601,
+        "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
         "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ] }),

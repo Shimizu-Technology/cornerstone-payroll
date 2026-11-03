@@ -106,3 +106,12 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 - Kasperbauer: merge the prior-provider history feature (#407) after the release, then record their 2026 history before their first Cornerstone payroll.
 - Before January W-2s: enter missing SSNs and addresses (AIRE, Cornerstone, MoSa); the CEO verifies the 2027 tax tables.
 - Small performance items in the below-threshold FICA path (duplicate review-note query; per-employee snapshot evaluation).
+
+For the held one-summary activation code, configure company2's reviewed earning
+rules before history approval: `bundle exec rails aire_rollout:configure_categories`
+with `SOURCE_ID=1`, the authorized `ACTOR_ID`, and attributable `REASON`/`EVIDENCE`.
+This audited step maps Solo to Flight Hours and Aircraft Maintenance to Maintenance
+first, otherwise Regular, separately resolving each employee's active rate. It
+also scopes the historical accountant category attributions shown on the single
+approval page. See `docs/integrations/aire-history-packet.md`. This is a later
+activation step; deployment remains paused and publishes nothing.

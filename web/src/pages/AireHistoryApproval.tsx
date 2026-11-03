@@ -104,6 +104,19 @@ function HistorySummary({ companyId }: { companyId: number }) {
           </div>)}</div>
           {dirty && <Button className="mt-3" onClick={refresh} disabled={busy}>Update summary with these matches</Button>}
         </section>
+        {!!summary.category_configuration?.length && <section className={panel} aria-labelledby="category-config-title">
+          <h2 id="category-config-title" className="text-lg font-semibold">Configured earning components</h2>
+          <p className="mt-1 text-sm text-neutral-600">Each import uses this employee’s own active rate. Missing required rates block import.</p>
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><thead><tr>{['Employee', 'AIRE category', 'Configured rule', 'Resolved component', 'Rate / h'].map((label) => <th key={label} className={cell}>{label}</th>)}</tr></thead><tbody>{summary.category_configuration.map((row, index) => <tr key={index}><td className={cell}>{row.employee}</td><td className={cell}>{row.source_category}</td><td className={cell}>{row.configured_components}</td><td className={cell}>{row.resolved_component || 'Missing required rate — import blocked'}</td><td className={cell}>{row.rate ? Number(row.rate).toFixed(2) : '—'}</td></tr>)}</tbody></table></div>
+        </section>}
+        {!!summary.attributed_categories?.length && <section className={panel} aria-labelledby="attributed-title">
+          <h2 id="attributed-title" className="text-lg font-semibold">Historical categories as paid</h2>
+          <p className="mt-1 text-sm text-neutral-600">Review these source hours against the committed earning components. Your single history attestation covers these attributions. Source categories and payment status stay unchanged.</p>
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><thead><tr>{['Employee', 'Run', 'Source category', 'Source h', 'Paid component', 'Attributed paid h'].map((label) => <th key={label} className={cell}>{label}</th>)}</tr></thead>
+            <tbody>{summary.attributed_categories.flatMap((group) => group.rows.map((row, index) => <tr key={`${group.run_id}:${group.employee}:${index}`}><td className={cell}>{group.employee}</td><td className={cell}>{group.run_id}</td><td className={cell}>{row.source_category?.name || 'Uncategorized (retained)'}</td><td className={cell}>{hours(row.source_hours)}</td><td className={cell}>{row.paid_component}</td><td className={cell}>{hours(row.attributed_paid_hours)}</td></tr>))}</tbody>
+          </table></div>
+          <p className="mt-2 text-sm">{summary.approved_at ? `Attested by ${summary.approved_by} at ${new Date(summary.approved_at).toLocaleString()}.` : 'The approving accountant’s name, time, evidence and summary reference will be recorded.'}</p>
+        </section>}
         {!!summary.historical_policies?.length && <section className={panel} aria-labelledby="prior-policy-title">
           <h2 id="prior-policy-title" className="text-lg font-semibold">History under the prior overtime policy</h2>
           <p className="mt-1 text-sm text-neutral-600">These manual runs used daily overtime after 8 hours and weekly overtime after 40 hours. Weekly-only payroll applies from October 16, 2026. Historical policy differences authorize no new payment.</p>
@@ -127,8 +140,8 @@ function HistorySummary({ companyId }: { companyId: number }) {
         <EntryList key={`${summary.review_id}:pending`} title="Pending accounting review — no payment authorized" entries={summary.pending_review} />
         <section className={panel} aria-labelledby="solo-title">
           <h2 id="solo-title" className="text-lg font-semibold">Solo earning treatment</h2>
-          <p className="mt-1 text-sm text-neutral-600">Chels/Mark must choose an earning component and rate before Solo hours can import. You can approve history while this decision remains open.</p>
-          {!summary.solo_decisions.length && <p className="mt-3 text-sm">No Solo entries in this history scope. Any future Solo import still needs an explicit earning choice.</p>}
+          <p className="mt-1 text-sm text-neutral-600">A reviewed company category mapping applies Solo hours to each employee’s Flight Hours rate. Without that configuration, an explicit earning choice is required before import.</p>
+          {!summary.solo_decisions.length && <p className="mt-3 text-sm">No individual Solo choice is required on this summary. Imports use the reviewed company mapping when configured and block if the employee’s required rate is missing.</p>}
           {summary.solo_decisions.map((row, index) => <div className="mt-3" key={row.employee_id || index}><Select label={`${row.employee || 'Unmatched employee'} · ${hours(row.hours)} Solo h`} value={solo[row.employee_id || 0] || ''} disabled={busy || !row.employee_id || !!summary.approved_at} onChange={(event) => setSolo((previous) => ({ ...previous, [row.employee_id!]: event.target.value }))}>
             <option value="">Decision still open — block Solo import</option>{row.options.map((option) => <option key={option.id} value={option.id}>{option.label} · ${Number(option.rate).toFixed(2)}/h</option>)}
           </Select></div>)}
