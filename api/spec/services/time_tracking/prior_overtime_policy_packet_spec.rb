@@ -166,4 +166,57 @@ RSpec.describe "Historical prior overtime policy packet" do
       expect(rollout(reviewed_packet).preview![:history_coverage_verified]).to be(false)
     end
   end
+  it "keeps Flight0.60 versus paid3.10 blocked even when another component offsets the difference" do
+    category.replace("id" => "1", "key" => "flight", "name" => "Flight Hours")
+    ground = { "id" => "2", "key" => "ground", "name" => "Ground Instruction Hours" }
+    adjustment.merge!("total_hours" => 0.6, "regular_hours" => 0.6)
+    extra_line = adjustment.deep_dup.merge("source_time_entry_id" => "42", "line_key" => "ground", "category" => ground,
+      "source_category_id" => "2", "total_hours" => 9.4, "regular_hours" => 9.4)
+    payload["employees"].sole["adjustments"] << extra_line
+    payload["summary"].merge!("adjustment_count" => 2, "current_count" => 2)
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["category"] = category
+    row["hours"] = 0.6
+    row["history_evidence"]["payable_segments"].sole["total_hours"] = "0.6"
+    row["history_evidence"]["baseline_lines"].sole.merge!("category" => category, "total_hours" => 0.6, "regular_hours" => 0.6,
+      "batch_checksum" => payload.dig("export", "checksum"))
+    extra = row.deep_dup.merge("id" => "42", "category" => ground, "hours" => 9.4)
+    extra["history_evidence"].merge!("payable_content_checksum" => "b" * 64,
+      "payable_segments" => [ { "work_date" => row["work_date"], "total_hours" => "9.4" } ])
+    extra["history_evidence"]["baseline_lines"].sole.merge!("source_time_entry_id" => "42", "line_key" => "ground",
+      "category" => ground, "total_hours" => 9.4, "regular_hours" => 9.4, "snapshot_checksum" => "e" * 64)
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "source_state" => "current", "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0,
+      "integration" => { "source_instance_id" => source.expected_source_instance_id }, "through_work_date" => "2026-08-15",
+      "time_entries" => [ row, extra ], "pagination" => { "current_page" => 1, "per_page" => 50, "total_count" => 2, "total_pages" => 1, "truncated" => false })
+    proof = payload["export"]["prior_overtime_policy"]
+    proof["batch_checksum"] = payload.dig("export", "checksum")
+    original_input = proof["employees"].sole["inputs"].sole
+    original_input["hours"] = "0.6"
+    original_input["frozen_rows"].sole["batch_checksum"] = proof["batch_checksum"]
+    new_input = original_input.deep_dup.merge("source_time_entry_id" => "42", "hours" => "9.4", "payable_content_checksum" => "b" * 64)
+    new_input["frozen_rows"].sole.merge!("line_key" => "ground", "snapshot_checksum" => "e" * 64)
+    proof["employees"].sole["inputs"] << new_input
+    proof["employees"].sole["inputs_checksum"] = TimeTracking::CanonicalPayload.checksum(proof["employees"].sole["inputs"])
+    proof["employees"].sole["allocations"] = [
+      { "source_time_entry_id" => "41", "line_key" => "maintenance", "regular_hours" => "0.6", "overtime_hours" => "0.0" },
+      { "source_time_entry_id" => "42", "line_key" => "ground", "regular_hours" => "7.4", "overtime_hours" => "2.0" } ]
+    proof["evidence_checksum"] = TimeTracking::CanonicalPayload.checksum(proof.except("evidence_checksum"))
+    item.update_columns(custom_columns_data: { "wage_rate_hours" => [
+      { "employee_wage_rate_id" => 11, "label" => "Flight Hours", "active" => true, "rate" => 10, "regular_hours" => 3.1, "overtime_hours" => 0 },
+      { "employee_wage_rate_id" => 12, "label" => "Ground Instruction Hours", "active" => true, "rate" => 10, "regular_hours" => 4.9, "overtime_hours" => 2 } ] })
+    packet = rollout(manifest).capture_review_packet!
+    packet["historical_earning_component_bindings"] = packet["rounding_review_blockers"].select { |blocker| blocker["source_category"] }.map do |blocker|
+      blocker.except("reason").merge("type" => "historical_earning_component_binding", "reviewer_id" => actor.id,
+        "earning_component" => blocker["source_category"] == category ? "wage_rate:11" : "wage_rate:12",
+        "reason" => "Reviewed exact source category to committed earning component",
+        "evidence" => "Synthetic explicit component labels; employee total ties")
+    end
+    packet["reviewed_dispositions"].each { |record| record.merge!("disposition" => "paid_under_prior_daily_weekly_ot_policy",
+      "reason" => "Review prior policy separately for every earning component", "evidence" => "Synthetic authenticated source and committed component evidence") }
+    preview = rollout(packet).preview!
+    expect(preview[:history_coverage_verified]).to be(false)
+    expect(preview[:rounding_variances]).to include(a_hash_including("source_category" => category, "source_total" => "0.6", "paid_total" => "3.1", "signed_difference" => "2.5"))
+  end
+
 end
