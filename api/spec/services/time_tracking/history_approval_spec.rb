@@ -407,4 +407,50 @@ RSpec.describe TimeTracking::HistoryApproval do
       .to raise_error(described_class::Changed, /Payroll employees changed/)
     expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
   end
+  it "prefills the authenticated prior policy and atomically approves complete coverage without new pay" do
+    item.update_columns(hours_worked: 8, overtime_hours: 2)
+    adjustment.merge!("total_hours" => 10.0, "regular_hours" => 10.0)
+    payload["employees"].sole.merge!("total_hours" => 10.0, "regular_hours" => 10.0)
+    payload["summary"].merge!("total_hours" => 10.0, "regular_hours" => 10.0)
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["hours"] = 10.0
+    row["history_evidence"]["payable_segments"].sole["total_hours"] = "10.0"
+    row["history_evidence"]["baseline_lines"].sole.merge!("total_hours" => 10.0, "regular_hours" => 10.0,
+      "batch_checksum" => payload.dig("export", "checksum"), "snapshot_checksum" => "f" * 64)
+    input = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "version" => 2, "work_date" => row["work_date"], "hours" => "10.0", "payable_content_checksum" => "a" * 64,
+      "frozen_rows" => [ { "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+        "line_key" => "maintenance", "snapshot_checksum" => "f" * 64 } ] }
+    proof = { "kind" => TimeTracking::PriorOvertimePolicyReview::KIND, "policy" => TimeTracking::PriorOvertimePolicyReview::POLICY,
+      "threshold_evidence" => { "basis" => "owner_reviewed_8_40_fallback_no_versioned_setting_history" },
+      "input_scope" => "all_effective_frozen_current_lines_in_workweek_through_batch_end",
+      "source_instance_id" => source.expected_source_instance_id, "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
+      "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, "eligible" => true, "blockers" => [],
+        "inputs" => [ input ], "inputs_checksum" => TimeTracking::CanonicalPayload.checksum([ input ]),
+        "allocations" => [ { "source_time_entry_id" => "41", "line_key" => "maintenance", "regular_hours" => "8.0", "overtime_hours" => "2.0" } ] } ] }
+    payload["export"]["prior_overtime_policy"] = proof.merge("evidence_checksum" => TimeTracking::CanonicalPayload.checksum(proof))
+    page = history_service.prepare!
+    expect(page).to include("history_coverage_verified" => true)
+    expect(page["dispositions"].sole["type"]).to eq("paid_under_prior_daily_weekly_ot_policy")
+    expect(page["historical_policies"].sole).to include("paid_split" => { "regular_hours" => "8.0", "overtime_hours" => "2.0" })
+    original = payload["export"]["prior_overtime_policy"].deep_dup
+    reads = 0
+    allow(client).to receive(:payroll_batch) do
+      answer = payload.deep_dup
+      reads += 1
+      if reads == 1
+        changed = payload["export"]["prior_overtime_policy"]
+        changed["threshold_evidence"]["observation"] = "Historical threshold observation changed during capture"
+        changed["evidence_checksum"] = TimeTracking::CanonicalPayload.checksum(changed.except("evidence_checksum"))
+      end
+      answer
+    end
+    expect { approve_review(page) }.to raise_error(TimeTracking::HistoryApproval::Changed)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    payload["export"]["prior_overtime_policy"] = original
+    allow(client).to receive(:payroll_batch).and_return(payload)
+    expect { approve_review(page) }.to change(AireVerifiedHistoryRolloutReceipt, :count).by(1)
+      .and change(CheckEvent, :count).by(0).and change(TimeTrackingManualAllocation, :count).by(0)
+    expect(AireHistoryReview.find(page["review_id"]).approved_packet["reviewed_dispositions"].sole["prior_overtime_policy"]).to be_present
+  end
 end

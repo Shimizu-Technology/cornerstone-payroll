@@ -33,6 +33,17 @@ afterEach(cleanup);
 const view = () => render(<MemoryRouter><AireHistoryApproval /></MemoryRouter>);
 
 describe('one-summary AIRE history approval', () => {
+  it('shows frozen, prior-policy and paid splits without changing the future policy or adding an approval step', async () => {
+    mocks.preview.mockResolvedValue({ ...summary(), historical_policies: [{ employee: 'Payroll person', employee_id: 8, run_id: 67,
+      baseline_evidence_class: 'historical_baseline', frozen_split: { regular_hours: '10', overtime_hours: '0' },
+      prior_policy_split: { regular_hours: '8', overtime_hours: '2' }, paid_split: { regular_hours: '8', overtime_hours: '2' } }] });
+    view();
+    expect(await screen.findByRole('heading', { name: 'History under the prior overtime policy' })).toBeTruthy();
+    expect(screen.getByText('10.00 / 0.00')).toBeTruthy();
+    expect(screen.getAllByText('8.00 / 2.00')).toHaveLength(2);
+    expect(screen.getByText(/Weekly-only payroll applies from October 16, 2026/)).toBeTruthy();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+  });
   it('retries the source list after an initial network failure without reloading the page', async () => {
     mocks.list.mockRejectedValueOnce(new Error('Source list temporarily unavailable'));
     const user = userEvent.setup(); view();
