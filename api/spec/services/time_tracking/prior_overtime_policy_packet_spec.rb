@@ -138,7 +138,18 @@ RSpec.describe "Historical prior overtime policy packet" do
     item.update_columns(hours_worked: 8.03, overtime_hours: 2)
     preview = rollout(reviewed_packet).preview!
     expect(preview[:history_coverage_verified]).to be(false)
-    expect(preview[:rounding_review_blockers]).to include(a_hash_including("reason" => "Prior-policy employee total differs from committed run"))
+    expect(reviewed_packet["reviewed_dispositions"].sole["prior_overtime_policy"]).to eq([])
+  end
+
+  it "does not retain a failed prior-policy variance when the original frozen split matches paid hours" do
+    item.update_columns(hours_worked: 10, overtime_hours: 0)
+    packet = rollout(manifest).capture_review_packet!
+    expect(packet["rounding_variances"]).to eq([])
+    expect(packet["reviewed_dispositions"].sole["prior_overtime_policy"]).to eq([])
+    packet["reviewed_dispositions"].sole.merge!("disposition" => "historical_baseline",
+      "reason" => "Review the unchanged frozen split actually present in the committed run",
+      "evidence" => "Authenticated original frozen source matches committed REG10 OT0 exactly")
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
   end
 
   it "keeps a NULL approval pending while verifying its represented prior-policy baseline" do
