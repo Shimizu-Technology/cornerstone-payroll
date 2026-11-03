@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage, type HistoryPayload, type HistoryPeriod } from "@/services/priorProviderHistory";
-import { bulkConfirmCheck, bulkConfirmStatement, defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
+import { DUPLICATE_KEY, MISSING_KEY, bulkConfirmCheck, bulkConfirmStatement, currentBusinessDate, defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
 
 function row(overrides: Partial<Record<AmountKey, string>> = {}): HistoryCheck {
   const zero = Object.fromEntries(Object.keys(amountLabels).map((key) => [key, "0.00"])) as Record<AmountKey, string>;
@@ -113,5 +113,19 @@ describe("prior-provider history model", () => {
     expect(bulkConfirmCheck({ ...payload, periods: [period("long", { source_reference: "p".repeat(501) })] }, "").failures[0].reasons)
       .toEqual(["Register reference is longer than 500 characters"]);
     expect(bulkConfirmStatement(summary)).toBe("I confirm these 6 pay dates / 6 paychecks totaling $6,000.00 gross / $5,401.00 net match the previous provider’s paid registers.");
+  });
+
+  it("refuses pay dates without a usable ID and uses the later of the server and live Guam dates", () => {
+    const base = { start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "Register p1", register_totals: {}, paychecks: [row()] };
+    const payload = {
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {},
+      periods: [{ ...base, key: "" }, { ...base, key: "a" }, { ...base, key: "a", pay_date: "2026-10-27" }],
+    } as unknown as HistoryPayload;
+    expect(bulkConfirmCheck(payload, "").failures.map((failure) => failure.reasons)).toEqual([[MISSING_KEY], [DUPLICATE_KEY], [DUPLICATE_KEY]]);
+    // 2026-10-28T14:30Z is already Oct 29 in Guam.
+    const afterGuamMidnight = new Date("2026-10-28T14:30:00Z");
+    expect(currentBusinessDate("2026-10-28", afterGuamMidnight)).toBe("2026-10-29");
+    expect(currentBusinessDate("2026-10-30", afterGuamMidnight)).toBe("2026-10-30");
+    expect(currentBusinessDate(undefined, afterGuamMidnight)).toBe("2026-10-29");
   });
 });

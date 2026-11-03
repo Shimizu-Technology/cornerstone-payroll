@@ -173,6 +173,25 @@ RSpec.describe "Prior-provider bulk register confirmation", type: :request do
       .to eq(@payload["periods"].map { |period| period["source_reference"] })
   end
 
+  it "refuses pay dates without a usable ID with a per-date reason instead of a server error" do
+    version = save_draft(@payload)
+    first, second, third, fourth = @payload["periods"]
+    first.delete("key")
+    second["key"] = "   "
+    fourth["key"] = third["key"]
+    confirm(@payload, lock_version: version)
+    expect(response).to have_http_status(:unprocessable_entity)
+    reasons = response.parsed_body.fetch("failures").to_h { |row| [ row["pay_date"], row["reasons"] ] }
+    expect(reasons).to eq(
+      first["pay_date"] => [ PriorProviderHistory::RegisterConfirmation::MISSING_KEY ],
+      second["pay_date"] => [ PriorProviderHistory::RegisterConfirmation::MISSING_KEY ],
+      third["pay_date"] => [ PriorProviderHistory::RegisterConfirmation::DUPLICATE_KEY ],
+      fourth["pay_date"] => [ PriorProviderHistory::RegisterConfirmation::DUPLICATE_KEY ]
+    )
+    expect(PriorProviderHistoryDraft.find_by!(company: @company).payload.key?("register_attestations")).to be(false)
+    expect(AuditLog.where(action: "prior_provider_histories#confirm_registers")).to be_empty
+  end
+
   it "refuses changed totals, a missing attestation, a stale draft and staff without access" do
     version = save_draft(@payload)
     confirm(@payload, lock_version: version, summary: confirmed(gross_pay: "23999.99"))

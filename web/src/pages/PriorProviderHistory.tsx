@@ -54,6 +54,7 @@ import {
   bulkConfirmCheck,
   bulkConfirmStatement,
   withFilledReferences,
+  currentBusinessDate,
   MAX_REFERENCE,
   MAX_REGISTER_NAME,
   periodDatesValid,
@@ -321,7 +322,8 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                         payload={payload}
                         onChange={update}
                         // Wait for a pending autosave: both use the same draft version.
-                        busy={busy || saveState === "saving" || saveState === "unsaved"}
+                        busy={busy || saveState === "saving" || saveState === "unsaved" || saveState === "conflict"}
+                        blockedReason={saveState === "conflict" ? "Someone saved newer changes. Load the latest version before confirming all." : undefined}
                         businessDate={page.business_date}
                         serverFailures={confirmFailures}
                         onRegisterNameChange={() => setConfirmFailures(null)}
@@ -733,6 +735,7 @@ function RegistersStep({
   payload,
   onChange,
   busy,
+  blockedReason,
   businessDate,
   serverFailures,
   onRegisterNameChange,
@@ -742,6 +745,7 @@ function RegistersStep({
   payload: HistoryPayload;
   onChange: (next: HistoryPayload) => void;
   busy: boolean;
+  blockedReason?: string;
   businessDate?: string;
   serverFailures: BulkConfirmFailure[] | null;
   onRegisterNameChange: () => void;
@@ -779,8 +783,15 @@ function RegistersStep({
           registerName={reference}
           businessDate={businessDate}
           busy={busy}
+          blockedReason={blockedReason}
           serverFailures={serverFailures}
-          onReview={(key) => setOpen(payload.periods.findIndex((period) => period.key === key))}
+          onReview={(failure) => {
+            const byKey = payload.periods.filter((period) => period.key === failure.key);
+            const index = failure.key && byKey.length === 1
+              ? payload.periods.indexOf(byKey[0])
+              : payload.periods.findIndex((period) => period.pay_date === failure.pay_date);
+            setOpen(index >= 0 ? index : null);
+          }}
           onConfirm={() => setConfirmOpen(true)}
         />
       )}
@@ -849,6 +860,7 @@ function ConfirmAllPanel({
   registerName,
   businessDate,
   busy,
+  blockedReason,
   serverFailures,
   onReview,
   onConfirm,
@@ -857,11 +869,13 @@ function ConfirmAllPanel({
   registerName: string;
   businessDate?: string;
   busy: boolean;
+  blockedReason?: string;
   serverFailures: BulkConfirmFailure[] | null;
-  onReview: (key: string) => void;
+  onReview: (failure: BulkConfirmFailure) => void;
   onConfirm: () => void;
 }) {
-  const { failures: local, summary } = bulkConfirmCheck(payload, registerName, businessDate);
+  const today = useGuamBusinessDate(businessDate);
+  const { failures: local, summary } = bulkConfirmCheck(payload, registerName, today);
   // Local failures block the action. A server refusal is shown but never
   // blocks, so the server re-checks on the next attempt.
   const failures = local.length ? local : serverFailures ?? [];
@@ -880,9 +894,9 @@ function ConfirmAllPanel({
             {failures.length} pay {failures.length === 1 ? "date needs" : "dates need"} individual review first:
           </p>
           <ul className="mt-2 space-y-2">
-            {failures.map((failure) => (
-              <li key={failure.key}>
-                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => onReview(failure.key)}>
+            {failures.map((failure, index) => (
+              <li key={`${index}:${failure.key}`}>
+                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => onReview(failure)}>
                   {label(failure)}
                 </button>
                 <ul className="mt-1 list-disc pl-5">
@@ -893,12 +907,27 @@ function ConfirmAllPanel({
           </ul>
         </div>
       ) : null}
-      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || local.length > 0} onClick={onConfirm}>
+      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || Boolean(blockedReason) || local.length > 0} onClick={onConfirm}>
         <CheckCircle2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
         <span className="whitespace-normal text-left">Confirm all pay dates match the previous provider’s registers…</span>
       </Button>
+      {blockedReason && <p role="status" className="text-sm text-danger-700">{blockedReason}</p>}
     </section>
   );
+}
+
+/**
+ * The Guam business date for the local check, recomputed on every render and
+ * re-checked every 30 seconds, so a page left open past midnight never relies
+ * on the date it loaded with. The server re-checks it on confirm.
+ */
+function useGuamBusinessDate(serverDate?: string): string {
+  const [, setLive] = useState(() => currentBusinessDate(serverDate));
+  useEffect(() => {
+    const timer = window.setInterval(() => setLive(currentBusinessDate(serverDate)), 30_000);
+    return () => window.clearInterval(timer);
+  }, [serverDate]);
+  return currentBusinessDate(serverDate);
 }
 
 function ConfirmAllDialog({ open, busy, summary, onClose, onConfirm }: { open: boolean; busy: boolean; summary: BulkConfirmSummary; onClose: () => void; onConfirm: (summary: BulkConfirmSummary) => void }) {
