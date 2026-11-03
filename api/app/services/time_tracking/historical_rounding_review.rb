@@ -73,9 +73,14 @@ module TimeTracking
       end
       # A policy reclassification must preserve this employee's total exactly.
       # Category rounding still needs its individually signed acknowledgement.
-      totals_tie = !policy_evidence || source_employee.fetch("adjustments").sum { |line| decimal(line.fetch("total_hours")) } ==
-        paid.values.sum { |hours| hours.values.sum }
-      results.all? && accounted && (discover || totals_tie)
+      source_hours = source_employee.fetch("adjustments").sum { |line| decimal(line.fetch("total_hours")) }
+      paid_hours = paid.values.sum { |hours| hours.values.sum }
+      totals_tie = !policy_evidence || source_hours == paid_hours
+      unless totals_tie
+        @blockers << base.merge("reason" => "Prior-policy employee total differs from committed run",
+          "source_total" => source_hours.to_s("F"), "paid_total" => paid_hours.to_s("F"))
+      end
+      results.all? && accounted && totals_tie
     rescue KeyError, ArgumentError, TypeError, NoMethodError => error
       @blockers << { "reason" => "Historical earning evidence invalid: #{error.message}" }
       false
