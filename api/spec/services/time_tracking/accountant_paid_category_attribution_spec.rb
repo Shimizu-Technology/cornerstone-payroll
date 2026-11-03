@@ -29,6 +29,19 @@ RSpec.describe TimeTracking::AccountantPaidCategoryAttribution do
     expect(capture.fetch("rows")).to include(a_hash_including("source_category" => nil, "source_hours" => "2.5", "paid_component" => "Flight Hours"))
     expect(lines).to eq(original)
   end
+  it "retains run61 Other 75.90 and NULL 2.50 only when their combined hours tie" do
+    run.update!(id: 61)
+    lines.replace([ { "category" => { "key" => "aire_other", "name" => "Other" }, "total_hours" => "75.90" }, { "category" => nil, "total_hours" => "2.50" } ])
+    policy("other")
+    null_policy = policy("uncategorized")
+    null_policy.update!(historical_run_limits: { employee.id.to_s => [ 61 ] })
+    item.update_columns(hours_worked: 78.4, custom_columns_data: { "wage_rate_hours" => [ { "employee_wage_rate_id" => 21, "label" => "Regular", "active" => true, "regular_hours" => 78.4, "overtime_hours" => 0 } ] })
+    expect(capture).to include("source_total" => "78.4", "paid_total" => "78.4")
+    expect(capture.fetch("rows")).to include(a_hash_including("source_category" => nil, "source_hours" => "2.5", "paid_component" => "Regular"))
+    item.update_columns(hours_worked: 78.46, custom_columns_data: { "wage_rate_hours" => [ { "employee_wage_rate_id" => 21, "label" => "Regular", "active" => true, "regular_hours" => 78.46, "overtime_hours" => 0 } ] })
+    expect(capture).to be_nil
+  end
+
   it "requires explicit company Solo configuration and a component present in the committed run" do
     lines.last["category"] = solo
     expect(capture).to be_nil
