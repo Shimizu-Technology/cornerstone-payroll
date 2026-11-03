@@ -782,10 +782,10 @@ function PeriodEditor({
         <p className="text-xs text-neutral-600">Check numbers are optional. Enter the previous provider’s numbers, including any leading zeros. These never use Cornerstone’s check sequence.</p>
         <table className="w-full text-left text-sm">
           <caption className="sr-only">Previous provider’s checks for this pay date</caption>
-          <thead><tr><th scope="col" className="w-1/2 py-2 pr-3">Employee</th><th scope="col" className="py-2">Check # from previous provider</th></tr></thead>
+          <thead><tr><th scope="col" className="w-1/2 py-2 pr-3">Employee</th><th scope="col" className="py-2">Check # / payment reference</th></tr></thead>
           <tbody>{period.paychecks.map((row, rowIndex) => <tr key={`${row.employee_id}:${rowIndex}`}>
             <th scope="row" className="py-2 pr-3 font-medium">{row.source_employee_name}</th>
-            <td className="py-2"><Input aria-label={`Check # from previous provider — ${row.source_employee_name}`} autoComplete="off" maxLength={255} value={row.provider_payment_reference ?? ""} onChange={(e) => onChange({ ...period, paychecks: period.paychecks.map((check, index) => index === rowIndex ? { ...check, provider_payment_reference: e.target.value } : check) })} /></td>
+            <td className="py-2"><Input aria-label={`Check # / payment reference — ${row.source_employee_name}`} autoComplete="off" maxLength={255} value={row.provider_payment_reference ?? ""} onChange={(e) => onChange({ ...period, paychecks: period.paychecks.map((check, index) => index === rowIndex ? { ...check, provider_payment_reference: e.target.value } : check) })} /></td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -1295,7 +1295,7 @@ function PaymentReferences({ rows }: { rows: Array<{ pay_date: string; name: str
     <h3 className="font-semibold">Checks from the previous provider</h3>
     <div className="max-h-64 overflow-auto rounded-xl border border-neutral-200">
       <table className="w-full text-left text-sm">
-        <thead className="bg-neutral-50"><tr>{["Paid", "Employee", "Check # from previous provider"].map((label) => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+        <thead className="bg-neutral-50"><tr>{["Paid", "Employee", "Check # / payment reference"].map((label) => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={index} className="border-t border-neutral-100"><td className="whitespace-nowrap px-3 py-2">{shortDate(row.pay_date)}</td><td className="px-3 py-2">{row.name}</td><td className="max-w-48 break-all px-3 py-2 font-mono">{row.reference || "Not recorded"}</td></tr>)}</tbody>
       </table>
     </div>

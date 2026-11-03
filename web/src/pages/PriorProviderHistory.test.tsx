@@ -168,7 +168,7 @@ describe("Prior-provider history", () => {
     open();
     await screen.findByText(/2 pay dates · 4 paychecks/);
     fireEvent.click(screen.getByRole("button", { name: /Match registers/ }));
-    const input = screen.getByLabelText("Check # from previous provider — Ana Cruz");
+    const input = screen.getByLabelText("Check # / payment reference — Ana Cruz");
     expect(screen.queryByLabelText("Provider check or deposit number (optional)")).toBeNull();
     fireEvent.change(input, { target: { value: "00707" } });
     fireEvent.click(screen.getByRole("button", { name: "Save progress" }));
