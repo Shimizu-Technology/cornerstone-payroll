@@ -1,10 +1,15 @@
 # frozen_string_literal: true
 
+require "timeout"
+
 module TimeTracking
   # All remote operations here are authenticated reads. Only mappings, optional
   # earning choices, the accounting receipt and the review audit are written.
   class HistoryApproval
     class Error < StandardError; end
+    class LockBudgetExceeded < Error; end
+    LOCK_BUDGET_SECONDS = 600
+
     class Changed < Error
       attr_reader :changes
       def initialize(changes)
@@ -61,32 +66,28 @@ module TimeTracking
           digest == review.digest
         raise Error, "This history summary belongs to a different client, source, operator or revision"
       end
-      @company.with_lock do
-        # Run SHARE locks precede the source lock, as calendar publication locks
-        # its run before its source. SHARE remains compatible with import FKs.
-        @company.pay_periods.order(:id).lock("FOR SHARE").load
-        @company.payroll_items.order(:id).lock.load
-        @company.employees.order(:id).lock("FOR SHARE").load
-        @actor = User.lock("FOR SHARE").find(@actor.id)
-        @company.company_assignments.where(user: @actor).lock("FOR SHARE").load
-        @source.lock!
-        review.lock!
+      validate_context!
+      validate_review!(review)
+      # The first full remote recapture holds no business-row locks.
+      fresh = capture(mapping_selections: review.snapshot.fetch("mapping_selections"))
+      changes = changed_sections(review.snapshot, fresh.fetch(:snapshot))
+      raise Changed, changes if changes.any?
+      raise Error, "History coverage is incomplete: #{fresh[:summary]['blockers'].join('; ')}" unless fresh[:summary]["history_coverage_verified"]
+      required = fresh[:summary]["mappings"].select { |row| row["confirmation_required"] }.map { |row| row.fetch("source_user_uuid") }
+      unless (required - Array(confirmed_mapping_uuids)).empty?
+        raise Error, "Explicitly confirm every employee match that is not exact"
+      end
+      allowed_solo = fresh[:summary].fetch("solo_decisions").filter_map { |row| row["employee_id"] }
+      unless solo_choices.all? { |row| allowed_solo.include?(row.fetch("employee_id").to_i) }
+        raise Error, "Solo choices must match employees with Solo history on this summary"
+      end
+      with_approval_locks(review) do
         validate_context!
-        raise Error, "This summary was already approved" if review.approved_at
-        if AireHistoryReview.where(time_tracking_source: @source).where.not(id: review.id).where.not(approved_at: nil).exists?
-          raise Error, "Another summary was approved. Refresh to see the recorded approval"
-        end
-        raise Error, "This summary expired. Refresh the history before approving" if review.created_at < 1.hour.ago
-        raise Error, "The saved summary digest differs; refresh before approving" unless checksum(review.snapshot) == review.digest
-
-        fresh = capture(mapping_selections: review.snapshot.fetch("mapping_selections"))
-        changes = changed_sections(review.snapshot, fresh.fetch(:snapshot))
+        validate_review!(review)
+        refresh_local_inputs!
+        locked = fresh.fetch(:snapshot).merge("local" => local_fingerprint(fresh.fetch(:inventory)))
+        changes = changed_sections(fresh.fetch(:snapshot), locked)
         raise Changed, changes if changes.any?
-        raise Error, "History coverage is incomplete: #{fresh[:summary]['blockers'].join('; ')}" unless fresh[:summary]["history_coverage_verified"]
-        required = fresh[:summary]["mappings"].select { |row| row["confirmation_required"] }.map { |row| row.fetch("source_user_uuid") }
-        unless (required - Array(confirmed_mapping_uuids)).empty?
-          raise Error, "Explicitly confirm every employee match that is not exact"
-        end
         persist_mappings!
         persist_solo_choices!(solo_choices)
         # Rebuild acknowledgements with the newly saved mapping IDs. The actor
@@ -111,6 +112,7 @@ module TimeTracking
         end
         original_entries = review.snapshot.fetch("entry_checksums")
         raise Changed, [ "AIRE source entries changed during approval" ] unless original_entries == last[:snapshot]["entry_checksums"]
+        validate_context!
         receipt = AireVerifiedHistoryRolloutReceipt.find_by!(time_tracking_source: @source, manifest_sha256: packet_digest, coverage_verified: true)
         review.update!(approved_at: Time.current, attestation: ATTESTATION, approved_packet: packet, receipt: receipt)
         AuditLog.record!(user: @actor, company_id: @company.id, organization_id: @company.organization_id,
@@ -120,11 +122,53 @@ module TimeTracking
             approved_at: review.approved_at.iso8601(6), attestation: ATTESTATION })
         response(review)
       end
+    rescue ActiveRecord::LockWaitTimeout, ActiveRecord::QueryCanceled, ActiveRecord::Deadlocked
+      raise Error, "Payroll evidence is busy or verification timed out. Nothing was applied. Refresh the summary before retrying."
     rescue KeyError, TypeError, ArgumentError => error
       raise Error, "AIRE history evidence is incomplete: #{error.message}"
     end
 
     private
+
+    def with_approval_locks(review)
+      Timeout.timeout(LOCK_BUDGET_SECONDS, LockBudgetExceeded,
+        "Historical approval exceeded its ten-minute lock budget. Nothing was applied. Refresh the summary before retrying.") do
+        AireHistoryReview.transaction do
+          connection = AireHistoryReview.connection
+          connection.execute("SET LOCAL lock_timeout = '5s'")
+          connection.execute("SET LOCAL statement_timeout = '20s'")
+          @company.lock!("FOR SHARE")
+          # Lock only the exact committed evidence runs, never unrelated payroll
+          # items. Match the publisher's run-before-source lock order.
+          ids = review.snapshot.fetch("local").fetch("runs").keys
+          @company.pay_periods.where(id: ids).order(:id).lock("FOR SHARE").load
+          @company.payroll_items.where(pay_period_id: ids).order(:id).lock("FOR SHARE").load
+          employee_ids = review.summary.fetch("mappings").filter_map { |row| row["employee_id"] }
+          @company.employees.where(id: employee_ids).order(:id).lock("FOR SHARE").load
+          @actor = User.lock("FOR SHARE").find(@actor.id)
+          @company.company_assignments.where(user: @actor).lock("FOR SHARE").load
+          @source.lock!
+          @source.time_tracking_employee_mappings.order(:id).lock("FOR SHARE").load
+          review.lock!
+          yield
+        end
+      end
+    end
+
+    def validate_review!(review)
+      raise Error, "This summary was already approved" if review.approved_at
+      if AireHistoryReview.where(time_tracking_source: @source).where.not(id: review.id).where.not(approved_at: nil).exists?
+        raise Error, "Another summary was approved. Refresh to see the recorded approval"
+      end
+      raise Error, "This summary expired. Refresh the history before approving" if review.created_at < 1.hour.ago
+      raise Error, "The saved summary digest differs; refresh before approving" unless checksum(review.snapshot) == review.digest
+    end
+
+    def refresh_local_inputs!
+      @employees = @company.employees.includes(:employee_wage_rates).order(:id).to_a
+      @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
+      @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
+    end
 
     def validate_context!
       raise Error, "Organization admin or assigned payroll accountant access required" unless self.class.allowed?(User.find(@actor.id), @company.reload)
@@ -149,9 +193,7 @@ module TimeTracking
       @client = Client.for_payroll_actor(@source, actor: @actor)
       directory = directory_entries
       @directory = directory.index_by { |row| row.fetch("payroll_integration_id") }
-      @employees = @company.employees.includes(:employee_wage_rates).order(:id).to_a
-      @saved_mappings = @source.time_tracking_employee_mappings.order(:id).to_a
-      @saved_mapping_fingerprint = checksum(@saved_mappings.map(&:attributes))
+      refresh_local_inputs!
       base = { "version" => 1, "company_id" => @company.id, "company_name" => @company.name,
         "source_id" => @source.id, "source_instance_id" => @source.expected_source_instance_id, "actor_id" => @actor.id,
         "history_through_work_date" => @through.iso8601, "identity_links" => [], "delivered_checks" => [],
@@ -218,7 +260,7 @@ module TimeTracking
         "directory" => checksum(directory.map { |row| row.slice("id", "payroll_integration_id", "full_name", "email", "active", "role") }), "local" => local_fingerprint(inventory),
         "mapping_selections" => mapping_rows.map { |row| row.slice("source_user_uuid", "employee_id") },
         "summary" => accounting_projection(summary) }
-      { packet: packet, snapshot: snapshot, summary: summary }
+      { packet: packet, snapshot: snapshot, summary: summary, inventory: inventory }
     end
 
     def directory_entries

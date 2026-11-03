@@ -24,6 +24,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
   const [summary, setSummary] = useState<HistoryApprovalSummary | null>(null);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [busy, setBusy] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [error, setError] = useState('');
   const [attested, setAttested] = useState(false);
   const [matches, setMatches] = useState<MappingSelection[]>([]);
@@ -48,7 +49,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
     }).catch((failure) => { if (mounted.current && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Could not fetch AIRE history.'); })
       .finally(() => { if (mounted.current && !controller.signal.aborted) setBusy(false); });
     return () => { mounted.current = false; controller.abort(); };
-  }, [companyId]);
+  }, [companyId, loadAttempt]);
 
   async function refresh() {
     if (!sourceId || busy) return;
@@ -81,7 +82,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
       <Link className="text-sm text-primary-700 underline" to="/app/time-account-connection">My AIRE account connection</Link>
       {error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-danger-800">{error}</div>}
       {busy && <p role="status" className="text-neutral-600">{summary ? 'Checking fresh AIRE and Payroll evidence. Please keep this page open…' : 'Fetching authenticated AIRE history and committed Payroll registers…'}</p>}
-      {!summary && !busy && sourceId && <Button onClick={refresh}>Retry history summary</Button>}
+      {!summary && !busy && <Button onClick={sourceId ? refresh : () => { setBusy(true); setError(''); setLoadAttempt((attempt) => attempt + 1); }}>Retry history summary</Button>}
       {summary && <>
         <section className={panel} aria-labelledby="coverage-title">
           <h2 id="coverage-title" className="text-lg font-semibold">{summary.source_name} · history through {summary.through_work_date}</h2>
