@@ -138,7 +138,18 @@ module TimeTracking
       when "pending_overtime"
         unallocated && unheld && baseline.empty? && overtime_hold_verified?(current)
       when "pending_review"
-        unallocated && unheld && pending && (baseline.empty? || baseline_verified?(baseline, current))
+        return false unless unallocated && unheld && pending
+
+        prior = prior_policy_review_evidence(current) if baseline.any?
+        represented = if baseline.empty?
+          true
+        elsif prior.present? && disposition["prior_overtime_policy"] == prior
+          legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+          baseline_verified?(baseline, current, legacy_frozen: legacy, prior_policy: true)
+        else
+          baseline_verified?(baseline, current)
+        end
+        represented
       when "owed"
         unallocated && evidence["pending_overtime"].nil? && baseline.empty? && decimal(current.fetch("hours")).positive? &&
           current.dig("state", "status") == "completed" && current.dig("state", "approval_status") == "approved" &&
