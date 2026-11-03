@@ -25,6 +25,7 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(result["approved_at"]).to be_present
     expect(review).to have_attributes(actor: actor, attestation: described_class::ATTESTATION)
     expect(review.receipt).to have_attributes(coverage_verified: true, approved_by: actor)
+    expect(TimeTracking::CanonicalPayload.checksum(review.approved_packet)).to eq(review.receipt.manifest_sha256)
     expect(source.historical_reconciliation_complete?).to be(true)
     expect(AuditLog.find_by!(action: "aire_history#approved").metadata).to include("summary_digest" => page["digest"])
     expect(CheckEvent.count).to eq(0)
