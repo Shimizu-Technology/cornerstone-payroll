@@ -17,6 +17,17 @@ module TimeTracking
     REVIEW_REASON = "Accountant reviewed the exact one-summary historical accounting evidence"
     REVIEW_EVIDENCE = "Authenticated AIRE history, immutable batch evidence and linked committed Payroll register; one-summary attestation"
     PENDING_TYPES = %w[pending_review pending_overtime historical_baseline_pending_overtime payment_evidence_pending].freeze
+    SUMMARY_LABELS = {
+      "historical_baseline" => "Hours already represented in manual payroll",
+      "legacy_frozen_batch_baseline" => "Older manual payroll — verified using less detailed frozen records",
+      "historical_baseline_pending_overtime" => "Regular hours represented; overtime remains pending",
+      "pending_overtime" => "Overtime awaiting approval — kept pending",
+      "pending_review" => "Awaiting accounting review — approval unchanged",
+      "owed" => "Owed hours — still need explicit routing",
+      "not_payable" => "Denied time — excluded from pay",
+      "no_payable_hours" => "No payable hours",
+      "payment_evidence_pending" => "Reported as paid; evidence still needed — no new payment"
+    }.freeze
 
     def self.allowed?(actor, company)
       actor && company && (actor.organization_admin? || actor.accountant?) &&
@@ -167,7 +178,7 @@ module TimeTracking
       dispositions = inventory.map do |entry|
         draft = packet.fetch("reviewed_dispositions").find { |row| row["source_time_entry_id"] == entry.fetch("id") }
           .merge("reason" => REVIEW_REASON, "evidence" => REVIEW_EVIDENCE)
-        types = %w[historical_baseline historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
+        types = %w[historical_baseline legacy_frozen_batch_baseline pending_overtime historical_baseline_pending_overtime owed not_payable no_payable_hours payment_evidence_pending pending_review]
         type = types.find { |candidate| verifier.verified?(draft.merge("disposition" => candidate), entry) }
         blockers << "Entry #{entry.fetch('id')}: source evidence does not support a complete accounting disposition" unless type
         draft.merge("disposition" => type || "pending_review")
@@ -190,7 +201,7 @@ module TimeTracking
       summary = { "history_coverage_verified" => coverage, "through_work_date" => @through.iso8601,
         "source_name" => @source.name, "mappings" => mapping_rows,
         "dispositions" => details.group_by { |row| row.fetch("disposition") }.map do |type, rows|
-          { "type" => type, "label" => HistoryDispositionVerifier::LABELS.fetch(type), "count" => rows.length,
+          { "type" => type, "label" => SUMMARY_LABELS.fetch(type), "count" => rows.length,
             "hours" => rows.sum { |row| BigDecimal(row.fetch("hours")) }.to_s("F") }
         end,
         "rounding_variances" => variances.map { |row| row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name) },
@@ -199,7 +210,7 @@ module TimeTracking
         "blockers" => blockers.uniq, "solo_decisions" => solo_decisions(inventory), "attestation" => ATTESTATION }
       snapshot = { "entry_checksums" => inventory.sort_by { |row| row.fetch("id") }.to_h { |row| [ row.fetch("id"), checksum(row) ] },
         "entry_observations" => inventory.to_h { |row| [ row.fetch("id"), row.slice("version", "hours", "work_date", "source_user_uuid", "state", "category") ] },
-        "directory" => checksum(directory), "local" => local_fingerprint(inventory),
+        "directory" => checksum(directory.map { |row| row.slice("id", "payroll_integration_id", "full_name", "email", "active", "role") }), "local" => local_fingerprint(inventory),
         "mapping_selections" => mapping_rows.map { |row| row.slice("source_user_uuid", "employee_id") },
         "summary" => accounting_projection(summary) }
       { packet: packet, snapshot: snapshot, summary: summary }
@@ -247,7 +258,7 @@ module TimeTracking
         numeric = @saved_mappings.find { |mapping| mapping.source_user_id == remote["id"] }
         saved ||= numeric if numeric&.source_user_uuid.blank?
         confirmed = saved&.source_user_uuid.present?
-        exact = @employees.select { |employee| normalized(employee.full_name) == normalized(remote["full_name"]) &&
+        exact = @employees.select { |employee| exact_name(employee.full_name) == exact_name(remote["full_name"]) &&
           (employee.email.blank? || remote["email"].blank? || employee.email.casecmp?(remote["email"])) }
         chosen_id = selected[uuid]&.fetch("employee_id", nil) || saved&.employee_id || (exact.one? && exact.sole.id)
         employee = @employees.find { |record| record.id == chosen_id.to_s.to_i }
@@ -341,7 +352,7 @@ module TimeTracking
         "boundary" => @source.cutoff_enforcement_starts_on.iso8601,
         "company" => checksum(@company.attributes),
         "mappings" => @saved_mapping_fingerprint,
-        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.map(&:attributes) ] }),
+        "employees" => checksum(@employees.map { |employee| [ employee.attributes, employee.employee_wage_rates.sort_by(&:id).map(&:attributes) ] }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
           [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map(&:attributes) ] } ]) ]
@@ -399,7 +410,11 @@ module TimeTracking
     end
 
     def normalized(value)
-      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
+      value.to_s.unicode_normalize(:nfc).downcase.gsub(/[^\p{Alnum}]+/u, " ").squish
+    end
+
+    def exact_name(value)
+      value.to_s.unicode_normalize(:nfc).downcase.squish
     end
 
     def checksum(value)
