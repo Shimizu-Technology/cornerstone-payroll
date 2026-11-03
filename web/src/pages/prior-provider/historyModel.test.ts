@@ -106,6 +106,12 @@ describe("prior-provider history model", () => {
       { key: "ok", pay_date: "2026-10-28", reasons: ["Needs a register reference (enter the register name above to fill it)"] },
     ]);
     expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register").failures).toEqual([]);
+    // The Guam business date and the server's reference limit apply locally too.
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register", "2026-10-28").failures).toEqual([
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Pay date is not in the past"] },
+    ]);
+    expect(bulkConfirmCheck({ ...payload, periods: [period("long", { source_reference: "p".repeat(501) })] }, "").failures[0].reasons)
+      .toEqual(["Register reference is longer than 500 characters"]);
     expect(bulkConfirmStatement(summary)).toBe("I confirm these 6 pay dates / 6 paychecks totaling $6,000.00 gross / $5,401.00 net match the previous provider’s paid registers.");
   });
 });

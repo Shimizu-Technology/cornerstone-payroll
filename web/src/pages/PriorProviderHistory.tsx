@@ -54,6 +54,8 @@ import {
   bulkConfirmCheck,
   bulkConfirmStatement,
   withFilledReferences,
+  MAX_REFERENCE,
+  MAX_REGISTER_NAME,
   periodDatesValid,
   registerTotalValid,
 } from "./prior-provider/historyModel";
@@ -318,8 +320,11 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                         employees={page.employees}
                         payload={payload}
                         onChange={update}
-                        busy={busy || saveState === "saving"}
+                        // Wait for a pending autosave: both use the same draft version.
+                        busy={busy || saveState === "saving" || saveState === "unsaved"}
+                        businessDate={page.business_date}
                         serverFailures={confirmFailures}
+                        onRegisterNameChange={() => setConfirmFailures(null)}
                         onConfirmAll={confirmAll}
                       />
                     )}
@@ -728,14 +733,18 @@ function RegistersStep({
   payload,
   onChange,
   busy,
+  businessDate,
   serverFailures,
+  onRegisterNameChange,
   onConfirmAll,
 }: {
   employees: HistoryEmployee[];
   payload: HistoryPayload;
   onChange: (next: HistoryPayload) => void;
   busy: boolean;
+  businessDate?: string;
   serverFailures: BulkConfirmFailure[] | null;
+  onRegisterNameChange: () => void;
   onConfirmAll: (registerName: string, summary: BulkConfirmSummary) => Promise<void>;
 }) {
   const firstOpen = payload.periods.findIndex((period) => periodState(period) !== "matched");
@@ -751,7 +760,7 @@ function RegistersStep({
       </p>
       <div className="flex flex-wrap items-end gap-3 rounded-xl bg-neutral-50 p-3">
         <div className="min-w-[14rem] flex-1">
-          <Input label="Register name (fills every pay date)" placeholder="For example, ADP payroll register 2026" value={reference} onChange={(e) => setReference(e.target.value)} />
+          <Input label="Register name (fills every pay date)" placeholder="For example, ADP payroll register 2026" maxLength={MAX_REGISTER_NAME} value={reference} onChange={(e) => { setReference(e.target.value); onRegisterNameChange(); }} />
         </div>
         <Button
           variant="outline"
@@ -768,6 +777,7 @@ function RegistersStep({
         <ConfirmAllPanel
           payload={payload}
           registerName={reference}
+          businessDate={businessDate}
           busy={busy}
           serverFailures={serverFailures}
           onReview={(key) => setOpen(payload.periods.findIndex((period) => period.key === key))}
@@ -777,7 +787,7 @@ function RegistersStep({
       <ConfirmAllDialog
         open={confirmOpen}
         busy={busy}
-        summary={bulkConfirmCheck(payload, reference).summary}
+        summary={bulkConfirmCheck(payload, reference, businessDate).summary}
         onClose={() => setConfirmOpen(false)}
         onConfirm={(summary) => void onConfirmAll(reference, summary).then(() => setConfirmOpen(false))}
       />
@@ -837,6 +847,7 @@ function RegistersStep({
 function ConfirmAllPanel({
   payload,
   registerName,
+  businessDate,
   busy,
   serverFailures,
   onReview,
@@ -844,12 +855,15 @@ function ConfirmAllPanel({
 }: {
   payload: HistoryPayload;
   registerName: string;
+  businessDate?: string;
   busy: boolean;
   serverFailures: BulkConfirmFailure[] | null;
   onReview: (key: string) => void;
   onConfirm: () => void;
 }) {
-  const { failures: local, summary } = bulkConfirmCheck(payload, registerName);
+  const { failures: local, summary } = bulkConfirmCheck(payload, registerName, businessDate);
+  // Local failures block the action. A server refusal is shown but never
+  // blocks, so the server re-checks on the next attempt.
   const failures = local.length ? local : serverFailures ?? [];
   const label = (failure: BulkConfirmFailure) => (failure.pay_date ? `Paid ${shortDate(failure.pay_date) || failure.pay_date}` : "New pay date");
   return (
@@ -879,7 +893,7 @@ function ConfirmAllPanel({
           </ul>
         </div>
       ) : null}
-      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || failures.length > 0} onClick={onConfirm}>
+      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || local.length > 0} onClick={onConfirm}>
         <CheckCircle2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
         <span className="whitespace-normal text-left">Confirm all pay dates match the previous provider’s registers…</span>
       </Button>
@@ -954,6 +968,7 @@ function PeriodEditor({
       <Input
         label="Where this is on the register"
         placeholder="For example, page 3"
+        maxLength={MAX_REFERENCE}
         value={period.source_reference}
         error={period.source_reference.trim() ? undefined : "Needed: a page or file reference for this pay date"}
         onChange={(e) => onChange({ ...period, source_reference: e.target.value })}

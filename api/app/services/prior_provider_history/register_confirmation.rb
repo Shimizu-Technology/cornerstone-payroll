@@ -36,6 +36,29 @@ module PriorProviderHistory
       "#{register_name} — paid #{pay_date.presence || 'date'}"
     end
 
+    # Canonical content of one confirmed pay date: its dates, reference, register
+    # totals and every paycheck amount, so a later edit to any of them is visible.
+    def self.period_fingerprint(period)
+      Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize(period.except("calculated_totals"))))
+    end
+
+    # Each attestation, annotated with whether it still describes the recorded
+    # pay dates. Attestations are never removed or rewritten as audit history.
+    def self.with_recorded_match(attestations, recorded_periods)
+      recorded = recorded_periods.to_h { |period| [ period.fetch("key").to_s, period_fingerprint(period) ] }
+      Array(attestations).map do |attestation|
+        fingerprints = attestation["period_fingerprints"]
+        status = if !fingerprints.is_a?(Hash)
+          "unverifiable_historical_record"
+        elsif fingerprints == recorded.slice(*fingerprints.keys) && fingerprints.size == recorded.size
+          "matches_recorded_periods"
+        else
+          "does_not_match_recorded_periods"
+        end
+        attestation.merge("recorded_period_match" => status)
+      end
+    end
+
     def self.money_string(value)
       whole, fraction = value.to_d.round(2).to_s("F").split(".")
       "#{whole}.#{(fraction || '').ljust(2, '0')}"
@@ -82,7 +105,8 @@ module PriorProviderHistory
         attestation = summary.merge(
           "statement" => self.class.statement(summary), "acknowledgement" => acknowledgement,
           "actor_id" => actor.id, "actor_name" => actor.name, "attested_at" => Time.current.utc.iso8601,
-          "register_name" => register_name.presence, "period_keys" => periods.map { |period| period.fetch("key").to_s }
+          "register_name" => register_name.presence, "period_keys" => periods.map { |period| period.fetch("key").to_s },
+          "period_fingerprints" => periods.to_h { |period| [ period.fetch("key").to_s, self.class.period_fingerprint(period) ] }
         )
         prior = Array(draft.persisted? ? draft.payload[ATTESTATIONS_KEY] : nil)
         raise ArgumentError, "Too many confirmations on this draft; discard it and start again" if prior.size >= MAX_ATTESTATIONS
@@ -104,11 +128,19 @@ module PriorProviderHistory
       {
         "period_count" => Integer(expected.fetch("period_count").to_s, 10),
         "paycheck_count" => Integer(expected.fetch("paycheck_count").to_s, 10),
-        "gross_pay" => self.class.money_string(Amounts.money(expected.fetch("gross_pay"), "Confirmed gross pay")),
-        "net_pay" => self.class.money_string(Amounts.money(expected.fetch("net_pay"), "Confirmed net pay"))
+        "gross_pay" => self.class.money_string(total_amount(expected.fetch("gross_pay"), "gross")),
+        "net_pay" => self.class.money_string(total_amount(expected.fetch("net_pay"), "net"))
       }
     rescue KeyError, TypeError
       raise ArgumentError, "Confirm the pay date count, paycheck count and gross and net totals shown"
+    end
+
+    # Aggregates may exceed the per-amount digit limit (up to 3,000 paychecks).
+    def total_amount(value, label)
+      string = value.to_s
+      raise ArgumentError, "The confirmed #{label} total must be an amount like 1234.56" unless string.match?(/\A\d{1,14}(?:\.\d{1,2})?\z/)
+
+      BigDecimal(string)
     end
 
     def tax_year = Integer(payload.fetch("tax_year").to_s, 10)
@@ -126,12 +158,14 @@ module PriorProviderHistory
       rescue ArgumentError, KeyError, Date::Error
         raise ArgumentError, "Choose a takeover date in the tax year before confirming pay dates"
       end
-      employees = company.employees.where(id: periods.flat_map { |row| Array(row["paychecks"]).map { |check| check.is_a?(Hash) ? check["employee_id"] : nil } }.compact).index_by(&:id)
+      ids = periods.flat_map { |row| Array(row["paychecks"]).map { |check| check.is_a?(Hash) ? check["employee_id"].to_s.to_i : 0 } }
+      employees = company.employees.where(id: ids.select(&:positive?)).index_by(&:id)
       failures = []
       confirmed = periods.map do |period|
         filled = period.merge("source_reference" => reference_for(period))
         reasons = period_problems(filled, year, takeover, employees)
-        failures << { "key" => period["key"].to_s, "pay_date" => period["pay_date"].to_s, "reasons" => reasons } if reasons.any?
+        next failures << { "key" => period["key"].to_s, "pay_date" => period["pay_date"].to_s, "reasons" => reasons } if reasons.any?
+
         filled.merge("register_totals" => register_totals(filled))
       end
       raise Refused, failures if failures.any?
@@ -202,13 +236,10 @@ module PriorProviderHistory
       end
     end
 
+    # Called only for dates whose paychecks already passed Amounts.validate!.
     def register_totals(period)
-      return period["register_totals"] unless period["paychecks"].is_a?(Array) && period["paychecks"].all? { |row| row.is_a?(Hash) }
-
-      totals = Amounts.totals(period["paychecks"])
+      totals = Amounts.totals(period.fetch("paychecks"))
       Amounts::REGISTER_FIELDS.to_h { |field| [ field, self.class.money_string(totals.fetch(field)) ] }
-    rescue KeyError, ArgumentError, TypeError
-      period["register_totals"]
     end
 
     def summary_for(periods)

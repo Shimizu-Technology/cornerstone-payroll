@@ -519,8 +519,34 @@ describe("Prior-provider history", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Confirm all 2 pay dates" }));
       await screen.findByText("Pay date is not in the past");
       expect(screen.getByText("1 pay date needs individual review first:")).toBeTruthy();
-      expect(confirmAllButton().disabled).toBe(true);
       expect(screen.getByText("0 of 2 pay dates match")).toBeTruthy();
+      // A server refusal is shown but doesn't block: the server re-checks on the next try.
+      expect(confirmAllButton().disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026, v2" } });
+      expect(screen.queryByText("Pay date is not in the past")).toBeNull();
+    });
+
+    it("checks pay dates against the Guam business date and waits for a pending autosave", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...registersPage(), business_date: "2026-10-28" });
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      const panel = screen.getByRole("region", { name: /Already checked every pay date/ });
+      expect(within(panel).getByRole("button", { name: "Paid Oct 28, 2026" })).toBeTruthy();
+      expect(within(panel).getByText("Pay date is not in the past")).toBeTruthy();
+      expect(confirmAllButton().disabled).toBe(true);
+    });
+
+    it("keeps Confirm all disabled while an edit is waiting to autosave", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(confirmAllButton().disabled).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Fill blank references" }));
+      expect(confirmAllButton().disabled).toBe(true);
+      await waitFor(() => expect(confirmAllButton().disabled).toBe(false), { timeout: 5000 });
+      expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalled();
     });
   });
 

@@ -140,6 +140,8 @@ export type HistoryOnboarding = {
   }>;
 };
 export type HistoryPage = {
+  /** Guam business date (YYYY-MM-DD); history pay dates must be before it. */
+  business_date?: string;
   company_id: number;
   enabled: boolean;
   can_manage: boolean;
