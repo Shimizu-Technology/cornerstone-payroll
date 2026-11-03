@@ -94,7 +94,11 @@ This is accounting coverage only. It creates no payment event, allocation, time 
 
 Company 2 activation uses an explicit, audited category configuration. Before
 history review or publication, run `aire_rollout:configure_categories` with
-`SOURCE_ID`, `ACTOR_ID`, `REASON` and `EVIDENCE`. The actor must have the same
+`SOURCE_ID`, `ACTOR_ID`, `REASON`, `EVIDENCE`, and the reviewed
+`MAINTENANCE_HISTORY_EMPLOYEE_ID`, `OTHER_HISTORY_EMPLOYEE_ID`,
+`OTHER_UNCATEGORIZED_RUN_ID`. Resolve and confirm the client employee IDs
+against the actual Payroll directory for the approved historical owners; the
+run must be committed and company-owned. The actor must have the same
 client payroll-operations access as history approval. Record Leon's November 4
 approval in the evidence; the task refuses published or history-approved sources.
 Other companies receive no defaults.

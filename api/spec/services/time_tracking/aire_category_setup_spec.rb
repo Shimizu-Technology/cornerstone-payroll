@@ -7,11 +7,11 @@ RSpec.describe TimeTracking::AireCategorySetup do
     create(:pay_period, :committed, id: 61, company: company, start_date: "2026-08-01", end_date: "2026-08-15", pay_date: "2026-08-31")
     actor = create(:user, company: company, organization: company.organization, role: "org_admin")
     source = create(:time_tracking_source, company: company, source_type: "aire_services")
-    anthony = create(:employee, company: company, first_name: "Anthony", last_name: "Ezra")
-    create(:employee, company: company, first_name: "Isiah", last_name: "Gonzales")
+    anthony = create(:employee, company: company, first_name: "Maintenance", last_name: "Worker")
+    other_owner = create(:employee, company: company, first_name: "Other", last_name: "Worker")
     pilot = create(:employee, company: company)
     create(:employee_wage_rate, employee: pilot, label: "Flight Hours", rate: 30)
-    args = { source: source, actor: actor, reason: "Reviewed November4 category activation configuration", evidence: "Leon approved Solo Flight and the scoped historical categories" }
+    args = { source: source, actor: actor, maintenance_history_employee_id: anthony.id, other_history_employee_id: other_owner.id, other_uncategorized_run_id: 61, reason: "Reviewed November4 category activation configuration", evidence: "Leon approved Solo Flight and the scoped historical categories" }
     result = described_class.call!(**args)
     expect(result[:maintenance]).to include("otherwise Regular")
     expect(TimeTrackingCategoryMapping.find_by!(time_tracking_source: source, source_category_key: "solo")).to have_attributes(earning_label: "Flight Hours", import_enabled: true)

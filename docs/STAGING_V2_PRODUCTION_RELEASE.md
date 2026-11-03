@@ -109,7 +109,8 @@ Follow [AIRE manual-to-scheduled lock rollout](integrations/aire-lock-rollout.md
 
 For the held one-summary activation code, configure company2's reviewed earning
 rules before history approval: `bundle exec rails aire_rollout:configure_categories`
-with `SOURCE_ID=1`, the authorized `ACTOR_ID`, and attributable `REASON`/`EVIDENCE`.
+with `SOURCE_ID=1`, the authorized `ACTOR_ID`, attributable `REASON`/`EVIDENCE`,
+and the reviewed historical owner/run IDs described in the integration guide.
 This audited step maps Solo to Flight Hours and Aircraft Maintenance to Maintenance
 first, otherwise Regular, separately resolving each employee's active rate. It
 also scopes the historical accountant category attributions shown on the single
