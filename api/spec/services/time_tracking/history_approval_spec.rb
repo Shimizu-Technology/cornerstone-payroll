@@ -319,6 +319,7 @@ RSpec.describe TimeTracking::HistoryApproval do
     it "prefills the lower-strength legacy type using the real payload validator and preserves NULL approval" do
       page = history_service.prepare!
       expect(page["dispositions"].sole).to include("type" => "legacy_frozen_batch_baseline")
+      expect(page["pending_review"].sole).to include("id" => "41", "approval_status" => nil, "disposition" => "legacy_frozen_batch_baseline")
       expect(page["history_coverage_verified"]).to be(true)
       approve_review(page)
       expect(AireHistoryReview.find(page["review_id"]).approved_packet["reviewed_dispositions"].sole.dig("source", "state", "approval_status")).to be_nil
