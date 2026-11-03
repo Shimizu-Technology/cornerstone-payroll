@@ -218,5 +218,4 @@ RSpec.describe "Historical prior overtime policy packet" do
     expect(preview[:history_coverage_verified]).to be(false)
     expect(preview[:rounding_variances]).to include(a_hash_including("source_category" => category, "source_total" => "0.6", "paid_total" => "3.1", "signed_difference" => "2.5"))
   end
-
 end
