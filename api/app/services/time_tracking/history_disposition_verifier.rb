@@ -3,9 +3,10 @@
 module TimeTracking
   # This approves accounting coverage only. It has no write or payment API.
   class HistoryDispositionVerifier
-    TYPES = %w[historical_baseline historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
+    TYPES = %w[historical_baseline paid_under_prior_daily_weekly_ot_policy historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
     LABELS = {
       "historical_baseline" => "Already represented in manual payroll; delivery not asserted",
+      "paid_under_prior_daily_weekly_ot_policy" => "Represented under the prior daily8/weekly40 policy; source approval and payment delivery unchanged",
       "historical_baseline_pending_overtime" => "Represented regular hours plus exact frozen overtime hold; overtime approval and payment unchanged",
       "legacy_frozen_batch_baseline" => "Legacy frozen representation; lower-strength unchanged-source evidence; approval and delivery unchanged",
       "pending_overtime" => "Frozen unpaid overtime awaiting approval; no payment asserted",
@@ -49,6 +50,7 @@ module TimeTracking
         Array(row.dig("history_evidence", "baseline_lines")).filter_map { |line| line.dig("processing", "external_pay_period_id") }
       end.uniq
       refresh_runs!(run_ids: run_ids)
+      @prior_policy_review = PriorOvertimePolicyReview.new(source: @source, inventory: inventory.index_by { |row| row.fetch("id") })
       @source_inventory_checksums = inventory.group_by { |row| row.fetch("source_user_uuid") }.transform_values do |rows|
         CanonicalPayload.checksum(rows.sort_by { |row| row.fetch("id").to_s }.map { |row| row.slice("id", *SOURCE_FIELDS) })
       end
@@ -57,7 +59,8 @@ module TimeTracking
         next if lines.blank?
 
         legacy = lines.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
-        unless baseline_verified?(lines, row, legacy_frozen: legacy, discover: true) || overtime_hold_verified?(row, discover: true)
+        prior = prior_policy_review_evidence(row).any?
+        unless baseline_verified?(lines, row, legacy_frozen: legacy, discover: true, prior_policy: prior) || overtime_hold_verified?(row, discover: true)
           @rounding_review.blockers << { "source_time_entry_id" => row.fetch("id"), "reason" => "Baseline evidence or earning component requires review" }
         end
       end
@@ -74,6 +77,16 @@ module TimeTracking
 
     def rounding_acknowledgements_valid?
       @rounding_review&.acknowledgements_valid? || (@rounding_acknowledgements == [] && @component_bindings == [])
+    end
+
+    def prior_policy_review_evidence(current)
+      Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
+        payload = batch(id)
+        employee = payload.fetch("employees").find { |row| row["source_user_id"] == current.dig("employee", "id") }
+        next unless employee
+
+        @prior_policy_review&.call(batch: payload, employee: employee)&.fetch(:evidence)
+      end
     end
 
     def verified?(disposition, current)
@@ -99,6 +112,11 @@ module TimeTracking
       unheld = evidence.fetch("active_cases").none? { |record| record["status"].in?(%w[open scheduled]) }
       pending = current.dig("state", "approval_status").in?([ nil, "pending" ])
       case disposition.fetch("disposition")
+      when "paid_under_prior_daily_weekly_ot_policy"
+        legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        expected = prior_policy_review_evidence(current)
+        unallocated && (!pending || legacy) && expected.any? && disposition["prior_overtime_policy"] == expected &&
+          baseline_verified?(baseline, current, legacy_frozen: legacy, prior_policy: true)
       when "historical_baseline"
         unallocated && !pending && baseline_verified?(baseline, current)
       when "historical_baseline_pending_overtime"
@@ -135,7 +153,7 @@ module TimeTracking
 
     private
 
-    def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false)
+    def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false, prior_policy: false)
       refresh_runs! unless @runs
       # A multi-day source may be represented across adjacent batches. Each
       # line still verifies against its own batch, run and employee balance.
@@ -188,7 +206,11 @@ module TimeTracking
           %w[total_hours regular_hours overtime_hours].all? { |key| decimal(frozen.fetch(key)) == decimal(line.fetch(key)) }
         next false unless exact_line
 
-        @rounding_review.verify!(batch: payload, run: run, mapping: mapping, source_employee: source_employee,
+        policy = prior_policy && @prior_policy_review&.call(batch: payload, employee: source_employee)
+        next false if prior_policy && !policy
+
+        @rounding_review.verify!(batch: payload, run: run, mapping: mapping, source_employee: policy ? policy.fetch(:employee) : source_employee,
+          policy_evidence: policy ? policy.fetch(:evidence) : nil,
           items: Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id },
           run_checksum: @run_checksums.fetch(run_id),
           source_inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")) ||
