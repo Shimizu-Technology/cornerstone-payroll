@@ -94,11 +94,29 @@ module TimeTracking
         next unless review
 
         items = Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id }
+        next unless prior_paid_split_matches?(review.fetch(:employee), items)
+
         review.fetch(:evidence).merge("run_id" => @runs.fetch(run_id).id, "employee_id" => mapping.employee_id,
           "baseline_evidence_class" => line["legacy_frozen_evidence"].present? ? "legacy_frozen_batch_baseline" : "historical_baseline",
           "paid_split" => { "regular_hours" => items.sum { |item| decimal(item.hours_worked) }.to_s("F"),
             "overtime_hours" => items.sum { |item| decimal(item.overtime_hours) }.to_s("F") })
       end
+    end
+
+    # Select this evidence class only when the committed employee REG/OT split
+    # actually supports it. A failed candidate must not pollute discovery for a
+    # truthful original frozen baseline with stale policy variances.
+    def prior_paid_split_matches?(employee, items)
+      return false if items.empty? || items.any? { |item| !item.payroll_included? }
+
+      lines = employee.fetch("adjustments")
+      source_regular = lines.sum { |line| decimal(line.fetch("regular_hours")) }
+      source_overtime = lines.sum { |line| decimal(line.fetch("overtime_hours")) }
+      paid_regular = items.sum { |item| decimal(item.hours_worked) }
+      paid_overtime = items.sum { |item| decimal(item.overtime_hours) }
+      source_regular + source_overtime == paid_regular + paid_overtime &&
+        (paid_regular - source_regular).abs <= HistoricalRoundingReview::LIMIT &&
+        (paid_overtime - source_overtime).abs <= HistoricalRoundingReview::LIMIT
     end
 
     def verified?(disposition, current)
