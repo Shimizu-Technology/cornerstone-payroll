@@ -11,6 +11,8 @@ module PriorProviderHistory
     ACKNOWLEDGEMENT = "CONFIRM ALL PAY DATES MATCH THE PAID REGISTERS"
     ATTESTATIONS_KEY = "register_attestations"
     MAX_ATTESTATIONS = 50
+    MISSING_KEY = "Is missing its pay date ID; remove this pay date and add it again"
+    DUPLICATE_KEY = "Shares its pay date ID with another pay date; remove one and add it again"
 
     class Conflict < StandardError
       attr_reader :draft
@@ -161,9 +163,15 @@ module PriorProviderHistory
       ids = periods.flat_map { |row| Array(row["paychecks"]).map { |check| check.is_a?(Hash) ? check["employee_id"].to_s.to_i : 0 } }
       employees = company.employees.where(id: ids.select(&:positive?)).index_by(&:id)
       failures = []
+      key_counts = periods.map { |period| period["key"].to_s.strip }.tally
       confirmed = periods.map do |period|
         filled = period.merge("source_reference" => reference_for(period))
-        reasons = period_problems(filled, year, takeover, employees)
+        # The key identifies the date in the attestation and its fingerprint.
+        key = period["key"].to_s.strip
+        reasons = []
+        reasons << MISSING_KEY if key.empty? || key.length > 200
+        reasons << DUPLICATE_KEY if reasons.empty? && key_counts[key] > 1
+        reasons += period_problems(filled, year, takeover, employees)
         next failures << { "key" => period["key"].to_s, "pay_date" => period["pay_date"].to_s, "reasons" => reasons } if reasons.any?
 
         filled.merge("register_totals" => register_totals(filled))

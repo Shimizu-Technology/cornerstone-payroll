@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { guamBusinessDate } from "@/lib/payrollBusinessDate";
 import {
   amountLabels,
   breakdownLabels,
@@ -334,8 +335,19 @@ export function withFilledReferences(payload: HistoryPayload, registerName: stri
 const FIELD_LABELS: Record<string, string> = { ...amountLabels, ...breakdownLabels };
 
 /** Why a pay date can't be confirmed in bulk; the server applies the same rules. */
+export const MISSING_KEY = "Is missing its pay date ID; remove this pay date and add it again";
+export const DUPLICATE_KEY = "Shares its pay date ID with another pay date; remove one and add it again";
+
+/** The later of the server's Guam business date and the Guam date now, so a page left open past midnight isn't stale. */
+export function currentBusinessDate(serverDate?: string, now = new Date()): string {
+  const live = guamBusinessDate(now);
+  return serverDate && serverDate > live ? serverDate : live;
+}
+
 export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryPayload, "tax_year" | "takeover_on">, businessDate?: string): string[] {
   const reasons: string[] = [];
+  const key = typeof period.key === "string" ? period.key.trim() : "";
+  if (!key || key.length > 200) reasons.push(MISSING_KEY);
   if (!periodDatesValid(period)) reasons.push("Needs real dates in order: period start, period end, then pay date");
   else {
     if (businessDate && period.pay_date >= businessDate) reasons.push("Pay date is not in the past");
@@ -371,8 +383,17 @@ export const MAX_REGISTER_NAME = 200;
 /** Every listed pay date must pass before all can be confirmed at once. */
 export function bulkConfirmCheck(payload: HistoryPayload, registerName: string, businessDate?: string): BulkConfirmCheck {
   const filled = withFilledReferences(payload, registerName);
+  const keyCounts = new Map<string, number>();
+  filled.periods.forEach((period) => {
+    const key = typeof period.key === "string" ? period.key.trim() : "";
+    if (key) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  });
   const failures = filled.periods
-    .map((period) => ({ key: period.key, pay_date: period.pay_date, reasons: bulkConfirmReasons(period, filled, businessDate) }))
+    .map((period) => {
+      const reasons = bulkConfirmReasons(period, filled, businessDate);
+      if ((keyCounts.get(typeof period.key === "string" ? period.key.trim() : "") ?? 0) > 1) reasons.unshift(DUPLICATE_KEY);
+      return { key: period.key ?? "", pay_date: period.pay_date, reasons };
+    })
     .filter((failure) => failure.reasons.length > 0);
   const checks = filled.periods.flatMap((period) => period.paychecks);
   const sum = (key: AmountKey) => checks.reduce((total, row) => total.plus(decimal(row[key])), new Decimal(0)).toFixed(2);

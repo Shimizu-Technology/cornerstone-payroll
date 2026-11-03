@@ -527,6 +527,8 @@ describe("Prior-provider history", () => {
     });
 
     it("checks pay dates against the Guam business date and waits for a pending autosave", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-10-28T02:00:00Z")); // noon on Oct 28 in Guam
       vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...registersPage(), business_date: "2026-10-28" });
       open();
       await screen.findByText(/Saved .* by Benjo/);
@@ -535,6 +537,39 @@ describe("Prior-provider history", () => {
       expect(within(panel).getByRole("button", { name: "Paid Oct 28, 2026" })).toBeTruthy();
       expect(within(panel).getByText("Pay date is not in the past")).toBeTruthy();
       expect(confirmAllButton().disabled).toBe(true);
+    });
+
+    it("re-enables a pay date as in the past once Guam passes midnight, without a reload", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-10-28T13:59:30Z")); // 23:59:30 on Oct 28 in Guam
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...registersPage(), business_date: "2026-10-28" });
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(screen.getByText("Pay date is not in the past")).toBeTruthy();
+      expect(confirmAllButton().disabled).toBe(true);
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.queryByText("Pay date is not in the past")).toBeNull();
+      expect(confirmAllButton().disabled).toBe(false);
+      expect(priorProviderHistoryApi.get).toHaveBeenCalledTimes(1);
+    });
+
+    it("disables Confirm all with a reason while a save conflict is unresolved", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      vi.mocked(priorProviderHistoryApi.saveDraft).mockRejectedValueOnce(new ApiError("Mark saved newer changes. Reload to continue from their version.", 409));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      fireEvent.click(screen.getByRole("button", { name: "Fill blank references" }));
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+      await screen.findByText("Mark saved newer changes. Reload to continue from their version.");
+      expect(confirmAllButton().disabled).toBe(true);
+      expect(screen.getByText("Someone saved newer changes. Load the latest version before confirming all.")).toBeTruthy();
     });
 
     it("keeps Confirm all disabled while an edit is waiting to autosave", async () => {
