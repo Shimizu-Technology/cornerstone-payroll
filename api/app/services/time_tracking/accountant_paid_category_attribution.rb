@@ -49,7 +49,11 @@ module TimeTracking
         configured_labels = [ policy&.earning_label, policy&.fallback_earning_label ].compact_blank
         matches = paid.keys.select do |component|
           names = label.present? ? configured_labels : [ category&.fetch("key", nil), category&.fetch("name", nil) ]
-          names.compact.any? { |name| normalize(name) == normalize(paid.fetch(component).fetch("label")) }
+          names.compact.any? do |name|
+            paid_label = paid.fetch(component).fetch("label")
+            normalize(name) == normalize(paid_label) ||
+              (policy && normalize(name) == "regular" && paid_label == "Regular Pay")
+          end
         end
         matches = paid.keys if policy && matches.empty? && paid.one? && label.blank?
         matches = remaining.select { |_, balance| balance.positive? }.keys.sort if policy && category.nil?
