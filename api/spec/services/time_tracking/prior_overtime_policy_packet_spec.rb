@@ -141,6 +141,17 @@ RSpec.describe "Historical prior overtime policy packet" do
     expect(preview[:rounding_review_blockers]).to include(a_hash_including("reason" => "Prior-policy employee total differs from committed run"))
   end
 
+  it "keeps a NULL approval pending while verifying its represented prior-policy baseline" do
+    row["state"]["approval_status"] = nil
+    packet = reviewed_packet
+    packet["reviewed_dispositions"].sole["disposition"] = "pending_review"
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(true)
+    expect(rollout(packet).preview![:rounding_variances]).to eq([])
+    expect(row.dig("state", "approval_status")).to be_nil
+    expect(CheckEvent.count).to eq(0)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
   it "refuses stale sources or committed registers after acknowledgement and never trusts a manifest policy label" do
     packet = reviewed_packet
     item.update_columns(hours_worked: 7, overtime_hours: 3)
@@ -253,5 +264,4 @@ RSpec.describe "Historical prior overtime policy packet" do
     end
     expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
   end
-
 end
