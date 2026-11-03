@@ -114,7 +114,7 @@ module TimeTracking
         "rounding_review_blockers" => verifier.rounding_review_blockers,
         "rounding_variance_acknowledgements" => [], "historical_earning_component_bindings" => [],
         "reviewed_dispositions" => @history_inventory.map do |row|
-        { "disposition" => "review_required", "prior_overtime_policy" => verifier.prior_policy_review_evidence(row),
+        { "disposition" => "review_required", "attributed_categories" => verifier.accountant_category_attributions(row), "prior_overtime_policy" => verifier.prior_policy_review_evidence(row),
           "actor_id" => actor.id, "reason" => "", "evidence" => "",
           "source_instance_id" => @source.expected_source_instance_id,
           "source_time_entry_id" => row.fetch("id"), "source_user_uuid" => row.fetch("source_user_uuid"),
