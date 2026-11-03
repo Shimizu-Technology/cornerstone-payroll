@@ -26,6 +26,8 @@ module Api
             end
           render json: {
             company_id: current_company_id,
+            # Guam business date: pay dates must be before it (the browser clock may differ).
+            business_date: PayrollBusinessClock.today.iso8601,
             enabled: current_company.historical_payroll_enabled?,
             can_manage: can_manage?,
             candidates: candidates,

@@ -84,12 +84,59 @@ RSpec.describe "Prior-provider bulk register confirmation", type: :request do
       idempotency_key: "bulk-confirm-2026", files: [ history_upload ], acknowledgement: PriorProviderHistory::Conversion::ACKNOWLEDGEMENT }
     expect(response).to have_http_status(:created), response.body
     onboarding = PriorProviderHistoryOnboarding.find_by!(company: @company)
-    expect(onboarding.evidence.fetch("register_attestations")).to eq(stored)
+    expect(onboarding.evidence.fetch("register_attestations")).to eq(stored.map { |row| row.merge("recorded_period_match" => "matches_recorded_periods") })
     expect(HistoricalPaycheck.where(company: @company).count).to eq(12)
     expect(HistoricalPaycheck.where(company: @company).sum(:gross_pay)).to eq(24_000)
     expect(@company.reload.next_check_number).to eq(701)
     expect(PayrollItem.where(company: @company).where.not(check_number: nil)).to be_empty
     expect(PayrollLiabilityPosting.where(company: @company)).to be_empty
+  end
+
+  it "keeps an attestation in the evidence but marks it unmatched when amounts move between paychecks after confirming" do
+    version = save_draft(@payload)
+    confirm(@payload, lock_version: version)
+    draft = PriorProviderHistoryDraft.find_by!(company: @company)
+    stored = draft.payload.fetch("register_attestations")
+    # Move $100 from one paycheck to another: every per-date and overall total is unchanged.
+    edited = draft.payload.deep_dup
+    first, second = edited["periods"].first["paychecks"]
+    { first => 100, second => -100 }.each do |row, delta|
+      %w[gross_pay net_pay fit_taxable_wages social_security_taxable_wages medicare_taxable_wages].each do |field|
+        row[field] = format("%.2f", row[field].to_d + delta)
+      end
+      row["earnings_breakdown"] = [ { "label" => "Salary", "amount" => row["gross_pay"] } ]
+    end
+    save_draft(edited, draft.lock_version)
+    post "/api/v1/admin/prior_provider_histories/preview", params: { payload: edited }, as: :json
+    expect(response.parsed_body).to include("ready" => true)
+    post "/api/v1/admin/prior_provider_histories", params: { payload: edited.to_json, preview_digest: response.parsed_body["digest"],
+      idempotency_key: "bulk-confirm-edited", files: [ history_upload ], acknowledgement: PriorProviderHistory::Conversion::ACKNOWLEDGEMENT }
+    expect(response).to have_http_status(:created), response.body
+    evidence = PriorProviderHistoryOnboarding.find_by!(company: @company).evidence.fetch("register_attestations")
+    expect(evidence).to eq(stored.map { |row| row.merge("recorded_period_match" => "does_not_match_recorded_periods") })
+  end
+
+  it "classifies attestations against recorded pay dates, including a changed pay date and older records without fingerprints" do
+    periods = @payload["periods"]
+    fingerprints = periods.to_h { |period| [ period["key"], PriorProviderHistory::RegisterConfirmation.period_fingerprint(period) ] }
+    moved = periods.map(&:deep_dup).tap { |rows| rows.first["pay_date"] = "2026-01-15" }
+    match = ->(recorded, attestation) { PriorProviderHistory::RegisterConfirmation.with_recorded_match([ attestation ], recorded).sole["recorded_period_match"] }
+    expect(match.call(periods, { "period_fingerprints" => fingerprints })).to eq("matches_recorded_periods")
+    expect(match.call(moved, { "period_fingerprints" => fingerprints })).to eq("does_not_match_recorded_periods")
+    expect(match.call(periods.first(3), { "period_fingerprints" => fingerprints })).to eq("does_not_match_recorded_periods")
+    expect(match.call(periods, { "period_keys" => fingerprints.keys })).to eq("unverifiable_historical_record")
+  end
+
+  it "answers malformed paycheck values and oversized totals with a refusal, not a server error" do
+    version = save_draft(@payload)
+    @payload["periods"].second["paychecks"].first["gross_pay"] = { "amount" => "2000.00" }
+    confirm(@payload, lock_version: version)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("failures").sole).to include("key" => @payload["periods"].second["key"])
+    @payload["periods"].second["paychecks"].first["gross_pay"] = "2000.00"
+    confirm(@payload, lock_version: version, summary: confirmed(gross_pay: "12345678901234.00"))
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body["error"]).to include("changed after you reviewed them")
   end
 
   it "refuses the whole confirmation, naming each failing pay date and why, and saves nothing" do

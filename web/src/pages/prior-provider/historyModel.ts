@@ -334,13 +334,17 @@ export function withFilledReferences(payload: HistoryPayload, registerName: stri
 const FIELD_LABELS: Record<string, string> = { ...amountLabels, ...breakdownLabels };
 
 /** Why a pay date can't be confirmed in bulk; the server applies the same rules. */
-export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryPayload, "tax_year" | "takeover_on">): string[] {
+export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryPayload, "tax_year" | "takeover_on">, businessDate?: string): string[] {
   const reasons: string[] = [];
   if (!periodDatesValid(period)) reasons.push("Needs real dates in order: period start, period end, then pay date");
-  else if (Number(period.pay_date.slice(0, 4)) !== payload.tax_year || period.pay_date >= payload.takeover_on) {
-    reasons.push(`Pay date is not in ${payload.tax_year} before the takeover date`);
+  else {
+    if (businessDate && period.pay_date >= businessDate) reasons.push("Pay date is not in the past");
+    if (Number(period.pay_date.slice(0, 4)) !== payload.tax_year || period.pay_date >= payload.takeover_on) {
+      reasons.push(`Pay date is not in ${payload.tax_year} before the takeover date`);
+    }
   }
   if (!period.source_reference.trim()) reasons.push("Needs a register reference (enter the register name above to fill it)");
+  if (period.source_reference.length > MAX_REFERENCE) reasons.push(`Register reference is longer than ${MAX_REFERENCE} characters`);
   if (!period.paychecks.length) reasons.push("Has no paychecks");
   period.paychecks.forEach((row) => {
     Object.entries(paycheckProblems(row)).forEach(([key, message]) => {
@@ -360,11 +364,15 @@ export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryP
 
 export type BulkConfirmCheck = { failures: BulkConfirmFailure[]; summary: BulkConfirmSummary };
 
+/** Server limits for a register reference and the register name. */
+export const MAX_REFERENCE = 500;
+export const MAX_REGISTER_NAME = 200;
+
 /** Every listed pay date must pass before all can be confirmed at once. */
-export function bulkConfirmCheck(payload: HistoryPayload, registerName: string): BulkConfirmCheck {
+export function bulkConfirmCheck(payload: HistoryPayload, registerName: string, businessDate?: string): BulkConfirmCheck {
   const filled = withFilledReferences(payload, registerName);
   const failures = filled.periods
-    .map((period) => ({ key: period.key, pay_date: period.pay_date, reasons: bulkConfirmReasons(period, filled) }))
+    .map((period) => ({ key: period.key, pay_date: period.pay_date, reasons: bulkConfirmReasons(period, filled, businessDate) }))
     .filter((failure) => failure.reasons.length > 0);
   const checks = filled.periods.flatMap((period) => period.paychecks);
   const sum = (key: AmountKey) => checks.reduce((total, row) => total.plus(decimal(row[key])), new Decimal(0)).toFixed(2);

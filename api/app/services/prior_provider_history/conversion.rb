@@ -54,7 +54,7 @@ module PriorProviderHistory
           company: company, historical_import_batch: batch, created_by: actor, tax_year: plan.tax_year,
           takeover_on: plan.takeover_on, preview_digest: plan.digest, idempotency_key: idempotency_key,
           evidence: { "payload" => payload, "source_run_ids" => plan.run_ids, "retirement" => "calculated_to_retired_history", "acknowledgement" => acknowledgement,
-            **register_attestation_evidence }
+            **register_attestation_evidence(plan) }
         )
         # Recorded history is only reachable through the historical payroll views.
         enabled_history = !company.historical_payroll_enabled?
@@ -76,11 +76,12 @@ module PriorProviderHistory
 
     attr_reader :company, :actor, :payload, :preview_digest, :idempotency_key, :files, :acknowledgement
 
-    # Copied from the server-owned draft, never from the submitted payload.
-    def register_attestation_evidence
+    # Copied from the server-owned draft, never from the submitted payload, and
+    # marked with whether each attestation still describes the recorded dates.
+    def register_attestation_evidence(plan)
       key = RegisterConfirmation::ATTESTATIONS_KEY
       attestations = PriorProviderHistoryDraft.find_by(company: company)&.payload&.dig(key)
-      attestations.present? ? { key => attestations } : {}
+      attestations.present? ? { key => RegisterConfirmation.with_recorded_match(attestations, plan.periods) } : {}
     end
 
     def retain_sources!(storage, plan)
