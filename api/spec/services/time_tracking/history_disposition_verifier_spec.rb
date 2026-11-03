@@ -170,6 +170,34 @@ RSpec.describe TimeTracking::HistoryDispositionVerifier do
       instance
     end
 
+    it "avoids loading committed payroll items when the current inventory has no baselines" do
+      queries = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") { |*, event| queries << event[:sql] }
+      begin
+        verifier.discover_rounding_variances!([ current.merge("history_evidence" => current["history_evidence"].merge("baseline_lines" => [])) ])
+      ensure
+        ActiveSupport::Notifications.unsubscribe(subscriber)
+      end
+      expect(queries.grep(/SELECT.*FROM "payroll_items"/)).to be_empty
+      expect(verifier.rounding_variances).to eq([])
+    end
+
+    it "keeps unrelated committed runs out of baseline payroll reads while verifying the complete referenced run" do
+      other_run = create(:pay_period, :committed, company: company, start_date: "2026-08-01", end_date: "2026-08-15", pay_date: "2026-08-31")
+      create(:payroll_item, company: company, pay_period: other_run, employee: create(:employee, company: company), hours_worked: 100)
+      instantiated = 0
+      subscriber = ActiveSupport::Notifications.subscribe("instantiation.active_record") do |*, event|
+        instantiated += event[:record_count] if event[:class_name] == "PayrollItem"
+      end
+      begin
+        verifier.discover_rounding_variances!([ current ])
+        expect(verifier.verified?(disposition, current)).to be(true)
+      ensure
+        ActiveSupport::Notifications.unsubscribe(subscriber)
+      end
+      expect(instantiated).to eq(1)
+    end
+
     context "with reviewed historical rounding" do
       it "requires a separate exact signed acknowledgement and preserves the normal baseline disposition" do
         PayrollItem.where(pay_period: run).update_all(hours_worked: 4.28)

@@ -21,10 +21,12 @@ module TimeTracking
       @rounding_acknowledgements, @component_bindings = rounding_acknowledgements, component_bindings
     end
 
-    def refresh_runs!
+    def refresh_runs!(run_ids: nil)
       # One fresh local read per coverage pass, including the completion lock.
       # Do not perform a company/run query for each of thousands of lines.
-      @runs = @company.pay_periods.where(status: "committed").index_by { |run| run.id.to_s }
+      runs = @company.pay_periods.where(status: "committed")
+      runs = runs.where(id: run_ids) unless run_ids.nil?
+      @runs = runs.index_by { |run| run.id.to_s }
       @employees = @source.time_tracking_employee_mappings.where(company: @company).index_by(&:source_user_uuid)
       @run_items = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
         .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
@@ -39,7 +41,10 @@ module TimeTracking
     end
 
     def discover_rounding_variances!(inventory)
-      refresh_runs!
+      run_ids = inventory.flat_map do |row|
+        Array(row.dig("history_evidence", "baseline_lines")).filter_map { |line| line.dig("processing", "external_pay_period_id") }
+      end.uniq
+      refresh_runs!(run_ids: run_ids)
       @source_inventory_checksums = inventory.group_by { |row| row.fetch("source_user_uuid") }.transform_values do |rows|
         CanonicalPayload.checksum(rows.sort_by { |row| row.fetch("id").to_s }.map { |row| row.slice("id", *SOURCE_FIELDS) })
       end
