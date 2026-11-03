@@ -6,6 +6,24 @@ require "support/aire_history_approval_evidence"
 RSpec.describe TimeTracking::HistoryApproval do
   include_context "aire history approval evidence"
 
+  def frozen_whole_overtime!
+    row["hours"] = 0.3
+    row["state"]["overtime_status"] = "pending"
+    row["history_evidence"]["baseline_lines"] = []
+    hold = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => row["work_date"], "category" => category, "reason" => "pending_overtime",
+      "held_total_hours" => "0.3", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.3" }
+    payload["employees"] = []
+    payload["exclusions"] = [ hold ]
+    payload["summary"].merge!("employee_count" => 0, "adjustment_count" => 0, "exclusion_count" => 1, "total_hours" => 0,
+      "regular_hours" => 0, "overtime_hours" => 0, "current_count" => 0)
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["pending_overtime"] = { "kind" => "pending_overtime", "source_time_entry_version" => 2,
+      "payable_content_checksum" => row.dig("history_evidence", "payable_content_checksum"), "represented_regular_hours" => "0.0",
+      "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"), "frozen_exclusion" => hold }
+  end
+
   it "prefills a strict baseline and exact signed rounding acknowledgement without applying anything" do
     expect(client).to receive(:payroll_batch).once.and_return(payload)
     page = history_service.prepare!
@@ -163,21 +181,7 @@ RSpec.describe TimeTracking::HistoryApproval do
   end
 
   it "keeps a whole frozen overtime exclusion pending when no regular lines were represented" do
-    row["hours"] = 0.3
-    row["state"]["overtime_status"] = "pending"
-    row["history_evidence"]["baseline_lines"] = []
-    hold = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
-      "original_work_date" => row["work_date"], "category" => category, "reason" => "pending_overtime",
-      "held_total_hours" => "0.3", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.3" }
-    payload["employees"] = []
-    payload["exclusions"] = [ hold ]
-    payload["summary"].merge!("employee_count" => 0, "adjustment_count" => 0, "exclusion_count" => 1, "total_hours" => 0,
-      "regular_hours" => 0, "overtime_hours" => 0, "current_count" => 0)
-    payload["issues"]["pending_overtime_count"] = 1
-    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
-    row["history_evidence"]["pending_overtime"] = { "kind" => "pending_overtime", "source_time_entry_version" => 2,
-      "payable_content_checksum" => row.dig("history_evidence", "payable_content_checksum"), "represented_regular_hours" => "0.0",
-      "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"), "frozen_exclusion" => hold }
+    frozen_whole_overtime!
     page = history_service.prepare!
     expect(page["dispositions"].sole).to include("type" => "pending_overtime")
     expect(page["history_coverage_verified"]).to be(true)
@@ -193,6 +197,21 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(source.time_tracking_employee_mappings).not_to exist
     approve_review(page)
     expect(source.time_tracking_employee_mappings.find_by!(source_user_uuid: uuid).employee_id).to eq(employee.id)
+  end
+
+  it "never infers debt from a legacy case for verified frozen pending overtime" do
+    frozen_whole_overtime!
+    row["state"]["overtime_status"] = "none"
+    row["lifecycle"] = { "status" => "ready_for_cutoff" }
+    row["history_evidence"]["active_cases"] = [ { "id" => "synthetic-legacy-case", "version" => 2,
+      "source_user_uuid" => uuid, "status" => "open", "destination_kind" => "unassigned", "held_total_hours" => "0.3" } ]
+    page = history_service.prepare!
+    expect(page["history_coverage_verified"]).to be(false)
+    expect(page["owed"]).to be_empty
+    expect(page["pending_review"].sole).to include("id" => "41", "hours" => "0.3")
+    expect { approve_review(page) }.to raise_error(described_class::Error, /coverage is incomplete/)
+    expect(CheckEvent.count).to eq(0)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
   end
 
   it "upgrades a verified numeric legacy mapping only during approval without inserting a duplicate person" do
