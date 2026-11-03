@@ -33,6 +33,15 @@ afterEach(cleanup);
 const view = () => render(<MemoryRouter><AireHistoryApproval /></MemoryRouter>);
 
 describe('one-summary AIRE history approval', () => {
+  it('retries the source list after an initial network failure without reloading the page', async () => {
+    mocks.list.mockRejectedValueOnce(new Error('Source list temporarily unavailable'));
+    const user = userEvent.setup(); view();
+    await user.click(await screen.findByRole('button', { name: 'Retry history summary' }));
+    expect(await screen.findByText('599.06')).toBeTruthy();
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(mocks.preview).toHaveBeenCalledOnce();
+  });
+
   it('shows truthful counts, rounding, owed 1804, pending work and an open Solo decision', async () => {
     view();
     expect(await screen.findByText('599.06')).toBeTruthy();

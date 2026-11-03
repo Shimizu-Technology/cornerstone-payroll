@@ -334,7 +334,9 @@ RSpec.describe TimeTracking::HistoryApproval do
   end
 
   it "stores only an explicit real employee earning choice and rejects stale or foreign rates" do
-    page = history_service.prepare!
+    row["category"] = { "id" => "3", "key" => "solo", "name" => "Solo" }
+    row["state"]["approval_status"] = nil
+    row["history_evidence"]["baseline_lines"] = []
     other = create(:employee, company: company)
     foreign_rate = create(:employee_wage_rate, employee: other, rate: 9)
     page = history_service.prepare!
@@ -348,5 +350,42 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(choice.current_rate).to eq(rate)
     rate.update!(rate: 12.35)
     expect(choice.reload.current_rate).to be_nil
+  end
+
+  it "rejects an earning choice for a mapped person without an attested Solo item" do
+    rate = create(:employee_wage_rate, employee: employee, label: "Explicit component", rate: 12)
+    page = history_service.prepare!
+    expect(page["solo_decisions"]).to be_empty
+    expect { approve_review(page, solo_choices: [ { "employee_id" => employee.id, "employee_wage_rate_id" => rate.id } ]) }
+      .to raise_error(described_class::Error, /Solo history on this summary/)
+    expect(TimeTrackingEarningChoice.count).to eq(0)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
+
+  it "rolls back when the bounded business-lock phase exceeds its deadline" do
+    page = history_service.prepare!
+    stub_const("TimeTracking::HistoryApproval::LOCK_BUDGET_SECONDS", 0.05)
+    allow_any_instance_of(TimeTracking::VerifiedHistoryRollout).to receive(:ensure_complete!).and_wrap_original do |method|
+      sleep 0.1
+      method.call
+    end
+    expect { approve_review(page) }.to raise_error(described_class::LockBudgetExceeded, /Nothing was applied/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    expect(AireHistoryReview.find(page["review_id"]).approved_at).to be_nil
+    expect(AuditLog.where(action: "aire_history#approved")).not_to exist
+  end
+
+  it "rechecks Payroll state after waiting for approval locks" do
+    service = history_service
+    page = service.prepare!
+    allow(service).to receive(:with_approval_locks).and_wrap_original do |method, review, &block|
+      method.call(review) do
+        employee.update!(first_name: "Changed")
+        block.call
+      end
+    end
+    expect { service.approve!(review: AireHistoryReview.find(page["review_id"]), digest: page["digest"], attestation: page["attestation"]) }
+      .to raise_error(described_class::Changed, /Payroll employees changed/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
   end
 end

@@ -101,6 +101,8 @@ RSpec.describe "AIRE one-summary history approval", type: :request do
     arguments = page.slice("review_id", "digest", "attestation").merge(background: true)
     2.times { post endpoint("approve"), params: arguments, as: :json }
     expect(AireHistoryOperation.where(kind: "approve").count).to eq(1)
+    approval = AireHistoryOperation.find_by!(kind: "approve")
+    expect(enqueued_jobs.count { |job| job[:job] == AireHistoryOperationJob && job[:args] == [ approval.id ] }).to eq(1)
     expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
     AireHistoryOperation.find(pending.fetch("operation_id")).update!(actor: create(:user, company: company, role: "admin"))
     get endpoint("operations/#{pending.fetch('operation_id')}")

@@ -51,7 +51,15 @@ module Api
             record.kind = kind
             record.arguments = arguments
           end
-          AireHistoryOperationJob.perform_later(operation.id) if operation.status == "queued"
+          if operation.previously_new_record?
+            job = AireHistoryOperationJob.perform_later(operation.id)
+            unless job&.successfully_enqueued?
+              operation.with_lock do
+                operation.update!(status: "failed", finished_at: Time.current,
+                  error: "History processing could not be queued. Nothing was applied. Refresh the summary before retrying.") if operation.status == "queued"
+              end
+            end
+          end
           render json: operation.response_payload, status: :accepted
         end
 
