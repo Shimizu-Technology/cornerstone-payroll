@@ -110,7 +110,7 @@ module TimeTracking
       when "pending_review"
         unallocated && unheld && pending && (baseline.empty? || baseline_verified?(baseline, current))
       when "owed"
-        unallocated && baseline.empty? && decimal(current.fetch("hours")).positive? &&
+        unallocated && evidence["pending_overtime"].nil? && baseline.empty? && decimal(current.fetch("hours")).positive? &&
           current.dig("state", "status") == "completed" && current.dig("state", "approval_status") == "approved" &&
           current.dig("lifecycle", "status") == "ready_for_cutoff" &&
           evidence.fetch("active_cases").one? && evidence.fetch("active_cases").all? do |record|
