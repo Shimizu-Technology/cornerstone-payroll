@@ -42,6 +42,24 @@ RSpec.describe TimeTracking::AccountantPaidCategoryAttribution do
     expect(capture).to be_nil
   end
 
+  [ [ "58.57", "42.0", "80.0", "20.6" ], [ "38.3", "61.25", "94.7", "4.85" ] ].each do |maintenance, uncategorized, regular, overtime|
+    it "matches the explicitly configured Regular fallback to actual Regular Pay and retains separate overtime components (#{regular}/#{overtime})" do
+      lines.replace([ { "category" => { "key" => "aire_maintenance", "name" => "Aircraft Maintenance" }, "total_hours" => maintenance }, { "category" => nil, "total_hours" => uncategorized } ])
+      configured = policy("maintenance", "Maintenance")
+      configured.update!(fallback_earning_label: "Regular")
+      policy("uncategorized")
+      item.update_columns(hours_worked: regular, overtime_hours: overtime, custom_columns_data: {})
+      item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: regular, rate: 14.7, amount: regular.to_d * 14.7)
+      item.payroll_item_earnings.create!(category: "overtime", label: "Overtime Pay", hours: overtime, rate: 22.05, amount: overtime.to_d * 22.05)
+      result = capture
+      expect(result).to be_present
+      expect(result.fetch("rows").map { |row| row.fetch("paid_component") }.uniq).to contain_exactly("Regular Pay", "Overtime Pay")
+      expect(result.fetch("rows").sum { |row| row.fetch("source_hours").to_d }).to eq(maintenance.to_d + uncategorized.to_d)
+      configured.update!(fallback_earning_label: nil)
+      expect(capture).to be_nil
+    end
+  end
+
   it "requires explicit company Solo configuration and a component present in the committed run" do
     lines.last["category"] = solo
     expect(capture).to be_nil
