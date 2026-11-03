@@ -29,6 +29,7 @@ module Api
           form_1099_nec: "1099-NEC preparation workbook for contractor compensation and filing readiness.",
           installment_loans: "Employee installment loan balances and transaction history as of the selected date."
         }.freeze
+        HISTORICAL_COMPONENT_SOURCES = %w[quickbooks prior_provider historical_adjustment].freeze
         OFFICIAL_FORM_STRING_LIMIT = 250
         OFFICIAL_FORM_DAILY_LIABILITY_LIMIT = 120
         OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT = 500
@@ -1388,6 +1389,11 @@ module Api
             return nil
           end
 
+          if pp.paid_prior_provider_source?
+            render json: { error: "Prior-provider source payroll is already paid history; use its historical record instead of live payroll reports" }, status: :unprocessable_entity
+            return nil
+          end
+
           pp
         end
 
@@ -1427,6 +1433,9 @@ module Api
           # payroll register even when someone supplies a native key directly.
           unless pay_period && !pay_period.draft? && !pay_period.voided?
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
+          end
+          if pay_period.paid_prior_provider_source?
+            return [ nil, render(json: { error: "The previous provider already paid this payroll; use its recorded history instead of a live payroll register" }, status: :unprocessable_entity) ]
           end
 
           @audit_report_record = pay_period
@@ -2037,12 +2046,13 @@ module Api
             }
           end
           imported = historical_paychecks
-            .map(&:historical_pay_period)
-            .select { |historical_period| historical_period.period_type == "regular" }
-            .uniq(&:id)
-            .map do |historical_period|
+            .select { |paycheck| paycheck.historical_pay_period.period_type == "regular" }
+            .uniq(&:historical_pay_period_id)
+            .map do |paycheck|
+              historical_period = paycheck.historical_pay_period
+              source = paycheck.historical_import_batch.source_system == "prior_provider" ? "Prior-provider history" : "QuickBooks import"
               {
-                key: "imported:#{historical_period.id}", source: "QuickBooks import", status: "locked",
+                key: "imported:#{historical_period.id}", source: source, status: "locked",
                 work_period_start: historical_period.start_date, work_period_end: historical_period.end_date, pay_date: historical_period.pay_date
               }
             end
@@ -2092,7 +2102,7 @@ module Api
         def period_summary_component_columns(entries, employee_ids)
           entries.select { |entry| employee_ids.include?(entry[:employee_id]) }
             .group_by do |entry|
-              if entry.key?(:historical_source) || entry[:source].in?(%w[quickbooks historical_adjustment])
+              if entry.key?(:historical_source) || entry[:source].in?(HISTORICAL_COMPONENT_SOURCES)
                 "historical:#{entry[:source]}:#{entry[:treatment]}:#{entry[:label]}"
               elsif entry.key?(:tax_treatment)
                 entry[:payroll_field_definition_id] ? "field:definition:#{entry[:payroll_field_definition_id]}" : "field:entry:#{entry[:payroll_item_field_entry_id]}"
@@ -2102,11 +2112,11 @@ module Api
             end
             .map do |key, grouped|
               first = grouped.first
-              historical = first[:source].in?(%w[quickbooks historical_adjustment])
+              historical = first[:source].in?(HISTORICAL_COMPONENT_SOURCES)
               field = first.key?(:tax_treatment)
               treatment = field ? first[:tax_treatment] : first[:treatment]
               identity = if historical
-                first[:source] == "quickbooks" ? "QuickBooks source" : "Historical adjustment"
+                { "quickbooks" => "QuickBooks source", "prior_provider" => "Prior-provider source" }.fetch(first[:source], "Historical adjustment")
               elsif field
                 first[:payroll_field_definition_id] ? "field ##{first[:payroll_field_definition_id]}" : "entry ##{first[:payroll_item_field_entry_id]}"
               else
@@ -2114,6 +2124,8 @@ module Api
               end
               source_group = if first[:source] == "quickbooks"
                 "quickbooks_history"
+              elsif first[:source] == "prior_provider"
+                "prior_provider_history"
               elsif first[:source] == "historical_adjustment"
                 "historical_adjustment"
               elsif field
@@ -3080,9 +3092,11 @@ module Api
           adjustment_export = PayrollAdjustmentExport.new(employees + contractors)
           field_columns = payroll_field_export_columns(employees + contractors)
           status_note = report.dig(:meta, :payroll_status_note)
-          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
-          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
-          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          historical_loans = (employees + contractors).any? { |worker| worker.key?(:historical_loan_deductions_unclassified) }
+          historical_headers = historical_loans ? [ "Previous Provider Loans (Type Not Recorded)" ] : []
+          detail_headers = (status_note ? [ "Payroll Status" ] : []) + PAYROLL_REGISTER_HEADERS + historical_headers + adjustment_export.headers + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + (historical_loans ? [ emp[:historical_loan_deductions_unclassified] ] : []) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| (status_note ? [ status_note ] : []) + payroll_export_row(emp) + (historical_loans ? [ emp[:historical_loan_deductions_unclassified] ] : []) + adjustment_export.values_for(emp) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
@@ -3103,7 +3117,7 @@ module Api
           pp = report[:pay_period] || {}
           context = "Work period: #{pp[:start_date]} to #{pp[:end_date]} | Pay date: #{pp[:pay_date]}"
           # Sum saved numeric amounts, hours, and disclosure columns, never rates/IDs.
-          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)" ]
+          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)", "Previous Provider Loans (Type Not Recorded)" ]
           totals = headers.each_with_index.map do |header, index|
             if header == "Employee Name"
               "TOTALS"
@@ -4253,6 +4267,21 @@ module Api
           quickbooks = summary[:quickbooks] || {}
           bridge = summary[:historical_ytd_bridge] || {}
           adjustments = summary[:adjustments] || {}
+          # Present only when the report includes prior-provider history, so
+          # QuickBooks-only and native-only sheets keep their exact rows.
+          prior_provider = summary[:prior_provider]
+          prior_provider_rows = if prior_provider
+            [
+              [ "Prior-provider payrolls", prior_provider[:payroll_count] ],
+              [ "Prior-provider paychecks", prior_provider[:paycheck_count] ],
+              [ "Prior-provider opening summaries", prior_provider[:opening_summary_count] ],
+              [ "Excluded unlinked prior-provider paychecks", prior_provider[:excluded_unlinked_paycheck_count] ],
+              [ "Excluded unlinked prior-provider gross pay", prior_provider[:excluded_unlinked_gross_pay] ],
+              [ "Excluded unlinked prior-provider net pay", prior_provider[:excluded_unlinked_net_pay] ]
+            ]
+          else
+            []
+          end
           {
             name: "Payroll Sources",
             rows: [
@@ -4266,6 +4295,7 @@ module Api
               [ "Excluded unlinked QuickBooks paychecks", quickbooks[:excluded_unlinked_paycheck_count] ],
               [ "Excluded unlinked QuickBooks gross pay", quickbooks[:excluded_unlinked_gross_pay] ],
               [ "Excluded unlinked QuickBooks net pay", quickbooks[:excluded_unlinked_net_pay] ],
+              *prior_provider_rows,
               [ "Historical ledger adjustments", adjustments[:count] ],
               [ "Historical adjustment gross delta", adjustments[:gross_pay_delta] ],
               [ "Historical adjustment net delta", adjustments[:net_pay_delta] ],

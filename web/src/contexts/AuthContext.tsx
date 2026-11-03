@@ -94,7 +94,10 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
-        signOut: async () => setUser(null),
+        signOut: async () => {
+          setUser(null);
+          authApi.logout();
+        },
         refreshUser: async () => {
           const res = await authApi.me();
           setUser(mapAuthUser(res.user));
@@ -196,6 +199,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
+          authApi.logout();
           await clerkSignOut();
         },
         refreshUser,

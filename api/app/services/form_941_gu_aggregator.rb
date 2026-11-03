@@ -564,8 +564,12 @@ class Form941GuAggregator
 
   def source_summary(items)
     metadata = include_historical ? historical_source.metadata(year: year, range: quarter_start_date..quarter_end_date) : {}
+    # Earlier-quarter history still feeds the prior SS/Medicare wages, so the
+    # source systems span the same Jan 1..quarter-end range.
+    systems = include_historical ? historical_source.source_systems(range: Date.new(year, 1, 1)..quarter_end_date) : []
     {
-      mode: include_historical ? "locked_quickbooks_plus_committed_cornerstone" : "committed_cornerstone_only",
+      mode: HistoricalPayrollFilingSource.summary_mode(include_historical, systems),
+      **(systems.include?("prior_provider") ? { historical_source_systems: systems } : {}),
       cornerstone: {
         payroll_item_count: items.count,
         pay_period_count: committed_pay_periods.count
@@ -582,12 +586,15 @@ class Form941GuAggregator
   def historical_caveats
     return [] unless include_historical
 
+    sources = (historical_quarter_records + prior_historical_records).map(&:source_system).uniq
+    label = sources.include?("prior_provider") ? (sources == [ "prior_provider" ] ? "Prior-provider" : "Historical") : "QuickBooks"
     caveats = [
-      "QuickBooks values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
+      "#{label} values come from dated records in locked imports whose latest historical YTD bridge is applied; imported snapshots remain immutable.",
       "Historical YTD bridge balances are used only for source eligibility and annual carry-forward; they are not added to quarterly lines, avoiding duplicate wages and taxes."
     ]
     if historical_source.opening_summary_count(range: quarter_start_date..quarter_end_date).positive?
-      caveats << "QuickBooks opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
+      opening_label = sources.include?("prior_provider") ? "Historical" : "QuickBooks"
+      caveats << "#{opening_label} opening summaries in this quarter are excluded because the source does not provide paycheck-level dates needed for Form 941 liability allocation."
     end
     caveats
   end

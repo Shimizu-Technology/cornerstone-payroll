@@ -1,3 +1,4 @@
+import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -107,7 +108,7 @@ function PayPeriodMobileCard({
         </Badge>
         {!period.includes_base_salary && <Badge variant="info">No base salary</Badge>}
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
-          {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
+          {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />{period.source.label}</> : 'Cornerstone'}
         </Badge>
         {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
         {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
@@ -172,10 +173,11 @@ export function PayPeriods() {
   const [payPeriodCompanyId, setPayPeriodCompanyId] = useState<number | null>(null);
   const searchTerm = searchParams.get('search') || '';
   const sourceParam = searchParams.get('source') || 'all';
-  const sourceFilter = (['all', 'cornerstone', 'quickbooks'].includes(sourceParam) ? sourceParam : 'all') as 'all' | 'cornerstone' | 'quickbooks';
+  const sourceFilter = (['all', 'cornerstone', 'quickbooks', 'prior_provider'].includes(sourceParam) ? sourceParam : 'all') as 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider';
   const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
   const [totalPages, setTotalPages] = useState(0);
   const [years, setYears] = useState<number[]>([]);
+  const [historyAvailable, setHistoryAvailable] = useState(false);
   const [goLiveGate, setGoLiveGate] = useState<PayrollGoLiveGateState | null>(null);
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
@@ -217,6 +219,7 @@ export function PayPeriods() {
     setTotalPages(0);
     setYears([]);
     setGoLiveGate(null);
+    setHistoryAvailable(false);
     setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
 
@@ -326,6 +329,7 @@ export function PayPeriods() {
       setTotalPages(response.meta.total_pages);
       setYears(response.meta.years);
       setGoLiveGate(response.meta.payroll_go_live ?? null);
+      setHistoryAvailable(response.meta.prior_provider_history_available ?? false);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
@@ -336,6 +340,7 @@ export function PayPeriods() {
         setTotalPages(0);
         setYears([]);
         setGoLiveGate(null);
+        setHistoryAvailable(false);
       }
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -746,6 +751,22 @@ export function PayPeriods() {
     if (!comparisonOnlyForSelectedPayDate) void loadCurrentNextCheckNumber();
   };
 
+  // Keep the period end and payday explicit after a historical boundary.
+  useEffect(() => {
+    const after = searchParams.get('new_after');
+    if (readOnlyWorkspace || trainingReplayWorkspace || !after || !/^\d{4}-\d{2}-\d{2}$/.test(after)) return;
+    const date = new Date(`${after}T12:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== after) return;
+    date.setUTCDate(date.getUTCDate() + 1);
+    createDatesEditedRef.current = true;
+    setFormData({ start_date: date.toISOString().slice(0, 10), end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
+    setScheduleContext('First live payroll after the recorded history. Confirm the period end and first unpaid pay date with the client.');
+    setIsCreateOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('new_after');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, readOnlyWorkspace, trainingReplayWorkspace, activeCompanyId]);
+
   const handleCreateOpenChange = (open: boolean) => {
     setIsCreateOpen(open);
     if (!open) {
@@ -781,7 +802,7 @@ export function PayPeriods() {
     <div>
       <Header
         title="Pay Periods"
-        description="Choose a pay period to review its employees, totals and next step. Imported QuickBooks history is read-only."
+        description="Choose a pay period to review its employees, totals and next step. Imported prior-provider history is read-only."
         actions={
           readOnlyWorkspace || trainingReplayWorkspace ? undefined : (
             <Button onClick={openCreateModal}>
@@ -793,6 +814,7 @@ export function PayPeriods() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         <TaxYearWarning companyId={activeCompanyId} />
+        {historyAvailable && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryNotice companyId={activeCompanyId} />}
         {trainingReplayWorkspace && (
           <div className="mb-4">
             <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
@@ -879,6 +901,7 @@ export function PayPeriods() {
               <option value="all">All sources</option>
               <option value="cornerstone">Cornerstone</option>
               <option value="quickbooks">QuickBooks imports</option>
+              <option value="prior_provider">Prior-provider history</option>
             </Select>
             <Select
               value={sortBy}
@@ -991,7 +1014,7 @@ export function PayPeriods() {
                           </Badge>
                           {!period.includes_base_salary && <span className="text-xs font-medium text-primary-700">No base salary</span>}
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
-                            {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
+                            {period.record_type === 'imported' ? period.source.label : 'Cornerstone'}
                           </Badge>
                           {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
                           {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}

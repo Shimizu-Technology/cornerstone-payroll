@@ -182,5 +182,11 @@ RSpec.describe StaffRolePolicy do
         action_name: "index"
       )).to eq(:manage_platform)
     end
+
+    it "gates every prior-provider history action with the ordinary payroll operations capability" do
+      %w[index preview create save_draft discard_draft activate reverse source_file].each do |action|
+        expect(described_class.capability_for(controller_path: "api/v1/admin/prior_provider_histories", action_name: action)).to eq(:payroll_operations)
+      end
+    end
   end
 end

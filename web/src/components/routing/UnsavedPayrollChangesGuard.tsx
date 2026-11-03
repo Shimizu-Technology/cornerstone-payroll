@@ -4,18 +4,18 @@ import { UNSAFE_DataRouterContext, useBeforeUnload, useBlocker, useLocation } fr
 
 export const UNSAVED_PAYROLL_MESSAGE = 'You have unsaved payroll changes. Stay here and calculate payroll to save them. Leave without saving?';
 
-function PayrollRouteBlocker({ dirty }: { dirty: boolean }) {
+function PayrollRouteBlocker({ dirty, message }: { dirty: boolean; message: string }) {
   const location = useLocation();
   const acceptedScopeChange = useRef<string | null>(null);
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
     const scopeAccepted = acceptedScopeChange.current === currentLocation.key;
     return dirty && currentLocation.pathname !== nextLocation.pathname
-      && !scopeAccepted && !window.confirm(UNSAVED_PAYROLL_MESSAGE);
+      && !scopeAccepted && !window.confirm(message);
   });
   useEffect(() => {
     const onScopeChange = (event: Event) => {
       if (acceptedScopeChange.current === location.key) return;
-      if (dirty && !window.confirm(UNSAVED_PAYROLL_MESSAGE)) {
+      if (dirty && !window.confirm(message)) {
         event.preventDefault();
         return;
       }
@@ -39,9 +39,9 @@ function PayrollRouteBlocker({ dirty }: { dirty: boolean }) {
   return null;
 }
 
-export function UnsavedPayrollChangesGuard({ dirty }: { dirty: boolean }) {
+export function UnsavedPayrollChangesGuard({ dirty, message = UNSAVED_PAYROLL_MESSAGE }: { dirty: boolean; message?: string }) {
   const router = useContext(UNSAFE_DataRouterContext);
   // The application uses a data router. Isolated declarative-router embeds
   // can render the worksheet without registering a second navigation owner.
-  return router ? <PayrollRouteBlocker dirty={dirty} /> : null;
+  return router ? <PayrollRouteBlocker dirty={dirty} message={message} /> : null;
 }
