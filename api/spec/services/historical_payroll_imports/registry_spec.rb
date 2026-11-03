@@ -6,7 +6,7 @@ RSpec.describe HistoricalPayrollImports::Registry do
   subject(:registry) { described_class.default }
 
   it "publishes the complete QuickBooks Online migration contract" do
-    contract = registry.contracts.sole
+    contract = registry.contracts.find { |entry| entry[:key] == "quickbooks_online" }
 
     expect(contract).to include(
       key: "quickbooks_online",

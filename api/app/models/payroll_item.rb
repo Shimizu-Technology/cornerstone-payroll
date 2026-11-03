@@ -235,6 +235,9 @@ class PayrollItem < ApplicationRecord
   end
 
   validate :pending_payment_resolution_cannot_change, on: :update
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
+  before_create :prevent_retired_history_mutation
   before_update :guard_pending_payment_resolution
 
   def pending_payment_resolution_cannot_change
@@ -715,6 +718,13 @@ class PayrollItem < ApplicationRecord
   end
 
   private
+
+  def prevent_retired_history_mutation
+    return unless PayPeriod.where(id: pay_period_id, status: "retired_history").exists?
+
+    errors.add(:base, "Retired prior-provider payroll is read-only evidence")
+    throw :abort
+  end
 
   def retained_correction_pay_basis_reconciles
     inputs = %w[employment_type pay_rate hours_worked overtime_hours holiday_hours pto_hours scheduled_hours

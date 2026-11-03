@@ -12,7 +12,7 @@ module HistoricalPayroll
     ].freeze
 
     Entry = Data.define(
-      :record_type, :record_id, :historical_paycheck_id, :employee_id, :employee,
+      :record_type, :record_id, :historical_paycheck_id, :employee_id, :employee, :verified_amounts, :source_system,
       :pay_date, :period_start, :period_end, :historical_pay_period,
       *FIELDS, *BREAKDOWN_FIELDS
     )
@@ -23,7 +23,7 @@ module HistoricalPayroll
     end
 
     def source_paychecks
-      scope = HistoricalPaycheck.includes(:employee, :historical_pay_period)
+      scope = HistoricalPaycheck.includes(:employee, :historical_pay_period, :historical_import_batch)
                                 .where(company_id: @company_id)
       scope = scope.where(historical_import_batch_id: @batch.id) if @batch
       scope
@@ -98,6 +98,8 @@ module HistoricalPayroll
 
     def build_entry(record_type:, record_id:, paycheck:, row:, pay_date:)
       attributes = {
+        verified_amounts: record_type == "source_snapshot" ? paycheck.source_metadata.to_h["verified_amounts"] : nil,
+        source_system: paycheck.historical_import_batch.source_system,
         record_type: record_type,
         record_id: record_id,
         historical_paycheck_id: paycheck.id,

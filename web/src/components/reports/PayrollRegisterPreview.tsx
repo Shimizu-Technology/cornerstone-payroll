@@ -430,7 +430,8 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   const additionColumns = fieldColumns.filter((column) => column.group === 'addition');
   const deductionColumns = fieldColumns.filter((column) => column.group === 'deduction');
   const employerColumns = fieldColumns.filter((column) => column.group === 'employer');
-  const columnCount = 22 + fieldColumns.length + adjustmentColumns.length;
+  const historicalLoans = workers.some((worker) => worker.historical_loan_deductions_unclassified !== undefined);
+  const columnCount = 22 + fieldColumns.length + adjustmentColumns.length + Number(historicalLoans);
   const total = (key: keyof PayrollWorker) => workers.reduce((sum, worker) => sum + Number(worker[key] || 0), 0);
   const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
     sum + (payrollFieldAmount(worker, column) || 0)
@@ -452,6 +453,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ['Bonus', currency(report.summary.total_bonus)],
     ['Straight loans', currency(report.summary.total_straight_loan_deductions)],
     ['Installment loans', currency(report.summary.total_installment_loan_payments)],
+    ...(historicalLoans ? [['Previous provider loans (type not recorded)', currency(total('historical_loan_deductions_unclassified'))]] : []),
     ['Employer contributions', currency(report.summary.total_employer_contributions)],
     ['Employer cost', currency(report.summary.total_employer_payroll_cost)],
     ['Withholding', currency(report.summary.total_withholding)],
@@ -513,6 +515,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 {deductionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Straight Loan</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Installment Loan</th>
+                {historicalLoans && <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Previous provider loans (type not recorded)</th>}
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Deductions</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Net Pay</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Employer Contributions</th>
@@ -552,6 +555,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                       {deductionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.straight_loan_deduction)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.installment_loan_payment)}</td>
+                      {historicalLoans && <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.historical_loan_deductions_unclassified)}</td>}
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_contributions_total)}</td>
@@ -594,6 +598,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 ))}
                 <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('straight_loan_deduction'))}</td>
                 <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('installment_loan_payment'))}</td>
+                {historicalLoans && <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('historical_loan_deductions_unclassified'))}</td>}
                 <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('total_deductions'))}</td>
                 <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('net_pay'))}</td>
                 <td className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('employer_contributions_total'))}</td>

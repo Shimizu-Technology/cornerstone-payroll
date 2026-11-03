@@ -89,8 +89,16 @@ class PayrollRegisterCsvExporter
   private
 
   def headers
-    (provisional? ? [ "Payroll Status" ] : []) + HEADERS + payroll_adjustment_export.headers +
+    (provisional? ? [ "Payroll Status" ] : []) + HEADERS + historical_loan_headers + payroll_adjustment_export.headers +
       payroll_field_columns.map { |column| payroll_field_header(column) }
+  end
+
+  def historical_loan_headers
+    historical_loans_column? ? [ "Previous Provider Loans (Type Not Recorded)" ] : []
+  end
+
+  def historical_loans_column?
+    payroll_rows.any? { |worker| worker.key?(:historical_loan_deductions_unclassified) }
   end
 
   def payroll_rows
@@ -205,7 +213,7 @@ class PayrollRegisterCsvExporter
       %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| emp[key].to_f },
       format_currency(PayrollRegisterReconciliation.non_taxable_additions(emp))
     ]
-    (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + payroll_adjustment_export.values_for(emp).map do |amount|
+    (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + (historical_loans_column? ? [ format_currency(emp[:historical_loan_deductions_unclassified]) ] : []) + payroll_adjustment_export.values_for(emp).map do |amount|
       amount.nil? ? "" : format_currency(amount)
     end + payroll_field_columns.map do |column|
       amount = payroll_field_amount(emp, column)
@@ -255,7 +263,7 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:withholding_tax) + total_for(:additional_withholding)),
       %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| total_for(key) },
       format_currency(payroll_rows.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) })
-    ] + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
+    ] + (historical_loans_column? ? [ format_currency(total_for(:historical_loan_deductions_unclassified)) ] : []) + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
       payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
   end
 

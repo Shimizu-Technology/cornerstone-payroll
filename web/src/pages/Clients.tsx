@@ -1479,6 +1479,9 @@ export function Clients() {
                               Rename
                             </Button>
                           )}
+                          {!isTestWorkspace(c) && (
+                            <Button size="sm" variant="outline" className="text-xs" aria-label={`Prior-provider history for ${c.name}`} onClick={() => { switchCompany(c.id); navigate(`/companies/${c.id}/prior-provider-history`); }}>Prior-provider history</Button>
+                          )}
                           {canManageClients && !isTestWorkspace(c) && (
                             <Button size="sm" variant="outline" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                               Time tracking
@@ -1623,7 +1626,10 @@ export function Clients() {
                                 Rename
                               </Button>
                             )}
-                            {canManageClients && !isTestWorkspace(c) && (
+                            {!isTestWorkspace(c) && (
+                            <Button size="sm" variant="outline" className="text-xs" aria-label={`Prior-provider history for ${c.name}`} onClick={() => { switchCompany(c.id); navigate(`/companies/${c.id}/prior-provider-history`); }}>Prior-provider history</Button>
+                          )}
+                          {canManageClients && !isTestWorkspace(c) && (
                               <Button size="sm" variant="outline" className="text-xs" onClick={() => openClientIntegrations(c.id)} aria-label={`Time tracking settings for ${c.name}`}>
                                 Time tracking
                               </Button>

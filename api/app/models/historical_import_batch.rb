@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 class HistoricalImportBatch < ApplicationRecord
-  STATUSES = %w[previewed applied locked failed].freeze
-  YTD_BRIDGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5].freeze
+  STATUSES = %w[previewed applied locked failed reversed].freeze
+  YTD_BRIDGE_IMPORTER_VERSIONS = %w[quickbooks-online-payroll-v5 prior-provider-existing-roster-v1].freeze
 
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
@@ -15,6 +15,7 @@ class HistoricalImportBatch < ApplicationRecord
   has_many :historical_import_source_files, dependent: :restrict_with_error
   has_many :historical_tax_wage_reports, dependent: :restrict_with_error
   has_one :historical_import_cutover_review, dependent: :restrict_with_error
+  has_one :prior_provider_history_onboarding, dependent: :restrict_with_error
   has_one :historical_client_bootstrap, dependent: :restrict_with_error
   has_one :payroll_go_live_review, dependent: :restrict_with_error
   has_many :historical_ytd_bridges, dependent: :restrict_with_error
@@ -84,7 +85,7 @@ class HistoricalImportBatch < ApplicationRecord
 
   def prevent_locked_batch_update
     persisted_status = self.class.lock.where(id: id).pick(:status)
-    return unless persisted_status == "locked"
+    return unless persisted_status.in?(%w[locked reversed])
 
     errors.add(:base, "Locked historical imports cannot be changed")
     throw(:abort)

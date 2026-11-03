@@ -9,12 +9,13 @@ interface PayrollSourceNoticeProps {
 
 export function PayrollSourceNotice({ summary, mentionFieldScope = false }: PayrollSourceNoticeProps): ReactElement | null {
   const adjustments = summary?.adjustments || { count: 0, gross_pay_delta: 0, net_pay_delta: 0 };
-  if (!summary || (summary.quickbooks.record_count === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0 && adjustments.count === 0)) return null;
+  if (!summary || (summary.quickbooks.record_count === 0 && (summary.prior_provider?.record_count ?? 0) === 0 && summary.quickbooks.excluded_unlinked_paycheck_count === 0 && adjustments.count === 0)) return null;
 
   const quickbooks = summary.quickbooks;
   const includedLabels = [
     summary.cornerstone.paycheck_count > 0 ? `${summary.cornerstone.paycheck_count} Cornerstone ${summary.cornerstone.paycheck_count === 1 ? 'paycheck' : 'paychecks'}` : null,
     quickbooks.paycheck_count > 0 ? `${quickbooks.paycheck_count} linked QuickBooks ${quickbooks.paycheck_count === 1 ? 'paycheck' : 'paychecks'}` : null,
+    (summary.prior_provider?.paycheck_count ?? 0) > 0 ? `${summary.prior_provider!.paycheck_count} linked prior-provider ${summary.prior_provider!.paycheck_count === 1 ? 'paycheck' : 'paychecks'}` : null,
   ].filter(Boolean);
 
   return (

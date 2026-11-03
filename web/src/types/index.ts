@@ -610,7 +610,7 @@ export interface EmployeeFormData {
 // Pay Period
 // ----------------
 
-export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed';
+export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed' | 'retired_history';
 export type TaxSyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
 export type PayRunPurpose = 'regular' | 'off_cycle_tips' | 'bonus' | 'commission' | 'correction' | 'final' | 'adjustment';
 
@@ -1221,6 +1221,7 @@ export interface AirePayrollCommandResponse {
 }
 
 export interface PayPeriod {
+  prior_provider_history_available?: boolean;
   /** Initial roster defaults; explicit operator selections remain authoritative. */
   default_employee_ids?: number[];
   id: number;

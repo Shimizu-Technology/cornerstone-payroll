@@ -68,3 +68,15 @@ it('reuses consent for scope synchronization only until the operation finishes',
   expect(confirm).toHaveBeenCalledTimes(2);
   expect((screen.getByLabelText('Hours') as HTMLInputElement).value).toBe('17');
 });
+
+it('asks with a page-specific message when one is provided', async () => {
+  function History() {
+    return <><UnsavedPayrollChangesGuard dirty message="Your history edits aren’t saved yet. Leave anyway?" /><Link to="/employees">Employees</Link></>;
+  }
+  const router = createMemoryRouter([{ path: '/history', element: <History /> }, { path: '/employees', element: <p>Employees page</p> }], { initialEntries: ['/history'] });
+  render(<RouterProvider router={router} />);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByText('Employees'));
+  expect(confirm).toHaveBeenCalledWith('Your history edits aren’t saved yet. Leave anyway?');
+  expect(router.state.location.pathname).toBe('/history');
+});

@@ -34,3 +34,13 @@ it('uses plural wording for multiple overlaps', () => {
   render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 3 } }} />);
   expect(screen.getByRole('alert').textContent).toContain('3 matching employee/pay-date pairs.');
 });
+
+
+it('names prior-provider payments separately from QuickBooks', () => {
+  render(<PayrollSourceNotice summary={{ ...summary,
+    quickbooks: { ...summary.quickbooks, payroll_count: 0, paycheck_count: 0, record_count: 0 },
+    prior_provider: { ...summary.quickbooks, paycheck_count: 3, record_count: 3 },
+  }} />);
+  expect(screen.getByText(/3 linked prior-provider paychecks/)).toBeTruthy();
+  expect(screen.queryByText(/linked QuickBooks/)).toBeNull();
+});
