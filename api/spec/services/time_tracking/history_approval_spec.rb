@@ -24,6 +24,46 @@ RSpec.describe TimeTracking::HistoryApproval do
       "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"), "frozen_exclusion" => hold }
   end
 
+  it "keeps the exact pending-overtime hold while attributing only represented regular hours" do
+    row["hours"] = 6.4
+    row["state"]["overtime_status"] = "pending"
+    row["history_evidence"]["payable_segments"].sole["total_hours"] = "6.4"
+    hold = { "source_time_entry_id" => "41", "source_user_id" => "91", "source_user_uuid" => uuid,
+      "original_work_date" => row["work_date"], "category" => category, "reason" => "pending_overtime",
+      "held_total_hours" => "0.3", "held_regular_hours" => "0.0", "held_overtime_hours" => "0.3" }
+    payload["exclusions"] = [ hold ]
+    payload["summary"]["exclusion_count"] = 1
+    payload["issues"]["pending_overtime_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["baseline_lines"].sole["batch_checksum"] = payload.dig("export", "checksum")
+    TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
+      historical_attribution: true, historical_employee_ids: [ employee.id ], history_through_on: run.end_date,
+      reviewed_by: actor, reason: "Reviewed only represented historical regular hours", evidence: "Committed regular component and retained exact unpaid overtime hold")
+    page = history_service.prepare!
+    expect(page["history_coverage_verified"]).to be(true)
+    expect(page["dispositions"]).to include(include("type" => "historical_baseline_pending_overtime"))
+    expect(page["pending_review"].sole["hours"]).to eq("0.3")
+    expect(page["attributed_categories"].sole["source_total"]).to eq("6.1")
+    approve_review(page)
+    expect(row.dig("state", "overtime_status")).to eq("pending")
+    expect(CheckEvent.count).to eq(0)
+  end
+
+  it "groups scoped paid-category attributions under the single attestation and rechecks configuration" do
+    TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
+      historical_attribution: true, historical_employee_ids: [ employee.id ], history_through_on: run.end_date,
+      reviewed_by: actor, reason: "Reviewed historical categories as paid", evidence: "Leon November4 decision and committed register")
+    page = history_service.prepare!
+    expect(page["history_coverage_verified"]).to be(true)
+    expect(page["attributed_categories"].sole.fetch("rows").sole).to include("paid_component" => "Regular", "source_hours" => "6.1", "attributed_paid_hours" => "6.13")
+    result = approve_review(page)
+    expect(result["approved_by"]).to eq(actor.name)
+    expect(result["approved_at"]).to be_present
+    expect(AireHistoryReview.find(page["review_id"]).approved_packet["reviewed_dispositions"].sole["disposition"]).to eq("accountant_attributed_paid_category")
+    expect(CheckEvent.count).to eq(0)
+    expect(TimeTrackingEntryAllocation.count).to eq(0)
+  end
+
   it "prefills a strict baseline and exact signed rounding acknowledgement without applying anything" do
     expect(client).to receive(:payroll_batch).once.and_return(payload)
     page = history_service.prepare!

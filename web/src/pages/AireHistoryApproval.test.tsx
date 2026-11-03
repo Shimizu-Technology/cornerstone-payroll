@@ -33,6 +33,24 @@ afterEach(cleanup);
 const view = () => render(<MemoryRouter><AireHistoryApproval /></MemoryRouter>);
 
 describe('one-summary AIRE history approval', () => {
+  it('shows the actual employee component and rate resolved by the company configuration', async () => {
+    mocks.preview.mockResolvedValue({ ...summary(), solo_decisions: [], category_configuration: [{ employee: 'Anthony Ezra', source_category: 'Aircraft Maintenance', configured_components: 'Maintenance or Regular', resolved_component: 'Regular', rate: '14.7', blocked: false }] });
+    view();
+    expect(await screen.findByRole('heading', { name: 'Configured earning components' })).toBeTruthy();
+    expect(screen.getByText('Maintenance or Regular')).toBeTruthy();
+    expect(screen.getByText('Regular')).toBeTruthy();
+    expect(screen.getByText('14.70')).toBeTruthy();
+  });
+  it('shows one grouped historical category section covered by the same single attestation', async () => {
+    mocks.preview.mockResolvedValue({ ...summary(), solo_decisions: [], attributed_categories: [{ employee: 'Payroll person', run_id: 67,
+      reviewer: 'Chels', source_total: '3.1', paid_total: '3.1', signed_difference: '0', rows: [
+        { source_category: null, source_hours: '2.5', paid_component: 'Flight Hours', attributed_paid_hours: '2.5', rounding_difference: '0' }] }] });
+    view();
+    expect(await screen.findByRole('heading', { name: 'Historical categories as paid' })).toBeTruthy();
+    expect(screen.getByText('Uncategorized (retained)')).toBeTruthy();
+    expect(screen.getByText('Flight Hours')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+  });
   it('shows frozen, prior-policy and paid splits without changing the future policy or adding an approval step', async () => {
     mocks.preview.mockResolvedValue({ ...summary(), historical_policies: [{ employee: 'Payroll person', employee_id: 8, run_id: 67,
       baseline_evidence_class: 'historical_baseline', frozen_split: { regular_hours: '10', overtime_hours: '0' },

@@ -16,6 +16,6 @@ class CreateTimeTrackingCategoryMappings < ActiveRecord::Migration[8.1]
       t.text :evidence, null: false
       t.timestamps
     end
-    add_index :time_tracking_category_mappings, [:time_tracking_source_id, :source_category_key], unique: true, name: "idx_source_category_mapping"
+    add_index :time_tracking_category_mappings, [ :time_tracking_source_id, :source_category_key ], unique: true, name: "idx_source_category_mapping"
   end
 end

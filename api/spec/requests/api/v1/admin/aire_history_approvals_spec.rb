@@ -15,6 +15,20 @@ RSpec.describe "AIRE one-summary history approval", type: :request do
     "/api/v1/admin/time_tracking_sources/#{source.id}/history_approval/#{action}"
   end
 
+  it "returns grouped accountant attribution and refuses a changed configuration atomically" do
+    policy = TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
+      historical_attribution: true, historical_employee_ids: [ employee.id ], history_through_on: run.end_date,
+      reviewed_by: actor, reason: "Reviewed historical categories as paid", evidence: "Leon November4 decision and committed register")
+    post endpoint("preview"), as: :json
+    page = response.parsed_body
+    expect(page["attributed_categories"].sole["reviewer_id"]).to eq(actor.id)
+    policy.update!(historical_employee_ids: [])
+    post endpoint("approve"), params: page.slice("review_id", "digest", "attestation"), as: :json
+    expect(response).to have_http_status(:conflict)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    expect(CheckEvent.count).to eq(0)
+  end
+
   it "returns one unapproved summary and applies strict history with one attestation" do
     post endpoint("preview"), as: :json
     expect(response).to have_http_status(:ok)

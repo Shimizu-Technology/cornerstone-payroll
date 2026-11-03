@@ -175,7 +175,8 @@ module TimeTracking
       when "historical_baseline"
         unallocated && !pending && baseline_verified?(baseline, current)
       when "historical_baseline_pending_overtime"
-        unallocated && unheld && baseline.any? && overtime_hold_verified?(current)
+        attributed = accountant_category_attributions(current)
+        unallocated && unheld && baseline.any? && (attributed.empty? || disposition["attributed_categories"] == attributed) && overtime_hold_verified?(current)
       when "legacy_frozen_batch_baseline"
         unallocated && baseline_verified?(baseline, current, legacy_frozen: true)
       when "pending_overtime"
@@ -275,7 +276,7 @@ module TimeTracking
         policy = prior_policy && @prior_policy_review&.call(batch: payload, employee: source_employee)
         next false if prior_policy && !policy
 
-        if category_attribution
+        if category_attribution || (allow_overtime_hold && accountant_category_attributions(current).any?)
           next accountant_category_attributions(current).any? { |record| record["batch_id"] == payload.fetch("batch_id") }
         end
 

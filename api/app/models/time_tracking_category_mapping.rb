@@ -21,18 +21,34 @@ class TimeTrackingCategoryMapping < ApplicationRecord
   end
 
   def matching_rate(rates)
-    matches = rates.select { |rate| rate.active? && rate.rate&.positive? && self.class.normalized(rate.label) == self.class.normalized(earning_label) }
-    matches.sole if matches.one?
+    [ earning_label, fallback_earning_label ].compact_blank.each do |label|
+      matches = rates.select { |rate| rate.active? && rate.rate&.positive? && self.class.normalized(rate.label) == self.class.normalized(label) }
+      return nil if matches.many?
+      return matches.sole if matches.one?
+    end
+    nil
   end
 
-  def historical_for?(employee_id, date)
-    historical_attribution? && date <= history_through_on && historical_employee_ids.include?(employee_id)
+  def required_rate_description
+    [ earning_label, fallback_earning_label ].compact_blank.join(" or ")
+  end
+
+  def historical_for?(employee_id, date, run_id: nil)
+    limits = historical_run_limits[employee_id.to_s]
+    historical_attribution? && date <= history_through_on && historical_employee_ids.include?(employee_id) &&
+      (limits.nil? || limits.include?(run_id))
   end
 
   private
 
   def valid_scope
     errors.add(:company, "must own the AIRE source") unless time_tracking_source&.company_id == company_id && time_tracking_source&.source_type == "aire_services"
+    limits = historical_run_limits
+    valid_limits = limits.is_a?(Hash) && limits.all? do |id, runs|
+      historical_employee_ids.include?(id.to_i) && runs.is_a?(Array) && runs.any? && runs.uniq == runs && runs.all? { |run| run.is_a?(Integer) && run.positive? } &&
+        PayPeriod.where(company_id: company_id, status: "committed", id: runs).count == runs.length
+    end
+    errors.add(:historical_run_limits, "must identify committed company-owned runs in the employee scope") unless valid_limits
     ids = historical_employee_ids
     unless ids.is_a?(Array) && ids.all? { |id| id.is_a?(Integer) } && ids.uniq == ids && Employee.where(company_id: company_id, id: ids).count == ids.length
       errors.add(:historical_employee_ids, "must be distinct employees of this company")
