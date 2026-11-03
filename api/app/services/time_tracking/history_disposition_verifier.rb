@@ -3,11 +3,12 @@
 module TimeTracking
   # This approves accounting coverage only. It has no write or payment API.
   class HistoryDispositionVerifier
-    TYPES = %w[historical_baseline historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review owed not_payable no_payable_hours payment_evidence_pending].freeze
+    TYPES = %w[historical_baseline historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
     LABELS = {
       "historical_baseline" => "Already represented in manual payroll; delivery not asserted",
       "historical_baseline_pending_overtime" => "Represented regular hours plus exact frozen overtime hold; overtime approval and payment unchanged",
       "legacy_frozen_batch_baseline" => "Legacy frozen representation; lower-strength unchanged-source evidence; approval and delivery unchanged",
+      "pending_overtime" => "Frozen unpaid overtime awaiting approval; no payment asserted",
       "pending_review" => "Pending accounting review; approval unchanged",
       "owed" => "Genuinely owed; explicit routing still required",
       "not_payable" => "Denied; remains not payable",
@@ -102,6 +103,8 @@ module TimeTracking
         unallocated && unheld && overtime_hold_verified?(current)
       when "legacy_frozen_batch_baseline"
         unallocated && baseline_verified?(baseline, current, legacy_frozen: true)
+      when "pending_overtime"
+        unallocated && unheld && baseline.empty? && overtime_hold_verified?(current)
       when "pending_review"
         unallocated && unheld && pending && (baseline.empty? || baseline_verified?(baseline, current))
       when "owed"
@@ -193,7 +196,8 @@ module TimeTracking
         current.dig("state", "overtime_status").in?([ nil, "none", "pending" ])
 
       lines = current.fetch("history_evidence").fetch("baseline_lines")
-      return false if lines.empty? || lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
+      return full_overtime_hold_verified?(current) if lines.empty?
+      return false if lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
       return false unless lines.all? { |line| decimal(line.fetch("overtime_hours")).zero? }
 
       payload = batch(lines.first.fetch("batch_id"))
@@ -210,6 +214,32 @@ module TimeTracking
         held.positive? && decimal(hold.fetch("held_overtime_hours")) == held && represented.positive? &&
         represented + held == decimal(current.fetch("hours"))
       exact_hold && baseline_verified?(lines, current, discover: discover, covered_hours: represented, allow_overtime_hold: true)
+    end
+
+    def full_overtime_hold_verified?(current)
+      proof = current.fetch("history_evidence").fetch("pending_overtime")
+      return false unless proof.is_a?(Hash) && proof["kind"] == "pending_overtime" &&
+        proof["source_time_entry_version"] == current.fetch("version") &&
+        proof["payable_content_checksum"] == current.dig("history_evidence", "payable_content_checksum") &&
+        decimal(proof.fetch("represented_regular_hours")).zero?
+
+      payload = batch(proof.fetch("batch_id"))
+      return false unless payload.dig("export", "checksum") == proof.fetch("batch_checksum")
+      return false if payload.fetch("employees").any? do |employee|
+        employee.fetch("adjustments").any? { |line| line["source_time_entry_id"] == current.fetch("id") }
+      end
+      exclusions = payload.fetch("exclusions").select { |row| row["source_time_entry_id"] == current.fetch("id") }
+      return false unless exclusions.one?
+
+      hold = exclusions.sole
+      hold.except("display_name", "email") == proof.fetch("frozen_exclusion") &&
+        hold["reason"] == "pending_overtime" && hold["allocation_review_reason"].nil? &&
+        hold["source_user_id"] == current.dig("employee", "id") && hold["source_user_uuid"] == current.fetch("source_user_uuid") &&
+        hold["original_work_date"] == current.fetch("work_date") &&
+        %w[id key name].all? { |key| hold.dig("category", key).to_s == current.dig("category", key).to_s } &&
+        decimal(hold.fetch("held_regular_hours")).zero? && decimal(hold.fetch("held_total_hours")).positive? &&
+        decimal(hold.fetch("held_total_hours")) == decimal(current.fetch("hours")) &&
+        decimal(hold.fetch("held_overtime_hours")) == decimal(current.fetch("hours"))
     end
 
     def legacy_frozen_verified?(line, current)
