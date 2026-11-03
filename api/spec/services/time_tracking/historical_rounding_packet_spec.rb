@@ -80,6 +80,53 @@ RSpec.describe "Reviewed historical rounding packet" do
     TimeTracking::VerifiedHistoryRollout.new(manifest: packet, actor: actor)
   end
 
+  it "recaptures supplied acknowledgements as explicitly unreviewed computed variances" do
+    first = rollout(manifest).capture_review_packet!
+    manifest["rounding_variance_acknowledgements"] = first.fetch("rounding_variances").map do |variance|
+      variance.except("within_limit", "acknowledged").merge("type" => "accountant_reviewed_rounding_variance", "reviewer_id" => actor.id,
+        "reason" => "Prior reviewed rounding must not make a fresh draft look approved",
+        "evidence" => "Synthetic prior source and committed register evidence")
+    end
+    packet = rollout(manifest).capture_review_packet!
+    expect(packet["rounding_variance_acknowledgements"]).to eq([])
+    expect(packet["historical_earning_component_bindings"]).to eq([])
+    expect(packet["rounding_variances"].sole).to include("signed_difference" => "0.03", "acknowledged" => false)
+  end
+
+  it "recaptures binding-required blockers even when input provides reviewed component bindings" do
+    other = { "id" => "2", "key" => "flight", "name" => "Flight Hours" }
+    second = adjustment.deep_dup.merge("source_time_entry_id" => "42", "line_key" => "flight", "category" => other,
+      "source_category_id" => "2", "total_hours" => 4.0, "regular_hours" => 4.0)
+    payload["employees"].sole["adjustments"] << second
+    payload["employees"].sole.merge!("total_hours" => 10.1, "regular_hours" => 10.1)
+    payload["summary"].merge!("adjustment_count" => 2, "current_count" => 2, "total_hours" => 10.1, "regular_hours" => 10.1)
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    row["history_evidence"]["baseline_lines"].sole["batch_checksum"] = payload.dig("export", "checksum")
+    extra = row.deep_dup.merge("id" => "42", "hours" => 4.0, "category" => other)
+    extra["history_evidence"]["baseline_lines"].sole.merge!("source_time_entry_id" => "42", "line_key" => "flight",
+      "category" => other, "regular_hours" => 4.0, "total_hours" => 4.0)
+    allow(client).to receive(:payroll_cockpit_history_entries).and_return(
+      "source_state" => "current", "history_evidence_version" => 1, "unresolved_historical_obligation_count" => 0,
+      "integration" => { "source_instance_id" => source.expected_source_instance_id }, "through_work_date" => "2026-08-15",
+      "time_entries" => [ row, extra ], "pagination" => { "current_page" => 1, "per_page" => 50, "total_count" => 2, "total_pages" => 1, "truncated" => false })
+    item.update_columns(hours_worked: 10.13, custom_columns_data: { "wage_rate_hours" => [
+      { "employee_wage_rate_id" => 11, "label" => "Maintenance", "rate" => 10, "regular_hours" => 6.13, "overtime_hours" => 0 },
+      { "employee_wage_rate_id" => 12, "label" => "Flight", "rate" => 10, "regular_hours" => 4.0, "overtime_hours" => 0 } ] })
+    unsigned = rollout(manifest).capture_review_packet!
+    expected = unsigned["rounding_review_blockers"].select { |blocker| blocker["category"] == "REG" }
+    expect(expected.length).to eq(2)
+    manifest["historical_earning_component_bindings"] = expected.map do |blocker|
+      blocker.except("reason").merge("type" => "historical_earning_component_binding", "reviewer_id" => actor.id,
+        "earning_component" => blocker["source_category"] == category ? "wage_rate:11" : "wage_rate:12",
+        "reason" => "Prior reviewed exact source category and paid component binding",
+        "evidence" => "Synthetic retained earning component and source identity")
+    end
+    packet = rollout(manifest).capture_review_packet!
+    expect(packet["historical_earning_component_bindings"]).to eq([])
+    expect(packet["rounding_review_blockers"].select { |blocker| blocker["category"] == "REG" }).to eq(expected)
+    expect(packet["rounding_variances"]).to eq([])
+  end
+
   it "keeps a whole frozen overtime exclusion pending with no historical payment claim" do
     row["hours"] = 0.3
     row["state"]["overtime_status"] = "pending"

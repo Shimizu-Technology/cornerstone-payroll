@@ -84,11 +84,14 @@ module TimeTracking
     end
 
     def save_preview_import!(lookup_attrs:, import_attrs:)
-      import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
-      persist_preview_import!(import, import_attrs)
-    rescue ActiveRecord::RecordNotUnique
-      import = TimeTrackingImport.find_by!(lookup_attrs)
-      persist_preview_import!(import, import_attrs)
+      source.with_lock do
+        begin
+          import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
+          TimeTrackingImport.transaction(requires_new: true) { persist_preview_import!(import, import_attrs) }
+        rescue ActiveRecord::RecordNotUnique
+          persist_preview_import!(TimeTrackingImport.find_by!(lookup_attrs), import_attrs)
+        end
+      end
     end
 
     def persist_preview_import!(import, import_attrs)
