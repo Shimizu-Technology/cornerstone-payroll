@@ -89,6 +89,24 @@ RSpec.describe "AIRE one-summary history approval", type: :request do
     expect(AireHistoryReview.count).to eq(0)
   end
 
+  it "returns background progress scoped to this operator/client and reuses a lost approval request" do
+    post endpoint("preview"), params: { background: true }, as: :json
+    expect(response).to have_http_status(:accepted)
+    pending = response.parsed_body
+    expect(pending).to include("status" => "queued", "result" => nil)
+    AireHistoryOperationJob.perform_now(pending.fetch("operation_id"))
+    get endpoint("operations/#{pending.fetch('operation_id')}")
+    expect(response).to have_http_status(:ok)
+    page = response.parsed_body.fetch("result")
+    arguments = page.slice("review_id", "digest", "attestation").merge(background: true)
+    2.times { post endpoint("approve"), params: arguments, as: :json }
+    expect(AireHistoryOperation.where(kind: "approve").count).to eq(1)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    AireHistoryOperation.find(pending.fetch("operation_id")).update!(actor: create(:user, company: company, role: "admin"))
+    get endpoint("operations/#{pending.fetch('operation_id')}")
+    expect(response).to have_http_status(:not_found)
+  end
+
   context "as an accountant" do
     let(:actor) { create(:user, company: company, organization: company.organization, role: "accountant") }
     before { CompanyAssignment.find_or_create_by!(user: actor, company: company) }

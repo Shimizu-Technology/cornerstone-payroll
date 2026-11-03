@@ -32,26 +32,29 @@ function HistorySummary({ companyId }: { companyId: number }) {
   const [dirty, setDirty] = useState(false);
   const [stale, setStale] = useState(false);
   const mounted = useRef(true);
+  const operationAbort = useRef(new AbortController());
 
   useEffect(() => {
     mounted.current = true;
+    const controller = new AbortController();
+    operationAbort.current = controller;
     timeTrackingSourcesApi.list().then(async (response) => {
       const source = response.time_tracking_sources.find((record) => record.active && record.source_type === 'aire_services');
       if (!source) throw new Error('No active AIRE connection is configured for this client. Ask your payroll administrator to prepare it.');
-      if (!mounted.current) return;
+      if (!mounted.current || controller.signal.aborted) return;
       setSourceId(source.id);
-      const result = await aireHistoryApprovalApi.preview(source.id, companyId);
-      if (mounted.current) { setSummary(result); setMatches(result.mappings.map(({ source_user_uuid, employee_id }) => ({ source_user_uuid, employee_id }))); }
-    }).catch((failure) => { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not fetch AIRE history.'); })
-      .finally(() => { if (mounted.current) setBusy(false); });
-    return () => { mounted.current = false; };
+      const result = await aireHistoryApprovalApi.preview(source.id, companyId, [], controller.signal);
+      if (mounted.current && !controller.signal.aborted) { setSummary(result); setMatches(result.mappings.map(({ source_user_uuid, employee_id }) => ({ source_user_uuid, employee_id }))); }
+    }).catch((failure) => { if (mounted.current && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Could not fetch AIRE history.'); })
+      .finally(() => { if (mounted.current && !controller.signal.aborted) setBusy(false); });
+    return () => { mounted.current = false; controller.abort(); };
   }, [companyId]);
 
   async function refresh() {
     if (!sourceId || busy) return;
     setBusy(true); setError(''); setAttested(false); setConfirmed([]); setSolo({}); setStale(true);
     try {
-      const result = await aireHistoryApprovalApi.preview(sourceId, companyId, matches);
+      const result = await aireHistoryApprovalApi.preview(sourceId, companyId, matches, operationAbort.current.signal);
       if (mounted.current) { setSummary(result); setMatches(result.mappings.map(({ source_user_uuid, employee_id }) => ({ source_user_uuid, employee_id }))); setDirty(false); setStale(false); }
     } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : 'Could not refresh history.'); }
     finally { if (mounted.current) setBusy(false); }
@@ -64,7 +67,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
       const result = await aireHistoryApprovalApi.approve(sourceId, companyId, {
         review_id: summary.review_id, digest: summary.digest, attestation: summary.attestation, confirmed_mapping_uuids: confirmed,
         solo_choices: Object.entries(solo).filter(([, rate]) => rate).map(([employee, rate]) => ({ employee_id: Number(employee), employee_wage_rate_id: Number(rate) })),
-      });
+      }, operationAbort.current.signal);
       if (mounted.current) setSummary(result);
     } catch (failure) {
       if (mounted.current) { setError(failure instanceof Error ? failure.message : 'History approval failed. Nothing was applied.'); setAttested(false); setStale(true); }
