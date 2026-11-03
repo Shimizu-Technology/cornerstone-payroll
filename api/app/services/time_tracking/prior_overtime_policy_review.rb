@@ -49,6 +49,7 @@ module TimeTracking
       end
       inputs = row.fetch("inputs")
       return unless inputs.any? && inputs.map { |input| input.fetch("source_time_entry_id") }.uniq.length == inputs.length
+      return unless complete_context?(inputs, row.fetch("source_user_id"), batch)
 
       allocations = row.fetch("allocations")
       keys = allocations.map { |line| line.values_at("source_time_entry_id", "line_key") }
@@ -105,6 +106,22 @@ module TimeTracking
         line
       end
       lines.length == references.length && lines.sum { |line| decimal(line.fetch("total_hours")) } == decimal(input.fetch("hours"))
+    end
+
+    def complete_context?(inputs, owner, batch)
+      first = Date.iso8601(batch.fetch("start_date")).beginning_of_week(:sunday)
+      last = Date.iso8601(batch.fetch("end_date"))
+      expected = @inventory.values.flat_map do |current|
+        Array(current.dig("history_evidence", "baseline_lines")).filter_map do |line|
+          next unless line["source_user_id"] == owner && Date.iso8601(line.fetch("work_date")).between?(first, last)
+
+          [ current.fetch("id"), line.fetch("batch_id"), line.fetch("line_key") ]
+        end
+      end
+      supplied = inputs.flat_map do |input|
+        input.fetch("frozen_rows").map { |reference| [ input.fetch("source_time_entry_id"), reference.fetch("batch_id"), reference.fetch("line_key") ] }
+      end
+      supplied.uniq.length == supplied.length && supplied.sort == expected.sort
     end
 
     def split(lines)
