@@ -209,7 +209,9 @@ module TimeTracking
         end,
         "rounding_variances" => variances.map { |row| row.merge("employee" => @employees.find { |employee| employee.id == row["employee_id"] }&.full_name) },
         "owed" => details.select { |row| row["disposition"] == "owed" },
-        "pending_review" => details.select { |row| PENDING_TYPES.include?(row["disposition"]) }.map { |row| row.merge("hours" => row.fetch("pending_hours")) },
+        "pending_review" => details.select do |row|
+          PENDING_TYPES.include?(row["disposition"]) || row["approval_status"].in?([ nil, "pending" ])
+        end.map { |row| row.merge("hours" => row.fetch("pending_hours")) },
         "blockers" => blockers.uniq, "solo_decisions" => solo_decisions(inventory), "attestation" => ATTESTATION }
       snapshot = { "entry_checksums" => inventory.sort_by { |row| row.fetch("id") }.to_h { |row| [ row.fetch("id"), checksum(row) ] },
         "entry_observations" => inventory.to_h { |row| [ row.fetch("id"), row.slice("version", "hours", "work_date", "source_user_uuid", "state", "category") ] },
