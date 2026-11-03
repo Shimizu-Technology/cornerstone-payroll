@@ -20,6 +20,8 @@ import {
   type BreakdownKey,
   type HistoryCheck,
   type HistoryEmployee,
+  type BulkConfirmFailure,
+  type BulkConfirmSummary,
   type HistoryOnboarding,
   type HistoryPage,
   type HistoryPayload,
@@ -49,6 +51,9 @@ import {
   type EmployeeTotals,
   type PeriodState,
   takeoverProblem,
+  bulkConfirmCheck,
+  bulkConfirmStatement,
+  withFilledReferences,
   periodDatesValid,
   registerTotalValid,
 } from "./prior-provider/historyModel";
@@ -97,6 +102,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<"record" | "activate" | "reverse" | "discard" | null>(null);
+  const [confirmFailures, setConfirmFailures] = useState<BulkConfirmFailure[] | null>(null);
   const mounted = useRef(true);
   const loadRequestId = useRef(0);
   const dirty = useRef(false);
@@ -169,6 +175,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const update = (next: HistoryPayload) => {
     setPayload(next);
     setPreview(null);
+    setConfirmFailures(null);
     dirty.current = true;
     if (saveState !== "conflict" && saveState !== "saving") setSaveState("unsaved");
   };
@@ -205,6 +212,32 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       link.download = file.original_filename;
       link.click();
       URL.revokeObjectURL(url);
+    });
+
+  // Confirms every pay date at once. The server re-checks every date and saves
+  // nothing if any fails; its list of failing dates is shown in the step.
+  const confirmAll = (registerName: string, summary: BulkConfirmSummary) =>
+    perform(async () => {
+      if (!payload) return;
+      setConfirmFailures(null);
+      try {
+        const result = await priorProviderHistoryApi.confirmRegisters(payload, Math.min(step, 3), version, registerName, summary);
+        if (!mounted.current) return;
+        setPayload(result.draft.payload);
+        setVersion(result.draft.lock_version);
+        setSavedAt(new Date(result.draft.updated_at).toLocaleTimeString("en-US", { timeStyle: "short" }));
+        dirty.current = false;
+        setSaveState("saved");
+        setPreview(null);
+        setNotice(`All ${summary.period_count} pay dates are confirmed against the registers. Check numbers you entered are kept.`);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          const failures = (err.data as { failures?: BulkConfirmFailure[] } | undefined)?.failures;
+          if (mounted.current && Array.isArray(failures)) setConfirmFailures(failures);
+          if (mounted.current && err.status === 409) setSaveState("conflict");
+        }
+        throw err;
+      }
     });
 
   const remaining = page && payload ? remainingWork(payload, page.employees, files.length > 0) : [];
@@ -280,7 +313,16 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                   <fieldset disabled={!canManage || busy} className="min-w-0 space-y-5">
                     {step === 0 && <PayDatesStep page={page} payload={payload} onChange={update} />}
                     {step === 1 && <EmployeesStep employees={page.employees} payload={payload} onChange={update} />}
-                    {step === 2 && <RegistersStep employees={page.employees} payload={payload} onChange={update} />}
+                    {step === 2 && (
+                      <RegistersStep
+                        employees={page.employees}
+                        payload={payload}
+                        onChange={update}
+                        busy={busy || saveState === "saving"}
+                        serverFailures={confirmFailures}
+                        onConfirmAll={confirmAll}
+                      />
+                    )}
                     {step === 3 && (
                       <RecordStep
                         payload={payload}
@@ -681,10 +723,25 @@ const STATE_BADGE: Record<PeriodState, { label: string; variant: "success" | "wa
   to_check: { label: "To check", variant: "default" },
 };
 
-function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmployee[]; payload: HistoryPayload; onChange: (next: HistoryPayload) => void }) {
+function RegistersStep({
+  employees,
+  payload,
+  onChange,
+  busy,
+  serverFailures,
+  onConfirmAll,
+}: {
+  employees: HistoryEmployee[];
+  payload: HistoryPayload;
+  onChange: (next: HistoryPayload) => void;
+  busy: boolean;
+  serverFailures: BulkConfirmFailure[] | null;
+  onConfirmAll: (registerName: string, summary: BulkConfirmSummary) => Promise<void>;
+}) {
   const firstOpen = payload.periods.findIndex((period) => periodState(period) !== "matched");
   const [open, setOpen] = useState<number | null>(firstOpen >= 0 ? firstOpen : null);
   const [reference, setReference] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const updatePeriod = (index: number, period: HistoryPeriod) => onChange({ ...payload, periods: payload.periods.map((old, i) => (i === index ? period : old)) });
   const matched = payload.periods.filter((period) => periodState(period) === "matched").length;
   return (
@@ -699,7 +756,7 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
         <Button
           variant="outline"
           disabled={!reference.trim()}
-          onClick={() => onChange({ ...payload, periods: payload.periods.map((period) => (period.source_reference.trim() ? period : { ...period, source_reference: `${reference.trim()} — paid ${period.pay_date || "date"}` })) })}
+          onClick={() => onChange(withFilledReferences(payload, reference))}
         >
           Fill blank references
         </Button>
@@ -707,6 +764,23 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
       <p className="text-sm font-semibold">
         {matched} of {payload.periods.length} pay dates match
       </p>
+      {matched < payload.periods.length && (
+        <ConfirmAllPanel
+          payload={payload}
+          registerName={reference}
+          busy={busy}
+          serverFailures={serverFailures}
+          onReview={(key) => setOpen(payload.periods.findIndex((period) => period.key === key))}
+          onConfirm={() => setConfirmOpen(true)}
+        />
+      )}
+      <ConfirmAllDialog
+        open={confirmOpen}
+        busy={busy}
+        summary={bulkConfirmCheck(payload, reference).summary}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={(summary) => void onConfirmAll(reference, summary).then(() => setConfirmOpen(false))}
+      />
       <ul className="space-y-2">
         {payload.periods.map((period, index) => {
           const state = periodState(period);
@@ -753,6 +827,92 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
         })}
       </ul>
     </>
+  );
+}
+
+/**
+ * "Confirm all" is offered only when every listed pay date passes the same
+ * checks as an individual match; otherwise it names each date left for review.
+ */
+function ConfirmAllPanel({
+  payload,
+  registerName,
+  busy,
+  serverFailures,
+  onReview,
+  onConfirm,
+}: {
+  payload: HistoryPayload;
+  registerName: string;
+  busy: boolean;
+  serverFailures: BulkConfirmFailure[] | null;
+  onReview: (key: string) => void;
+  onConfirm: () => void;
+}) {
+  const { failures: local, summary } = bulkConfirmCheck(payload, registerName);
+  const failures = local.length ? local : serverFailures ?? [];
+  const label = (failure: BulkConfirmFailure) => (failure.pay_date ? `Paid ${shortDate(failure.pay_date) || failure.pay_date}` : "New pay date");
+  return (
+    <section aria-labelledby="confirm-all-heading" className="space-y-3 rounded-xl border border-neutral-200 p-3 sm:p-4">
+      <div>
+        <h4 id="confirm-all-heading" className="text-sm font-semibold">Already checked every pay date against the registers?</h4>
+        <p className="mt-1 text-sm leading-6 text-neutral-600">
+          Confirm all {summary.period_count} pay dates at once instead of one by one. Check numbers you entered are kept, and you can still open, change or re-check any pay date afterwards.
+        </p>
+      </div>
+      {failures.length > 0 ? (
+        <div role="status" className="rounded-lg bg-warning-50 p-3 text-sm text-warning-900">
+          <p className="font-semibold">
+            {failures.length} pay {failures.length === 1 ? "date needs" : "dates need"} individual review first:
+          </p>
+          <ul className="mt-2 space-y-2">
+            {failures.map((failure) => (
+              <li key={failure.key}>
+                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => onReview(failure.key)}>
+                  {label(failure)}
+                </button>
+                <ul className="mt-1 list-disc pl-5">
+                  {failure.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || failures.length > 0} onClick={onConfirm}>
+        <CheckCircle2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+        <span className="whitespace-normal text-left">Confirm all pay dates match the previous provider’s registers…</span>
+      </Button>
+    </section>
+  );
+}
+
+function ConfirmAllDialog({ open, busy, summary, onClose, onConfirm }: { open: boolean; busy: boolean; summary: BulkConfirmSummary; onClose: () => void; onConfirm: (summary: BulkConfirmSummary) => void }) {
+  const [checked, setChecked] = useState(false);
+  useResetOnClose(open, () => setChecked(false));
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!busy) { setChecked(false); if (!next) onClose(); } }}>
+      <DialogContent className="w-full max-w-lg sm:!mx-auto">
+        <DialogHeader>
+          <DialogTitle>Confirm all {summary.period_count} pay dates?</DialogTitle>
+          <DialogDescription>
+            {summary.period_count} pay dates · {summary.paycheck_count} paychecks · {money(summary.gross_pay)} gross · {money(summary.net_pay)} net
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-neutral-700">
+          <li>Marks every pay date as matching its register and saves your name and the time with this confirmation.</li>
+          <li>Blank register references are filled from the register name. Check numbers you entered are kept.</li>
+          <li>Nothing is recorded or paid yet. You still review and record the history in the next step.</li>
+        </ul>
+        <ConfirmCheckbox checked={checked} onChange={setChecked}>
+          {bulkConfirmStatement(summary)}
+        </ConfirmCheckbox>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button disabled={!checked} loading={busy} onClick={() => onConfirm(summary)}>Confirm all {summary.period_count} pay dates</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

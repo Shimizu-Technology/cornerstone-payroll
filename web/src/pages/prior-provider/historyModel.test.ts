@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage } from "@/services/priorProviderHistory";
-import { defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
+import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage, type HistoryPayload, type HistoryPeriod } from "@/services/priorProviderHistory";
+import { bulkConfirmCheck, bulkConfirmStatement, defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
 
 function row(overrides: Partial<Record<AmountKey, string>> = {}): HistoryCheck {
   const zero = Object.fromEntries(Object.keys(amountLabels).map((key) => [key, "0.00"])) as Record<AmountKey, string>;
@@ -75,5 +75,37 @@ describe("prior-provider history model", () => {
     expect(remainingWork(full, [], false).map((item) => item.text)).toContain(takeoverProblem(full));
     expect(takeoverProblem({ ...payload, takeover_on: "2026-12-10" })).toMatch(/after the last pay date/);
     expect(takeoverProblem({ ...payload, takeover_on: "2027-01-01" })).toBe("Choose a takeover date in 2026.");
+  });
+
+  it("offers confirm-all only when every pay date passes the same checks as an individual match", () => {
+    const period = (key: string, overrides: Partial<HistoryPeriod> = {}): HistoryPeriod => ({
+      key, start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "", register_totals: {}, paychecks: [row()], ...overrides,
+    });
+    const payload = {
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {},
+      periods: [
+        period("ok"),
+        period("register", { register_totals: { gross_pay: "999.00" } }),
+        period("invalid-total", { register_totals: { net_pay: "9.999" } }),
+        period("dates", { start_date: "2026-10-30" }),
+        period("after-takeover", { pay_date: "2026-11-02", end_date: "2026-11-01" }),
+        period("net", { paychecks: [row({ net_pay: "901.00" })] }),
+      ],
+    } as HistoryPayload;
+    const { failures, summary } = bulkConfirmCheck(payload, "ADP register");
+    expect(Object.fromEntries(failures.map((failure) => [failure.key, failure.reasons]))).toEqual({
+      register: ["Doesn’t match the register gross pay (register $999.00, paychecks $1,000.00)"],
+      "invalid-total": ["Register net pay is not a valid amount"],
+      dates: ["Needs real dates in order: period start, period end, then pay date"],
+      "after-takeover": ["Pay date is not in 2026 before the takeover date"],
+      net: ["Ana Cruz: Net pay — Gross − taxes − deductions is $900.00; net differs by +$1.00"],
+    });
+    expect(summary).toEqual({ period_count: 6, paycheck_count: 6, gross_pay: "6000.00", net_pay: "5401.00" });
+    // Without a register name, every blank reference is listed too.
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, " ").failures).toEqual([
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Needs a register reference (enter the register name above to fill it)"] },
+    ]);
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register").failures).toEqual([]);
+    expect(bulkConfirmStatement(summary)).toBe("I confirm these 6 pay dates / 6 paychecks totaling $6,000.00 gross / $5,401.00 net match the previous provider’s paid registers.");
   });
 });

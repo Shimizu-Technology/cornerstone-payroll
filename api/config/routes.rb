@@ -175,6 +175,7 @@ Rails.application.routes.draw do
         resources :prior_provider_histories, only: %i[index create] do
           post :preview, on: :collection
           put :draft, on: :collection, action: :save_draft
+          post "draft/confirm_registers", on: :collection, action: :confirm_registers
           delete :draft, on: :collection, action: :discard_draft
           member do
             post :activate
