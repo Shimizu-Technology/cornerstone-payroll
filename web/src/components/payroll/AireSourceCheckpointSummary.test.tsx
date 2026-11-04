@@ -55,6 +55,7 @@ describe('AireSourceCheckpointSummary', () => {
     ['payment_pending', 'Time tracking hours are linked; payment evidence is pending.'],
     ['needs_attention', 'Time tracking payment needs attention. Review the payment history.'],
     ['paid', 'Time tracking hours are paid; delivery or settlement is recorded.'],
+    ['recorded_before_line_tracking', 'Time tracking hours are linked. This payroll was recorded before line-by-line payment tracking; its checks show payment.'],
   ] as const)('preserves committed %s payment meaning without offering import again', (state, label) => {
     const status = { ...linkedRecord.payable_line_status!, in_payroll: bucket(0), [state]: bucket(1) };
     render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" aireRecord={{ ...linkedRecord, payable_line_status: status }} calendar={{ ...calendar, finalized_batch: batch }} />);

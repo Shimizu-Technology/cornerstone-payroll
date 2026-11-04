@@ -49,4 +49,22 @@ describe('AirePayrollRecordsDialog', () => {
     await userEvent.click(closeButton);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('labels lines recorded before line-level payment tracking separately from attention', () => {
+    const earlier = { line_count: 134, total_hours: 599.06, regular_hours: 599.06, overtime_hours: 0 };
+    render(<AirePayrollRecordsDialog open onClose={vi.fn()} records={[{
+      ...record,
+      payable_line_status: {
+        ...record.payable_line_status!,
+        line_count: 134,
+        total_hours: 599.06,
+        in_payroll: { line_count: 0, total_hours: 0, regular_hours: 0, overtime_hours: 0 },
+        recorded_before_line_tracking: earlier,
+      },
+    }]} />);
+
+    expect(screen.getByText('Recorded earlier')).toBeTruthy();
+    expect(screen.getByText('599.06 hrs')).toBeTruthy();
+    expect(screen.getByText(/added before line-by-line payment tracking/)).toBeTruthy();
+  });
 });

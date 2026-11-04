@@ -706,6 +706,8 @@ export interface AirePayrollRecord {
     payment_pending: AirePayableLineStatusBucket;
     paid: AirePayableLineStatusBucket;
     needs_attention: AirePayableLineStatusBucket;
+    /** Lines from runs added before line-level payment receipts existed; payment is on that run's checks. */
+    recorded_before_line_tracking?: AirePayableLineStatusBucket;
     accounting_corrections?: AirePayableLineStatusBucket;
     held: { entry_count: number; total_hours: number };
     synchronization: {

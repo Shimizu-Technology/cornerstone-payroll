@@ -45,6 +45,34 @@ RSpec.describe TimeTracking::AllocationStatusSummary do
     expect(result.dig(:synchronization, :last_confirmed_at)).to be_within(1.second).of(30.minutes.ago)
   end
 
+  it "reports lines from runs recorded before line-level receipts separately from attention" do
+    earlier = allocation("earlier", 4)
+    allocation("unmatched", 2)
+    earlier_receipt(earlier, "committed", 1.day.ago)
+
+    result = described_class.call(import.reload)
+
+    expect(result[:recorded_before_line_tracking]).to include(line_count: 1, total_hours: 4.to_d)
+    expect(result[:needs_attention]).to include(line_count: 1, total_hours: 2.to_d)
+    expect(result[:in_payroll]).to include(line_count: 0)
+    expect(result[:paid]).to include(line_count: 0)
+  end
+
+  it "uses the latest earlier receipt so failed or voided legacy payments still need attention" do
+    voided = allocation("voided-earlier", 3)
+    reissued = allocation("reissued-earlier", 5)
+    earlier_receipt(voided, "committed", 3.days.ago)
+    earlier_receipt(voided, "payment_voided", 1.day.ago)
+    earlier_receipt(reissued, "payment_voided", 2.days.ago)
+    earlier_receipt(reissued, "payment_issued", 1.day.ago)
+
+    result = described_class.call(import.reload)
+
+    expect(result[:needs_attention]).to include(line_count: 1, total_hours: 3.to_d)
+    expect(result[:paid]).to include(line_count: 1, total_hours: 5.to_d)
+    expect(result[:recorded_before_line_tracking]).to include(line_count: 0)
+  end
+
   it "includes the status summary in the saved AIRE record for a pay period" do
     linked = allocation("linked", 8)
     acknowledgement(linked, "committed", 1.hour.ago)
@@ -72,6 +100,15 @@ RSpec.describe TimeTracking::AllocationStatusSummary do
       total_hours: hours,
       regular_hours: hours,
       overtime_hours: 0
+    )
+  end
+
+  def earlier_receipt(allocation, status, occurred_at)
+    AirePayrollEntryAcknowledgement.create!(
+      time_tracking_import: import, payroll_item: payroll_item,
+      source_event_key: "legacy:#{allocation.source_time_entry_id}:#{status}", event_id: SecureRandom.uuid,
+      source_time_entry_id: allocation.source_time_entry_id, source_user_id: "source-user-1",
+      status: status, occurred_at: occurred_at, delivered_at: occurred_at
     )
   end
 
