@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage } from "@/services/priorProviderHistory";
-import { defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
+import { amountLabels, type AmountKey, type HistoryCheck, type HistoryPage, type HistoryPayload, type HistoryPeriod } from "@/services/priorProviderHistory";
+import { DUPLICATE_KEY, MISSING_KEY, bulkConfirmCheck, bulkConfirmStatement, currentBusinessDate, defaultTakeover, emptyCheck, initialPayload, paycheckProblems, periodMatched, periodState, remainingWork, setPaycheckAmount, takeoverProblem } from "./historyModel";
 
 function row(overrides: Partial<Record<AmountKey, string>> = {}): HistoryCheck {
   const zero = Object.fromEntries(Object.keys(amountLabels).map((key) => [key, "0.00"])) as Record<AmountKey, string>;
@@ -75,5 +75,73 @@ describe("prior-provider history model", () => {
     expect(remainingWork(full, [], false).map((item) => item.text)).toContain(takeoverProblem(full));
     expect(takeoverProblem({ ...payload, takeover_on: "2026-12-10" })).toMatch(/after the last pay date/);
     expect(takeoverProblem({ ...payload, takeover_on: "2027-01-01" })).toBe("Choose a takeover date in 2026.");
+  });
+
+  it("offers confirm-all only when every pay date passes the same checks as an individual match", () => {
+    const period = (key: string, overrides: Partial<HistoryPeriod> = {}): HistoryPeriod => ({
+      key, start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "", register_totals: {}, paychecks: [row()], ...overrides,
+    });
+    const payload = {
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {},
+      periods: [
+        period("ok"),
+        period("register", { register_totals: { gross_pay: "999.00" } }),
+        period("invalid-total", { register_totals: { net_pay: "9.999" } }),
+        period("dates", { start_date: "2026-10-30" }),
+        period("after-takeover", { pay_date: "2026-11-02", end_date: "2026-11-01" }),
+        period("net", { paychecks: [row({ net_pay: "901.00" })] }),
+      ],
+    } as HistoryPayload;
+    const { failures, summary } = bulkConfirmCheck(payload, "ADP register");
+    expect(Object.fromEntries(failures.map((failure) => [failure.key, failure.reasons]))).toEqual({
+      register: ["Doesn’t match the register gross pay (register $999.00, paychecks $1,000.00)"],
+      "invalid-total": ["Register net pay is not a valid amount"],
+      dates: ["Needs real dates in order: period start, period end, then pay date"],
+      "after-takeover": ["Pay date is not in 2026 before the takeover date"],
+      net: ["Ana Cruz: Net pay — Gross − taxes − deductions is $900.00; net differs by +$1.00"],
+    });
+    expect(summary).toEqual({ period_count: 6, paycheck_count: 6, gross_pay: "6000.00", net_pay: "5401.00" });
+    // Without a register name, every blank reference is listed too.
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, " ").failures).toEqual([
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Needs a register reference (enter the register name above to fill it)"], index: 0 },
+    ]);
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register").failures).toEqual([]);
+    // The Guam business date and the server's reference limit apply locally too.
+    expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register", "2026-10-28").failures).toEqual([
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Pay date is not in the past"], index: 0 },
+    ]);
+    expect(bulkConfirmCheck({ ...payload, periods: [period("long", { source_reference: "p".repeat(501) })] }, "").failures[0].reasons)
+      .toEqual(["Register reference is longer than 500 characters"]);
+    expect(bulkConfirmStatement(summary)).toBe("I confirm these 6 pay dates / 6 paychecks totaling $6,000.00 gross / $5,401.00 net match the previous provider’s paid registers.");
+  });
+
+  it("refuses pay dates without a usable ID and uses the later of the server and live Guam dates", () => {
+    const base = { start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "Register p1", register_totals: {}, paychecks: [row()] };
+    const payload = {
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {},
+      periods: [{ ...base, key: "" }, { ...base, key: "a" }, { ...base, key: "a", pay_date: "2026-10-27" }],
+    } as unknown as HistoryPayload;
+    expect(bulkConfirmCheck(payload, "").failures.map((failure) => failure.reasons)).toEqual([[MISSING_KEY], [DUPLICATE_KEY], [DUPLICATE_KEY]]);
+    // 2026-10-28T14:30Z is already Oct 29 in Guam.
+    const afterGuamMidnight = new Date("2026-10-28T14:30:00Z");
+    expect(currentBusinessDate("2026-10-28", afterGuamMidnight)).toBe("2026-10-29");
+    expect(currentBusinessDate("2026-10-30", afterGuamMidnight)).toBe("2026-10-30");
+    expect(currentBusinessDate(undefined, afterGuamMidnight)).toBe("2026-10-29");
+  });
+
+  it("names the server's batch limits and records which row each failure came from", () => {
+    const base = { start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "Register p1", register_totals: {}, paychecks: [row()] };
+    const payload = (periods: unknown[]) => ({
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {}, periods,
+    }) as unknown as HistoryPayload;
+    const periods = (count: number) => Array.from({ length: count }, (_, index) => ({ ...base, key: `run-${index}` }));
+    expect(bulkConfirmCheck(payload(periods(60)), "").batchProblems).toEqual([]);
+    expect(bulkConfirmCheck(payload(periods(61)), "").batchProblems).toEqual(["This history has 61 pay dates; the limit is 60. Remove the extra pay dates before confirming."]);
+    const atLimit = Array.from({ length: 2000 }, () => row());
+    expect(bulkConfirmCheck(payload([{ ...base, key: "a", paychecks: atLimit }]), "").batchProblems).toEqual([]);
+    expect(bulkConfirmCheck(payload([{ ...base, key: "a", paychecks: [...atLimit, row()] }]), "").batchProblems)
+      .toEqual(["This history has 2001 paychecks; the limit is 2000. Remove the extra paychecks before confirming."]);
+    const failures = bulkConfirmCheck(payload([{ ...base, key: "ok" }, { ...base, key: "" }, { ...base, key: "" }]), "").failures;
+    expect(failures.map((failure) => failure.index)).toEqual([1, 2]);
   });
 });

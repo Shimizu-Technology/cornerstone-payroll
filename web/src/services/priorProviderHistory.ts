@@ -65,7 +65,30 @@ export type HistoryPayload = {
   same_employer_confirmed: boolean;
   periods: HistoryPeriod[];
   identities: Record<string, { source_name: string; ssn_last4: string }>;
+  /** Server-owned record of "confirm all" attestations; drafts can't change it. */
+  register_attestations?: RegisterAttestation[];
 };
+export type RegisterAttestation = {
+  actor_id: number;
+  actor_name: string;
+  attested_at: string;
+  statement: string;
+  period_count: number;
+  paycheck_count: number;
+  gross_pay: string;
+  net_pay: string;
+  period_keys: string[];
+};
+/** A pay date left for individual review, and why. */
+export type BulkConfirmFailure = {
+  key: string;
+  pay_date: string;
+  reasons: string[];
+  /** The pay date's position in this draft; set only by the page's own check. */
+  index?: number;
+};
+export type BulkConfirmSummary = { period_count: number; paycheck_count: number; gross_pay: string; net_pay: string };
+export const CONFIRM_ALL_ACK = "CONFIRM ALL PAY DATES MATCH THE PAID REGISTERS";
 export type HistoryOnboarding = {
   id: number;
   status: "converted" | "active" | "reversed";
@@ -123,6 +146,8 @@ export type HistoryOnboarding = {
   }>;
 };
 export type HistoryPage = {
+  /** Guam business date (YYYY-MM-DD); history pay dates must be before it. */
+  business_date?: string;
   company_id: number;
   enabled: boolean;
   can_manage: boolean;
@@ -154,6 +179,10 @@ export const priorProviderHistoryApi = {
   saveDraft: (payload: HistoryPayload, step: number, lock_version?: number) =>
     api.put<{ draft: HistoryDraft }>(`${path}/draft`, { payload, step, lock_version }),
   discardDraft: () => api.delete<void>(`${path}/draft`),
+  confirmRegisters: (payload: HistoryPayload, step: number, lock_version: number | undefined, register_name: string, confirmed: BulkConfirmSummary) =>
+    api.post<{ draft: HistoryDraft }>(`${path}/draft/confirm_registers`, {
+      payload, step, lock_version, register_name, confirmed, acknowledgement: CONFIRM_ALL_ACK,
+    }),
   preview: (payload: HistoryPayload) => api.post<HistoryPreview>(`${path}/preview`, { payload }),
   convert: (
     payload: HistoryPayload,

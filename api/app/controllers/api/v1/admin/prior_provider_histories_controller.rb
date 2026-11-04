@@ -10,6 +10,13 @@ module Api
         rescue_from PriorProviderHistory::Authorization::NotAuthorized do |error|
           render json: { error: error.message }, status: :forbidden
         end
+        # Declared after ArgumentError so the per-date reasons are returned.
+        rescue_from PriorProviderHistory::RegisterConfirmation::Refused do |error|
+          render json: { error: error.message, failures: error.failures }, status: :unprocessable_entity
+        end
+        rescue_from PriorProviderHistory::RegisterConfirmation::Conflict do |error|
+          render json: { error: error.message, draft: serialize_draft(error.draft) }, status: :conflict
+        end
 
         def index
           eligible = PriorProviderHistory::Discovery.candidates(current_company)
@@ -19,6 +26,8 @@ module Api
             end
           render json: {
             company_id: current_company_id,
+            # Guam business date: pay dates must be before it (the browser clock may differ).
+            business_date: PayrollBusinessClock.today.iso8601,
             enabled: current_company.historical_payroll_enabled?,
             can_manage: can_manage?,
             candidates: candidates,
@@ -50,7 +59,12 @@ module Api
               conflict = record
               next
             end
-            record.update!(payload: payload, step: step, updated_by: current_user)
+            # Register attestations are server-owned: a draft save can neither
+            # add, alter nor remove them.
+            attestations = record.persisted? ? record.payload[PriorProviderHistory::RegisterConfirmation::ATTESTATIONS_KEY] : nil
+            saved = payload.except(PriorProviderHistory::RegisterConfirmation::ATTESTATIONS_KEY)
+            saved[PriorProviderHistory::RegisterConfirmation::ATTESTATIONS_KEY] = attestations if attestations
+            record.update!(payload: saved, step: step, updated_by: current_user)
             record
           end
           if removed
@@ -60,6 +74,19 @@ module Api
             return render json: { error: "#{conflict.updated_by.name} saved newer changes. Reload to continue from their version.",
               draft: serialize_draft(conflict) }, status: :conflict
           end
+          render json: { draft: serialize_draft(draft) }
+        end
+
+        # Confirms every pay date against the paid registers at once, under one
+        # attestation. The service re-validates every date; nothing is trusted
+        # from the browser except the payload being confirmed.
+        def confirm_registers
+          draft = PriorProviderHistory::RegisterConfirmation.new(
+            company: current_company, actor: current_user, payload: payload,
+            lock_version: params[:lock_version].presence, step: params.fetch(:step, 2),
+            register_name: params[:register_name], acknowledgement: params[:acknowledgement],
+            expected: params[:confirmed].respond_to?(:permit) ? params[:confirmed].permit(:period_count, :paycheck_count, :gross_pay, :net_pay).to_h : {}
+          ).call
           render json: { draft: serialize_draft(draft) }
         end
 
