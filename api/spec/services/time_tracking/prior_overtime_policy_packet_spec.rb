@@ -112,6 +112,41 @@ RSpec.describe "Historical prior overtime policy packet" do
 
   before { install_policy! }
 
+  it "exports an unapproved blocker for a noncommitted baseline without fetching its batch" do
+    row.fetch("history_evidence").fetch("baseline_lines").sole.fetch("processing")["status"] = "draft"
+    expect(client).not_to receive(:payroll_batch)
+    packet = rollout(manifest).capture_review_packet!
+    expect(packet.fetch("reviewed_dispositions").sole.fetch("prior_overtime_policy")).to eq([])
+    expect(packet.fetch("rounding_review_blockers")).to include(a_hash_including("source_time_entry_id" => "41"))
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
+
+  it "records a failed authenticated batch read as a blocker and refuses coverage without repeated fetches in one pass" do
+    allow(client).to receive(:payroll_batch).and_raise(TimeTracking::Client::Error, "Synthetic unavailable export")
+    packet = rollout(manifest).capture_review_packet!
+    expect(client).to have_received(:payroll_batch).once
+    expect(packet.fetch("rounding_review_blockers")).to include(a_hash_including("batch_id" => payload.fetch("batch_id"),
+      "source_time_entry_id" => "41", "reason" => "Authenticated historical batch is unavailable or invalid; refresh before approving"))
+    expect(packet.fetch("reviewed_dispositions").sole.fetch("prior_overtime_policy")).to eq([])
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+    expect(CheckEvent.count).to eq(0)
+    expect(TimeTrackingManualAllocation.count).to eq(0)
+  end
+
+  it "exports an invalid checksum as blocking evidence instead of accepting an empty baseline or old receipt" do
+    payload.fetch("export")["checksum"] = "0" * 64
+    packet = rollout(manifest).capture_review_packet!
+    expect(packet.fetch("rounding_review_blockers")).to include(a_hash_including("batch_id" => payload.fetch("batch_id")))
+    record = packet.fetch("reviewed_dispositions").sole
+    record.merge!("disposition" => "historical_baseline", "reason" => "Reviewed frozen historical baseline accounting", "evidence" => "Retained synthetic register and frozen batch")
+    expect(rollout(packet).preview![:history_coverage_verified]).to be(false)
+    expect { rollout(packet).apply!(accepted_manifest_sha256: Digest::SHA256.hexdigest(JSON.generate(packet)), release_owner: "Synthetic reviewer") }
+      .to raise_error(TimeTracking::VerifiedHistoryRollout::Error, /without a verified disposition/)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
+
   it "verifies reviewed category attribution with every existing frozen-source fence" do
     TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
       historical_attribution: true, historical_employee_ids: [ employee.id ], history_through_on: run.end_date,
