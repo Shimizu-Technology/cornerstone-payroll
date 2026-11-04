@@ -162,6 +162,16 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
   });
 
+  it.each(['year=2025', 'status=committed', 'source=cornerstone'])('keeps the recorded-history notice but not its list text when filtered by %s', async (filter) => {
+    apiMocks.activeCompany = { id: 11 };
+    const empty = historyResponse([]);
+    apiMocks.payrollHistoryList.mockResolvedValue({ ...empty, meta: { ...empty.meta, prior_provider_history_recorded: { period_count: 20 } } });
+    render(<MemoryRouter initialEntries={[`/companies/11/pay-runs?${filter}`]}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('No pay periods match the current filters.')).toBeTruthy();
+    expect(screen.getByText(/^20 pay runs are recorded/)).toBeTruthy();
+    expect(screen.queryByText(/appear here after year-to-date/)).toBeNull();
+  });
+
   it('keeps the normal empty state when no history is waiting for YTD', async () => {
     apiMocks.activeCompany = { id: 11 };
     apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));

@@ -953,7 +953,9 @@ export function PayPeriods() {
                 : readOnlyWorkspace
                   ? 'This workspace has no pay periods to review.'
                   : recordedHistoryCount !== null
-                    ? 'Recorded previous-provider pay runs appear here after year-to-date is turned on.'
+                    ? (yearFilter || statusFilter || sourceFilter !== 'all'
+                      ? 'No pay periods match the current filters.'
+                      : 'Recorded previous-provider pay runs appear here after year-to-date is turned on.')
                     : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
