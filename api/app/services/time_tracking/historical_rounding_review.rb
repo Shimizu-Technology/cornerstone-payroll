@@ -155,11 +155,11 @@ module TimeTracking
     end
 
     def variance_key(row)
-      row.values_at("run_id", "employee_mapping_id", "batch_id", "category", "source_category", "earning_component")
+      row.values_at("run_id", "employee_mapping_id", "source_user_uuid", "employee_id", "batch_id", "category", "source_category", "earning_component")
     end
 
     def binding_key(row)
-      row.values_at("run_id", "employee_mapping_id", "batch_id", "category", "source_category")
+      row.values_at("run_id", "employee_mapping_id", "source_user_uuid", "employee_id", "batch_id", "category", "source_category")
     end
 
     def decimal(value, signed: false)
