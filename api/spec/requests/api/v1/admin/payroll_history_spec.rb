@@ -325,4 +325,24 @@ RSpec.describe "Api::V1::Admin::PayrollHistory", type: :request do
 
     expect(response).to have_http_status(:not_found)
   end
+
+  it "reports recorded prior-provider history only between Record and Turn on YTD" do
+    history_company, history_admin, _employees, _runs, payload = history_fixture(period_count: 2)
+    allow_any_instance_of(Api::V1::Admin::PayrollHistoryController).to receive(:current_user).and_return(history_admin)
+    allow_any_instance_of(Api::V1::Admin::PayrollHistoryController).to receive(:current_company_id).and_return(history_company.id)
+    get "/api/v1/admin/payroll_history"
+    expect(response.parsed_body["meta"]).not_to have_key("prior_provider_history_recorded")
+
+    onboarding = convert_history(history_company, history_admin, payload)
+    get "/api/v1/admin/payroll_history"
+    expect(response.parsed_body["data"]).to eq([])
+    expect(response.parsed_body.dig("meta", "prior_provider_history_recorded")).to eq("period_count" => 2)
+
+    activate_history(onboarding, history_admin)
+    get "/api/v1/admin/payroll_history"
+    expect(response.parsed_body["meta"]).not_to have_key("prior_provider_history_recorded")
+    expect(response.parsed_body["data"].map { |row| row["record_type"] }).to eq(%w[imported imported])
+  ensure
+    HistoricalImportSourceFile.where(company: history_company).find_each { |file| R2StorageService.new.delete(file.storage_key) } if history_company
+  end
 end

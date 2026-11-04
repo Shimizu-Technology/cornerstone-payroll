@@ -86,6 +86,8 @@ export function TimeTrackingSources({
 function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTrackingSourcesProps>) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
+  const [connectedPaused, setConnectedPaused] = useState(false);
+  const pausedTitle = connectedPaused ? 'Connected payroll is paused' : undefined;
   const [form, setForm] = useState<FormState>(() => normalizeForm());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -107,6 +109,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       const loadedSources = res.time_tracking_sources;
       const requestedSourceId = Number(new URLSearchParams(window.location.search).get('source_id'));
       setSources(loadedSources);
+      setConnectedPaused(res.connected_payroll?.enabled === false || loadedSources.some((source) => source.connected_payroll?.enabled === false));
       setForm(normalizeForm(
         loadedSources.find((source) => source.id === requestedSourceId) ||
         loadedSources.find((source) => source.active) ||
@@ -126,7 +129,8 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
   const accountLinkSupported = supportsSourceOperation(sources.find((source) => source.id === form.id), 'account_linking');
 
   useEffect(() => {
-    if (!form.id || !accountLinkSupported) {
+    // The account-link endpoint is unavailable while connected payroll is paused.
+    if (!form.id || !accountLinkSupported || connectedPaused) {
       setAccountLink(null);
       setAccountLinkLoading(false);
       return;
@@ -149,7 +153,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       });
 
     return () => { active = false; };
-  }, [form.id, accountLinkSupported, setError]);
+  }, [form.id, accountLinkSupported, connectedPaused, setError]);
 
   useEffect(() => {
     if (loading) return;
@@ -348,6 +352,12 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {success && <ActionFeedback tone="success" message={success} />}
+        {connectedPaused && (
+          <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Connected payroll is paused</p>
+            <p className="mt-1">You can enter manual hours and calculate payroll. Connecting, testing and saving time tracking sources are unavailable until it resumes.</p>
+          </div>
+        )}
 
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           <div className="flex gap-2">
@@ -370,7 +380,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
               </div>
               <div className="flex gap-2">
                 {editing && activeSource && activeSource.id === form.id && (
-                  <Button variant="outline" onClick={() => testConnection(activeSource)} disabled={saving || testingId === activeSource.id}>
+                  <Button variant="outline" onClick={() => testConnection(activeSource)} disabled={saving || testingId === activeSource.id || connectedPaused} title={pausedTitle}>
                     <Zap className="mr-2 h-4 w-4" /> {testingId === activeSource.id ? 'Testing...' : 'Test connection'}
                   </Button>
                 )}
@@ -508,13 +518,13 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                       <div className="mt-4 flex flex-wrap gap-2">
                         {!editing && <p className="text-xs text-neutral-600">Save this source first, then connect your time tracking administrator account.</p>}
                         {editing && !accountLink?.connected && (
-                          <Button type="button" onClick={() => void connectAireAccount()} disabled={saving || accountLinkBusy || accountLinkLoading}>
+                          <Button type="button" onClick={() => void connectAireAccount()} disabled={saving || accountLinkBusy || accountLinkLoading || connectedPaused} title={pausedTitle}>
                             <Link2 className="mr-2 h-4 w-4" />
                             {accountLinkBusy ? 'Opening time tracking…' : 'Connect my time tracking account'}
                           </Button>
                         )}
                         {editing && accountLink?.connected && (
-                          <Button type="button" variant="outline" onClick={() => void disconnectAireAccount()} disabled={saving || accountLinkBusy}>
+                          <Button type="button" variant="outline" onClick={() => void disconnectAireAccount()} disabled={saving || accountLinkBusy || connectedPaused} title={pausedTitle}>
                             <Unplug className="mr-2 h-4 w-4" />
                             {accountLinkBusy ? 'Disconnecting…' : 'Disconnect'}
                           </Button>
@@ -531,13 +541,13 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                   role="switch"
                   checked={form.active}
                   onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))}
-                  disabled={saving || loading}
+                  disabled={saving || loading || connectedPaused}
                   className="mt-1 h-4 w-4"
                 />
                 <span><span className="font-semibold text-neutral-900">Enable time tracking integration for this client</span><span className="mt-1 block text-neutral-600">Save the source to apply this setting. Disabling stops new imports and links; it keeps saved records and payment tracking for payroll already linked.</span></span>
               </label>
               <div className="flex justify-end lg:col-span-2">
-                <Button onClick={saveSource} disabled={saving || loading || !activeCompanyId}>
+                <Button onClick={saveSource} disabled={saving || loading || !activeCompanyId || connectedPaused} title={pausedTitle}>
                   <Save className="mr-2 h-4 w-4" />
                   {saving ? 'Saving...' : editing ? 'Save source' : 'Create source'}
                 </Button>
@@ -591,8 +601,8 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                     </div>
                     <div className="mt-4 grid gap-2 [&>button]:w-full">
                       <Button variant="outline" size="sm" onClick={() => editSource(source)} disabled={saving}>Edit</Button>
-                      {source.active && <Button variant="outline" size="sm" onClick={() => testConnection(source)} disabled={testingId === source.id}><Zap className="mr-1 h-3.5 w-3.5" />{testingId === source.id ? 'Testing' : 'Test connection'}</Button>}
-                      {source.active && <Button variant="outline" size="sm" onClick={() => deactivateSource(source)} disabled={saving}><Trash2 className="mr-1 h-3.5 w-3.5" />Deactivate</Button>}
+                      {source.active && <Button variant="outline" size="sm" onClick={() => testConnection(source)} disabled={testingId === source.id || connectedPaused} title={pausedTitle}><Zap className="mr-1 h-3.5 w-3.5" />{testingId === source.id ? 'Testing' : 'Test connection'}</Button>}
+                      {source.active && <Button variant="outline" size="sm" onClick={() => deactivateSource(source)} disabled={saving || connectedPaused} title={pausedTitle}><Trash2 className="mr-1 h-3.5 w-3.5" />Deactivate</Button>}
                     </div>
                   </div>
                 ))}
@@ -636,12 +646,12 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                           <div className="flex justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => editSource(source)} disabled={saving}>Edit</Button>
                             {source.active && (
-                              <Button variant="outline" size="sm" onClick={() => testConnection(source)} disabled={testingId === source.id}>
+                              <Button variant="outline" size="sm" onClick={() => testConnection(source)} disabled={testingId === source.id || connectedPaused} title={pausedTitle}>
                                 <Zap className="mr-1 h-3.5 w-3.5" /> {testingId === source.id ? 'Testing' : 'Test'}
                               </Button>
                             )}
                             {source.active && (
-                              <Button variant="outline" size="sm" onClick={() => deactivateSource(source)} disabled={saving}>
+                              <Button variant="outline" size="sm" onClick={() => deactivateSource(source)} disabled={saving || connectedPaused} title={pausedTitle}>
                                 <Trash2 className="mr-1 h-3.5 w-3.5" /> Deactivate
                               </Button>
                             )}
