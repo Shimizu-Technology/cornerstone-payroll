@@ -167,6 +167,21 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return true;
   }, [activeCompanyId, companies, location.key]);
 
+  // A switch is pending only until its redirect leaves that history entry.
+  // Left set, returning with Back or Forward would look like a pending switch
+  // and the route would wait forever instead of opening the client in its URL.
+  useEffect(() => {
+    setScopeChangeLocationKey((pendingKey) => (pendingKey === location.key ? pendingKey : null));
+  }, [location.key]);
+
+  // Back can also land before the redirect commits. The location then never
+  // changes, so the effect above can't see it.
+  useEffect(() => {
+    const clearPendingSwitch = () => setScopeChangeLocationKey(null);
+    window.addEventListener('popstate', clearPendingSwitch);
+    return () => window.removeEventListener('popstate', clearPendingSwitch);
+  }, []);
+
   const activeCompany = companies.find(c => c.id === activeCompanyId) || null;
   const activeOrganizationId = activeCompany?.organization_id ?? user?.organization_id ?? null;
   const activeOrganizationName = activeCompany?.organization_name || user?.organization_name || null;

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { createMemoryRouter, RouterProvider, useNavigate, useLocation, Routes, Route } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -121,4 +121,31 @@ it.each(['client', 'organization'])('preserves edits on Stay and retains the acc
   expect(screen.getByTestId('scope').textContent).toBe(scope === 'client' ? '2' : '3');
   expect(mocks.switchCompany).toHaveBeenCalledExactlyOnceWith(scope === 'client' ? 2 : 3, scope === 'client' ? 1 : 2);
   expect(confirm).toHaveBeenCalledTimes(2);
+});
+
+it('opens the client in the URL on Back and Forward after a switch, without getting stuck', async () => {
+  const router = createMemoryRouter([{ path: '*', element: <CompanyProvider><ScopedApplication /></CompanyProvider> }], { initialEntries: ['/companies/1/pay-runs'] });
+  render(<RouterProvider router={router} />);
+  await screen.findByText('Pay runs');
+  const expectOpen = async (companyId: string) => {
+    await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(companyId));
+    await screen.findByText('Pay runs');
+    expect(router.state.location.pathname).toBe(`/companies/${companyId}/pay-runs`);
+    expect(screen.queryByText('Opening client workspace')).toBeNull();
+  };
+  fireEvent.click(screen.getByRole('button', { name: /First/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Second' }));
+  await expectOpen('2');
+  mocks.switchCompany.mockClear();
+  await act(async () => { await router.navigate(-1); });
+  await expectOpen('1');
+  expect(mocks.switchCompany).toHaveBeenLastCalledWith(1, 1);
+  await act(async () => { await router.navigate(1); });
+  await expectOpen('2');
+  expect(mocks.switchCompany).toHaveBeenLastCalledWith(2, 1);
+  // Returning to the same entries again must behave the same way.
+  await act(async () => { await router.navigate(-1); });
+  await expectOpen('1');
+  await act(async () => { await router.navigate(1); });
+  await expectOpen('2');
 });
