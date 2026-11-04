@@ -71,6 +71,21 @@ RSpec.describe "Authenticated accounting receipt delivery", type: :request do
     expect(row[:correction_dispositions].first[:source_receipt]).to include(status: "error", confirmed_at: nil)
   end
 
+  it "loads applied-import collections separately instead of joining them into one fan-out query" do
+    next_import.update!(status: "applied")
+    queries = []
+    callback = ->(*, payload) { queries << payload[:sql] unless payload[:name] == "SCHEMA" }
+    row = ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+      PayPeriodTimeTrackingSummary.call(next_period)[:linked_source_records].first
+    end
+
+    expect(row).to include(id: next_import.id)
+    fan_out = queries.select do |sql|
+      sql.match?(/JOIN\s+"?time_tracking_entry_allocations"?/i) && sql.match?(/JOIN\s+"?aire_payroll_entry_acknowledgements"?/i)
+    end
+    expect(fan_out).to be_empty
+  end
+
   it "requires authentication and rejects missing, wrong-import and foreign-company scopes" do
     get "/api/v1/admin/pay_periods/#{next_period.id}/time_tracking_correction_delivery", params: delivery_params
     expect(response).to have_http_status(:unauthorized)
