@@ -1093,6 +1093,64 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       expect(import.time_tracking_entry_allocations.map(&:attributes)).to eq(frozen_allocations)
     end
 
+    it "combines current categories that resolve to one rate into one earning line and calculates them" do
+      company, period, source = setup_records
+      actor = create(:user, company: company, role: "admin")
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
+      create(:tax_table, tax_year: 2026)
+      pilot = create(:employee, company: company, email: "solo-pilot@example.com", pay_rate: 30)
+      flight = create(:employee_wage_rate, employee: pilot, label: "Flight Hours", rate: 30, is_primary: true)
+      ground = create(:employee_wage_rate, employee: pilot, label: "Regular", rate: 15, is_primary: false)
+      TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "solo",
+        earning_label: "Flight Hours", import_enabled: true, reviewed_by: actor,
+        reason: "Solo hours are paid at the Flight Hours rate", evidence: "Leon decision November 4 2026")
+      line = lambda do |id, key, date, category, hours, kind: "current", week: "2026-08-16"|
+        { "source_time_entry_id" => id, "line_key" => key, "source_kind" => kind, "original_work_date" => date,
+          "original_week_start" => week, "source_category_id" => category["id"], "category" => category,
+          "total_hours" => hours, "regular_hours" => hours, "overtime_hours" => 0.0 }
+      end
+      flight_category = { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" }
+      solo_category = { "id" => "solo", "key" => "solo", "name" => "Solo" }
+      ground_category = { "id" => "ground", "key" => "regular", "name" => "Regular" }
+      adjustments = [
+        line.call("201", "flight:1", "2026-08-18", flight_category, 6.0),
+        line.call("202", "flight:2", "2026-08-27", flight_category, 2.0, week: "2026-08-23"),
+        line.call("203", "solo:1", "2026-08-21", solo_category, 3.5),
+        line.call("204", "ground:1", "2026-08-22", ground_category, 4.0),
+        line.call("188", "flight:0", "2026-08-12", flight_category, 1.5, kind: "carryover", week: "2026-08-09")
+      ]
+      confirm_mapping!(company: company, source: source, employee: pilot)
+      import = preview_import(pay_period: period, source: source, payload: payload_for(pay_period: period, employee: pilot, adjustments: adjustments))
+      result = TimeTracking::ApplyImportService.new(import: import, mappings: [
+        { source_user_id: "aire-user-1", employee_id: pilot.id, include: true, wage_rate_mappings: [
+          { source_category_id: "ground", source_category_key: "regular", source_category_name: "Regular", source_kind: "current", employee_wage_rate_id: ground.id }
+        ] }
+      ], applied_by: actor).call
+      expect(result[:errors]).to be_empty
+
+      entries = period.payroll_items.find_by!(employee: pilot).wage_rate_hours
+      expect(entries).to contain_exactly(
+        include("employee_wage_rate_id" => flight.id, "regular_hours" => 11.5, "label" => "Flight Hours · AIRE current period · $30.00/hr"),
+        include("employee_wage_rate_id" => flight.id, "regular_hours" => 1.5, "label" => /AIRE carryover from Aug 12, 2026/),
+        include("employee_wage_rate_id" => ground.id, "regular_hours" => 4.0, "label" => /Regular · AIRE current period/)
+      )
+      current_flight = entries.find { |entry| entry["label"].include?("Flight Hours · AIRE current period") }
+      expect(current_flight["source_lines"].map { |source_line| source_line["source_time_entry_id"] }).to contain_exactly("201", "202", "203")
+
+      post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", params: { employee_ids: [ pilot.id ] }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      item = period.payroll_items.find_by!(employee: pilot)
+      expect(item.gross_pay).to eq(((11.5 + 1.5) * 30 + 4 * 15).to_d)
+      expect(item.payroll_item_earnings.where(category: "regular").pluck(:label, :amount)).to contain_exactly(
+        [ "Flight Hours · AIRE current period · $30.00/hr", 345.to_d ],
+        [ a_string_matching(/AIRE carryover from Aug 12, 2026/), 45.to_d ],
+        [ a_string_matching(/Regular · AIRE current period/), 60.to_d ]
+      )
+    end
+
     it "uses the same salary amount in an ordinary manual run" do
       _company, period, _hourly, salary = prepare_regular_roster(import_hours: false)
       calculate_roster(period)
