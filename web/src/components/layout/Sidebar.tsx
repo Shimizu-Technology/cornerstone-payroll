@@ -94,6 +94,7 @@ const clientSettingsNavigation: NavItem[] = [
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time Tracking Sources', href: '/time-tracking-sources', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Review AIRE history', href: '/app/aire-history-approval', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const adminNavigation: NavItem[] = [
@@ -258,6 +259,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/check-settings') return canUsePrinterProfiles;
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (item.href === '/time-tracking-sources') return isAdmin;
+    if (item.href === '/app/aire-history-approval') return (isAdmin || isAccountant) && hasCapability('payroll_operations');
     if (!canManageClientConfiguration) return false;
     return true;
   });

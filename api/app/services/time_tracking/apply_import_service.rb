@@ -211,6 +211,13 @@ module TimeTracking
 
     def validate_preview_provenance!
       payload = @import.processed_payload
+      if @source.source_type == "aire_services"
+        policies = TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)
+        actual = CanonicalPayload.checksum(policies)
+        if (payload["category_configuration_checksum"].present? || policies.any?) && payload["category_configuration_checksum"] != actual
+          raise ArgumentError, "AIRE category configuration changed; refresh this time import preview before applying it"
+        end
+      end
       if finalized_batch?
         validate_finalized_batch_provenance!(payload)
       elsif payload["validation_version"] != "time_summary_v1" || payload["schema_version"] != PayloadValidator::CONTRACT_VERSION
@@ -589,6 +596,13 @@ module TimeTracking
     end
 
     def wage_rate_for_category(category, active_rates, override_by_category_key)
+      policy = @source.source_type == "aire_services" && TimeTrackingCategoryMapping.find_by(time_tracking_source: @source,
+        source_category_key: TimeTrackingCategoryMapping.category_key(category), import_enabled: true)
+      if policy
+        rate = policy.matching_rate(active_rates)
+        raise ArgumentError, "#{policy.source_category_key} requires this employee's active #{policy.required_rate_description} rate; configure that rate before importing" unless rate
+        return rate
+      end
       override_rate_id = category_override_keys(category).filter_map { |key| override_by_category_key[key] }.first
       return active_rates.find { |rate| rate.id == override_rate_id } if override_rate_id.present?
 

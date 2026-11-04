@@ -54,7 +54,7 @@ Keep the complete fresh variance table privately for Chels's sign-off, including
 
 2. Reconcile all preceding manual runs and run AIRE's paid-history preview/apply/replay while paused. Include any additional manually processed period using its real snapshot/commit evidence. Preserve genuinely owed 1804 and existing evidence holds. The release-day runner retains its original four known runs and accepts contiguous additional complete manual periods up to an explicit `rollout_starts_on`. Each added period requires a unique external run ID, real snapshot/commit timestamps and a `manual_run_evidence` reference of at least 20 characters. Separately list any `pending_overtime_entry_ids` with a reviewed `pending_overtime_note`; the runner requires exact frozen regular-plus-pending-OT accounting and leaves the general unpaid-hours guard intact. Review whole pending-OT rows as `pending_overtime`, and mixed represented-REG/pending-OT rows as `historical_baseline_pending_overtime`. Neither classification approves or pays overtime. It refuses gaps, duplicate runs or an uncovered interval before the rollout.
 3. Enable and restart both fleets in an **unpublished maintenance phase**. Verify both enabled statuses and exact builds, with no connected calendar published. Keep Payroll operators frozen during maintenance. Paused APIs cannot perform the required remote pin/link/map/history reads.
-4. Pin the correct AIRE installation, link the authorized reviewer account and verify person mappings and earning choices. Missing Solo treatment remains a Chels/Mark decision.
+4. Pin the correct AIRE installation, link the authorized reviewer account and verify person mappings and run the audited `aire_rollout:configure_categories` setup described below. Leon’s November4 decision configures Solo as Flight Hours; missing employee rates still block import.
 5. Capture an unapproved packet from Payroll `api/` into a private directory:
 
    ```sh
@@ -89,3 +89,40 @@ Evidence covers all effective frozen current lines in the relevant workweeks thr
 The retained settings and available setting-audit digest are recorded. With no versioned threshold history, the approved8/40 policy is explicitly recorded as the owner-reviewed fallback; contrary historical settings or retained threshold audits require individual review. Payroll verifies the authenticated evidence, original immutable payload/lines, permanent employee mapping and the company-owned committed run. It retains both frozen and recomputed splits. Employee total hours must tie exactly; REG and OT are compared separately, with each nonzero difference within±0.05 requiring its own signed acknowledgement. No netting between employees, categories or earning components is permitted. Genuine component/quantity differences remain blocked.
 
 This is accounting coverage only. It creates no payment event, allocation, time approval or delivery assertion and performs no publication or activation.
+
+### November 4 reviewed category decisions
+
+Company 2 activation uses an explicit, audited category configuration. Before
+history review or publication, run `aire_rollout:configure_categories` with
+`SOURCE_ID`, `ACTOR_ID`, `REASON`, `EVIDENCE`, and the reviewed
+`MAINTENANCE_HISTORY_EMPLOYEE_ID`, `OTHER_HISTORY_EMPLOYEE_ID`,
+`OTHER_UNCATEGORIZED_RUN_ID`. Resolve and confirm the client employee IDs
+against the actual Payroll directory for the approved historical owners; the
+run must be committed and company-owned. The actor must have the same
+client payroll-operations access as history approval. Record Leon's November 4
+approval in the evidence; the task refuses published or history-approved sources.
+Other companies receive no defaults.
+
+The setup maps Solo to each employee's active **Flight Hours** rate. An absent,
+inactive or ambiguous Flight Hours rate blocks import with a specific message;
+no substitute rate is chosen. Aircraft Maintenance uses the employee’s active Maintenance component when present,
+otherwise the existing Regular component. Both labels are stored explicitly in
+company2 configuration. Missing or ambiguous required rates block import; no
+other company receives this fallback. The selected component and rate are shown
+in the import review and the history summary’s configuration section.
+
+For retained manual history only, `accountant_attributed_paid_category` records
+source category, source hours, actual committed paid component and attributed
+hours. The explicit configuration limits Anthony's Aircraft Maintenance and
+uncategorized history, Isiah's Other history and his specifically approved run61 uncategorized2.50h (retaining NULL), pilots' uncategorized history and
+the approved Solo mapping. Every employee/run total must tie within 0.05 h;
+all paid components must exist and reconcile to the committed company-owned run.
+Known categories consume their named components; reviewed uncategorized hours
+are displayed against the remaining committed components. Every bounded rounding
+amount is visible. No cross-person/run netting, source reassignment, time approval,
+allocation, payment event or check-delivery assertion occurs.
+
+The one-summary page groups these rows under **Historical categories as paid**.
+The single attestation records the accountant's identity, approval time, evidence
+and digest. Source, register or configuration drift refuses the entire approval.
+The connection remains unpublished until the separate operator publication step.

@@ -19,10 +19,12 @@ module TimeTracking
     }.freeze
     SOURCE_FIELDS = %w[version work_date hours source_user_uuid employee category state history_evidence].freeze
 
-    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [])
+    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [], employee_mappings: nil, batch_cache: nil)
       @source, @company, @actor, @client = source, company, actor, client
       @batches = {}
       @rounding_acknowledgements, @component_bindings = rounding_acknowledgements, component_bindings
+      @employee_mappings = employee_mappings
+      @batch_cache = batch_cache
     end
 
     def refresh_runs!(run_ids: nil)
@@ -31,7 +33,7 @@ module TimeTracking
       runs = @company.pay_periods.where(status: "committed")
       runs = runs.where(id: run_ids) unless run_ids.nil?
       @runs = runs.index_by { |run| run.id.to_s }
-      @employees = @source.time_tracking_employee_mappings.where(company: @company).index_by(&:source_user_uuid)
+      @employees = (@employee_mappings || @source.time_tracking_employee_mappings.where(company: @company)).index_by(&:source_user_uuid)
       @run_items = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
         .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
       @run_checksums = @run_items.to_h do |id, items|
@@ -182,7 +184,8 @@ module TimeTracking
       when "historical_baseline"
         unallocated && !pending && baseline_verified?(baseline, current)
       when "historical_baseline_pending_overtime"
-        unallocated && unheld && overtime_hold_verified?(current)
+        attributed = accountant_category_attributions(current)
+        unallocated && unheld && baseline.any? && (attributed.empty? || disposition["attributed_categories"] == attributed) && overtime_hold_verified?(current)
       when "legacy_frozen_batch_baseline"
         unallocated && baseline_verified?(baseline, current, legacy_frozen: true)
       when "pending_overtime"
@@ -201,7 +204,7 @@ module TimeTracking
         end
         represented
       when "owed"
-        unallocated && baseline.empty? && decimal(current.fetch("hours")).positive? &&
+        unallocated && evidence["pending_overtime"].nil? && baseline.empty? && decimal(current.fetch("hours")).positive? &&
           current.dig("state", "status") == "completed" && current.dig("state", "approval_status") == "approved" &&
           current.dig("lifecycle", "status") == "ready_for_cutoff" &&
           evidence.fetch("active_cases").one? && evidence.fetch("active_cases").all? do |record|

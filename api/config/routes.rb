@@ -280,6 +280,11 @@ Rails.application.routes.draw do
 
         get "time_tracking_sources/:source_id/health", to: "time_tracking_source_health#show"
         resources :time_tracking_sources, except: [ :new, :edit ] do
+          resource :history_approval, only: [], controller: :aire_history_approvals do
+            post :preview
+            post :approve
+            get "operations/:operation_id", action: :operation
+          end
           member do
             post :test_connection
             put :delegation, action: :save_delegation

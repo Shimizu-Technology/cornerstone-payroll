@@ -57,21 +57,6 @@ namespace :aire_rollout do
 
   desc "Fail closed if the verified AIRE history has not been reconciled"
   task ensure_complete: :environment do
-    expected_sha256 = ENV.fetch("AIRE_ROLLOUT_MANIFEST_SHA256").downcase
-    rollout = load_verified_rollout
-    unless rollout.preview!.fetch(:history_coverage_verified) == true
-      raise "Fresh AIRE historical coverage is incomplete; the prior receipt cannot authorize completion"
-    end
-    manifest = TimeTracking::VerifiedHistoryRollout.load_file!(
-      path: ENV.fetch("AIRE_ROLLOUT_MANIFEST_PATH"), expected_sha256: expected_sha256
-    )
-    source = TimeTrackingSource.find(manifest.fetch("source_id"))
-    unless source.historical_reconciliation_complete? && AireVerifiedHistoryRolloutReceipt.exists?(
-      coverage_verified: true, source_instance_id: source.expected_source_instance_id,
-      company_id: manifest.fetch("company_id"), time_tracking_source_id: manifest.fetch("source_id"),
-      manifest_sha256: expected_sha256
-    )
-      raise "Verified AIRE history has not been applied; provide the approved private manifest before deployment"
-    end
+    load_verified_rollout.ensure_complete!
   end
 end
