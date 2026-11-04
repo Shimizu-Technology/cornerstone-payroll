@@ -45,6 +45,23 @@ RSpec.describe TimeTracking::AllocationStatusSummary do
     expect(result.dig(:synchronization, :last_confirmed_at)).to be_within(1.second).of(30.minutes.ago)
   end
 
+  it "reports lines from runs recorded before line-level receipts separately from attention" do
+    earlier = allocation("earlier", 4)
+    allocation("unmatched", 2)
+    AirePayrollEntryAcknowledgement.create!(
+      time_tracking_import: import, payroll_item: payroll_item, source_event_key: "legacy:#{earlier.source_time_entry_id}",
+      event_id: SecureRandom.uuid, source_time_entry_id: earlier.source_time_entry_id, source_user_id: "source-user-1",
+      status: "committed", occurred_at: 1.day.ago, delivered_at: 1.day.ago
+    )
+
+    result = described_class.call(import.reload)
+
+    expect(result[:recorded_before_line_tracking]).to include(line_count: 1, total_hours: 4.to_d)
+    expect(result[:needs_attention]).to include(line_count: 1, total_hours: 2.to_d)
+    expect(result[:in_payroll]).to include(line_count: 0)
+    expect(result[:paid]).to include(line_count: 0)
+  end
+
   it "includes the status summary in the saved AIRE record for a pay period" do
     linked = allocation("linked", 8)
     acknowledgement(linked, "committed", 1.hour.ago)

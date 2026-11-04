@@ -237,3 +237,21 @@ it('preserves payment attention guidance when a linked batch also contains corre
   expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
   expect(screen.getByText(/Failed and voided payments require an explicit follow-up/)).toBeTruthy();
 });
+
+it('shows a committed payroll recorded before line-level payment tracking as recorded, not needing attention', () => {
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed"
+    aireRecord={linkedRecord({ in_payroll: bucket(0, 0), recorded_before_line_tracking: bucket(2, 72.5) })} onReview={vi.fn()} />);
+  expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
+  expect(screen.getByText('Recorded')).toBeTruthy();
+  expect(screen.getByText('Recorded earlier')).toBeTruthy();
+  expect(screen.getByText(/Its checks show who was paid and when/)).toBeTruthy();
+  expect(screen.queryByText('Needs attention')).toBeNull();
+  expect(screen.queryByText('time tracking payment needs attention')).toBeNull();
+});
+
+it('keeps attention when a run recorded earlier also has lines with no receipt', () => {
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed"
+    aireRecord={linkedRecord({ in_payroll: bucket(0, 0), recorded_before_line_tracking: bucket(1, 70), needs_attention: bucket(1, 2.5) })} onReview={vi.fn()} />);
+  expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+  expect(screen.queryByText('Time tracking hours were recorded with this payroll')).toBeNull();
+});
