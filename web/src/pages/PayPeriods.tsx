@@ -1,4 +1,4 @@
-import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
+import { PriorProviderHistoryNotice, PriorProviderHistoryRecordedNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
 import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -178,6 +178,7 @@ export function PayPeriods() {
   const [totalPages, setTotalPages] = useState(0);
   const [years, setYears] = useState<number[]>([]);
   const [historyAvailable, setHistoryAvailable] = useState(false);
+  const [recordedHistoryCount, setRecordedHistoryCount] = useState<number | null>(null);
   const [goLiveGate, setGoLiveGate] = useState<PayrollGoLiveGateState | null>(null);
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
@@ -330,6 +331,7 @@ export function PayPeriods() {
       setYears(response.meta.years);
       setGoLiveGate(response.meta.payroll_go_live ?? null);
       setHistoryAvailable(response.meta.prior_provider_history_available ?? false);
+      setRecordedHistoryCount(response.meta.prior_provider_history_recorded?.period_count ?? null);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
@@ -341,6 +343,7 @@ export function PayPeriods() {
         setYears([]);
         setGoLiveGate(null);
         setHistoryAvailable(false);
+        setRecordedHistoryCount(null);
       }
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -804,7 +807,7 @@ export function PayPeriods() {
         title="Pay Periods"
         description="Choose a pay period to review its employees, totals and next step. Imported prior-provider history is read-only."
         actions={
-          readOnlyWorkspace || trainingReplayWorkspace ? undefined : (
+          readOnlyWorkspace || trainingReplayWorkspace || recordedHistoryCount !== null ? undefined : (
             <Button onClick={openCreateModal}>
               {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
             </Button>
@@ -814,7 +817,8 @@ export function PayPeriods() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         <TaxYearWarning companyId={activeCompanyId} />
-        {historyAvailable && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryNotice companyId={activeCompanyId} />}
+        {historyAvailable && recordedHistoryCount === null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryNotice companyId={activeCompanyId} />}
+        {recordedHistoryCount !== null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryRecordedNotice companyId={activeCompanyId} periodCount={recordedHistoryCount} />}
         {trainingReplayWorkspace && (
           <div className="mb-4">
             <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
@@ -948,7 +952,9 @@ export function PayPeriods() {
                 ? 'No pay periods match the current filters.'
                 : readOnlyWorkspace
                   ? 'This workspace has no pay periods to review.'
-                  : 'No pay periods found. Create your first pay period to get started.'}
+                  : recordedHistoryCount !== null
+                    ? 'Recorded previous-provider pay runs appear here after year-to-date is turned on.'
+                    : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
             <>

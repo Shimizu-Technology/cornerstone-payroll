@@ -1280,7 +1280,7 @@ export interface TimeTrackingImportResultError {
 }
 
 export const timeTrackingSourcesApi = {
-  list: () => api.get<{ time_tracking_sources: TimeTrackingSource[] }>('/admin/time_tracking_sources'),
+  list: () => api.get<{ time_tracking_sources: TimeTrackingSource[]; connected_payroll?: TimeTrackingSource['connected_payroll'] }>('/admin/time_tracking_sources'),
   create: (data: TimeTrackingSourceCreatePayload) =>
     api.post<{ time_tracking_source: TimeTrackingSource }>('/admin/time_tracking_sources', { time_tracking_source: data }),
   update: (id: number, data: TimeTrackingSourceUpdatePayload) =>
@@ -5880,8 +5880,8 @@ export const payrollHistoryApi = {
   list: (
     params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
