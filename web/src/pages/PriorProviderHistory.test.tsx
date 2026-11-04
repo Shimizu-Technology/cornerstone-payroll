@@ -572,6 +572,41 @@ describe("Prior-provider history", () => {
       expect(screen.getByText("Someone saved newer changes. Load the latest version before confirming all.")).toBeTruthy();
     });
 
+    it("blocks Confirm all and names the limit when the history has too many pay dates", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage((periods) => {
+        const extras = Array.from({ length: 59 }, (_, index) => ({ ...periods[0], key: `extra-${index}`, run_id: 100 + index }));
+        periods.push(...extras);
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(screen.getByText("This history has 61 pay dates; the limit is 60. Remove the extra pay dates before confirming.")).toBeTruthy();
+      expect(screen.queryByText(/need individual review/)).toBeNull();
+      expect(confirmAllButton().disabled).toBe(true);
+    });
+
+    it("opens the failed pay date itself when two pay dates share a date and ID", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage((periods) => {
+        periods[0].pay_date = "2026-10-28";
+        periods[1].key = periods[0].key;
+        periods[1].paychecks[0].net_pay = "1200.00";
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      const panel = screen.getByRole("region", { name: /Already checked every pay date/ });
+      const links = within(panel).getAllByRole("button", { name: "Paid Oct 28, 2026" });
+      expect(links.length).toBe(2);
+      const rows = () => screen.getAllByRole("button", { expanded: true }).concat(screen.getAllByRole("button", { expanded: false }))
+        .filter((button) => button.textContent?.includes("Paid Oct 28, 2026"));
+      const expandedPeriods = () => rows().filter((button) => button.getAttribute("aria-expanded") === "true");
+      fireEvent.click(links[1]);
+      expect(expandedPeriods().length).toBe(1);
+      // The second row (Oct 8 – Oct 28) is the one that opened, not the first (Sep 24 – Oct 7).
+      expect(expandedPeriods()[0].textContent).toContain("Oct 8, 2026");
+      fireEvent.click(links[0]);
+      expect(expandedPeriods()[0].textContent).toContain("Sep 24, 2026");
+    });
+
     it("keeps Confirm all disabled while an edit is waiting to autosave", async () => {
       vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
       open();
