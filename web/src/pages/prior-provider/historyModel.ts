@@ -1,7 +1,11 @@
 import Decimal from "decimal.js";
+import { guamBusinessDate } from "@/lib/payrollBusinessDate";
 import {
   amountLabels,
+  breakdownLabels,
   registerLabels,
+  type BulkConfirmFailure,
+  type BulkConfirmSummary,
   type AmountKey,
   type BreakdownKey,
   type HistoryCheck,
@@ -313,4 +317,101 @@ export function remainingWork(payload: HistoryPayload, employees: HistoryEmploye
   if (!filesAttached) items.push({ step: 3, text: "Attach the provider’s paid register files" });
   if (!payload.complete_history_confirmed || !payload.same_employer_confirmed) items.push({ step: 3, text: "Tick both statements before recording" });
   return items;
+}
+
+/** Fills a blank register reference the same way as "Fill blank references". */
+export function filledReference(registerName: string, payDate: string): string {
+  return `${registerName.trim()} — paid ${payDate || "date"}`;
+}
+
+export function withFilledReferences(payload: HistoryPayload, registerName: string): HistoryPayload {
+  if (!registerName.trim()) return payload;
+  return {
+    ...payload,
+    periods: payload.periods.map((period) => (period.source_reference.trim() ? period : { ...period, source_reference: filledReference(registerName, period.pay_date) })),
+  };
+}
+
+const FIELD_LABELS: Record<string, string> = { ...amountLabels, ...breakdownLabels };
+
+/** Why a pay date can't be confirmed in bulk; the server applies the same rules. */
+export const MISSING_KEY = "Is missing its pay date ID; remove this pay date and add it again";
+export const DUPLICATE_KEY = "Shares its pay date ID with another pay date; remove one and add it again";
+
+/** The later of the server's Guam business date and the Guam date now, so a page left open past midnight isn't stale. */
+export function currentBusinessDate(serverDate?: string, now = new Date()): string {
+  const live = guamBusinessDate(now);
+  return serverDate && serverDate > live ? serverDate : live;
+}
+
+export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryPayload, "tax_year" | "takeover_on">, businessDate?: string): string[] {
+  const reasons: string[] = [];
+  const key = typeof period.key === "string" ? period.key.trim() : "";
+  if (!key || key.length > 200) reasons.push(MISSING_KEY);
+  if (!periodDatesValid(period)) reasons.push("Needs real dates in order: period start, period end, then pay date");
+  else {
+    if (businessDate && period.pay_date >= businessDate) reasons.push("Pay date is not in the past");
+    if (Number(period.pay_date.slice(0, 4)) !== payload.tax_year || period.pay_date >= payload.takeover_on) {
+      reasons.push(`Pay date is not in ${payload.tax_year} before the takeover date`);
+    }
+  }
+  if (!period.source_reference.trim()) reasons.push("Needs a register reference (enter the register name above to fill it)");
+  if (period.source_reference.length > MAX_REFERENCE) reasons.push(`Register reference is longer than ${MAX_REFERENCE} characters`);
+  if (!period.paychecks.length) reasons.push("Has no paychecks");
+  period.paychecks.forEach((row) => {
+    Object.entries(paycheckProblems(row)).forEach(([key, message]) => {
+      reasons.push(`${row.source_employee_name}: ${FIELD_LABELS[key] ?? key} — ${message}`);
+    });
+  });
+  if (reasons.length) return reasons;
+  const differences = registerDifferences(period);
+  REGISTER_KEYS.forEach((key) => {
+    const entered = period.register_totals[key];
+    if (entered === undefined || entered === "") return;
+    if (!registerTotalValid(period, key)) reasons.push(`Register ${registerLabels[key].toLowerCase()} is not a valid amount`);
+    else if (differences[key]) reasons.push(`Doesn’t match the register ${registerLabels[key].toLowerCase()} (register ${money(entered)}, paychecks ${money(periodTotals(period)[key])})`);
+  });
+  return reasons;
+}
+
+export type BulkConfirmCheck = { failures: BulkConfirmFailure[]; batchProblems: string[]; summary: BulkConfirmSummary };
+
+/** Server limits for a register reference and the register name. */
+export const MAX_REFERENCE = 500;
+export const MAX_REGISTER_NAME = 200;
+/** Server limits for one history (SourceAdapter::MAX_RUNS and MAX_PAYCHECKS). */
+export const MAX_PERIODS = 60;
+export const MAX_PAYCHECKS = 2000;
+
+/** Every listed pay date must pass before all can be confirmed at once. */
+export function bulkConfirmCheck(payload: HistoryPayload, registerName: string, businessDate?: string): BulkConfirmCheck {
+  const filled = withFilledReferences(payload, registerName);
+  const keyCounts = new Map<string, number>();
+  filled.periods.forEach((period) => {
+    const key = typeof period.key === "string" ? period.key.trim() : "";
+    if (key) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  });
+  const failures = filled.periods
+    .map((period, index) => {
+      const reasons = bulkConfirmReasons(period, filled, businessDate);
+      if ((keyCounts.get(typeof period.key === "string" ? period.key.trim() : "") ?? 0) > 1) reasons.unshift(DUPLICATE_KEY);
+      return { key: period.key ?? "", pay_date: period.pay_date, reasons, index };
+    })
+    .filter((failure) => failure.reasons.length > 0);
+  const checks = filled.periods.flatMap((period) => period.paychecks);
+  const sum = (key: AmountKey) => checks.reduce((total, row) => total.plus(decimal(row[key])), new Decimal(0)).toFixed(2);
+  // Recording enforces the same limits, so the extras have to be removed.
+  const batchProblems: string[] = [];
+  if (filled.periods.length > MAX_PERIODS) batchProblems.push(`This history has ${filled.periods.length} pay dates; the limit is ${MAX_PERIODS}. Remove the extra pay dates before confirming.`);
+  if (checks.length > MAX_PAYCHECKS) batchProblems.push(`This history has ${checks.length} paychecks; the limit is ${MAX_PAYCHECKS}. Remove the extra paychecks before confirming.`);
+  return {
+    failures,
+    batchProblems,
+    summary: { period_count: filled.periods.length, paycheck_count: checks.length, gross_pay: sum("gross_pay"), net_pay: sum("net_pay") },
+  };
+}
+
+/** The attestation shown in the dialog; the server stores the same wording. */
+export function bulkConfirmStatement(summary: BulkConfirmSummary): string {
+  return `I confirm these ${summary.period_count} pay dates / ${summary.paycheck_count} paychecks totaling ${money(summary.gross_pay)} gross / ${money(summary.net_pay)} net match the previous provider’s paid registers.`;
 }

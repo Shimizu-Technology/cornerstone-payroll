@@ -20,6 +20,8 @@ import {
   type BreakdownKey,
   type HistoryCheck,
   type HistoryEmployee,
+  type BulkConfirmFailure,
+  type BulkConfirmSummary,
   type HistoryOnboarding,
   type HistoryPage,
   type HistoryPayload,
@@ -49,6 +51,12 @@ import {
   type EmployeeTotals,
   type PeriodState,
   takeoverProblem,
+  bulkConfirmCheck,
+  bulkConfirmStatement,
+  withFilledReferences,
+  currentBusinessDate,
+  MAX_REFERENCE,
+  MAX_REGISTER_NAME,
   periodDatesValid,
   registerTotalValid,
 } from "./prior-provider/historyModel";
@@ -97,6 +105,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<"record" | "activate" | "reverse" | "discard" | null>(null);
+  const [confirmFailures, setConfirmFailures] = useState<BulkConfirmFailure[] | null>(null);
   const mounted = useRef(true);
   const loadRequestId = useRef(0);
   const dirty = useRef(false);
@@ -169,6 +178,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
   const update = (next: HistoryPayload) => {
     setPayload(next);
     setPreview(null);
+    setConfirmFailures(null);
     dirty.current = true;
     if (saveState !== "conflict" && saveState !== "saving") setSaveState("unsaved");
   };
@@ -205,6 +215,32 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       link.download = file.original_filename;
       link.click();
       URL.revokeObjectURL(url);
+    });
+
+  // Confirms every pay date at once. The server re-checks every date and saves
+  // nothing if any fails; its list of failing dates is shown in the step.
+  const confirmAll = (registerName: string, summary: BulkConfirmSummary) =>
+    perform(async () => {
+      if (!payload) return;
+      setConfirmFailures(null);
+      try {
+        const result = await priorProviderHistoryApi.confirmRegisters(payload, Math.min(step, 3), version, registerName, summary);
+        if (!mounted.current) return;
+        setPayload(result.draft.payload);
+        setVersion(result.draft.lock_version);
+        setSavedAt(new Date(result.draft.updated_at).toLocaleTimeString("en-US", { timeStyle: "short" }));
+        dirty.current = false;
+        setSaveState("saved");
+        setPreview(null);
+        setNotice(`All ${summary.period_count} pay dates are confirmed against the registers. Check numbers you entered are kept.`);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          const failures = (err.data as { failures?: BulkConfirmFailure[] } | undefined)?.failures;
+          if (mounted.current && Array.isArray(failures)) setConfirmFailures(failures);
+          if (mounted.current && err.status === 409) setSaveState("conflict");
+        }
+        throw err;
+      }
     });
 
   const remaining = page && payload ? remainingWork(payload, page.employees, files.length > 0) : [];
@@ -280,7 +316,20 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                   <fieldset disabled={!canManage || busy} className="min-w-0 space-y-5">
                     {step === 0 && <PayDatesStep page={page} payload={payload} onChange={update} />}
                     {step === 1 && <EmployeesStep employees={page.employees} payload={payload} onChange={update} />}
-                    {step === 2 && <RegistersStep employees={page.employees} payload={payload} onChange={update} />}
+                    {step === 2 && (
+                      <RegistersStep
+                        employees={page.employees}
+                        payload={payload}
+                        onChange={update}
+                        // Wait for a pending autosave: both use the same draft version.
+                        busy={busy || saveState === "saving" || saveState === "unsaved" || saveState === "conflict"}
+                        blockedReason={saveState === "conflict" ? "Someone saved newer changes. Load the latest version before confirming all." : undefined}
+                        businessDate={page.business_date}
+                        serverFailures={confirmFailures}
+                        onRegisterNameChange={() => setConfirmFailures(null)}
+                        onConfirmAll={confirmAll}
+                      />
+                    )}
                     {step === 3 && (
                       <RecordStep
                         payload={payload}
@@ -681,10 +730,31 @@ const STATE_BADGE: Record<PeriodState, { label: string; variant: "success" | "wa
   to_check: { label: "To check", variant: "default" },
 };
 
-function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmployee[]; payload: HistoryPayload; onChange: (next: HistoryPayload) => void }) {
+function RegistersStep({
+  employees,
+  payload,
+  onChange,
+  busy,
+  blockedReason,
+  businessDate,
+  serverFailures,
+  onRegisterNameChange,
+  onConfirmAll,
+}: {
+  employees: HistoryEmployee[];
+  payload: HistoryPayload;
+  onChange: (next: HistoryPayload) => void;
+  busy: boolean;
+  blockedReason?: string;
+  businessDate?: string;
+  serverFailures: BulkConfirmFailure[] | null;
+  onRegisterNameChange: () => void;
+  onConfirmAll: (registerName: string, summary: BulkConfirmSummary) => Promise<void>;
+}) {
   const firstOpen = payload.periods.findIndex((period) => periodState(period) !== "matched");
   const [open, setOpen] = useState<number | null>(firstOpen >= 0 ? firstOpen : null);
   const [reference, setReference] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const updatePeriod = (index: number, period: HistoryPeriod) => onChange({ ...payload, periods: payload.periods.map((old, i) => (i === index ? period : old)) });
   const matched = payload.periods.filter((period) => periodState(period) === "matched").length;
   return (
@@ -694,12 +764,12 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
       </p>
       <div className="flex flex-wrap items-end gap-3 rounded-xl bg-neutral-50 p-3">
         <div className="min-w-[14rem] flex-1">
-          <Input label="Register name (fills every pay date)" placeholder="For example, ADP payroll register 2026" value={reference} onChange={(e) => setReference(e.target.value)} />
+          <Input label="Register name (fills every pay date)" placeholder="For example, ADP payroll register 2026" maxLength={MAX_REGISTER_NAME} value={reference} onChange={(e) => { setReference(e.target.value); onRegisterNameChange(); }} />
         </div>
         <Button
           variant="outline"
           disabled={!reference.trim()}
-          onClick={() => onChange({ ...payload, periods: payload.periods.map((period) => (period.source_reference.trim() ? period : { ...period, source_reference: `${reference.trim()} — paid ${period.pay_date || "date"}` })) })}
+          onClick={() => onChange(withFilledReferences(payload, reference))}
         >
           Fill blank references
         </Button>
@@ -707,6 +777,32 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
       <p className="text-sm font-semibold">
         {matched} of {payload.periods.length} pay dates match
       </p>
+      {matched < payload.periods.length && (
+        <ConfirmAllPanel
+          payload={payload}
+          registerName={reference}
+          businessDate={businessDate}
+          busy={busy}
+          blockedReason={blockedReason}
+          serverFailures={serverFailures}
+          onReview={(failure) => {
+            // The page's own check knows the exact row; a server failure has only its key and date.
+            const byKey = payload.periods.filter((period) => period.key === failure.key);
+            const index = failure.index ?? (failure.key && byKey.length === 1
+              ? payload.periods.indexOf(byKey[0])
+              : payload.periods.findIndex((period) => period.pay_date === failure.pay_date));
+            setOpen(index >= 0 ? index : null);
+          }}
+          onConfirm={() => setConfirmOpen(true)}
+        />
+      )}
+      <ConfirmAllDialog
+        open={confirmOpen}
+        busy={busy}
+        summary={bulkConfirmCheck(payload, reference, businessDate).summary}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={(summary) => void onConfirmAll(reference, summary).then(() => setConfirmOpen(false))}
+      />
       <ul className="space-y-2">
         {payload.periods.map((period, index) => {
           const state = periodState(period);
@@ -756,6 +852,115 @@ function RegistersStep({ employees, payload, onChange }: { employees: HistoryEmp
   );
 }
 
+/**
+ * "Confirm all" is offered only when every listed pay date passes the same
+ * checks as an individual match; otherwise it names each date left for review.
+ */
+function ConfirmAllPanel({
+  payload,
+  registerName,
+  businessDate,
+  busy,
+  blockedReason,
+  serverFailures,
+  onReview,
+  onConfirm,
+}: {
+  payload: HistoryPayload;
+  registerName: string;
+  businessDate?: string;
+  busy: boolean;
+  blockedReason?: string;
+  serverFailures: BulkConfirmFailure[] | null;
+  onReview: (failure: BulkConfirmFailure) => void;
+  onConfirm: () => void;
+}) {
+  const today = useGuamBusinessDate(businessDate);
+  const { failures: local, batchProblems, summary } = bulkConfirmCheck(payload, registerName, today);
+  // Local failures block the action. A server refusal is shown but never
+  // blocks, so the server re-checks on the next attempt.
+  const failures = local.length ? local : serverFailures ?? [];
+  const label = (failure: BulkConfirmFailure) => (failure.pay_date ? `Paid ${shortDate(failure.pay_date) || failure.pay_date}` : "New pay date");
+  return (
+    <section aria-labelledby="confirm-all-heading" className="space-y-3 rounded-xl border border-neutral-200 p-3 sm:p-4">
+      <div>
+        <h4 id="confirm-all-heading" className="text-sm font-semibold">Already checked every pay date against the registers?</h4>
+        <p className="mt-1 text-sm leading-6 text-neutral-600">
+          Confirm all {summary.period_count} pay dates at once instead of one by one. Check numbers you entered are kept, and you can still open, change or re-check any pay date afterwards.
+        </p>
+      </div>
+      {failures.length > 0 ? (
+        <div role="status" className="rounded-lg bg-warning-50 p-3 text-sm text-warning-900">
+          <p className="font-semibold">
+            {failures.length} pay {failures.length === 1 ? "date needs" : "dates need"} individual review first:
+          </p>
+          <ul className="mt-2 space-y-2">
+            {failures.map((failure, index) => (
+              <li key={`${index}:${failure.key}`}>
+                <button type="button" className="font-semibold underline underline-offset-2" onClick={() => onReview(failure)}>
+                  {label(failure)}
+                </button>
+                <ul className="mt-1 list-disc pl-5">
+                  {failure.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || Boolean(blockedReason) || batchProblems.length > 0 || local.length > 0} onClick={onConfirm}>
+        <CheckCircle2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+        <span className="whitespace-normal text-left">Confirm all pay dates match the previous provider’s registers…</span>
+      </Button>
+      {batchProblems.map((problem) => <p key={problem} role="status" className="text-sm text-danger-700">{problem}</p>)}
+      {blockedReason && <p role="status" className="text-sm text-danger-700">{blockedReason}</p>}
+    </section>
+  );
+}
+
+/**
+ * The Guam business date for the local check, recomputed on every render and
+ * re-checked every 30 seconds, so a page left open past midnight never relies
+ * on the date it loaded with. The server re-checks it on confirm.
+ */
+function useGuamBusinessDate(serverDate?: string): string {
+  const [, setLive] = useState(() => currentBusinessDate(serverDate));
+  useEffect(() => {
+    const timer = window.setInterval(() => setLive(currentBusinessDate(serverDate)), 30_000);
+    return () => window.clearInterval(timer);
+  }, [serverDate]);
+  return currentBusinessDate(serverDate);
+}
+
+function ConfirmAllDialog({ open, busy, summary, onClose, onConfirm }: { open: boolean; busy: boolean; summary: BulkConfirmSummary; onClose: () => void; onConfirm: (summary: BulkConfirmSummary) => void }) {
+  const [checked, setChecked] = useState(false);
+  useResetOnClose(open, () => setChecked(false));
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!busy) { setChecked(false); if (!next) onClose(); } }}>
+      <DialogContent className="w-full max-w-lg sm:!mx-auto">
+        <DialogHeader>
+          <DialogTitle>Confirm all {summary.period_count} pay dates?</DialogTitle>
+          <DialogDescription>
+            {summary.period_count} pay dates · {summary.paycheck_count} paychecks · {money(summary.gross_pay)} gross · {money(summary.net_pay)} net
+          </DialogDescription>
+        </DialogHeader>
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-neutral-700">
+          <li>Marks every pay date as matching its register and saves your name and the time with this confirmation.</li>
+          <li>Blank register references are filled from the register name. Check numbers you entered are kept.</li>
+          <li>Nothing is recorded or paid yet. You still review and record the history in the next step.</li>
+        </ul>
+        <ConfirmCheckbox checked={checked} onChange={setChecked}>
+          {bulkConfirmStatement(summary)}
+        </ConfirmCheckbox>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button disabled={!checked} loading={busy} onClick={() => onConfirm(summary)}>Confirm all {summary.period_count} pay dates</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PeriodEditor({
   period,
   employees,
@@ -794,6 +999,7 @@ function PeriodEditor({
       <Input
         label="Where this is on the register"
         placeholder="For example, page 3"
+        maxLength={MAX_REFERENCE}
         value={period.source_reference}
         error={period.source_reference.trim() ? undefined : "Needed: a page or file reference for this pay date"}
         onChange={(e) => onChange({ ...period, source_reference: e.target.value })}

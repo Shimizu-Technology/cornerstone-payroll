@@ -134,6 +134,30 @@ async function openRecordDialog() {
   return screen.findByRole("dialog");
 }
 
+/** A saved draft on Match registers with nothing matched or referenced yet. */
+function registersPage(edit: (periods: HistoryPage["candidates"]) => void = () => undefined): HistoryPage {
+  const data = page();
+  const periods = data.candidates.map((period) => ({ ...period, paychecks: period.paychecks.map((row) => ({ ...row })) }));
+  periods[0].paychecks[0].provider_payment_reference = "000123";
+  edit(periods);
+  data.draft = {
+    payload: {
+      tax_year: 2026,
+      takeover_on: "2026-11-01",
+      provider_name: "Prior Payroll Inc.",
+      complete_history_confirmed: false,
+      same_employer_confirmed: false,
+      identities: { 1: { source_name: "Ana Cruz", ssn_last4: "1111" }, 2: { source_name: "Ben Diaz", ssn_last4: "2222" } },
+      periods,
+    },
+    step: 2,
+    lock_version: 4,
+    updated_at: "2026-11-02T01:00:00Z",
+    updated_by_name: "Benjo",
+  };
+  return data;
+}
+
 function open() {
   return render(
     <MemoryRouter>
@@ -413,6 +437,187 @@ describe("Prior-provider history", () => {
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
     await screen.findByText(/^Saved/);
     expect(guard().dataset.dirty).toBe("false");
+  });
+
+  describe("confirm all pay dates", () => {
+    const confirmAllButton = () => screen.getByRole("button", { name: /Confirm all pay dates match the previous provider’s registers/ }) as HTMLButtonElement;
+
+    it("lists each pay date that needs individual review and why, and stays disabled until all pass", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage((periods) => {
+        periods[1].paychecks[0].net_pay = "1200.00";
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      const panel = screen.getByRole("region", { name: /Already checked every pay date/ });
+      expect(within(panel).getByText("2 pay dates need individual review first:")).toBeTruthy();
+      expect(within(panel).getByRole("button", { name: "Paid Oct 7, 2026" })).toBeTruthy();
+      expect(within(panel).getAllByText("Needs a register reference (enter the register name above to fill it)").length).toBe(2);
+      expect(within(panel).getByText(/^Ana Cruz: Net pay — Gross − taxes − deductions is \$1,285\.25; net differs by −\$85\.25$/)).toBeTruthy();
+      expect(confirmAllButton().disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(within(panel).getByText("1 pay date needs individual review first:")).toBeTruthy();
+      expect(within(panel).queryByText(/Needs a register reference/)).toBeNull();
+      expect(confirmAllButton().disabled).toBe(true);
+      // Reviewing the failing date opens it for an individual fix.
+      fireEvent.click(within(panel).getByRole("button", { name: "Paid Oct 28, 2026" }));
+      expect(screen.getAllByLabelText("Net pay")[0]).toBeTruthy();
+      expect(screen.getByText("0 of 2 pay dates match")).toBeTruthy();
+    });
+
+    it("confirms every date through one attested dialog and keeps check numbers", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      const confirm = vi.spyOn(priorProviderHistoryApi, "confirmRegisters").mockImplementation(async (payload) => ({
+        draft: {
+          payload: {
+            ...payload,
+            periods: payload.periods.map((period) => ({
+              ...period,
+              source_reference: period.source_reference || `ADP register 2026 — paid ${period.pay_date}`,
+              register_totals: { gross_pay: "2900.00", federal_income_tax: "200.00", social_security_tax: "179.80", medicare_tax: "42.05", deductions: "0.00", net_pay: "2478.15", employer_taxes: "221.85", employer_contributions: "0.00" },
+            })),
+          },
+          step: 2, lock_version: 5, updated_at: "2026-11-02T03:00:00Z", updated_by_name: "Leon",
+        },
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(screen.queryByText(/need individual review/)).toBeNull();
+      fireEvent.click(confirmAllButton());
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("heading", { name: "Confirm all 2 pay dates?" })).toBeTruthy();
+      expect(within(dialog).getByText("2 pay dates · 4 paychecks · $5,800.00 gross · $4,956.30 net")).toBeTruthy();
+      const statement = "I confirm these 2 pay dates / 4 paychecks totaling $5,800.00 gross / $4,956.30 net match the previous provider’s paid registers.";
+      const submit = within(dialog).getByRole("button", { name: "Confirm all 2 pay dates" }) as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+      fireEvent.click(within(dialog).getByLabelText(statement));
+      fireEvent.click(submit);
+      await screen.findByText(/All 2 pay dates are confirmed against the registers/);
+      expect(confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ periods: expect.arrayContaining([expect.objectContaining({ paychecks: expect.arrayContaining([expect.objectContaining({ provider_payment_reference: "000123" })]) })]) }),
+        2,
+        4,
+        "ADP register 2026",
+        { period_count: 2, paycheck_count: 4, gross_pay: "5800.00", net_pay: "4956.30" },
+      );
+      expect(screen.getByText("2 of 2 pay dates match")).toBeTruthy();
+      expect(screen.queryByRole("region", { name: /Already checked every pay date/ })).toBeNull();
+    });
+
+    it("shows the server’s list when it refuses, and marks nothing as matched", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      vi.spyOn(priorProviderHistoryApi, "confirmRegisters").mockRejectedValue(new ApiError("1 pay date needs individual review before confirming all", 422, undefined, {
+        error: "1 pay date needs individual review before confirming all",
+        failures: [{ key: "run-2", pay_date: "2026-10-28", reasons: ["Pay date is not in the past"] }],
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      fireEvent.click(confirmAllButton());
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("checkbox"));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Confirm all 2 pay dates" }));
+      await screen.findByText("Pay date is not in the past");
+      expect(screen.getByText("1 pay date needs individual review first:")).toBeTruthy();
+      expect(screen.getByText("0 of 2 pay dates match")).toBeTruthy();
+      // A server refusal is shown but doesn't block: the server re-checks on the next try.
+      expect(confirmAllButton().disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026, v2" } });
+      expect(screen.queryByText("Pay date is not in the past")).toBeNull();
+    });
+
+    it("checks pay dates against the Guam business date and waits for a pending autosave", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-10-28T02:00:00Z")); // noon on Oct 28 in Guam
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...registersPage(), business_date: "2026-10-28" });
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      const panel = screen.getByRole("region", { name: /Already checked every pay date/ });
+      expect(within(panel).getByRole("button", { name: "Paid Oct 28, 2026" })).toBeTruthy();
+      expect(within(panel).getByText("Pay date is not in the past")).toBeTruthy();
+      expect(confirmAllButton().disabled).toBe(true);
+    });
+
+    it("re-enables a pay date as in the past once Guam passes midnight, without a reload", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-10-28T13:59:30Z")); // 23:59:30 on Oct 28 in Guam
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue({ ...registersPage(), business_date: "2026-10-28" });
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(screen.getByText("Pay date is not in the past")).toBeTruthy();
+      expect(confirmAllButton().disabled).toBe(true);
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.queryByText("Pay date is not in the past")).toBeNull();
+      expect(confirmAllButton().disabled).toBe(false);
+      expect(priorProviderHistoryApi.get).toHaveBeenCalledTimes(1);
+    });
+
+    it("disables Confirm all with a reason while a save conflict is unresolved", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      vi.mocked(priorProviderHistoryApi.saveDraft).mockRejectedValueOnce(new ApiError("Mark saved newer changes. Reload to continue from their version.", 409));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      fireEvent.click(screen.getByRole("button", { name: "Fill blank references" }));
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+      await screen.findByText("Mark saved newer changes. Reload to continue from their version.");
+      expect(confirmAllButton().disabled).toBe(true);
+      expect(screen.getByText("Someone saved newer changes. Load the latest version before confirming all.")).toBeTruthy();
+    });
+
+    it("blocks Confirm all and names the limit when the history has too many pay dates", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage((periods) => {
+        const extras = Array.from({ length: 59 }, (_, index) => ({ ...periods[0], key: `extra-${index}`, run_id: 100 + index }));
+        periods.push(...extras);
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(screen.getByText("This history has 61 pay dates; the limit is 60. Remove the extra pay dates before confirming.")).toBeTruthy();
+      expect(screen.queryByText(/need individual review/)).toBeNull();
+      expect(confirmAllButton().disabled).toBe(true);
+    });
+
+    it("opens the failed pay date itself when two pay dates share a date and ID", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage((periods) => {
+        periods[0].pay_date = "2026-10-28";
+        periods[1].key = periods[0].key;
+        periods[1].paychecks[0].net_pay = "1200.00";
+      }));
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      const panel = screen.getByRole("region", { name: /Already checked every pay date/ });
+      const links = within(panel).getAllByRole("button", { name: "Paid Oct 28, 2026" });
+      expect(links.length).toBe(2);
+      const rows = () => screen.getAllByRole("button", { expanded: true }).concat(screen.getAllByRole("button", { expanded: false }))
+        .filter((button) => button.textContent?.includes("Paid Oct 28, 2026"));
+      const expandedPeriods = () => rows().filter((button) => button.getAttribute("aria-expanded") === "true");
+      fireEvent.click(links[1]);
+      expect(expandedPeriods().length).toBe(1);
+      // The second row (Oct 8 – Oct 28) is the one that opened, not the first (Sep 24 – Oct 7).
+      expect(expandedPeriods()[0].textContent).toContain("Oct 8, 2026");
+      fireEvent.click(links[0]);
+      expect(expandedPeriods()[0].textContent).toContain("Sep 24, 2026");
+    });
+
+    it("keeps Confirm all disabled while an edit is waiting to autosave", async () => {
+      vi.mocked(priorProviderHistoryApi.get).mockResolvedValue(registersPage());
+      open();
+      await screen.findByText(/Saved .* by Benjo/);
+      fireEvent.change(screen.getByLabelText("Register name (fills every pay date)"), { target: { value: "ADP register 2026" } });
+      expect(confirmAllButton().disabled).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Fill blank references" }));
+      expect(confirmAllButton().disabled).toBe(true);
+      await waitFor(() => expect(confirmAllButton().disabled).toBe(false), { timeout: 5000 });
+      expect(priorProviderHistoryApi.saveDraft).toHaveBeenCalled();
+    });
   });
 
   it("selects the remaining runs, not clears, when a manual pay date is also added", async () => {
