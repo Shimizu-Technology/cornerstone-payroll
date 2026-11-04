@@ -31,7 +31,8 @@ module Api
 
         def index
           sources = TimeTrackingSource.where(company_id: current_company_id).includes(:time_tracking_delegations).order(:name)
-          render json: { time_tracking_sources: sources.map { |source| source_json(source) } }
+          # At the top level too: a client with no sources still needs the paused state.
+          render json: { time_tracking_sources: sources.map { |source| source_json(source) }, connected_payroll: ConnectedPayrollMode.capability }
         end
 
         def show

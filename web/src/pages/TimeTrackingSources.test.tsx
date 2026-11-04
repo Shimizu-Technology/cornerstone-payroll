@@ -71,6 +71,41 @@ describe('TimeTrackingSources AIRE account connection', () => {
     else expect(payload).not.toHaveProperty('authorization_origin');
   });
 
+  it('explains the pause and disables connect, test and save for a client with no source', async () => {
+    apiMocks.list.mockResolvedValue({ time_tracking_sources: [], connected_payroll: { mode: 'paused', enabled: false, message: 'Connected payroll is paused' } });
+    render(<TimeTrackingSources />);
+    expect((await screen.findByRole('status')).textContent).toContain('Connected payroll is paused');
+    expect((screen.getByRole('button', { name: 'Create source' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('disables every connected action on a saved source while paused, without calling the unavailable link endpoint', async () => {
+    const paused = { mode: 'paused' as const, enabled: false, message: 'Connected payroll is paused' };
+    apiMocks.list.mockResolvedValue({ time_tracking_sources: [{ ...source, connected_payroll: paused }], connected_payroll: paused });
+    render(<TimeTrackingSources />);
+    expect((await screen.findByRole('status')).textContent).toContain('You can enter manual hours and calculate payroll.');
+    await screen.findByRole('button', { name: 'Save source' });
+    for (const name of ['Save source', 'Connect my time tracking account']) {
+      const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(button.title).toBe('Connected payroll is paused');
+    }
+    for (const name of [/Test/, /Deactivate/]) {
+      screen.getAllByRole('button', { name }).forEach((button) => expect((button as HTMLButtonElement).disabled).toBe(true));
+    }
+    expect(screen.queryByText('Connection needed')).toBeTruthy();
+    await waitFor(() => expect(apiMocks.getAireAccountLink).not.toHaveBeenCalled());
+  });
+
+  it('keeps connected actions available when connected payroll is enabled', async () => {
+    const enabled = { mode: 'enabled' as const, enabled: true, message: null };
+    apiMocks.list.mockResolvedValue({ time_tracking_sources: [{ ...source, connected_payroll: enabled }], connected_payroll: enabled });
+    apiMocks.getAireAccountLink.mockResolvedValue({ account_link: { connected: false } });
+    render(<TimeTrackingSources />);
+    const connect = await screen.findByRole('button', { name: 'Connect my time tracking account' }) as HTMLButtonElement;
+    await waitFor(() => expect(connect.disabled).toBe(false));
+    expect(screen.queryByText('Connected payroll is paused')).toBeNull();
+  });
+
   it('walks an unlinked operator through a one-time AIRE connection', async () => {
     const user = userEvent.setup();
     const navigateToAuthorization = vi.fn();

@@ -149,6 +149,38 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   });
 
+  it('says where recorded history went until YTD is on, using the API count, and does not offer a new pay period', async () => {
+    apiMocks.activeCompany = { id: 11 };
+    const empty = historyResponse([]);
+    apiMocks.payrollHistoryList.mockResolvedValue({ ...empty, meta: { ...empty.meta, prior_provider_history_available: true, prior_provider_history_recorded: { period_count: 20 } } });
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('20 pay runs are recorded as previous-provider history. Turn on YTD to finish.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Turn on YTD' }).getAttribute('href')).toBe('/companies/11/prior-provider-history');
+    expect(await screen.findByText('Recorded previous-provider pay runs appear here after year-to-date is turned on.')).toBeTruthy();
+    expect(screen.queryByText(/Create your first pay period/)).toBeNull();
+    expect(screen.queryByText(/Were these already paid/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
+  });
+
+  it.each(['year=2025', 'status=committed', 'source=cornerstone'])('keeps the recorded-history notice but not its list text when filtered by %s', async (filter) => {
+    apiMocks.activeCompany = { id: 11 };
+    const empty = historyResponse([]);
+    apiMocks.payrollHistoryList.mockResolvedValue({ ...empty, meta: { ...empty.meta, prior_provider_history_recorded: { period_count: 20 } } });
+    render(<MemoryRouter initialEntries={[`/companies/11/pay-runs?${filter}`]}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('No pay periods match the current filters.')).toBeTruthy();
+    expect(screen.getByText(/^20 pay runs are recorded/)).toBeTruthy();
+    expect(screen.queryByText(/appear here after year-to-date/)).toBeNull();
+  });
+
+  it('keeps the normal empty state when no history is waiting for YTD', async () => {
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('No pay periods found. Create your first pay period to get started.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New Pay Period' })).toBeTruthy();
+    expect(screen.queryByText(/recorded as previous-provider history/)).toBeNull();
+  });
+
   it('suppresses every mutation action in both read-only row layouts', async () => {
     apiMocks.activeCompany = {
       id: 11,

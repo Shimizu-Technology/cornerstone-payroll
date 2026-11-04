@@ -20,13 +20,22 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(response).to have_http_status(:ok)
   end
 
+  it "returns the connected payroll capability at the top level, even for a client with no sources" do
+    authenticate_as(create(:user, company: company, role: "admin"))
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    get "/api/v1/admin/time_tracking_sources"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["time_tracking_sources"]).to eq([])
+    expect(response.parsed_body["connected_payroll"]).to include("enabled" => false, "message" => "Connected payroll is paused")
+  end
+
   it "allows accountants to read the non-secret source metadata needed by the import modal" do
     authenticate_as(create(:user, company: company, role: "accountant"))
 
     get "/api/v1/admin/time_tracking_sources"
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to eq("time_tracking_sources" => [])
+    expect(response.parsed_body).to eq("time_tracking_sources" => [], "connected_payroll" => { "mode" => "enabled", "enabled" => true, "message" => nil })
   end
 
   it "denies managers access to integration configuration" do
