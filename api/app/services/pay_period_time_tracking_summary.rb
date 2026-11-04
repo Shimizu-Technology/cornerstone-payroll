@@ -7,7 +7,7 @@ class PayPeriodTimeTrackingSummary
     imports = pay_period.time_tracking_imports
                         .joins(:time_tracking_source)
                         .where(status: "applied", time_tracking_sources: { company_id: pay_period.company_id })
-                        .includes(:time_tracking_source, :time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements)
+                        .preload(:time_tracking_source, :time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements)
                         .order(:id)
     summary = {
       connected_payroll: ConnectedPayrollMode.capability,
