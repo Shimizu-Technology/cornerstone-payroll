@@ -11,6 +11,11 @@ module TimeTracking
       "payment_voided" => :needs_attention,
       "payment_cancelled" => :in_payroll
     }.freeze
+    EARLIER_RECEIPT_BUCKETS = {
+      "payment_issued" => :paid,
+      "payment_failed" => :needs_attention,
+      "payment_voided" => :needs_attention
+    }.freeze
 
     def self.call(import, coverage: CorrectionCoverage.new(import))
       new(import, coverage: coverage).call
@@ -29,7 +34,7 @@ module TimeTracking
       states.reject { |state| state[:verification_error] }.each { |state| add_allocation!(accounting, state[:record]) }
       correction_receipts = dispositions.filter_map(&:time_tracking_correction_receipt)
       latest_by_line = latest_acknowledgements.index_by { |acknowledgement| line_identity(acknowledgement) }
-      earlier_receipts = earlier_receipt_identities
+      earlier_receipts = latest_earlier_receipts
       buckets = %i[in_payroll payment_pending paid needs_attention recorded_before_line_tracking].index_with { empty_bucket }
 
       states.select { |state| state[:verification_error] }.each { |state| add_allocation!(buckets.fetch(:needs_attention), state[:record]) }
@@ -38,8 +43,8 @@ module TimeTracking
         acknowledgement = latest_by_line[line_identity(allocation)]
         bucket = if acknowledgement
           STATUS_BUCKETS.fetch(acknowledgement.status, :needs_attention)
-        elsif earlier_receipts.include?([ allocation.source_time_entry_id.to_s, allocation.payroll_item_id ])
-          :recorded_before_line_tracking
+        elsif (earlier = earlier_receipts[[ allocation.source_time_entry_id.to_s, allocation.payroll_item_id ]])
+          EARLIER_RECEIPT_BUCKETS.fetch(earlier.status, :recorded_before_line_tracking)
         else
           :needs_attention
         end
@@ -82,11 +87,13 @@ module TimeTracking
 
     # Payroll runs imported before payable-line receipts existed have one
     # entry-level receipt per source entry and payroll item. Those lines were
-    # paid through that run's checks, not through tracked line events.
-    def earlier_receipt_identities
+    # paid through that run's checks, not through tracked line events, unless
+    # the latest earlier receipt records a failed or voided payment.
+    def latest_earlier_receipts
       import.aire_payroll_entry_acknowledgements
         .reject(&:line_contract?)
-        .to_set { |acknowledgement| [ acknowledgement.source_time_entry_id.to_s, acknowledgement.payroll_item_id ] }
+        .group_by { |acknowledgement| [ acknowledgement.source_time_entry_id.to_s, acknowledgement.payroll_item_id ] }
+        .transform_values { |receipts| receipts.max_by { |receipt| [ receipt.occurred_at, receipt.id ] } }
     end
 
     def line_identity(record)
