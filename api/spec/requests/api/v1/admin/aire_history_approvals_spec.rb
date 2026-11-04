@@ -103,6 +103,18 @@ RSpec.describe "AIRE one-summary history approval", type: :request do
     expect(AireHistoryReview.count).to eq(0)
   end
 
+  it "reads operation status without an activity write that would contend with approval's actor lock" do
+    operation = AireHistoryOperation.create!(company: company, time_tracking_source: source, actor: actor,
+      kind: "preview", request_key: SecureRandom.uuid, arguments: { "mapping_selections" => [] })
+    actor.update_columns(last_active_at: 1.hour.ago)
+    activity = actor.reload.last_active_at
+    get endpoint("operations/#{operation.id}")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("status" => "queued")
+    expect(actor.reload.last_active_at).to eq(activity)
+    expect(AireVerifiedHistoryRolloutReceipt.count).to eq(0)
+  end
+
   it "returns background progress scoped to this operator/client and reuses a lost approval request" do
     post endpoint("preview"), params: { background: true }, as: :json
     expect(response).to have_http_status(:accepted)

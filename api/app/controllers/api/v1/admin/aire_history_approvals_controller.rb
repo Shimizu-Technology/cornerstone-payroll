@@ -5,6 +5,10 @@ module Api
     module Admin
       class AireHistoryApprovalsController < BaseController
         include ConnectedPayrollControl
+        # Status polls must not request an actor UPDATE lock while approval
+        # protects that actor's permissions with a shared lock. Interactive
+        # preview/approval requests still record authenticated activity.
+        skip_before_action :track_authenticated_user_activity, only: :operation
         before_action :set_source
         before_action :require_history_access!
         before_action :require_connected_payroll!, except: :operation
