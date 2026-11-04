@@ -13,7 +13,7 @@ module TimeTracking
     end
 
     def call(batch:, run:, mapping:, employee:, items:, run_checksum:, inventory_checksum:)
-      key = [ batch.fetch("batch_id"), mapping.source_user_uuid ]
+      key = [ batch.fetch("batch_id"), mapping.source_user_uuid, run.id, run_checksum, inventory_checksum ]
       return @cache[key] if @cache.key?(key)
 
       @cache[key] = build(batch, run, mapping, employee, items, run_checksum, inventory_checksum)
@@ -45,21 +45,20 @@ module TimeTracking
         hours = lines.sum { |line| decimal(line.fetch("total_hours")) }
         next if hours.zero?
         policy = policies[category]
-        label = policy&.earning_label
         configured_labels = [ policy&.earning_label, policy&.fallback_earning_label ].compact_blank
-        matches = paid.keys.select do |component|
-          names = label.present? ? configured_labels : [ category&.fetch("key", nil), category&.fetch("name", nil) ]
-          names.compact.any? do |name|
-            paid_label = paid.fetch(component).fetch("label")
-            normalize(name) == normalize(paid_label) ||
-              (policy && normalize(name) == "regular" && paid_label == "Regular Pay")
-          end
+        # Resolve the primary component before trying the fallback, regardless
+        # of register row order. A fallback-only policy still constrains labels.
+        matches = if configured_labels.any?
+          configured_labels.lazy.map { |label| matching_components(paid, [ label ], policy: policy) }.find(&:any?) || []
+        else
+          matching_components(paid, [ category&.fetch("key", nil), category&.fetch("name", nil) ], policy: policy)
         end
-        matches = paid.keys if policy && matches.empty? && paid.one? && label.blank?
-        matches = remaining.select { |_, balance| balance.positive? }.keys.sort if policy && category.nil?
+        matches = paid.keys if policy && matches.empty? && paid.one? && configured_labels.empty?
+        matches = remaining.select { |_, balance| balance.positive? }.keys.sort if policy && category.nil? && configured_labels.empty?
         return unless matches.any? && (policy || matches.one?)
 
         left = hours
+        first_row = rows.length
         matches.each do |component|
           take = [ left, remaining.fetch(component) ].min
           next unless take.positive?
@@ -72,8 +71,14 @@ module TimeTracking
         # A bounded employee/run rounding difference is visible on this row;
         # it cannot be hidden by another employee or run.
         if left.positive? && left <= HistoricalRoundingReview::LIMIT && category == ordered.last.first && rows.any? && difference.negative?
-          rows.last["source_hours"] = (decimal(rows.last.fetch("source_hours")) + left).to_s("F")
-          rows.last["rounding_difference"] = (-left).to_s("F")
+          if rows.length == first_row
+            rows << { "source_category" => category, "source_hours" => left.to_s("F"),
+              "earning_component" => matches.first, "paid_component" => paid.fetch(matches.first).fetch("label"),
+              "attributed_paid_hours" => "0.0", "rounding_difference" => (-left).to_s("F") }
+          else
+            rows.last["source_hours"] = (decimal(rows.last.fetch("source_hours")) + left).to_s("F")
+            rows.last["rounding_difference"] = (-left).to_s("F")
+          end
           left = 0.to_d
         end
         return unless left.zero?
@@ -124,6 +129,16 @@ module TimeTracking
         end
       end
       result
+    end
+
+    def matching_components(paid, names, policy:)
+      paid.keys.select do |component|
+        paid_label = paid.fetch(component).fetch("label")
+        names.compact.any? do |name|
+          normalize(name) == normalize(paid_label) ||
+            (policy && normalize(name) == "regular" && paid_label == "Regular Pay")
+        end
+      end
     end
 
     def normalize(value)

@@ -98,4 +98,66 @@ RSpec.describe TimeTracking::AccountantPaidCategoryAttribution do
     item.update_columns(hours_worked: 3.2)
     expect(capture).to be_nil
   end
+  it "rejects malformed or noncanonical employee keys instead of dropping run limits" do
+    row = policy("uncategorized")
+    [ "#{employee.id}extra", "0#{employee.id}" ].each do |key|
+      row.historical_run_limits = { key => [ run.id ] }
+      expect(row).not_to be_valid
+      expect(row.errors[:historical_run_limits]).to be_present
+    end
+    row.historical_run_limits = { employee.id.to_s => [ run.id ] }
+    expect(row).to be_valid
+  end
+
+  it "isolates cached attributions, including refusals, between committed runs" do
+    policy("uncategorized")
+    other_run = create(:pay_period, :committed, company: company, start_date: run.start_date, end_date: run.end_date, pay_date: run.pay_date)
+    other_item = create(:payroll_item, company: company, employee: employee, pay_period: other_run, hours_worked: 3.1, overtime_hours: 0,
+      custom_columns_data: item.custom_columns_data)
+    service = described_class.new(source: source, actor: actor)
+    args = { batch: { "batch_id" => "FROZEN", "export" => { "checksum" => "a" * 64 } }, mapping: mapping,
+      employee: { "adjustments" => lines }, inventory_checksum: "i" * 64 }
+    expect(service.call(**args, run: run, items: [], run_checksum: "first")).to be_nil
+    result = service.call(**args, run: other_run, items: [ other_item ], run_checksum: "second")
+    expect(result).to include("run_id" => other_run.id, "run_checksum" => "second")
+    expect(service.call(**args, run: run, items: [ item ], run_checksum: "first-present")).to include("run_id" => run.id)
+  end
+
+  it "uses the primary paid component before Regular fallback even when Regular Pay was created first" do
+    maintenance = { "key" => "aire_maintenance", "name" => "Aircraft Maintenance" }
+    lines.replace([ { "category" => maintenance, "total_hours" => "1.1" }, { "category" => nil, "total_hours" => "2.0" } ])
+    policy("maintenance", "Maintenance").update!(fallback_earning_label: "Regular")
+    policy("uncategorized")
+    item.update_columns(custom_columns_data: {})
+    item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 2, rate: 14.7, amount: 29.4)
+    item.payroll_item_earnings.create!(category: "regular", label: "Maintenance", hours: 1.1, rate: 20, amount: 22)
+    expect(capture.fetch("rows")).to include(a_hash_including("source_category" => maintenance, "paid_component" => "Maintenance", "attributed_paid_hours" => "1.1"))
+  end
+
+  it "honors a fallback-only label instead of using an unrelated sole component" do
+    lines.replace([ { "category" => solo, "total_hours" => "3.1" } ])
+    row = policy("solo")
+    row.update!(fallback_earning_label: "Missing component")
+    expect(capture).to be_nil
+    row.update!(fallback_earning_label: "Flight Hours")
+    expect(capture).to be_present
+  end
+
+  it "does not span unrelated components when NULL has a configured primary or fallback" do
+    [ :earning_label, :fallback_earning_label ].each do |field|
+      row = policy("uncategorized")
+      row.update!(field => "Missing component")
+      expect(capture).to be_nil
+      row.destroy!
+    end
+  end
+
+  it "keeps a final category's negative rounding remainder on its own source row" do
+    lines.replace([ { "category" => flight, "total_hours" => "3.1" }, { "category" => solo, "total_hours" => "0.03" } ])
+    policy("solo", "Flight Hours")
+    result = capture
+    expect(result).to include("signed_difference" => "-0.03")
+    expect(result.fetch("rows")).to include(a_hash_including("source_category" => solo, "source_hours" => "0.03", "attributed_paid_hours" => "0.0", "rounding_difference" => "-0.03"))
+    expect(result.fetch("rows").find { |row| row["source_category"] == flight }.fetch("source_hours")).to eq("3.1")
+  end
 end
