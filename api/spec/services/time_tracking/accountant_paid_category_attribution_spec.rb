@@ -160,4 +160,50 @@ RSpec.describe TimeTracking::AccountantPaidCategoryAttribution do
     expect(result.fetch("rows")).to include(a_hash_including("source_category" => solo, "source_hours" => "0.03", "attributed_paid_hours" => "0.0", "rounding_difference" => "-0.03"))
     expect(result.fetch("rows").find { |row| row["source_category"] == flight }.fetch("source_hours")).to eq("3.1")
   end
+  it "applies the single signed rounding remainder to an earlier category without changing the later exact category" do
+    ground = { "key" => "aire_ground_instruction", "name" => "Ground Instruction" }
+    lines.replace([ { "category" => solo, "total_hours" => "0.63" }, { "category" => ground, "total_hours" => "2.5" } ])
+    policy("solo", "Flight Hours")
+    item.update_columns(custom_columns_data: { "wage_rate_hours" => [
+      { "employee_wage_rate_id" => 21, "label" => "Flight Hours", "active" => true, "regular_hours" => 0.6, "overtime_hours" => 0 },
+      { "employee_wage_rate_id" => 22, "label" => "Ground Instruction", "active" => true, "regular_hours" => 2.5, "overtime_hours" => 0 }
+    ] })
+    [ lines.dup, lines.reverse ].each do |order|
+      lines.replace(order)
+      result = capture
+      expect(result).to include("signed_difference" => "-0.03")
+      expect(result.fetch("rows")).to include(a_hash_including("source_category" => solo, "source_hours" => "0.63", "attributed_paid_hours" => "0.6", "rounding_difference" => "-0.03"))
+      expect(result.fetch("rows")).to include(a_hash_including("source_category" => ground, "source_hours" => "2.5", "attributed_paid_hours" => "2.5", "rounding_difference" => "0.0"))
+    end
+    lines.replace([ { "category" => solo, "total_hours" => "0.62" }, { "category" => ground, "total_hours" => "2.52" } ])
+    expect(capture).to be_nil # A single acknowledgement cannot hide two category deficits.
+  end
+
+  it "prefers exact Regular over the older Regular Pay alias for configured Aircraft Maintenance" do
+    maintenance = { "key" => "aire_maintenance", "name" => "Aircraft Maintenance" }
+    lines.replace([ { "category" => maintenance, "total_hours" => "1.1" }, { "category" => nil, "total_hours" => "2.0" } ])
+    policy("maintenance", "Maintenance").update!(fallback_earning_label: "Regular")
+    policy("uncategorized")
+    item.update_columns(custom_columns_data: {})
+    item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 2, rate: 14.7, amount: 29.4)
+    item.payroll_item_earnings.create!(category: "regular", label: "Regular", hours: 1.1, rate: 14.7, amount: 16.17)
+    result = capture
+    expect(result.fetch("rows")).to include(a_hash_including("source_category" => maintenance, "paid_component" => "Regular", "source_hours" => "1.1"))
+    expect(result.fetch("rows")).to include(a_hash_including("source_category" => nil, "paid_component" => "Regular Pay", "source_hours" => "2.0"))
+    lines.replace([ { "category" => maintenance, "total_hours" => "1.2" }, { "category" => nil, "total_hours" => "1.9" } ])
+    expect(capture).to be_nil # No spill from the exhausted exact component into its alias.
+  end
+
+  it "keeps Isiah run61 Other75.90 plus retained NULL2.50 attributed to actual Regular Pay when no exact Regular exists" do
+    run.update!(id: 61)
+    lines.replace([ { "category" => { "key" => "aire_other", "name" => "Other" }, "total_hours" => "75.90" }, { "category" => nil, "total_hours" => "2.50" } ])
+    policy("other", "Regular")
+    policy("uncategorized").update!(historical_run_limits: { employee.id.to_s => [ run.id ] })
+    item.update_columns(hours_worked: 78.4, custom_columns_data: {})
+    item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 78.4, rate: 12, amount: 940.8)
+    result = capture
+    expect(result).to include("source_total" => "78.4", "paid_total" => "78.4", "signed_difference" => "0.0")
+    expect(result.fetch("rows")).to include(a_hash_including("source_category" => nil, "source_hours" => "2.5", "paid_component" => "Regular Pay"))
+    expect(result.fetch("rows").map { |row| row.fetch("paid_component") }.uniq).to eq([ "Regular Pay" ])
+  end
 end
