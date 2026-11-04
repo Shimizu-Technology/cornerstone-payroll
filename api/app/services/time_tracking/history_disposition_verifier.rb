@@ -43,6 +43,7 @@ module TimeTracking
       @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
         acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
       @batches = (@batch_cache || {}).reject { |_, payload| payload.dig("export", "prior_overtime_policy").present? }
+      @unavailable_batches = {}
       @source_inventory_checksums = nil
       @category_attribution = AccountantPaidCategoryAttribution.new(source: @source, actor: @actor)
     end
@@ -81,6 +82,8 @@ module TimeTracking
     end
 
     def rounding_acknowledgements_valid?
+      return false if @unavailable_batches&.any?
+
       @rounding_review&.acknowledgements_valid? || (@rounding_acknowledgements == [] && @component_bindings == [])
     end
 
@@ -91,7 +94,9 @@ module TimeTracking
         run_id = line.dig("processing", "external_pay_period_id").to_s
         mapping = @employees && @employees[current.fetch("source_user_uuid")]
         next unless mapping && @runs[run_id] && mapping.source_user_id == current.dig("employee", "id")
-        payload = batch(id)
+        payload = review_batch(id, current)
+        next unless payload
+
         employee = payload.fetch("employees").find { |row| row["source_user_id"] == mapping.source_user_id }
         next unless employee
         @category_attribution.call(batch: payload, run: @runs.fetch(run_id), mapping: mapping, employee: employee,
@@ -102,9 +107,13 @@ module TimeTracking
 
     def prior_policy_review_evidence(current)
       Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
-        payload = batch(id)
-        employee = payload.fetch("employees").find { |row| row["source_user_id"] == current.dig("employee", "id") }
         line = current.fetch("history_evidence").fetch("baseline_lines").find { |row| row.fetch("batch_id") == id }
+        next unless line.dig("processing", "status") == "committed" && line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+
+        payload = review_batch(id, current)
+        next unless payload
+
+        employee = payload.fetch("employees").find { |row| row["source_user_id"] == current.dig("employee", "id") }
         run_id = line.dig("processing", "external_pay_period_id").to_s
         mapping = @employees && @employees[current.fetch("source_user_uuid")]
         next unless employee && mapping && @runs[run_id] && line.dig("processing", "status") == "committed" &&
@@ -241,8 +250,8 @@ module TimeTracking
           run.start_date.iso8601 == line.fetch("batch_start_date") && run.end_date.iso8601 == line.fetch("batch_end_date") &&
           decimal(line.fetch("regular_hours")) + decimal(line.fetch("overtime_hours")) == decimal(line.fetch("total_hours"))
 
-        payload = batch(line.fetch("batch_id"))
-        next false unless payload.dig("export", "checksum") == line.fetch("batch_checksum") &&
+        payload = review_batch(line.fetch("batch_id"), current)
+        next false unless payload && payload.dig("export", "checksum") == line.fetch("batch_checksum") &&
           payload.fetch("start_date") == line.fetch("batch_start_date") && payload.fetch("end_date") == line.fetch("batch_end_date")
         unless allow_overtime_hold
           next false if Array(payload["exclusions"]).any? do |exclusion|
@@ -330,9 +339,13 @@ module TimeTracking
       lines = current.fetch("history_evidence").fetch("baseline_lines")
       return full_overtime_hold_verified?(current) if lines.empty?
       return false if lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
-      return false unless lines.all? { |line| decimal(line.fetch("overtime_hours")).zero? }
+      return false unless lines.all? do |line|
+        decimal(line.fetch("overtime_hours")).zero? && line.dig("processing", "status") == "committed" &&
+          line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+      end
 
-      payload = batch(lines.first.fetch("batch_id"))
+      payload = review_batch(lines.first.fetch("batch_id"), current)
+      return false unless payload
       exclusions = Array(payload["exclusions"]).select { |row| row["source_time_entry_id"] == current.fetch("id") }
       return false unless exclusions.one?
 
@@ -355,8 +368,8 @@ module TimeTracking
         proof["payable_content_checksum"] == current.dig("history_evidence", "payable_content_checksum") &&
         decimal(proof.fetch("represented_regular_hours")).zero?
 
-      payload = batch(proof.fetch("batch_id"))
-      return false unless payload.dig("export", "checksum") == proof.fetch("batch_checksum")
+      payload = review_batch(proof.fetch("batch_id"), current)
+      return false unless payload && payload.dig("export", "checksum") == proof.fetch("batch_checksum")
       return false if payload.fetch("employees").any? do |employee|
         employee.fetch("adjustments").any? { |line| line["source_time_entry_id"] == current.fetch("id") }
       end
@@ -388,7 +401,27 @@ module TimeTracking
         line.fetch("snapshot_checksum").match?(/\A[0-9a-f]{64}\z/)
     end
 
+    # Missing or invalid authenticated exports are blockers, never an empty
+    # baseline or permission to reuse a receipt. Retry only on a fresh pass.
+    def review_batch(id, current)
+      return unavailable_batch(id, current) if @unavailable_batches&.key?(id)
+
+      batch(id)
+    rescue Client::Error, PayrollBatchPayloadValidator::Error, KeyError, ArgumentError, TypeError, NoMethodError
+      @unavailable_batches ||= {}
+      @unavailable_batches[id] = true
+      unavailable_batch(id, current)
+    end
+
+    def unavailable_batch(id, current)
+      @rounding_review&.blockers&.push({ "source_time_entry_id" => current.fetch("id"), "batch_id" => id,
+        "reason" => "Authenticated historical batch is unavailable or invalid; refresh before approving" })
+      nil
+    end
+
     def batch(id)
+      raise ArgumentError, "Authenticated historical batch is unavailable or invalid" if @unavailable_batches&.key?(id)
+
       @batches[id] ||= begin
         payload = @client.payroll_batch(batch_id: id)
         PayrollBatchPayloadValidator.new(payload: payload, start_date: payload.fetch("start_date"),
@@ -400,6 +433,12 @@ module TimeTracking
         @batch_cache[id] = payload if @batch_cache && payload.dig("export", "prior_overtime_policy").nil?
         payload
       end
+    rescue Client::Error, PayrollBatchPayloadValidator::Error, KeyError, ArgumentError, TypeError, NoMethodError
+      @unavailable_batches ||= {}
+      @unavailable_batches[id] = true
+      # The prior-policy context loader also calls this method. Normalize its
+      # failure into an invalid evidence result, retaining the blocking flag.
+      raise ArgumentError, "Authenticated historical batch is unavailable or invalid"
     end
 
     def decimal(value)

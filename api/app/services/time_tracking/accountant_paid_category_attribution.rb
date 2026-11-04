@@ -38,6 +38,7 @@ module TimeTracking
 
       remaining = paid.transform_values { |component| component.fetch("hours") }
       rows = []
+      rounding_applied = false
       # Known categories consume their actual named component first. Only an
       # explicitly allowed uncategorized group may span the remaining components.
       ordered = groups.sort_by { |category, _| category.nil? ? 1 : 0 }
@@ -70,7 +71,7 @@ module TimeTracking
         end
         # A bounded employee/run rounding difference is visible on this row;
         # it cannot be hidden by another employee or run.
-        if left.positive? && left <= HistoricalRoundingReview::LIMIT && category == ordered.last.first && rows.any? && difference.negative?
+        if left.positive? && left <= HistoricalRoundingReview::LIMIT && difference.negative? && left == -difference && !rounding_applied
           if rows.length == first_row
             rows << { "source_category" => category, "source_hours" => left.to_s("F"),
               "earning_component" => matches.first, "paid_component" => paid.fetch(matches.first).fetch("label"),
@@ -80,6 +81,7 @@ module TimeTracking
             rows.last["rounding_difference"] = (-left).to_s("F")
           end
           left = 0.to_d
+          rounding_applied = true
         end
         return unless left.zero?
       end
@@ -132,13 +134,16 @@ module TimeTracking
     end
 
     def matching_components(paid, names, policy:)
-      paid.keys.select do |component|
-        paid_label = paid.fetch(component).fetch("label")
-        names.compact.any? do |name|
-          normalize(name) == normalize(paid_label) ||
-            (policy && normalize(name) == "regular" && paid_label == "Regular Pay")
-        end
+      exact = paid.keys.select do |component|
+        names.compact.any? { |name| normalize(name) == normalize(paid.fetch(component).fetch("label")) }
       end
+      return exact if exact.any?
+
+      # The retained legacy label is a fallback only. Never spill into it
+      # after exhausting an exact configured Regular component.
+      return [] unless policy && names.compact.any? { |name| normalize(name) == "regular" }
+
+      paid.keys.select { |component| paid.fetch(component).fetch("label") == "Regular Pay" }
     end
 
     def normalize(value)
