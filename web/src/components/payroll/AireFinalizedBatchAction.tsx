@@ -29,15 +29,19 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   const lineStatus = aireRecord?.payable_line_status;
   const attentionLines = lineStatus?.needs_attention.line_count || 0;
   const unpaidLines = (lineStatus?.in_payroll.line_count || 0) + (lineStatus?.payment_pending.line_count || 0);
+  const earlierLines = lineStatus?.recorded_before_line_tracking?.line_count || 0;
   const allLinesPaid = Boolean(lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count);
+  const recordedEarlier = committed && earlierLines > 0 && attentionLines === 0 && unpaidLines === 0;
   const linkedTitle = attentionLines > 0
     ? 'time tracking payment needs attention'
     : committed && allLinesPaid
       ? 'Time tracking hours are paid'
       : committed && unpaidLines > 0
         ? 'Time tracking hours are linked; payment evidence is pending'
-        : 'Time tracking hours are in this payroll';
-  const linkedBadge = attentionLines > 0 ? 'Needs attention' : committed && allLinesPaid ? 'Paid' : committed && unpaidLines > 0 ? 'Payment pending' : 'Added';
+        : recordedEarlier
+          ? 'Time tracking hours were recorded with this payroll'
+          : 'Time tracking hours are in this payroll';
+  const linkedBadge = attentionLines > 0 ? 'Needs attention' : committed && allLinesPaid ? 'Paid' : committed && unpaidLines > 0 ? 'Payment pending' : recordedEarlier ? 'Recorded' : 'Added';
   const linkedBadgeTone = attentionLines > 0 || (committed && unpaidLines > 0) ? 'warning' : 'success';
   const linkedNeedsReview = aireRecordLinked && (attentionLines > 0 || (committed && unpaidLines > 0));
 
@@ -118,11 +122,14 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
         </div>
 
         {aireRecordLinked && lineStatus && lineStatus.line_count > 0 && (
-          <div className="grid divide-y divide-neutral-200 border-t border-neutral-200 bg-neutral-50 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <div className={`grid divide-y divide-neutral-200 border-t border-neutral-200 bg-neutral-50 sm:divide-x sm:divide-y-0 ${earlierLines > 0 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
             {([
               ['In payroll', lineStatus.in_payroll, 'Added to payroll; payment not yet recorded'],
               ['Prepared', lineStatus.payment_pending, 'Payment prepared; delivery pending'],
               ['Paid', lineStatus.paid, 'Delivery or settlement recorded'],
+              ...(earlierLines > 0 && lineStatus.recorded_before_line_tracking
+                ? [['Recorded earlier', lineStatus.recorded_before_line_tracking, 'Before line-by-line payment tracking; see this payroll\'s checks'] as const]
+                : []),
               ['Attention', lineStatus.needs_attention, 'Failed, voided, or missing evidence'],
             ] as const).map(([label, bucket, detail]) => (
               <div key={label} className="px-5 py-4 sm:px-6">
@@ -147,7 +154,9 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                   ? 'The payment history remains preserved. Failed and voided payments require an explicit follow-up; they are never turned back into new unpaid hours automatically.'
                   : allLinesPaid
                     ? 'Paid means Cornerstone recorded check delivery or deposit settlement and sent that exact status back to time tracking.'
-                    : 'Check preparation and delivery are reported back to time tracking automatically. Delivery or settlement establishes paid status.'
+                    : recordedEarlier
+                      ? 'This payroll was recorded before Cornerstone tracked payment line by line. Its checks show who was paid and when; the original hours are preserved.'
+                      : 'Check preparation and delivery are reported back to time tracking automatically. Delivery or settlement establishes paid status.'
                 : `${nextAction} Adding the batch records hours in payroll; it does not mark anyone paid.`
               : 'Held entries stay visible in time tracking and Cornerstone and are not added to this payroll.'}
           </p>

@@ -41,11 +41,17 @@ export function AirePayrollRecordsDialog({ open, onClose, records }: {
                 <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                   <h4 className="font-semibold text-neutral-950">Exact payable-line status</h4>
                   <p className="mt-1 text-xs leading-5 text-neutral-600">Payment status comes from saved check delivery or deposit settlement events. Preparing or printing a check remains pending.</p>
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                  {!!record.payable_line_status.recorded_before_line_tracking?.line_count && (
+                    <p className="mt-1 text-xs leading-5 text-neutral-600">Recorded earlier means these hours were added before line-by-line payment tracking. This payroll's checks show who was paid and when.</p>
+                  )}
+                  <div className={`mt-4 grid grid-cols-2 gap-3 text-sm ${record.payable_line_status.recorded_before_line_tracking?.line_count ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
                     {([
                       ['In payroll', record.payable_line_status.in_payroll],
                       ['Prepared', record.payable_line_status.payment_pending],
                       ['Paid', record.payable_line_status.paid],
+                      ...(record.payable_line_status.recorded_before_line_tracking?.line_count
+                        ? [['Recorded earlier', record.payable_line_status.recorded_before_line_tracking] as const]
+                        : []),
                       ['Attention', record.payable_line_status.needs_attention],
                     ] as const).map(([label, bucket]) => (
                       <div key={label} className="rounded-lg border border-neutral-200 bg-white p-3">

@@ -65,6 +65,7 @@ export function AireSourceCheckpointSummary({
   const attention = Number(lineStatus?.needs_attention.line_count || 0) > 0;
   const paymentPending = committed && Number(lineStatus?.in_payroll.line_count || 0) + Number(lineStatus?.payment_pending.line_count || 0) > 0;
   const allPaid = committed && lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count;
+  const recordedEarlier = committed && !attention && !paymentPending && Number(lineStatus?.recorded_before_line_tracking?.line_count || 0) > 0;
   const manualLock = (overview?.payroll_period.lock_mode ?? calendar.lock_mode) === 'manual';
   const locked = overview?.payroll_period.status === 'finalized' || Boolean(calendar.finalized_batch)
     || ['finalized', 'batch_verifying', 'batch_verification_failed', 'batch_rejected', 'batch_verified'].includes(calendar.cutoff_state);
@@ -120,7 +121,8 @@ export function AireSourceCheckpointSummary({
         {attention ? 'Time tracking payment needs attention. Review the payment history.'
           : allPaid ? 'Time tracking hours are paid; delivery or settlement is recorded.'
             : paymentPending ? 'Time tracking hours are linked; payment evidence is pending.'
-              : 'Time tracking hours are linked. Adding hours does not mark anyone paid.'}
+              : recordedEarlier ? 'Time tracking hours are linked. This payroll was recorded before line-by-line payment tracking; its checks show payment.'
+                : 'Time tracking hours are linked. Adding hours does not mark anyone paid.'}
       </p>}
       {!calendar.eligible && calendar.eligibility_error && <p role="status" className="text-sm text-warning-900">{calendar.eligibility_error}</p>}
       {(calendar.finalized_batch?.last_error || calendar.publication?.last_error) && <p role="alert" className="break-words text-sm text-danger-800">{calendar.finalized_batch?.last_error || calendar.publication?.last_error}</p>}
