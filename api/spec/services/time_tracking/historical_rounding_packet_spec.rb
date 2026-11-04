@@ -42,6 +42,7 @@ RSpec.describe "Reviewed historical rounding packet" do
       "employee" => { "id" => "91" }, "category" => category,
       "state" => { "status" => "completed", "approval_status" => "approved" },
       "history_evidence" => { "payable_content_checksum" => "a" * 64, "active_manual_allocation_ids" => [],
+        "payable_segments" => [ { "work_date" => "2026-08-14", "total_hours" => "6.1" } ],
         "active_cases" => [], "payment_attestation" => nil, "baseline_lines" => [ {
           "batch_id" => payload["batch_id"], "batch_checksum" => payload.dig("export", "checksum"),
           "batch_start_date" => payload["start_date"], "batch_end_date" => payload["end_date"],
@@ -103,6 +104,7 @@ RSpec.describe "Reviewed historical rounding packet" do
     payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
     row["history_evidence"]["baseline_lines"].sole["batch_checksum"] = payload.dig("export", "checksum")
     extra = row.deep_dup.merge("id" => "42", "hours" => 4.0, "category" => other)
+    extra["history_evidence"]["payable_segments"].sole["total_hours"] = "4.0"
     extra["history_evidence"]["baseline_lines"].sole.merge!("source_time_entry_id" => "42", "line_key" => "flight",
       "category" => other, "regular_hours" => 4.0, "total_hours" => 4.0)
     allow(client).to receive(:payroll_cockpit_history_entries).and_return(
@@ -163,6 +165,7 @@ RSpec.describe "Reviewed historical rounding packet" do
   it "verifies a complete checksum-bound regular baseline plus an exact pending overtime exclusion" do
     item.update_columns(hours_worked: 6.1)
     row["hours"] = 6.4
+    row["history_evidence"]["payable_segments"].sole["total_hours"] = "6.4"
     row["state"]["overtime_status"] = "none"
     payload["exclusions"] = [ {
       "source_time_entry_id" => "41", "source_time_entry_version" => 2, "source_user_id" => "91", "source_user_uuid" => uuid,
