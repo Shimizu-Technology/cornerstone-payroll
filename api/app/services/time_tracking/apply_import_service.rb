@@ -396,7 +396,11 @@ module TimeTracking
 
         source_kind = Array(category["source_kinds"] || category[:source_kinds]).first || "current"
         original_work_dates = Array(category["original_work_dates"] || category[:original_work_dates]).map(&:to_s).sort
-        bucket = hours_by_dimension[[ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]]
+        # Current-period lines that resolve to the same rate share one earning
+        # line (e.g. Flight and Solo both paid at Flight Hours). Carryover and
+        # correction lines keep their date range, which their labels show.
+        dimension = source_kind == "current" ? [ rate.id, source_kind, nil, nil ] : [ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]
+        bucket = hours_by_dimension[dimension]
         bucket[:regular_hours] += category_regular_hours(category)
         bucket[:overtime_hours] += category_overtime_hours(category)
         bucket[:source_lines].concat(Array(category["source_lines"] || category[:source_lines]))
