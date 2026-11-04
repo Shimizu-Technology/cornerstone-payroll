@@ -80,7 +80,13 @@ export type RegisterAttestation = {
   period_keys: string[];
 };
 /** A pay date left for individual review, and why. */
-export type BulkConfirmFailure = { key: string; pay_date: string; reasons: string[] };
+export type BulkConfirmFailure = {
+  key: string;
+  pay_date: string;
+  reasons: string[];
+  /** The pay date's position in this draft; set only by the page's own check. */
+  index?: number;
+};
 export type BulkConfirmSummary = { period_count: number; paycheck_count: number; gross_pay: string; net_pay: string };
 export const CONFIRM_ALL_ACK = "CONFIRM ALL PAY DATES MATCH THE PAID REGISTERS";
 export type HistoryOnboarding = {

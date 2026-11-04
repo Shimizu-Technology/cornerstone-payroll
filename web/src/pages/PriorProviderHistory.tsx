@@ -786,10 +786,11 @@ function RegistersStep({
           blockedReason={blockedReason}
           serverFailures={serverFailures}
           onReview={(failure) => {
+            // The page's own check knows the exact row; a server failure has only its key and date.
             const byKey = payload.periods.filter((period) => period.key === failure.key);
-            const index = failure.key && byKey.length === 1
+            const index = failure.index ?? (failure.key && byKey.length === 1
               ? payload.periods.indexOf(byKey[0])
-              : payload.periods.findIndex((period) => period.pay_date === failure.pay_date);
+              : payload.periods.findIndex((period) => period.pay_date === failure.pay_date));
             setOpen(index >= 0 ? index : null);
           }}
           onConfirm={() => setConfirmOpen(true)}
@@ -875,7 +876,7 @@ function ConfirmAllPanel({
   onConfirm: () => void;
 }) {
   const today = useGuamBusinessDate(businessDate);
-  const { failures: local, summary } = bulkConfirmCheck(payload, registerName, today);
+  const { failures: local, batchProblems, summary } = bulkConfirmCheck(payload, registerName, today);
   // Local failures block the action. A server refusal is shown but never
   // blocks, so the server re-checks on the next attempt.
   const failures = local.length ? local : serverFailures ?? [];
@@ -907,10 +908,11 @@ function ConfirmAllPanel({
           </ul>
         </div>
       ) : null}
-      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || Boolean(blockedReason) || local.length > 0} onClick={onConfirm}>
+      <Button className="h-auto min-h-11 w-full py-2.5 sm:w-auto" disabled={busy || Boolean(blockedReason) || batchProblems.length > 0 || local.length > 0} onClick={onConfirm}>
         <CheckCircle2 className="mr-2 h-4 w-4 shrink-0" aria-hidden />
         <span className="whitespace-normal text-left">Confirm all pay dates match the previous provider’s registers…</span>
       </Button>
+      {batchProblems.map((problem) => <p key={problem} role="status" className="text-sm text-danger-700">{problem}</p>)}
       {blockedReason && <p role="status" className="text-sm text-danger-700">{blockedReason}</p>}
     </section>
   );

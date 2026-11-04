@@ -374,11 +374,14 @@ export function bulkConfirmReasons(period: HistoryPeriod, payload: Pick<HistoryP
   return reasons;
 }
 
-export type BulkConfirmCheck = { failures: BulkConfirmFailure[]; summary: BulkConfirmSummary };
+export type BulkConfirmCheck = { failures: BulkConfirmFailure[]; batchProblems: string[]; summary: BulkConfirmSummary };
 
 /** Server limits for a register reference and the register name. */
 export const MAX_REFERENCE = 500;
 export const MAX_REGISTER_NAME = 200;
+/** Server limits for one history (SourceAdapter::MAX_RUNS and MAX_PAYCHECKS). */
+export const MAX_PERIODS = 60;
+export const MAX_PAYCHECKS = 2000;
 
 /** Every listed pay date must pass before all can be confirmed at once. */
 export function bulkConfirmCheck(payload: HistoryPayload, registerName: string, businessDate?: string): BulkConfirmCheck {
@@ -389,16 +392,21 @@ export function bulkConfirmCheck(payload: HistoryPayload, registerName: string, 
     if (key) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
   });
   const failures = filled.periods
-    .map((period) => {
+    .map((period, index) => {
       const reasons = bulkConfirmReasons(period, filled, businessDate);
       if ((keyCounts.get(typeof period.key === "string" ? period.key.trim() : "") ?? 0) > 1) reasons.unshift(DUPLICATE_KEY);
-      return { key: period.key ?? "", pay_date: period.pay_date, reasons };
+      return { key: period.key ?? "", pay_date: period.pay_date, reasons, index };
     })
     .filter((failure) => failure.reasons.length > 0);
   const checks = filled.periods.flatMap((period) => period.paychecks);
   const sum = (key: AmountKey) => checks.reduce((total, row) => total.plus(decimal(row[key])), new Decimal(0)).toFixed(2);
+  // Recording enforces the same limits, so the extras have to be removed.
+  const batchProblems: string[] = [];
+  if (filled.periods.length > MAX_PERIODS) batchProblems.push(`This history has ${filled.periods.length} pay dates; the limit is ${MAX_PERIODS}. Remove the extra pay dates before confirming.`);
+  if (checks.length > MAX_PAYCHECKS) batchProblems.push(`This history has ${checks.length} paychecks; the limit is ${MAX_PAYCHECKS}. Remove the extra paychecks before confirming.`);
   return {
     failures,
+    batchProblems,
     summary: { period_count: filled.periods.length, paycheck_count: checks.length, gross_pay: sum("gross_pay"), net_pay: sum("net_pay") },
   };
 }

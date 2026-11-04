@@ -103,12 +103,12 @@ describe("prior-provider history model", () => {
     expect(summary).toEqual({ period_count: 6, paycheck_count: 6, gross_pay: "6000.00", net_pay: "5401.00" });
     // Without a register name, every blank reference is listed too.
     expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, " ").failures).toEqual([
-      { key: "ok", pay_date: "2026-10-28", reasons: ["Needs a register reference (enter the register name above to fill it)"] },
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Needs a register reference (enter the register name above to fill it)"], index: 0 },
     ]);
     expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register").failures).toEqual([]);
     // The Guam business date and the server's reference limit apply locally too.
     expect(bulkConfirmCheck({ ...payload, periods: [period("ok")] }, "ADP register", "2026-10-28").failures).toEqual([
-      { key: "ok", pay_date: "2026-10-28", reasons: ["Pay date is not in the past"] },
+      { key: "ok", pay_date: "2026-10-28", reasons: ["Pay date is not in the past"], index: 0 },
     ]);
     expect(bulkConfirmCheck({ ...payload, periods: [period("long", { source_reference: "p".repeat(501) })] }, "").failures[0].reasons)
       .toEqual(["Register reference is longer than 500 characters"]);
@@ -127,5 +127,21 @@ describe("prior-provider history model", () => {
     expect(currentBusinessDate("2026-10-28", afterGuamMidnight)).toBe("2026-10-29");
     expect(currentBusinessDate("2026-10-30", afterGuamMidnight)).toBe("2026-10-30");
     expect(currentBusinessDate(undefined, afterGuamMidnight)).toBe("2026-10-29");
+  });
+
+  it("names the server's batch limits and records which row each failure came from", () => {
+    const base = { start_date: "2026-10-08", end_date: "2026-10-21", pay_date: "2026-10-28", source_reference: "Register p1", register_totals: {}, paychecks: [row()] };
+    const payload = (periods: unknown[]) => ({
+      tax_year: 2026, takeover_on: "2026-11-01", provider_name: "ADP", complete_history_confirmed: false, same_employer_confirmed: false, identities: {}, periods,
+    }) as unknown as HistoryPayload;
+    const periods = (count: number) => Array.from({ length: count }, (_, index) => ({ ...base, key: `run-${index}` }));
+    expect(bulkConfirmCheck(payload(periods(60)), "").batchProblems).toEqual([]);
+    expect(bulkConfirmCheck(payload(periods(61)), "").batchProblems).toEqual(["This history has 61 pay dates; the limit is 60. Remove the extra pay dates before confirming."]);
+    const atLimit = Array.from({ length: 2000 }, () => row());
+    expect(bulkConfirmCheck(payload([{ ...base, key: "a", paychecks: atLimit }]), "").batchProblems).toEqual([]);
+    expect(bulkConfirmCheck(payload([{ ...base, key: "a", paychecks: [...atLimit, row()] }]), "").batchProblems)
+      .toEqual(["This history has 2001 paychecks; the limit is 2000. Remove the extra paychecks before confirming."]);
+    const failures = bulkConfirmCheck(payload([{ ...base, key: "ok" }, { ...base, key: "" }, { ...base, key: "" }]), "").failures;
+    expect(failures.map((failure) => failure.index)).toEqual([1, 2]);
   });
 });
