@@ -1,6 +1,6 @@
 # Rails 8.1.4.1 upgrade review
 
-Reviewed November 5, 2026. This change is held for Claude's release decision. It changes dependency constraints, lockfiles, specs and this review only. Payroll calculations, source mappings, approval/commit, connected-mode guards and database migrations are unchanged. Full CI and an updated exact-pair integration certificate remain release gates.
+Reviewed November 5, 2026. This change is held for Claude's release decision. It changes dependency constraints, lockfiles, canonical proxy-header middleware, specs and this review. Payroll calculations, source mappings, approval/commit, connected-mode guards and database migrations are unchanged. Full CI and an updated exact-pair integration certificate remain release gates.
 
 ## Dependency boundary
 
@@ -12,7 +12,7 @@ Read the [8.1.4](https://github.com/rails/rails/releases/tag/v8.1.4) and [8.1.4.
 
 | Area | Finding and acceptance |
 | --- | --- |
-| Forwarded client IP | When both header families are supplied, different resolved client addresses now raise `ActionDispatch::RemoteIp::IpSpoofAttackError`. Local requests with X-Forwarded-For alone or matching headers reach the real API. A conflict raises even in request logging, outside the inner exception handler; its default exception status is 500. This needs the hosted check below. |
+| Forwarded client IP | When both header families are supplied, different resolved client addresses now raise `ActionDispatch::RemoteIp::IpSpoofAttackError`. Local requests with X-Forwarded-For alone or matching headers reach the real API. A conflict raises even in request logging, outside the inner exception handler; its default exception status is 500. CanonicalProxyHeaders now removes the two untrusted alternative headers before either resolver; hosted acceptance is described below. |
 | Parameters | `each_key` now returns the parameters object. App call-site searches found Hash iteration, with no use of a returned unpermitted parameter object for assignment. New specs verify the returned object remains unpermitted and assignment raises. |
 | Sessions | Cookie SameSite settings now apply across stores; CacheStore has dropped-session and reset/concurrency fixes. Both apps use API token authentication and load no Rails session middleware in the tested configuration. `Rails.cache` and Rack::Attack caching are separate from `Session::CacheStore`. No session configuration changed. |
 | Storage | Blob tempfiles retain an extension only when it agrees with the recorded media type; sanitized filename handling also changes. Video/audio probing now limits accepted container formats, and background video preview handling improves. Common image/video uploads need hosted checks. Neither app uses GCS, so its new signed content-length/CORS requirements are inactive here. |
@@ -23,13 +23,15 @@ Read the [8.1.4](https://github.com/rails/rails/releases/tag/v8.1.4) and [8.1.4.
 
 Sources: [Action Pack](https://github.com/rails/rails/blob/v8.1.4.1/actionpack/CHANGELOG.md), [Active Storage](https://github.com/rails/rails/blob/v8.1.4.1/activestorage/CHANGELOG.md), [Action View](https://github.com/rails/rails/blob/v8.1.4.1/actionview/CHANGELOG.md), [Active Record](https://github.com/rails/rails/blob/v8.1.4.1/activerecord/CHANGELOG.md), [Active Support](https://github.com/rails/rails/blob/v8.1.4.1/activesupport/CHANGELOG.md).
 
-## Hosted IP gate and safe configuration
+## Canonical proxy headers on Render
 
-[Render describes its Cloudflare/load-balancer chain and X-Forwarded-For](https://render.com/articles/how-render-handles-ddos-attacks), but does not establish how client-supplied `Forwarded` is normalized. Normal Render traffic triggering the new exception is therefore unverified. Rack's request IP is also distinct from Rails `remote_ip`: Rack currently prefers Forwarded, so throttling and audits must agree after ingress processing.
+On November 5, the lead's hosted probes confirmed that Render replaces a forged X-Forwarded-For value, but preserves client-supplied Forwarded and Client-Ip. Both alternative headers produced 500 responses on the previous candidate. The new `CanonicalProxyHeaders` Rack middleware deletes only `HTTP_FORWARDED` and `HTTP_CLIENT_IP`, retaining `HTTP_X_FORWARDED_FOR` and `REMOTE_ADDR` unchanged. The deployment contract is that all application traffic passes through the existing Render edge and its authoritative X-Forwarded-For chain.
 
-On candidate staging, the release owner should inspect sanitized forwarding headers and socket IP for an ordinary browser/API request, matching headers, and deliberately conflicting TEST-NET addresses. Use a real controller endpoint, not only `/up`; logging level can change where lazy IP evaluation happens. Confirm the authenticated audit IP and Rack::Attack key resolve to the same client, and no legitimate request becomes a 500. Do not log credentials or complete authenticated request headers.
+The application registers this middleware after the configuration initializers and before middleware-stack construction, inserting it at index zero. This puts normalization before CORS, Rails request logging, both IP resolvers and Rack::Attack. Spoof checking remains enabled; trusted-proxy CIDRs, throttles and audit logic are unchanged. This is header normalization, not an exception rescue or a blanket trust expansion.
 
-Keep spoof checking enabled. Trust only the verified proxy-hop CIDRs, never every address. If Render preserves a client-controlled Forwarded header while supplying authoritative X-Forwarded-For, the concrete safe ingress setup is to strip Forwarded at the verified trusted edge, retain that edge's canonical X-Forwarded-For chain, and make both Rails and Rack::Attack consume that chain. If ingress normalization is unavailable, a narrowly scoped outer middleware can reject `IpSpoofAttackError` with 400 before Rails logging and IP consumers. A controller rescue or `rescue_responses` entry alone is insufficient for the observed logging failure. Either mitigation needs its own tested configuration change; neither is silently applied by this dependency PR. Retest normal traffic, spoof rejection, audit IPs and throttling before promotion.
+Request regressions assert exact normal API responses for ordinary traffic, a forged XFF prefix, forged Forwarded, forged Client-Ip and matching alternative headers. They assert the middleware is first, audit context and throttle identity resolve from the canonical chain, and request logging records the true client address. AIRE's public index is `/api/v1/site-media`; `/api/v1/site_media` is an ordinary 404 and is also suitable for comparing status behavior through the host.
+
+Hosted acceptance must repeat the lead's matrix on the deployed exact heads, compare normal and forged request log IPs, and verify authenticated audit context and throttle identity through safe staging checks. Keep Render's edge contract and the existing trusted-hop configuration; do not expose the app directly or broaden trust. [Rails IP source](https://github.com/rails/rails/blob/v8.1.4.1/actionpack/lib/action_dispatch/middleware/remote_ip.rb), [Render proxy chain](https://render.com/articles/how-render-handles-ddos-attacks).
 
 ## Local evidence and remaining hosted checks
 
