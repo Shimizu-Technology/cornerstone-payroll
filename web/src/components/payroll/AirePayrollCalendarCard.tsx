@@ -64,8 +64,8 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
   const manualLock = calendar.lock_mode === 'manual';
   // Nothing was ever scheduled for this completed payroll and nothing can be now,
   // so its hours come from the linked record. Any publication keeps its real state.
-  const recordedWithoutSchedule = payPeriodStatus === 'committed' && Boolean(linkedRecord)
-    && !calendar.finalized_batch && !calendar.publication && !calendar.can_publish;
+  const historicalRecord = payPeriodStatus === 'committed' && Boolean(linkedRecord) && !calendar.finalized_batch;
+  const recordedWithoutSchedule = historicalRecord && !calendar.publication && !calendar.can_publish;
   const distance = manualLock || recordedWithoutSchedule ? null : cutoffDistance(calendar.cutoff_at, now);
   const cutoffPassed = !manualLock && calendar.cutoff_at
     ? new Date(calendar.cutoff_at).getTime() <= now.getTime()
@@ -192,7 +192,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
 
         </details>
 
-        {!calendar.eligible && calendar.eligibility_error && payPeriodStatus === 'committed' && (
+        {!calendar.eligible && calendar.eligibility_error && historicalRecord && (
           <div className="flex items-start gap-4 border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-sm text-neutral-700" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
             <div className="min-w-0 flex-1">
@@ -202,7 +202,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
           </div>
         )}
 
-        {!calendar.eligible && calendar.eligibility_error && payPeriodStatus !== 'committed' && (
+        {!calendar.eligible && calendar.eligibility_error && !historicalRecord && (
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
             <div className="min-w-0 flex-1">

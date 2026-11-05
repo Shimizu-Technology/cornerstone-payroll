@@ -128,6 +128,14 @@ describe('committed run with a linked record and no batch', () => {
     expect(screen.getByLabelText('Source checkpoint').querySelector('[class*="warning"]')).toBeNull();
   });
 
+  it('keeps the schedule note as a warning without a linked record or with a batch', () => {
+    const { unmount } = render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} aireRecord={null} />);
+    expect(screen.getByRole('status').className).toContain('text-warning-900');
+    unmount();
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={{ ...notEffective, finalized_batch: batch }} aireRecord={earlierRecord} />);
+    expect(screen.getByRole('status').className).toContain('text-warning-900');
+  });
+
   it('does not explain the frozen held count with live approval counts', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40, pending_approvals: 3, pending_overtime: 1, missing_punches: 2 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
