@@ -269,8 +269,202 @@ RSpec.describe PayStubGenerator do
       custom_earnings: [], service_charge_wages: -25, gross_pay: 975)
 
     rows = earnings_table(payroll_item)
-    expect(rows).to include([ "Service Charges", "—", "—", "$-25.00", "—" ])
+    expect(rows).to include([ "Service Charges", "—", "—", "$-25.00", "$-25.00" ])
     expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
+  end
+
+  describe "per-row earnings YTD" do
+    def calculated_item(worker, type, pay_date, **attributes)
+      period = create(:pay_period, :committed, company: company, start_date: pay_date - 14, end_date: pay_date - 4, pay_date: pay_date)
+      item = create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: type,
+        pay_rate: worker.pay_rate, hours_worked: 0, **attributes)
+      calculator = { "hourly" => HourlyPayrollCalculator, "salary" => SalaryPayrollCalculator }.fetch(type).new(worker, item)
+      calculator.send(:calculate_gross_pay)
+      calculator.send(:record_earnings_breakdown)
+      item.save!
+      item
+    end
+
+    def hourly_worker = create(:employee, :hourly, company: company, pay_rate: 14.37)
+    def salaried_worker = create(:employee, :salary, company: company, pay_rate: 41_234.56, pay_frequency: "biweekly")
+
+    def statement_rows(item) = earnings_table(PayrollItem.find(item.id))
+
+    def statement_lines(item)
+      reader = PDF::Reader.new(StringIO.new(described_class.new(PayrollItem.find(item.id)).generate))
+      [ reader.page_count, reader.pages.map(&:text).join("\n").gsub(/ +/, " ") ]
+    end
+
+    def money(cell) = cell.delete("$,").to_d
+
+    def expect_rows_to_foot(item, rows)
+      gross_ytd = described_class.new(item).send(:pay_ytd_total)
+      expect(rows.sum { |row| money(row[3]) }).to eq(item.gross_pay)
+      expect(rows.sum { |row| money(row[4]) }).to eq(gross_ytd)
+    end
+
+    it "prints wages, overtime and tips with their own YTD in the rendered statement" do
+      worker = hourly_worker
+      3.times do |index|
+        calculated_item(worker, "hourly", Date.new(2026, 1, 15) + (index * 14), hours_worked: 76.33, overtime_hours: 2.25, reported_tips: 212.15)
+      end
+      item = calculated_item(worker, "hourly", Date.new(2026, 2, 26), hours_worked: 80.5, overtime_hours: 3.75, reported_tips: 188.4)
+
+      rows = statement_rows(item)
+      expect(rows).to eq([
+        [ "Regular Pay", "80.50", "$14.37", "$1,156.79", "$4,447.37" ],
+        [ "Overtime Pay", "3.75", "$21.56", "$80.83", "$226.33" ],
+        [ "Tips", "—", "—", "$188.40", "$824.85" ]
+      ])
+      expect_rows_to_foot(item, rows)
+
+      page_count, text = statement_lines(item)
+      expect(page_count).to eq(1)
+      expect(text).to include("Regular Pay 80.50 $14.37 $1,156.79 $4,447.37", "Tips — — $188.40 $824.85", "GROSS PAY $1,426.02 $5,498.55")
+    end
+
+    it "prints salary, bonus, service charges and other earnings with their own YTD" do
+      worker = salaried_worker
+      calculated_item(worker, "salary", Date.new(2026, 1, 15), bonus: 250, service_charge_wages: 310.55)
+      calculated_item(worker, "salary", Date.new(2026, 1, 29), service_charge_wages: 95.2)
+      item = calculated_item(worker, "salary", Date.new(2026, 2, 12), bonus: 100, service_charge_wages: 45.75,
+        custom_earnings: [ { "label" => "Chief Stipend", "amount" => 75 } ])
+
+      rows = statement_rows(item)
+      expect(rows).to contain_exactly(
+        [ "Salary", "—", "—", "$1,585.94", "$4,757.82" ],
+        [ "Service Charges", "—", "—", "$45.75", "$451.50" ],
+        [ "Bonus", "—", "—", "$100.00", "$350.00" ],
+        [ "Chief Stipend", "—", "—", "$75.00", "$75.00" ]
+      )
+      expect_rows_to_foot(item, rows)
+    end
+
+    it "keeps earlier components on the statement when they are absent from this paycheck" do
+      worker = hourly_worker
+      calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, reported_tips: 150, bonus: 300)
+      worker.update!(employment_type: "salary", pay_rate: 41_234.56, salary_type: "annual", pay_frequency: "biweekly")
+      item = calculated_item(worker, "salary", Date.new(2026, 1, 29))
+
+      rows = statement_rows(item)
+      expect(rows.first).to eq([ "Salary", "—", "—", "$1,585.94", "$1,585.94" ])
+      expect(rows.drop(1)).to contain_exactly(
+        [ "Regular Pay", "—", "—", "$0.00", "$1,149.60" ],
+        [ "Tips", "—", "—", "$0.00", "$150.00" ],
+        [ "Bonus", "—", "—", "$0.00", "$300.00" ]
+      )
+      expect_rows_to_foot(item, rows)
+      expect(statement_lines(item).first).to eq(1)
+    end
+
+    it "keeps both summaries together when many earlier components lengthen the statement" do
+      worker = hourly_worker
+      calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, overtime_hours: 4, holiday_hours: 8, pto_hours: 8,
+        reported_tips: 150, bonus: 300, service_charge_wages: 20,
+        custom_earnings: (1..4).map { |index| { "label" => "Stipend #{index}", "amount" => 10 * index } })
+      item = calculated_item(worker, "hourly", Date.new(2026, 1, 29), hours_worked: 80, non_taxable_pay: 20,
+        custom_deductions: (1..8).map { |index| { "label" => "Deduction #{index}", "amount" => 5 } })
+
+      reader = PDF::Reader.new(StringIO.new(described_class.new(PayrollItem.find(item.id)).generate))
+      expect(reader.page_count).to eq(2)
+      expect(reader.pages.first.text).to include("GROSS PAY", "TOTAL DEDUCTIONS")
+      expect(reader.pages.last.text).to include("NET PAY", "YEAR-TO-DATE SUMMARY", "Gross Earnings", "Net Pay")
+    end
+
+    it "itemizes items saved without earning rows under their existing labels" do
+      worker = salaried_worker
+      prior = calculated_item(worker, "salary", Date.new(2026, 1, 15), bonus: 100)
+      item = calculated_item(worker, "salary", Date.new(2026, 1, 29), service_charge_wages: 20)
+      [ prior, item ].each { |saved| saved.payroll_item_earnings.destroy_all }
+
+      rows = statement_rows(item)
+      expect(rows).to eq([
+        [ "Salary", "—", "$41,234.56/yr", "$1,585.94", "$3,171.88" ],
+        [ "Service Charges", "—", "—", "$20.00", "$20.00" ],
+        [ "Bonus", "—", "—", "$0.00", "$100.00" ]
+      ])
+      expect_rows_to_foot(item, rows)
+
+      worker = hourly_worker
+      prior = calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, overtime_hours: 2, reported_tips: 50)
+      item = calculated_item(worker, "hourly", Date.new(2026, 1, 29), hours_worked: 80, reported_tips: 25)
+      [ prior, item ].each { |saved| saved.payroll_item_earnings.destroy_all }
+
+      rows = statement_rows(item)
+      expect(rows.first(2)).to eq([
+        [ "Regular", "80.00", "$14.37", "$1,149.60", "$2,299.20" ],
+        [ "Reported Tips", "—", "—", "$25.00", "$75.00" ]
+      ])
+      expect(rows.last).to eq([ "Overtime Pay", "—", "—", "$0.00", "$43.11" ])
+      expect_rows_to_foot(item, rows)
+    end
+
+    it "carries an itemized opening balance into the rows without its reimbursements" do
+      worker = hourly_worker
+      apply_historical_ytd_balance(company: company, employee: worker,
+        through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+        gross_pay: 5_300, non_taxable_pay: 300,
+        source_breakdown: { "earnings_breakdown" => { "Hourly Pay" => "4000", "Overtime" => "400", "Paycheck Tips" => "600", "Reimb" => "300" } })
+      item = calculated_item(worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80, overtime_hours: 2, reported_tips: 80)
+
+      rows = statement_rows(item)
+      expect(rows).to contain_exactly(
+        [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "$1,149.60" ],
+        [ "Overtime Pay", "2.00", "$21.56", "$43.11", "$443.11" ],
+        [ "Tips", "—", "—", "$80.00", "$680.00" ],
+        [ "Hourly Pay", "—", "—", "$0.00", "$4,000.00" ]
+      )
+      expect_rows_to_foot(item, rows)
+    end
+
+    context "when row YTD cannot be derived" do
+      it "keeps dashes for an opening balance that was not itemized and retains the YTD total" do
+        worker = hourly_worker
+        apply_historical_ytd_balance(company: company, employee: worker,
+          through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+          gross_pay: 5_000, non_taxable_pay: 0, source_breakdown: {})
+        item = calculated_item(worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80, reported_tips: 80)
+
+        expect(statement_rows(item)).to eq([
+          [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "—" ],
+          [ "Tips", "—", "—", "$80.00", "—" ]
+        ])
+        expect(statement_lines(item).last).to include("GROSS PAY $1,229.60 $6,229.60")
+      end
+
+      it "keeps dashes when same-label rows cannot be attributed separately" do
+        worker = salaried_worker
+        item = calculated_item(worker, "salary", Date.new(2026, 1, 15),
+          custom_earnings: [ { "label" => "Stipend", "amount" => 25 } ])
+        item.payroll_item_earnings.destroy_all
+        item.update!(custom_earnings: [ { "label" => "Stipend", "amount" => 25 }, { "label" => "Stipend", "amount" => 30 } ],
+          gross_pay: item.gross_pay + 30)
+
+        rows = statement_rows(item)
+        expect(rows.map(&:last).uniq).to eq([ "—" ])
+        expect(rows.map(&:first)).to include("Salary", "Stipend")
+      end
+
+      it "keeps dashes on a correction without stored earning rows" do
+        worker = hourly_worker
+        original = calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80)
+        period = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 16), end_date: Date.new(2026, 1, 20), pay_date: Date.new(2026, 1, 29))
+        correction = create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: "hourly",
+          pay_rate: 14.37, hours_worked: 0, gross_pay: -143.70, net_pay: 0, correction_for_payroll_item_id: original.id)
+
+        expect(statement_rows(correction)).to eq([ [ "Taxable earnings adjustment", "—", "—", "$-143.70", "—" ] ])
+      end
+    end
+
+    it "does not change the saved payroll record" do
+      worker = hourly_worker
+      item = calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80, reported_tips: 20)
+      before = item.reload.attributes
+
+      described_class.new(item).generate
+
+      expect(item.reload.attributes).to eq(before)
+    end
   end
 
   it "prints legacy insurance and loan YTD values when those rows are visible" do
