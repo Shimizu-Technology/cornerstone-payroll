@@ -14,6 +14,14 @@ class PayStubGenerator
   include PdfFooter
 
   GUAM_TIME_ZONE = "Pacific/Guam"
+  # Items saved without earning rows keep the labels their statements have always printed.
+  UNSTORED_EARNING_LABELS = {
+    "regular" => "Regular",
+    "overtime" => "Overtime (1.5x)",
+    "holiday" => "Holiday",
+    "pto" => "PTO",
+    "tips" => "Reported Tips"
+  }.freeze
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
@@ -138,6 +146,79 @@ class PayStubGenerator
     pdf.move_down 3
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
+    earnings_data.concat(itemized_earnings_rows&.map { |row| itemized_earnings_row(row) } || unitemized_earnings_rows)
+
+    # Gross total
+    earnings_data << [
+      { content: "GROSS PAY", font_style: :bold },
+      "",
+      "",
+      { content: format_currency(payroll_item.gross_pay), font_style: :bold },
+      { content: format_currency(pay_ytd_total), font_style: :bold }
+    ]
+
+    pdf.font_size(8) do
+      pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
+        row(0).font_style = :bold
+        row(0).background_color = "EEEEEE"
+        cells.padding = [ 2, 6 ]
+        columns(1..4).align = :right
+        row(-1).background_color = "F5F5F5"
+      end
+    end
+
+    pdf.move_down 6
+  end
+
+  # Each row's YTD prints only when the rows account for both printed totals.
+  # A correction without stored rows, an opening balance that was not itemized,
+  # or a partial older record keeps "—" rather than a figure that does not foot.
+  def itemized_earnings_rows
+    return if SignedCorrectionEarnings.call(payroll_item)
+
+    rows = earnings_ytd_breakdown.call
+    return unless rows.sum(0.to_d, &:current) == payroll_item.gross_pay.to_d.round(2)
+    return unless rows.sum(0.to_d, &:ytd) == pay_ytd_total
+    return if rows.any? { |row| row.current.nonzero? && row.ytd.zero? }
+
+    rows.reject { |row| row.current.zero? && row.ytd.zero? }.presence
+  end
+
+  def itemized_earnings_row(row)
+    [
+      itemized_earning_label(row),
+      row.hours.present? ? format_hours(row.hours) : "—",
+      itemized_earning_rate(row),
+      format_currency(row.current),
+      format_currency(row.ytd)
+    ]
+  end
+
+  def itemized_earning_label(row)
+    if row.current.nonzero? && !stored_earning_rows?
+      UNSTORED_EARNING_LABELS.fetch(row.category.to_s) { row.source_label }
+    else
+      row.source_label.presence || row.category.to_s.titleize
+    end
+  end
+
+  def itemized_earning_rate(row)
+    return format_currency(row.rate) if row.rate.present?
+    return "—" if row.current.zero? || stored_earning_rows?
+
+    case row.category.to_s
+    when "salary" then "#{format_currency(payroll_item.pay_rate)}/yr"
+    when "contract_fee" then format_currency(payroll_item.pay_rate)
+    else "—"
+    end
+  end
+
+  def stored_earning_rows?
+    payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
+  end
+
+  def unitemized_earnings_rows
+    earnings_data = []
 
     # Non-taxable earnings are printed in their own section because they increase
     # net pay but are intentionally excluded from gross pay.
@@ -276,26 +357,7 @@ class PayStubGenerator
 
     end
 
-    # Gross total
-    earnings_data << [
-      { content: "GROSS PAY", font_style: :bold },
-      "",
-      "",
-      { content: format_currency(payroll_item.gross_pay), font_style: :bold },
-      { content: format_currency(pay_ytd_total), font_style: :bold }
-    ]
-
-    pdf.font_size(8) do
-      pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
-        row(0).font_style = :bold
-        row(0).background_color = "EEEEEE"
-        cells.padding = [ 2, 6 ]
-        columns(1..4).align = :right
-        row(-1).background_color = "F5F5F5"
-      end
-    end
-
-    pdf.move_down 6
+    earnings_data
   end
 
   def render_deductions(pdf)
@@ -500,8 +562,12 @@ class PayStubGenerator
         for_reporting: true
       )
       gross = totals.fetch(:gross_pay).to_d + payroll_item.gross_pay.to_d
-      PayrollEarningsYtdBreakdown.new(payroll_item).pay_ytd_total(gross)
+      earnings_ytd_breakdown.pay_ytd_total(gross)
     end
+  end
+
+  def earnings_ytd_breakdown
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
   end
 
   def payroll_field_entries_for(*treatments)
