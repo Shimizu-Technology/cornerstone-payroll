@@ -15,7 +15,7 @@ import { canWriteCompany } from '@/lib/company-write-access';
 import { cutoffDistance, lockedBatchCopy, lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import { formatGuamDateTime } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
-import type { AirePayrollCalendarState } from '@/types';
+import type { AirePayrollCalendarState, AirePayrollRecord, PayPeriodStatus } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,6 +23,8 @@ import { Card, CardContent } from '@/components/ui/card';
 type Props = {
   payPeriodId: number;
   calendar: AirePayrollCalendarState;
+  payPeriodStatus?: PayPeriodStatus;
+  linkedRecord?: Pick<AirePayrollRecord, 'source_cutoff_at'> | null;
   onRefresh: () => Promise<void> | void;
 };
 
@@ -51,7 +53,7 @@ function statusTone(state: AirePayrollCalendarState['cutoff_state']) {
   return 'default' as const;
 }
 
-export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Props) {
+export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, linkedRecord, onRefresh }: Props) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
@@ -60,7 +62,11 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const manualLock = calendar.lock_mode === 'manual';
-  const distance = manualLock ? null : cutoffDistance(calendar.cutoff_at, now);
+  // Nothing was ever scheduled for this completed payroll and nothing can be now,
+  // so its hours come from the linked record. Any publication keeps its real state.
+  const historicalRecord = payPeriodStatus === 'committed' && Boolean(linkedRecord) && !calendar.finalized_batch;
+  const recordedWithoutSchedule = historicalRecord && !calendar.publication && !calendar.can_publish;
+  const distance = manualLock || recordedWithoutSchedule ? null : cutoffDistance(calendar.cutoff_at, now);
   const cutoffPassed = !manualLock && calendar.cutoff_at
     ? new Date(calendar.cutoff_at).getTime() <= now.getTime()
     : false;
@@ -116,11 +122,15 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-display text-base font-bold text-neutral-950">Time tracking cutoff</h3>
-                <Badge variant={statusTone(calendar.cutoff_state)}>{stateLabels[calendar.cutoff_state]}</Badge>
+                {recordedWithoutSchedule
+                  ? <Badge variant="default">Recorded with payroll</Badge>
+                  : <Badge variant={statusTone(calendar.cutoff_state)}>{stateLabels[calendar.cutoff_state]}</Badge>}
                 {calendar.publication && <Badge variant="default">Schedule v{calendar.publication.schedule_version}</Badge>}
               </div>
               <p className="mt-2 text-sm leading-6 text-neutral-600">
-                <span>{lockScheduleCopy(calendar, Boolean(batch) || calendar.cutoff_state === 'finalized')}</span>{manualLock && !batch ? '. Approved hours stay editable until you choose Lock.' : '. Held time stays separate.'}
+                {recordedWithoutSchedule
+                  ? 'No cutoff was scheduled; hours come from the linked time record. Held time stays separate.'
+                  : <><span>{lockScheduleCopy(calendar, Boolean(batch) || calendar.cutoff_state === 'finalized')}</span>{manualLock && !batch ? '. Approved hours stay editable until you choose Lock.' : '. Held time stays separate.'}</>}
               </p>
             </div>
           </div>
@@ -145,7 +155,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
         </div>
 
-        {!manualLock && ['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
+        {!manualLock && !recordedWithoutSchedule && ['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
           <p className="font-semibold">Cutoff reached — waiting for time tracking to lock the hours</p>
           {calendar.cutoff_at && <p className="mt-1">Waiting since {formatGuamDateTime(calendar.cutoff_at)} ({Math.max(0, Math.floor((now.getTime() - new Date(calendar.cutoff_at).getTime()) / 60000))} minutes).</p>}
           {calendar.publication?.next_delivery_attempt_at && <p className="mt-1">Next retry: {formatGuamDateTime(calendar.publication.next_delivery_attempt_at)}</p>}
@@ -156,14 +166,16 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           <div className="px-6 py-4">
             <p className="text-xs font-semibold text-neutral-600">Cutoff</p>
             <p className="mt-2 font-semibold text-neutral-950">
-              {manualLock ? 'Manual Lock' : calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not available'}
+              {recordedWithoutSchedule && linkedRecord?.source_cutoff_at
+                ? formatGuamDateTime(linkedRecord.source_cutoff_at)
+                : manualLock ? 'Manual Lock' : calendar.cutoff_at ? formatGuamDateTime(calendar.cutoff_at) : 'Not available'}
             </p>
             {distance && <p className="mt-2 text-xs text-neutral-500">{distance}</p>}
           </div>
           <div className="px-6 py-4">
             <p className="text-xs font-semibold text-neutral-600">Time tracking delivery</p>
             <p className="mt-2 font-semibold text-neutral-950">
-              {calendar.publication?.delivery_status === 'delivered'
+              {recordedWithoutSchedule ? 'Not used for this payroll' : calendar.publication?.delivery_status === 'delivered'
                 ? 'Schedule received'
                 : calendar.publication?.delivery_status === 'failed'
                   ? 'Retry required'
@@ -173,14 +185,24 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
           </div>
           <div className="px-6 py-4">
             <p className="text-xs font-semibold text-neutral-600">Locked batch</p>
-            <p className="mt-2 font-semibold text-neutral-950">{batchCopy.headline}</p>
-            <p className="mt-2 text-xs text-neutral-500">{batchCopy.detail}</p>
+            <p className="mt-2 font-semibold text-neutral-950">{recordedWithoutSchedule ? 'Linked time record' : batchCopy.headline}</p>
+            <p className="mt-2 text-xs text-neutral-500">{recordedWithoutSchedule ? 'This payroll\'s hours come from its linked record, not a scheduled batch.' : batchCopy.detail}</p>
           </div>
         </div>
 
         </details>
 
-        {!calendar.eligible && calendar.eligibility_error && (
+        {!calendar.eligible && calendar.eligibility_error && historicalRecord && (
+          <div className="flex items-start gap-4 border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-sm text-neutral-700" role="status">
+            <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-neutral-950">Time tracking scheduling does not apply to this completed payroll</p>
+              <p className="mt-2 leading-6">{calendar.eligibility_error}</p>
+            </div>
+          </div>
+        )}
+
+        {!calendar.eligible && calendar.eligibility_error && !historicalRecord && (
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
             <div className="min-w-0 flex-1">

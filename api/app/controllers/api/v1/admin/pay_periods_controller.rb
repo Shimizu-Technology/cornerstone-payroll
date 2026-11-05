@@ -1254,7 +1254,7 @@ module Api
           # for the `supplemental_pay_periods_count` field without firing an
           # extra `SELECT COUNT(*)` query on every show/update/etc. request.
           @pay_period = PayPeriod
-            .includes(:payroll_items, :voided_by, :source_pay_period, :company_workweek,
+            .includes({ payroll_items: :legacy_disposition }, :voided_by, :source_pay_period, :company_workweek,
                       :correction_events, :supplemental_pay_periods)
             .find(params[:id])
 
@@ -1413,12 +1413,16 @@ module Api
           end
 
           if include_items
-            print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period) if pay_period.committed?
-            json[:payroll_items] = pay_period.payroll_items.reportable.includes(
+            print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period)
+            items = pay_period.payroll_items.reportable.includes(
               :check_events, :check_reconciliation_events, :payroll_item_field_entries,
+              :payroll_item_earnings, :payroll_item_deductions, :direct_deposit_payment_confirmation,
+              :financial_correction_origin_item, :correction_for_payroll_item,
               :time_tracking_entry_allocations, employee: :department
-            ).map do |item|
-              payroll_item_json(item, print_activity: print_activity)
+            ).to_a
+            payment_lookup = PayrollPaymentEligibilityLookup.new(items)
+            json[:payroll_items] = items.map do |item|
+              payroll_item_json(item, print_activity: print_activity, payment_lookup: payment_lookup)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
             json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids
@@ -1440,7 +1444,7 @@ module Api
           user
         end
 
-        def payroll_item_json(item, print_activity: nil)
+        def payroll_item_json(item, print_activity: nil, payment_lookup: nil)
           {
             id: item.id,
             payroll_included: item.payroll_included?,
@@ -1460,7 +1464,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
-            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item),
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item, employee: item.employee),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
             bonus_source: item.bonus_source,
@@ -1520,7 +1524,7 @@ module Api
             effective_payment_delivery_method: item.effective_payment_delivery_method,
             earnings_statement_eligible: EarningsStatementEligibility.printable?(item),
             employee_payment_delivery_method: item.employee&.payment_delivery_method,
-            payment_method_change: PayrollPaymentMethodEligibility.new(item, print_activity: print_activity).call,
+            payment_method_change: PayrollPaymentMethodEligibility.new(item, print_activity: print_activity, lookup: payment_lookup).call,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,

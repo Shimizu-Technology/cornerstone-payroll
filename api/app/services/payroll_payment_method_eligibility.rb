@@ -25,9 +25,10 @@ class PayrollPaymentMethodEligibility
     activity
   end
 
-  def initialize(item, print_activity: nil)
+  def initialize(item, print_activity: nil, lookup: nil)
     @item = item
     @print_activity = print_activity
+    @lookup = lookup
   end
 
   def call
@@ -45,9 +46,9 @@ class PayrollPaymentMethodEligibility
       "There is no net payment to change. Print the earnings statement instead; no check number is needed."
     elsif item.direct_deposit_payment_confirmation.present?
       "A bank payment has already been confirmed. Its delivery method cannot be changed."
-    elsif item.duplicate_check_linked?
+    elsif lookup ? lookup.duplicate_check_linked?(item) : item.duplicate_check_linked?
       "This payment is linked to a duplicate check record. Review that reconciliation before changing its delivery method."
-    elsif (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(item, check_activity: check_has_activity?))
+    elsif (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(item, check_activity: check_has_activity?, lookup: lookup))
       blocker
     elsif CheckReconciliationStatus.for(item) == "cleared"
       "This check has cleared. Resolve the bank clearing evidence before changing its delivery method."
@@ -67,8 +68,7 @@ class PayrollPaymentMethodEligibility
   end
 
   def check_has_activity?
-    return true if item.time_tracking_manual_allocations.where.not(status: "voided")
-      .where("status = 'issued' OR payment_issue_intent <> '{}'::jsonb").exists?
+    return true if lookup ? lookup.manual_payment_activity?(item) : item.time_tracking_manual_allocations.with_payment_activity.exists?
     return true if item.check_prepared?
 
     events = item.check_events
@@ -88,5 +88,5 @@ class PayrollPaymentMethodEligibility
 
   private
 
-  attr_reader :item
+  attr_reader :item, :lookup
 end
