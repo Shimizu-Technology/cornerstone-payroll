@@ -96,3 +96,53 @@ describe('schedule eligibility note', () => {
     cleanup();
   });
 });
+describe('committed run with a linked record and no schedule', () => {
+  const linkedRecord = { source_cutoff_at: '2026-08-31T03:06:59Z' };
+  const unpublished = { ...calendar, eligible: false, cutoff_at: null, cutoff_state: 'unpublished', publication: null, finalized_batch: null, eligibility_error: 'Synthetic setup note.' } as AirePayrollCalendarState;
+  const expectRecorded = (): void => {
+    expect(screen.getByText('Recorded with payroll')).toBeTruthy();
+    expect(screen.getByText('No cutoff was scheduled; hours come from the linked time record. Held time stays separate.')).toBeTruthy();
+    expect(screen.getByText(/Aug 31, 2026.*ChST/)).toBeTruthy();
+    expect(screen.getByText('Not used for this payroll')).toBeTruthy();
+    expect(screen.getByText('Linked time record')).toBeTruthy();
+    expect(screen.queryByText(/Not published|No finalized batch received|Not sent|Automatic lock time unavailable|Not available/)).toBeNull();
+  };
+  it('describes the linked record instead of a schedule that never existed', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={unpublished} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expectRecorded();
+  });
+  it('does not wait for a lock on a cutoff that was never published', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...unpublished, cutoff_at: '2026-08-24T07:00:00Z', cutoff_state: 'cutoff_due' }} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expectRecorded();
+    expect(screen.queryByText(/waiting for time tracking to lock/)).toBeNull();
+    expect(screen.queryByText('Cutoff reached')).toBeNull();
+  });
+  it('keeps the real state and alert when a publication failed', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...unpublished, cutoff_state: 'publication_failed', publication: { id: 1, schedule_version: 1, publication_id: 'synthetic', delivery_status: 'failed', delivery_attempts: 2, last_error: 'Connection unavailable' } }} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Sync needs attention')).toBeTruthy();
+    expect(screen.getByText('Retry required')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Connection unavailable');
+    expect(screen.queryByText('Recorded with payroll')).toBeNull();
+  });
+  it('keeps the batch state while a batch is being verified', (): void => {
+    const finalized_batch = { event_id: 'event', verification_status: 'pending', verification_attempts: 1, occurred_at: '2026-10-22T07:00:00Z', payroll_batch_id: 'batch', payroll_batch_checksum: 'checksum' } as NonNullable<AirePayrollCalendarState['finalized_batch']>;
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...unpublished, finalized_batch }} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Verification in progress')).toBeTruthy();
+    expect(screen.queryByText('Recorded with payroll')).toBeNull();
+  });
+  it('keeps the schedule wording while publishing is still offered', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...unpublished, can_publish: true }} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Not published')).toBeTruthy();
+  });
+  it('keeps the schedule wording without a linked record', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={unpublished} payPeriodStatus="committed" linkedRecord={null} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Not published')).toBeTruthy();
+    expect(screen.getByText('No finalized batch received')).toBeTruthy();
+  });
+  it.each(['draft', 'calculated', 'approved'] as const)('keeps the schedule wording on a %s run', (payPeriodStatus): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={unpublished} payPeriodStatus={payPeriodStatus} linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Not published')).toBeTruthy();
+    expect(screen.getByText('No finalized batch received')).toBeTruthy();
+    cleanup();
+  });
+});

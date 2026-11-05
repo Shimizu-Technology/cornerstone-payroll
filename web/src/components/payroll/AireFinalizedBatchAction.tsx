@@ -25,8 +25,10 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
   // The linked record keeps hours by line, not a batch headcount.
   const employeeCount = batch ? Number(summary.employee_count || 0) : null;
   const exclusionCount = Number(summary.exclusion_count || 0);
-  const includesCorrections = Number(summary.correction_count || 0) > 0
-    || Number(batch?.issues?.negative_adjustment_count || 0) > 0;
+  // Without a batch, the record's accounting corrections are its signed lines.
+  const includesCorrections = batch
+    ? Number(summary.correction_count || 0) > 0 || Number(batch.issues?.negative_adjustment_count || 0) > 0
+    : Number(lineStatus?.accounting_corrections?.line_count || 0) > 0;
   const committed = payPeriodStatus === 'committed';
   const nextAction = payPeriodStatus === 'calculated'
     ? 'Next: review the calculated payroll, then select Approve when ready.'

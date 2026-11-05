@@ -392,6 +392,8 @@ describe('AirePayrollCockpit', () => {
       expect(screen.getByText('Batch and payment details')).toBeTruthy();
       expect(screen.getByText('time tracking-PAY-EARLIER')).toBeTruthy();
       expect(screen.getByText('Compare source and payroll hours')).toBeTruthy();
+      expect(screen.getByText('Recorded with payroll')).toBeTruthy();
+      expect(screen.queryByText('Not published')).toBeNull();
       await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalled());
     });
 
