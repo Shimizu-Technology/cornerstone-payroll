@@ -94,7 +94,8 @@ RSpec.describe "CompanyAssignment client management integrity", type: :model do
     assignment = create(:company_assignment, user: accountant, company: company)
     expect(assignment.reload.client_management).to be(false)
     expect(CompanyAssignment.columns_hash.fetch("client_management").null).to be(false)
-    expect(CompanyAssignment.columns_hash.fetch("client_management").default).to be(false)
+    raw_default = CompanyAssignment.columns_hash.fetch("client_management").default
+    expect(CompanyAssignment.type_for_attribute("client_management").deserialize(raw_default)).to be(false)
   end
 
   it "requires an active administrator grantor other than the recipient" do
