@@ -4,7 +4,8 @@ require "rails_helper"
 
 RSpec.describe "Rails security upgrade request boundaries", type: :request do
   let(:client_ip) { "198.51.100.25" }
-  let(:proxy_env) { { "REMOTE_ADDR" => "10.0.0.5" } }
+  # Puma unmapped the observed Render socket peer to this private IPv4 shape.
+  let(:proxy_env) { { "REMOTE_ADDR" => "10.209.25.240" } }
 
   it "normalizes headers before every other middleware, including request logging" do
     stack = Rails.application.middleware.map(&:klass)
