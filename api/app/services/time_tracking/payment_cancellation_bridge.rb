@@ -7,6 +7,7 @@ module TimeTracking
   class PaymentCancellationBridge
     LOCK_KEY_BASE = 4_100_000_000_000_000_000
     LOCK_WAIT_SECONDS = 10
+    ORIGINAL_RECEIPT_STATUSES = %w[payment_prepared payment_issued].freeze
 
     # One lock spans the short durable-intent transaction, remote command,
     # and local acknowledgement. Both native method changes and sync use it.
@@ -22,23 +23,23 @@ module TimeTracking
       raise TimeTracking::Client::Error, "Another payment transition is in progress; refresh and retry"
     end
 
-    def self.blocker_for(item, check_activity: nil)
-      pending_resolution = resolution_blocker_for(item)
+    def self.blocker_for(item, check_activity: nil, lookup: nil)
+      pending_resolution = resolution_blocker_for(item, lookup: lookup)
       return pending_resolution if pending_resolution
       return unless item.pay_period.committed?
-      if item.source_accounting_correction_linked?
+      if lookup ? lookup.source_accounting_correction_linked?(item) : item.source_accounting_correction_linked?
         return "This payment has an exact source accounting correction. Payment cancellation is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support."
       end
-      if item.time_tracking_manual_allocations.where.not(status: "voided").where.not(payment_cancellation_intent: {}).exists?
+      if lookup ? lookup.manual_cancellation_intent?(item) : item.time_tracking_manual_allocations.with_payment_cancellation_intent.exists?
         return "Finish syncing the earlier check cancellation before changing this payment method again."
       end
       return unless item.effective_payment_delivery_method == "paper_check"
 
-      check_activity = PayrollPaymentMethodEligibility.new(item).check_has_activity? if check_activity.nil?
+      check_activity = PayrollPaymentMethodEligibility.new(item, lookup: lookup).check_has_activity? if check_activity.nil?
       return unless check_activity
 
-      direct = item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)
-      manual = item.time_tracking_manual_allocations.where.not(status: "voided").to_a
+      direct = lookup ? lookup.source_lines(item) : item.time_tracking_entry_allocations.to_a + FinancialCorrectionService.links_for(item)
+      manual = lookup ? lookup.active_manual_allocations(item) : item.time_tracking_manual_allocations.not_voided.to_a
       sources = (direct + manual).map(&:time_tracking_source).uniq(&:id)
       return if sources.empty?
       if sources.any? { |source| !source.active? || !source.remote_identity_pinned? || !source.supports?(:payment_cancellation_v1) }
@@ -47,7 +48,7 @@ module TimeTracking
       if direct.any? { |row| row.verified_source_user_uuid.blank? } || manual.any? { |row| row.source_user_uuid.blank? }
         return "Verify the connected employee identity before retiring this check."
       end
-      if direct.any? { |row| !valid_original_receipt?(item, row) }
+      if direct.any? { |row| !valid_original_receipt?(item, row, lookup: lookup) }
         return "The original check's exact source receipt is missing. Review the connected payment before cancelling it."
       end
       if manual.any? { |row| row.payment_cancellation_intent.present? }
@@ -56,8 +57,8 @@ module TimeTracking
       nil
     end
 
-    def self.resolution_blocker_for(item)
-      if item.time_tracking_manual_allocations.pending_payment_resolution.exists?
+    def self.resolution_blocker_for(item, lookup: nil)
+      if lookup ? lookup.pending_payment_resolution?(item) : item.time_tracking_manual_allocations.pending_payment_resolution.exists?
         "Reconcile the saved reported-payment match before changing or voiding this payment. Its hours remain reserved."
       end
     end
@@ -67,11 +68,11 @@ module TimeTracking
         time_tracking_import_id: row.time_tracking_import_id,
         source_time_entry_id: row.source_time_entry_id, source_line_key: row.line_key,
         payment_method: "paper_check", payment_reference: number,
-        status: %w[payment_prepared payment_issued]).order(:id).last
+        status: ORIGINAL_RECEIPT_STATUSES).order(:id).last
     end
 
-    def self.valid_original_receipt?(item, row)
-      receipt = original_receipt(item, row, item.check_number)
+    def self.valid_original_receipt?(item, row, lookup: nil)
+      receipt = lookup ? lookup.original_receipt(item, row, item.check_number) : original_receipt(item, row, item.check_number)
       receipt&.line_contract? && receipt.source_user_uuid == row.verified_source_user_uuid &&
         receipt.regular_hours == row.regular_hours && receipt.overtime_hours == row.overtime_hours &&
         receipt.total_hours == row.total_hours && receipt.source_kind == row.source_kind
