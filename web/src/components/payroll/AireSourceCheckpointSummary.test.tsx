@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AirePayrollCalendarState, AirePayrollRecord } from '@/types';
+import type { AirePayrollCalendarState, AirePayrollCockpitOverview, AirePayrollRecord } from '@/types';
 import { AireSourceCheckpointSummary } from './AireSourceCheckpointSummary';
 
 const calendar: AirePayrollCalendarState = {
@@ -103,4 +103,72 @@ it('labels a manually locked batch while its verification is still pending', () 
 it('names the scheduled November cutoff plainly inside the compact checkpoint', () => {
   render(<AireSourceCheckpointSummary {...props} calendar={{ ...calendar, lock_mode: 'scheduled', cutoff_at: '2026-11-07T17:00:00+10:00' }} />);
   expect(within(screen.getByRole('region', { name: 'Source checkpoint' })).getByText('Locks automatically Nov 7, 5:00 p.m. ChST')).toBeTruthy();
+});
+
+describe('committed run with a linked record and no batch', () => {
+  const earlierStatus = {
+    ...linkedRecord.payable_line_status!, line_count: 134, total_hours: 599.06, regular_hours: 578.49, overtime_hours: 20.57,
+    in_payroll: bucket(0), recorded_before_line_tracking: { line_count: 134, total_hours: 599.06, regular_hours: 578.49, overtime_hours: 20.57 },
+    held: { entry_count: 10, total_hours: 6.1 },
+  };
+  const earlierRecord = { ...linkedRecord, payable_line_status: earlierStatus };
+  const notEffective = { ...calendar, eligible: false, cutoff_at: null, cutoff_state: 'unpublished' as const, finalized_batch: null,
+    eligibility_code: 'pay_schedule_not_effective' as const, eligibility_error: 'This pay period begins before the confirmed payroll setup takes effect.' };
+
+  it('shows the record totals, held count and a neutral schedule note', () => {
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByText('599.06 h linked to payroll')).toBeTruthy();
+    expect(screen.getByText('578.49 regular + 20.57 OT · 134 lines')).toBeTruthy();
+    expect(screen.getByText('10 held entries excluded').className).not.toContain('warning');
+    expect(screen.getByText('6.10 h outside this payroll; see the linked time record.')).toBeTruthy();
+    expect(screen.getByText(/^Source cutoff · /)).toBeTruthy();
+    expect(screen.getByRole('status').className).toContain('text-neutral-700');
+    expect(screen.getByRole('status').textContent).toBe(notEffective.eligibility_error);
+    expect(screen.queryByText(/after batch verification|count unavailable|Cutoff not published/)).toBeNull();
+    expect(screen.getByLabelText('Source checkpoint').querySelector('[class*="warning"]')).toBeNull();
+  });
+
+  it('does not present a live estimate as this run\'s held count', () => {
+    const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40 } } as unknown as AirePayrollCockpitOverview;
+    render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByText('10 held entries excluded')).toBeTruthy();
+    expect(screen.queryByText(/live estimate/)).toBeNull();
+  });
+
+  it.each([
+    ['needs_attention', 'Time tracking payment needs attention. Review the payment history.'],
+    ['payment_pending', 'Time tracking hours are linked; payment evidence is pending.'],
+  ] as const)('keeps the %s warning', (state, message) => {
+    const status = { ...earlierStatus, [state]: bucket(2), recorded_before_line_tracking: { ...earlierStatus.recorded_before_line_tracking, line_count: 132 } };
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} aireRecord={{ ...earlierRecord, payable_line_status: status }} />);
+    expect(screen.getByText(message).className).toContain('text-warning-900');
+  });
+
+  it('still surfaces a connection error', () => {
+    const publication = { id: 1, schedule_version: 1, publication_id: 'synthetic', delivery_status: 'failed' as const, delivery_attempts: 2, last_error: 'Connection unavailable' };
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={{ ...notEffective, publication }} aireRecord={earlierRecord} />);
+    expect(screen.getByRole('alert').textContent).toBe('Connection unavailable');
+  });
+
+  it('leaves a batch still being verified on its live wording', () => {
+    const pending = { ...batch, verification_status: 'pending' as const };
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={{ ...notEffective, finalized_batch: pending }} aireRecord={earlierRecord} />);
+    expect(screen.getByText('Source hours linked to payroll')).toBeTruthy();
+    expect(screen.getByText('Held entry count unavailable')).toBeTruthy();
+  });
+
+  it('does not say hours are linked when a completed payroll has no record', () => {
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} />);
+    expect(screen.getByText('No time tracking record is linked to this completed payroll.')).toBeTruthy();
+    expect(screen.queryByText(/after batch verification/)).toBeNull();
+  });
+
+  it.each(['draft', 'calculated', 'approved'] as const)('keeps the %s run warning and live wording', (payPeriodStatus) => {
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus={payPeriodStatus} calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByRole('status').className).toContain('text-warning-900');
+    expect(screen.getByText('Regular / OT / people available after batch verification.')).toBeTruthy();
+    expect(screen.getByText('Source hours linked to payroll')).toBeTruthy();
+    expect(screen.getByText('Cutoff not published · cutoff time unavailable')).toBeTruthy();
+    cleanup();
+  });
 });

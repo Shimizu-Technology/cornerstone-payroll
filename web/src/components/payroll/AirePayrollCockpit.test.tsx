@@ -9,6 +9,7 @@ import type {
   AirePayrollCalendarState,
   AirePayrollCockpitOverview,
   AirePayrollExceptionsResponse,
+  AirePayrollRecord,
   AirePayrollSettlementCasesResponse,
   AirePayrollTimeEntriesResponse,
 } from '@/types';
@@ -365,6 +366,53 @@ describe('AirePayrollCockpit', () => {
     for (const api of [apiMocks.overview, apiMocks.entries, apiMocks.exceptions, apiMocks.settlements]) {
       expect(api).not.toHaveBeenCalled();
     }
+  });
+
+  describe('committed record without a batch', () => {
+    const lineBucket = (line_count: number, total_hours: number) => ({ line_count, total_hours, regular_hours: total_hours, overtime_hours: 0 });
+    const earlierRecord: AirePayrollRecord = {
+      id: 9, source_name: 'time tracking', source_active: true, external_batch_id: 'time tracking-PAY-EARLIER',
+      external_batch_checksum: 'earlier-checksum', contract_version: '2.0', source_cutoff_at: '2026-08-31T13:06:59+10:00',
+      payable_line_status: {
+        line_count: 3, total_hours: 24, regular_hours: 24, overtime_hours: 0,
+        in_payroll: lineBucket(0, 0), payment_pending: lineBucket(0, 0), paid: lineBucket(0, 0), needs_attention: lineBucket(0, 0),
+        recorded_before_line_tracking: lineBucket(3, 24), held: { entry_count: 2, total_hours: 1.5 },
+        synchronization: { pending_event_count: 0, failed_event_count: 0 },
+      },
+    };
+    const historical = { ...calendar, eligible: false, cutoff_state: 'unpublished', external_pay_period_id: null, publication: null, finalized_batch: null } as AirePayrollCalendarState;
+    const pendingBatch = {
+      event_id: 'event-17', verification_status: 'pending', verification_attempts: 1, occurred_at: '2026-10-23T00:01:00+10:00',
+      payroll_batch_id: 'time tracking-PAY-17', payroll_batch_checksum: 'checksum',
+    } as NonNullable<AirePayrollCalendarState['finalized_batch']>;
+
+    it('adds the recorded card in its own section and keeps the hours comparison', async () => {
+      render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} payPeriodStatus="committed" aireRecord={earlierRecord} calendar={historical} onRefresh={vi.fn()} />);
+      expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
+      expect(screen.getByText('Batch and payment details')).toBeTruthy();
+      expect(screen.getByText('time tracking-PAY-EARLIER')).toBeTruthy();
+      expect(screen.getByText('Compare source and payroll hours')).toBeTruthy();
+      await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalled());
+    });
+
+    it.each(['draft', 'calculated', 'approved'] as const)('does not add it on a %s run', async (payPeriodStatus) => {
+      render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} payPeriodStatus={payPeriodStatus} aireRecord={earlierRecord} calendar={historical} onRefresh={vi.fn()} />);
+      await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalled());
+      expect(screen.queryByText('Time tracking hours were recorded with this payroll')).toBeNull();
+      expect(screen.queryByText('Batch and payment details')).toBeNull();
+    });
+
+    it('does not add it while a batch is still being verified', async () => {
+      render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} payPeriodStatus="committed" aireRecord={earlierRecord} calendar={{ ...historical, finalized_batch: pendingBatch }} onRefresh={vi.fn()} />);
+      await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalled());
+      expect(screen.queryByText('Time tracking hours were recorded with this payroll')).toBeNull();
+    });
+
+    it('does not add it without a linked record', async () => {
+      render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} payPeriodStatus="committed" calendar={historical} onRefresh={vi.fn()} />);
+      await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalled());
+      expect(screen.queryByText('Batch and payment details')).toBeNull();
+    });
   });
 
   it('shows exact time tracking time, readiness, and mapping in one payroll workspace', async () => {

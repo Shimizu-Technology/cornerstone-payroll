@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
 import type { AirePayrollCalendarState } from '@/types';
 const actions = vi.hoisted(() => ({ manage: false, publish: vi.fn(), refresh: vi.fn() }));
@@ -74,4 +74,25 @@ it('shows a reconciliation failure without presenting an old page as refreshed',
   await user.click(screen.getByRole('button', { name: 'Refresh' }));
   expect(await screen.findByText('Calendar refresh failed')).toBeTruthy();
   expect(onRefresh).not.toHaveBeenCalled();
+});
+describe('schedule eligibility note', () => {
+  const ineligible = { ...calendar, eligible: false, cutoff_state: 'unpublished', eligibility_code: 'pay_schedule_not_effective', eligibility_error: 'This pay period begins before the confirmed payroll setup takes effect.' } as AirePayrollCalendarState;
+  it('stays neutral on a completed payroll and drops the setup action', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={ineligible} payPeriodStatus="committed" onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Time tracking scheduling does not apply to this completed payroll')).toBeTruthy();
+    expect(screen.getByText(ineligible.eligibility_error!).closest('[role="status"]')?.className).toContain('bg-neutral-50');
+    expect(screen.queryByText('This run is not ready for time tracking scheduling')).toBeNull();
+    expect(screen.queryByRole('link', { name: /pay schedule/i })).toBeNull();
+  });
+  it('keeps a connection failure as an alert on a completed payroll', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...ineligible, publication: { id: 1, schedule_version: 1, publication_id: 'synthetic', delivery_status: 'failed', delivery_attempts: 2, last_error: 'Connection unavailable' } }} payPeriodStatus="committed" onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByRole('alert').textContent).toContain('Connection unavailable');
+  });
+  it.each(['draft', 'calculated', 'approved', undefined] as const)('keeps the warning and setup action for %s', (payPeriodStatus): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={ineligible} payPeriodStatus={payPeriodStatus} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('This run is not ready for time tracking scheduling')).toBeTruthy();
+    expect(screen.getByText(ineligible.eligibility_error!).closest('[role="status"]')?.className).toContain('bg-warning-50');
+    expect(screen.getByRole('link', { name: /Open pay schedule and workweek/ })).toBeTruthy();
+    cleanup();
+  });
 });
