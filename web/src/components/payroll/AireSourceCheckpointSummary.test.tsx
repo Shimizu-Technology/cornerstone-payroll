@@ -128,6 +128,31 @@ describe('committed run with a linked record and no batch', () => {
     expect(screen.getByLabelText('Source checkpoint').querySelector('[class*="warning"]')).toBeNull();
   });
 
+  it('does not explain the frozen held count with live approval counts', () => {
+    const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40, pending_approvals: 3, pending_overtime: 1, missing_punches: 2 } } as unknown as AirePayrollCockpitOverview;
+    render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByText('6.10 h outside this payroll; see the linked time record.')).toBeTruthy();
+    expect(screen.queryByText(/approval|missing punch/)).toBeNull();
+  });
+
+  it('keeps live missing payment evidence beside the frozen held hours', () => {
+    const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, pending_approvals: 3, payment_attested_pending_evidence_entries: 2 } } as unknown as AirePayrollCockpitOverview;
+    render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByText('6.10 h outside this payroll; see the linked time record. · 2 payment reports awaiting evidence')).toBeTruthy();
+  });
+
+  it('keeps live reasons on an editable run', () => {
+    const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, pending_approvals: 3 } } as unknown as AirePayrollCockpitOverview;
+    render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="draft" calendar={notEffective} aireRecord={earlierRecord} />);
+    expect(screen.getByText('3 approvals needed')).toBeTruthy();
+  });
+
+  it('notes signed totals when the record has accounting corrections', () => {
+    const status = { ...earlierStatus, accounting_corrections: { line_count: 1, total_hours: -2, regular_hours: -2, overtime_hours: 0 } };
+    render(<AireSourceCheckpointSummary {...props} payPeriodStatus="committed" calendar={notEffective} aireRecord={{ ...earlierRecord, payable_line_status: status }} />);
+    expect(screen.getByText('Signed totals include accounting corrections.')).toBeTruthy();
+  });
+
   it('does not present a live estimate as this run\'s held count', () => {
     const overview = { payroll_period: { lock_mode: 'manual' }, readiness: { held_entries: 3, eligible_hours: 40 } } as unknown as AirePayrollCockpitOverview;
     render(<AireSourceCheckpointSummary {...props} overview={overview} payPeriodStatus="committed" calendar={notEffective} aireRecord={earlierRecord} />);

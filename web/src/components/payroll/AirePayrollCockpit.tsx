@@ -883,15 +883,15 @@ function AirePayrollCockpitWorkspace({
       />}
       {checkpoint ? <details ref={sourceDetailsRef} className="border-t border-neutral-200">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">Cutoff and connection details</summary>
-        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} onRefresh={async () => {
+        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
           if (await onRefresh() !== true) await load();
         }} />
       </details> : verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">
         <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-primary-800">Verified cutoff · connection details</summary>
-      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} onRefresh={async () => {
+      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
       }} />      </details> : (
-      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} onRefresh={async () => {
+      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
       }} />      )}
 

@@ -62,7 +62,8 @@ export function AireSourceCheckpointSummary({
     [issues?.denied_overtime_count, 'overtime denial', 'overtime denials'],
     [issues?.payment_attested_pending_evidence_count ?? (!batch ? readiness?.payment_attested_pending_evidence_entries : undefined), 'payment report awaiting evidence', 'payment reports awaiting evidence'],
   ] as const;
-  const heldReasons = reasons.filter(([count]) => Number(count) > 0)
+  // A live count can't explain a frozen record's held entries, but missing payment evidence stays visible.
+  const heldReasons = reasons.filter(([count, singular]) => Number(count) > 0 && (!recordTotals || singular === 'payment report awaiting evidence'))
     .map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`).join(' · ');
   const attention = Number(lineStatus?.needs_attention.line_count || 0) > 0;
   const paymentPending = committed && Number(lineStatus?.in_payroll.line_count || 0) + Number(lineStatus?.payment_pending.line_count || 0) > 0;
@@ -116,12 +117,13 @@ export function AireSourceCheckpointSummary({
           </p>
           {!batch && !recordTotals && readiness && <p className="mt-1 text-xs tabular-nums text-neutral-600">{hours(readiness.eligible_hours)} h ready for cutoff · live estimate</p>}
           {corrections && <p className="mt-1 text-xs text-neutral-600">Signed batch totals include corrections. Review the exact hours before adding them.</p>}
+          {Number(recordTotals?.accounting_corrections?.line_count || 0) > 0 && <p className="mt-1 text-xs text-neutral-600">Signed totals include accounting corrections.</p>}
         </div>
         <div>
           <p className={`text-sm font-semibold tabular-nums ${Number(heldCount) > 0 && !recordTotals ? 'text-warning-900' : 'text-neutral-950'}`}>
             {heldCount == null ? 'Held entry count unavailable' : `${heldCount} held ${heldCount === 1 ? 'entry' : 'entries'} excluded`}
           </p>
-          <p className="mt-1 text-xs leading-5 text-neutral-600">{heldReasons || (recordTotals && heldCount ? `${hours(recordTotals.held.total_hours)} h outside this payroll; see the linked time record.` : Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
+          <p className="mt-1 text-xs leading-5 text-neutral-600">{[recordTotals && heldCount ? `${hours(recordTotals.held.total_hours)} h outside this payroll; see the linked time record.` : '', heldReasons].filter(Boolean).join(' · ') || (Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
         </div>
       </div>
       {sourceCoverageRequired && <div className="space-y-2"><p className="text-xs leading-5 text-neutral-600">Source hours have not been linked to this payroll. Calculating without linked source hours requires an acknowledgement and reason.</p>{sourceCoverageAction}</div>}

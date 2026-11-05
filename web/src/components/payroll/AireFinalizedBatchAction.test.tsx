@@ -295,6 +295,26 @@ describe('linked record without a batch', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  it('labels signed totals when the record has accounting corrections', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.getByText('Time tracking correction batch is linked')).toBeTruthy();
+    expect(screen.getByText('Signed batch hours')).toBeTruthy();
+    expect(screen.queryByText('Payable hours')).toBeNull();
+    expect(screen.getByText(/Accounting-only corrections record no new payment or recovery/)).toBeTruthy();
+  });
+
+  it('keeps the attention title when a record has corrections and failed lines', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2), needs_attention: bucket(1, 4) })} onReview={vi.fn()} />);
+    expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+  });
+
+  it('keeps batch-based correction detection when a batch exists', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.queryByText('Time tracking correction batch is linked')).toBeNull();
+    expect(screen.getByText('Payable hours')).toBeTruthy();
+  });
+
   it.each([
     ['failed or voided lines', { needs_attention: bucket(1, 4) }, 'Needs attention'],
     ['unpaid lines', { payment_pending: bucket(1, 4) }, 'Payment pending'],
