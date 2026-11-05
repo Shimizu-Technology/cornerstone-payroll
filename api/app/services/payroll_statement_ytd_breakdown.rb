@@ -187,12 +187,13 @@ class PayrollStatementYtdBreakdown
   end
 
   def historical_breakdown(field)
-    historical_balance.source_breakdown.to_h.fetch(field, {}).to_h
+    breakdown = historical_balance.source_breakdown.to_h[field]
+    breakdown.is_a?(Hash) ? breakdown : {}
   end
 
   def component(label, amount, semantic)
     value = BigDecimal(amount.to_s, exception: false)
-    return if label.to_s.blank? || value.nil? || value.zero?
+    return if label.to_s.blank? || value.nil? || !value.finite? || value.zero?
 
     Component.new(label: label.to_s, amount: value, semantic: semantic)
   end
