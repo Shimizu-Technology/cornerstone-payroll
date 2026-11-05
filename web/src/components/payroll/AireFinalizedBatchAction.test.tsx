@@ -255,3 +255,72 @@ it('keeps attention when a run recorded earlier also has lines with no receipt',
   expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
   expect(screen.queryByText('Time tracking hours were recorded with this payroll')).toBeNull();
 });
+
+describe('committed wording', () => {
+  const earlier = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}) => linkedRecord({
+    in_payroll: bucket(0, 0),
+    recorded_before_line_tracking: bucket(2, 72.5),
+    ...overrides,
+  });
+
+  it('never tells a completed payroll to continue with payroll steps', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText(/saved the exact time tracking batch and its entry-level links with this completed payroll/)).toBeTruthy();
+    expect(screen.queryByText(/normal payroll steps/)).toBeNull();
+  });
+
+  it('keeps the payroll steps on an editable run', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="approved" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText(/continue with the normal payroll steps/)).toBeTruthy();
+    expect(screen.getByText(/Next: select Commit & Finalize/)).toBeTruthy();
+  });
+});
+
+describe('linked record without a batch', () => {
+  const earlier = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}) => linkedRecord({
+    in_payroll: bucket(0, 0),
+    recorded_before_line_tracking: bucket(2, 72.5),
+    ...overrides,
+  });
+
+  it('shows the recorded card from the record totals without inventing a headcount', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
+    expect(screen.getByText('Recorded')).toBeTruthy();
+    expect(screen.getByText(/recorded before Cornerstone tracked payment line by line/)).toBeTruthy();
+    expect(screen.getByText('Held time')).toBeTruthy();
+    expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
+    expect(screen.getAllByText('69.00 hrs').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/employee/)).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('labels signed totals when the record has accounting corrections', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.getByText('Time tracking correction batch is linked')).toBeTruthy();
+    expect(screen.getByText('Signed batch hours')).toBeTruthy();
+    expect(screen.queryByText('Payable hours')).toBeNull();
+    expect(screen.getByText(/Accounting-only corrections record no new payment or recovery/)).toBeTruthy();
+  });
+
+  it('keeps the attention title when a record has corrections and failed lines', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2), needs_attention: bucket(1, 4) })} onReview={vi.fn()} />);
+    expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+  });
+
+  it('keeps batch-based correction detection when a batch exists', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.queryByText('Time tracking correction batch is linked')).toBeNull();
+    expect(screen.getByText('Payable hours')).toBeTruthy();
+  });
+
+  it.each([
+    ['failed or voided lines', { needs_attention: bucket(1, 4) }, 'Needs attention'],
+    ['unpaid lines', { payment_pending: bucket(1, 4) }, 'Payment pending'],
+  ])('still warns about %s', (_name, overrides, badge) => {
+    const { container } = render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier(overrides)} onReview={vi.fn()} />);
+    expect(screen.getByText(badge)).toBeTruthy();
+    expect(container.querySelector('[class*="border-warning-200"]')).toBeTruthy();
+  });
+});

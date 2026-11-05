@@ -814,20 +814,23 @@ function AirePayrollCockpitWorkspace({
   const verifiedBatch = calendar.finalized_batch?.verification_status === 'verified'
     ? calendar.finalized_batch
     : null;
+  // A committed run imported before the batch calendar has its linked record but no batch to verify.
+  const recordOnlyHistory = payPeriodStatus === 'committed' && !calendar.finalized_batch && Boolean(aireRecord?.payable_line_status);
   const visibleError = commandError || refreshError;
   const needsAccountConnection = needsTimeTrackingAccount(visibleError);
   const displayedError = needsAccountConnection ? TIME_TRACKING_CONNECTION_MESSAGE : visibleError;
   const correctionCategories = correction?.entry.available_time_categories
     ?? (correction?.entry.category ? [correction.entry.category] : []);
   const checkpoint = presentation === 'checkpoint';
-  const sourceHoursContent = verifiedBatch ? (
+  const linkedBatchCard = verifiedBatch || recordOnlyHistory ? (
     <AireFinalizedBatchAction
       batch={verifiedBatch}
       payPeriodStatus={payPeriodStatus}
       aireRecord={aireRecord}
       onReview={onReviewFinalizedBatch}
     />
-  ) : supportsCockpit ? (
+  ) : null;
+  const sourceHoursContent = verifiedBatch ? linkedBatchCard : supportsCockpit ? (
     <AireManualHoursReview
       payPeriodId={payPeriodId}
       payPeriodStatus={payPeriodStatus}
@@ -880,17 +883,26 @@ function AirePayrollCockpitWorkspace({
       />}
       {checkpoint ? <details ref={sourceDetailsRef} className="border-t border-neutral-200">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">Cutoff and connection details</summary>
-        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
+        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
           if (await onRefresh() !== true) await load();
         }} />
       </details> : verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">
         <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-primary-800">Verified cutoff · connection details</summary>
-      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
+      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
       }} />      </details> : (
-      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} onRefresh={async () => {
+      <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
         if (await onRefresh() !== true) await load();
       }} />      )}
+
+      {recordOnlyHistory && (checkpoint ? <details className="border-t border-neutral-200">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">Batch and payment details</summary>
+        <dl className="space-y-2 px-4 pb-3 text-xs text-neutral-600 sm:px-5">
+          <div><dt>Batch ID</dt><dd className="break-all">{aireRecord?.external_batch_id}</dd></div>
+          <div><dt>Checksum</dt><dd className="break-all">{aireRecord?.external_batch_checksum}</dd></div>
+        </dl>
+        {linkedBatchCard}
+      </details> : linkedBatchCard)}
 
       {checkpoint ? <details className="border-t border-neutral-200">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">{verifiedBatch ? 'Batch and payment details' : 'Compare source and payroll hours'}</summary>

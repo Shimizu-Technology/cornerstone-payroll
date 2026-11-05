@@ -46,7 +46,10 @@ export function AireSourceCheckpointSummary({
   const summary = batch?.summary;
   const corrections = Number(summary?.correction_count || 0) > 0 || Number(batch?.issues?.negative_adjustment_count || 0) > 0;
   const committed = payPeriodStatus === 'committed';
-  const heldCount = batch ? summary?.exclusion_count : overview?.readiness.held_entries;
+  const lineStatus = aireRecord?.payable_line_status;
+  // A committed run's linked record keeps its own frozen totals; a live estimate no longer applies.
+  const recordTotals = committed && !calendar.finalized_batch ? lineStatus : undefined;
+  const heldCount = batch ? summary?.exclusion_count : recordTotals ? recordTotals.held.entry_count : overview?.readiness.held_entries;
   const issues = batch?.issues;
   const readiness = overview?.readiness;
   const reasons = [
@@ -59,9 +62,9 @@ export function AireSourceCheckpointSummary({
     [issues?.denied_overtime_count, 'overtime denial', 'overtime denials'],
     [issues?.payment_attested_pending_evidence_count ?? (!batch ? readiness?.payment_attested_pending_evidence_entries : undefined), 'payment report awaiting evidence', 'payment reports awaiting evidence'],
   ] as const;
-  const heldReasons = reasons.filter(([count]) => Number(count) > 0)
+  // A live count can't explain a frozen record's held entries, but missing payment evidence stays visible.
+  const heldReasons = reasons.filter(([count, singular]) => Number(count) > 0 && (!recordTotals || singular === 'payment report awaiting evidence'))
     .map(([count, singular, plural]) => `${count} ${count === 1 ? singular : plural}`).join(' · ');
-  const lineStatus = aireRecord?.payable_line_status;
   const attention = Number(lineStatus?.needs_attention.line_count || 0) > 0;
   const paymentPending = committed && Number(lineStatus?.in_payroll.line_count || 0) + Number(lineStatus?.payment_pending.line_count || 0) > 0;
   const allPaid = committed && lineStatus && lineStatus.line_count > 0 && lineStatus.paid.line_count === lineStatus.line_count;
@@ -70,7 +73,8 @@ export function AireSourceCheckpointSummary({
   const locked = overview?.payroll_period.status === 'finalized' || Boolean(calendar.finalized_batch)
     || ['finalized', 'batch_verifying', 'batch_verification_failed', 'batch_rejected', 'batch_verified'].includes(calendar.cutoff_state);
   const cutoffLabel = batch ? 'Locked' : cutoffLabels[calendar.cutoff_state];
-  const cutoffCopy = manualLock ? lockScheduleCopy({ lock_mode: 'manual' }, locked)
+  const cutoffCopy = recordTotals && aireRecord?.source_cutoff_at ? `Source cutoff · ${formatGuamDateTime(aireRecord.source_cutoff_at, { second: undefined })}`
+    : manualLock ? lockScheduleCopy({ lock_mode: 'manual' }, locked)
     : calendar.lock_mode === 'scheduled' && ['scheduled', 'upcoming'].includes(calendar.cutoff_state)
       ? lockScheduleCopy(calendar)
       : `${cutoffLabel}${calendar.cutoff_at ? ` · ${formatGuamDateTime(calendar.cutoff_at, { second: undefined })}` : ' · cutoff time unavailable'}`;
@@ -100,20 +104,26 @@ export function AireSourceCheckpointSummary({
       <div className="grid gap-3 border-t border-neutral-200 pt-3 sm:grid-cols-2">
         <div>
           <p className="text-sm font-semibold tabular-nums text-neutral-950">
-            {batch ? `${hours(summary?.total_hours)} h ${aireRecord ? 'added' : 'in locked batch'}` : aireRecord ? 'Source hours linked to payroll' : 'No locked batch added'}
+            {batch ? `${hours(summary?.total_hours)} h ${aireRecord ? 'added' : 'in locked batch'}`
+              : recordTotals ? `${hours(recordTotals.total_hours)} h linked to payroll`
+                : aireRecord ? 'Source hours linked to payroll' : 'No locked batch added'}
           </p>
           <p className="mt-1 text-sm tabular-nums text-neutral-700">
             {batch ? `${hours(summary?.regular_hours)} regular + ${hours(summary?.overtime_hours)} OT · ${summary?.employee_count ?? '—'} ${Number(summary?.employee_count) === 1 ? 'person' : 'people'}`
-              : loading ? 'Checking source hours…' : 'Regular / OT / people available after batch verification.'}
+              : recordTotals ? `${hours(recordTotals.regular_hours)} regular + ${hours(recordTotals.overtime_hours)} OT · ${recordTotals.line_count} ${recordTotals.line_count === 1 ? 'line' : 'lines'}`
+                : loading ? 'Checking source hours…'
+                  : !committed ? 'Regular / OT / people available after batch verification.'
+                    : aireRecord ? 'Open the linked time record for its hours.' : 'No time tracking record is linked to this completed payroll.'}
           </p>
-          {!batch && readiness && <p className="mt-1 text-xs tabular-nums text-neutral-600">{hours(readiness.eligible_hours)} h ready for cutoff · live estimate</p>}
+          {!batch && !recordTotals && readiness && <p className="mt-1 text-xs tabular-nums text-neutral-600">{hours(readiness.eligible_hours)} h ready for cutoff · live estimate</p>}
           {corrections && <p className="mt-1 text-xs text-neutral-600">Signed batch totals include corrections. Review the exact hours before adding them.</p>}
+          {Number(recordTotals?.accounting_corrections?.line_count || 0) > 0 && <p className="mt-1 text-xs text-neutral-600">Signed totals include accounting corrections.</p>}
         </div>
         <div>
-          <p className={`text-sm font-semibold tabular-nums ${Number(heldCount) > 0 ? 'text-warning-900' : 'text-neutral-950'}`}>
+          <p className={`text-sm font-semibold tabular-nums ${Number(heldCount) > 0 && !recordTotals ? 'text-warning-900' : 'text-neutral-950'}`}>
             {heldCount == null ? 'Held entry count unavailable' : `${heldCount} held ${heldCount === 1 ? 'entry' : 'entries'} excluded`}
           </p>
-          <p className="mt-1 text-xs leading-5 text-neutral-600">{heldReasons || (Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
+          <p className="mt-1 text-xs leading-5 text-neutral-600">{[recordTotals && heldCount ? `${hours(recordTotals.held.total_hours)} h outside this payroll; see the linked time record.` : '', heldReasons].filter(Boolean).join(' · ') || (Number(heldCount) > 0 ? 'Outside this cutoff; review held time for the exact reasons.' : heldCount === 0 ? 'No held entries reported.' : 'Review source details for held time.')}</p>
         </div>
       </div>
       {sourceCoverageRequired && <div className="space-y-2"><p className="text-xs leading-5 text-neutral-600">Source hours have not been linked to this payroll. Calculating without linked source hours requires an acknowledgement and reason.</p>{sourceCoverageAction}</div>}
@@ -124,7 +134,7 @@ export function AireSourceCheckpointSummary({
               : recordedEarlier ? 'Time tracking hours are linked. This payroll was recorded before line-by-line payment tracking; its checks show payment.'
                 : 'Time tracking hours are linked. Adding hours does not mark anyone paid.'}
       </p>}
-      {!calendar.eligible && calendar.eligibility_error && <p role="status" className="text-sm text-warning-900">{calendar.eligibility_error}</p>}
+      {!calendar.eligible && calendar.eligibility_error && <p role="status" className={`text-sm ${committed && aireRecord && !calendar.finalized_batch ? 'text-neutral-700' : 'text-warning-900'}`}>{calendar.eligibility_error}</p>}
       {(calendar.finalized_batch?.last_error || calendar.publication?.last_error) && <p role="alert" className="break-words text-sm text-danger-800">{calendar.finalized_batch?.last_error || calendar.publication?.last_error}</p>}
     </section>
   );

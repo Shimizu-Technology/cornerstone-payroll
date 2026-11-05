@@ -234,6 +234,14 @@ class PayrollItem < ApplicationRecord
       TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
   end
 
+  # The same three links as source_accounting_correction_linked?, for a run.
+  def self.source_accounting_correction_linked_ids(ids)
+    dispositions = TimeTrackingCorrectionDisposition
+    (dispositions.where(corrective_payroll_item_id: ids).pluck(:corrective_payroll_item_id) +
+      where(correction_for_payroll_item_id: ids, id: dispositions.select(:corrective_payroll_item_id)).pluck(:correction_for_payroll_item_id) +
+      TimeTrackingEntryAllocation.where(payroll_item_id: ids, id: dispositions.select(:original_allocation_id)).pluck(:payroll_item_id)).to_set
+  end
+
   validate :pending_payment_resolution_cannot_change, on: :update
   before_update :prevent_retired_history_mutation
   before_destroy :prevent_retired_history_mutation

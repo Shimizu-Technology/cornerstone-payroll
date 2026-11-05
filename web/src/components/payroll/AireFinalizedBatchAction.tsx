@@ -5,7 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import type { AirePayrollCalendarState, AirePayrollRecord, PayPeriodStatus } from '@/types';
 
 type Props = {
-  batch: NonNullable<AirePayrollCalendarState['finalized_batch']>;
+  /** Null when a committed run's linked record predates the current batch calendar. */
+  batch: NonNullable<AirePayrollCalendarState['finalized_batch']> | null;
   payPeriodStatus: PayPeriodStatus;
   aireRecord?: AirePayrollRecord | null;
   onReview: () => void;
@@ -14,11 +15,20 @@ type Props = {
 const hours = (value: unknown) => Number(value || 0).toFixed(2);
 
 export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, onReview }: Props) {
-  const summary = batch.summary || {};
-  const employeeCount = Number(summary.employee_count || 0);
+  const lineStatus = aireRecord?.payable_line_status;
+  const summary = batch?.summary || (lineStatus ? {
+    total_hours: lineStatus.total_hours,
+    regular_hours: lineStatus.regular_hours,
+    overtime_hours: lineStatus.overtime_hours,
+    exclusion_count: lineStatus.held.entry_count,
+  } : {});
+  // The linked record keeps hours by line, not a batch headcount.
+  const employeeCount = batch ? Number(summary.employee_count || 0) : null;
   const exclusionCount = Number(summary.exclusion_count || 0);
-  const includesCorrections = Number(summary.correction_count || 0) > 0
-    || Number(batch.issues?.negative_adjustment_count || 0) > 0;
+  // Without a batch, the record's accounting corrections are its signed lines.
+  const includesCorrections = batch
+    ? Number(summary.correction_count || 0) > 0 || Number(batch.issues?.negative_adjustment_count || 0) > 0
+    : Number(lineStatus?.accounting_corrections?.line_count || 0) > 0;
   const committed = payPeriodStatus === 'committed';
   const nextAction = payPeriodStatus === 'calculated'
     ? 'Next: review the calculated payroll, then select Approve when ready.'
@@ -26,7 +36,6 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
       ? 'Next: select Commit & Finalize when the approved payroll is ready.'
       : 'Next: select Calculate Payroll.';
   const aireRecordLinked = Boolean(aireRecord);
-  const lineStatus = aireRecord?.payable_line_status;
   const attentionLines = lineStatus?.needs_attention.line_count || 0;
   const unpaidLines = (lineStatus?.in_payroll.line_count || 0) + (lineStatus?.payment_pending.line_count || 0);
   const earlierLines = lineStatus?.recorded_before_line_tracking?.line_count || 0;
@@ -80,7 +89,9 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
                       ? 'Cornerstone has delivery or settlement evidence for every linked payable line in this time tracking batch.'
                       : committed && unpaidLines > 0
                         ? 'The exact time tracking lines are linked to this completed payroll. Prepared checks and committed payroll records remain unpaid until delivery or settlement is recorded.'
-                        : 'Cornerstone saved the exact time tracking cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
+                        : committed
+                          ? 'Cornerstone saved the exact time tracking batch and its entry-level links with this completed payroll. Its checks show payment details.'
+                          : 'Cornerstone saved the exact time tracking cutoff batch and its entry-level links. Review the payroll amounts, then continue with the normal payroll steps.'
                   : committed
                     ? 'Review the locked time tracking batch and link it to this completed payroll. Cornerstone will verify every mapped employee without changing the payroll.'
                     : 'Review the locked time tracking batch once, add its hours to this payroll, then select Calculate Payroll. No hours need to be typed again.'}
@@ -97,7 +108,7 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
         </div>
 
         <p className="border-t border-neutral-200 px-5 py-3 text-sm text-neutral-700 sm:px-6">
-          <span className="font-semibold">{hours(summary.total_hours)} hours</span> · {hours(summary.regular_hours)} regular + {hours(summary.overtime_hours)} overtime · {employeeCount} employees · {exclusionCount} held entries excluded
+          <span className="font-semibold">{hours(summary.total_hours)} hours</span> · {hours(summary.regular_hours)} regular + {hours(summary.overtime_hours)} overtime{employeeCount === null ? '' : ` · ${employeeCount} employees`} · {exclusionCount} held entries excluded
         </p>
         <details>
           <summary className="cursor-pointer border-t border-neutral-200 px-5 py-3 text-sm font-semibold text-primary-800 sm:px-6">Source and payment totals</summary>
@@ -115,9 +126,9 @@ export function AireFinalizedBatchAction({ batch, payPeriodStatus, aireRecord, o
             <p className="mt-2 font-display text-xl font-bold text-neutral-950">{hours(summary.overtime_hours)} hrs</p>
           </div>
           <div className="px-5 py-4 sm:px-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">People and held time</p>
-            <p className="mt-2 font-semibold text-neutral-950">{employeeCount} employee{employeeCount === 1 ? '' : 's'}</p>
-            <p className="mt-1 text-xs text-neutral-500">{exclusionCount} held entr{exclusionCount === 1 ? 'y' : 'ies'} tracked for later</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{employeeCount === null ? 'Held time' : 'People and held time'}</p>
+            {employeeCount !== null && <p className="mt-2 font-semibold text-neutral-950">{employeeCount} employee{employeeCount === 1 ? '' : 's'}</p>}
+            <p className={employeeCount === null ? 'mt-2 font-semibold text-neutral-950' : 'mt-1 text-xs text-neutral-500'}>{exclusionCount} held entr{exclusionCount === 1 ? 'y' : 'ies'} tracked for later</p>
           </div>
         </div>
 
