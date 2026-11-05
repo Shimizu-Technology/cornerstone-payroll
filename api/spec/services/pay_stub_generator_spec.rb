@@ -278,7 +278,9 @@ RSpec.describe PayStubGenerator do
       period = create(:pay_period, :committed, company: company, start_date: pay_date - 14, end_date: pay_date - 4, pay_date: pay_date)
       item = create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: type,
         pay_rate: worker.pay_rate, hours_worked: 0, **attributes)
-      calculator = { "hourly" => HourlyPayrollCalculator, "salary" => SalaryPayrollCalculator }.fetch(type).new(worker, item)
+      yield item if block_given?
+      calculator = { "hourly" => HourlyPayrollCalculator, "salary" => SalaryPayrollCalculator,
+        "contractor" => ContractorPayrollCalculator }.fetch(type).new(worker, item)
       calculator.send(:calculate_gross_pay)
       calculator.send(:record_earnings_breakdown)
       item.save!
@@ -453,6 +455,142 @@ RSpec.describe PayStubGenerator do
           pay_rate: 14.37, hours_worked: 0, gross_pay: -143.70, net_pay: 0, correction_for_payroll_item_id: original.id)
 
         expect(statement_rows(correction)).to eq([ [ "Taxable earnings adjustment", "—", "—", "$-143.70", "—" ] ])
+      end
+    end
+
+    context "when an applied opening balance has a malformed earnings breakdown" do
+      [ nil, [], [ { "label" => "Regular Pay", "amount" => "5000" } ], "not itemized", 7, { "Regular Pay" => "NaN" }, { "Reimb" => "NaN" } ].each do |breakdown|
+        it "renders with dashes and the YTD total for #{breakdown.inspect}" do
+          worker = hourly_worker
+          apply_historical_ytd_balance(company: company, employee: worker,
+            through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+            gross_pay: 5_000, non_taxable_pay: 0, source_breakdown: { "earnings_breakdown" => breakdown })
+          item = calculated_item(worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80, reported_tips: 80)
+
+          expect(statement_rows(item)).to eq([
+            [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "—" ],
+            [ "Tips", "—", "—", "$80.00", "—" ]
+          ])
+          text = statement_lines(item).last
+          expect(text).to include("GROSS PAY $1,229.60 $6,229.60")
+          expect(text).not_to include("NaN")
+        end
+      end
+    end
+
+    context "when taxable payroll fields share a label" do
+      def allowance(item, amount, category:)
+        item.payroll_item_field_entries.create!(label: "Allowance", kind: "addition", tax_treatment: "taxable_addition",
+          category: category, amount: amount, source: "manual", active: true)
+      end
+
+      it "keeps the current field's own YTD when another field's mirror has the same label" do
+        worker = salaried_worker
+        calculated_item(worker, "salary", Date.new(2026, 1, 15)) { |item| allowance(item, 100, category: "benefit") }
+        item = calculated_item(worker, "salary", Date.new(2026, 1, 29)) { |saved| allowance(saved, 50, category: "other") }
+
+        expect(statement_rows(item)).to eq([
+          [ "Salary", "—", "—", "$1,585.94", "—" ],
+          [ "Allowance", "—", "—", "$50.00", "$50.00" ]
+        ])
+      end
+
+      it "keeps dashes when different fields would merge into an earlier-component row" do
+        worker = salaried_worker
+        calculated_item(worker, "salary", Date.new(2026, 1, 15)) { |item| allowance(item, 100, category: "benefit") }
+        calculated_item(worker, "salary", Date.new(2026, 1, 29)) { |item| allowance(item, 50, category: "other") }
+        item = calculated_item(worker, "salary", Date.new(2026, 2, 12))
+
+        expect(statement_rows(item)).to eq([ [ "Salary", "—", "—", "$1,585.94", "—" ] ])
+      end
+
+      it "keeps dashes when a one-time earning shares the field's label" do
+        worker = salaried_worker
+        calculated_item(worker, "salary", Date.new(2026, 1, 15), custom_earnings: [ { "label" => "Allowance", "amount" => 100 } ])
+        item = calculated_item(worker, "salary", Date.new(2026, 1, 29)) { |saved| allowance(saved, 50, category: "other") }
+
+        expect(statement_rows(item)).to include([ "Allowance", "—", "—", "$50.00", "$50.00" ], [ "Salary", "—", "—", "$1,585.94", "—" ])
+      end
+
+      it "itemizes the field when one identity carries through the year" do
+        worker = salaried_worker
+        calculated_item(worker, "salary", Date.new(2026, 1, 15)) { |item| allowance(item, 100, category: "other") }
+        item = calculated_item(worker, "salary", Date.new(2026, 1, 29)) { |saved| allowance(saved, 50, category: "other") }
+
+        rows = statement_rows(item)
+        expect(rows).to contain_exactly(
+          [ "Salary", "—", "—", "$1,585.94", "$3,171.88" ],
+          [ "Allowance", "—", "—", "$50.00", "$150.00" ]
+        )
+        expect_rows_to_foot(item, rows)
+      end
+    end
+
+    context "with contractor items saved without earning rows" do
+      def contractor(pay_type) = create(:employee, :contractor, company: company, pay_rate: 20, contractor_pay_type: pay_type)
+
+      def unstored_contractor_item(worker, pay_date, saved_pay_type:, **attributes)
+        period = create(:pay_period, :committed, company: company, start_date: pay_date - 14, end_date: pay_date - 4, pay_date: pay_date)
+        snapshot = saved_pay_type ? { "employee" => { "contractor_pay_type" => saved_pay_type } } : {}
+        create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: "contractor", pay_rate: 20,
+          hours_worked: 0, **attributes).tap { |item| item.update_columns(calculation_context_snapshot: snapshot) }
+      end
+
+      it "keeps an hourly contractor's override as a contract fee rather than hours" do
+        item = unstored_contractor_item(contractor("hourly"), Date.new(2026, 1, 15), saved_pay_type: "hourly",
+          salary_override: 200, hours_worked: 10, gross_pay: 200)
+
+        expect(statement_rows(item)).to eq([ [ "Contract Fee", "—", "$20.00", "$200.00", "—" ] ])
+      end
+
+      it "does not fold a saved flat fee into hourly YTD after the profile changes" do
+        worker = contractor("flat_fee")
+        unstored_contractor_item(worker, Date.new(2026, 1, 15), saved_pay_type: "flat_fee", hours_worked: 25, gross_pay: 500)
+        worker.update!(contractor_pay_type: "hourly")
+        item = calculated_item(worker, "contractor", Date.new(2026, 1, 29), hours_worked: 10)
+
+        expect(statement_rows(item)).to eq([ [ "Contract Labor", "10.00", "$20.00", "$200.00", "—" ] ])
+      end
+
+      it "keeps dashes when no saved pay basis exists" do
+        item = unstored_contractor_item(contractor("flat_fee"), Date.new(2026, 1, 15), saved_pay_type: nil, gross_pay: 500)
+
+        expect(statement_rows(item)).to eq([ [ "Contract Fee", "—", "$20.00", "$500.00", "—" ] ])
+      end
+
+      it "itemizes when the saved basis agrees with the profile" do
+        worker = contractor("flat_fee")
+        unstored_contractor_item(worker, Date.new(2026, 1, 15), saved_pay_type: "flat_fee", gross_pay: 500)
+        item = unstored_contractor_item(worker, Date.new(2026, 1, 29), saved_pay_type: "flat_fee", gross_pay: 300)
+
+        rows = statement_rows(item)
+        expect(rows).to eq([ [ "Contract Fee", "—", "$20.00", "$300.00", "$800.00" ] ])
+        expect_rows_to_foot(item, rows)
+      end
+    end
+
+    context "when stored earning rows omit saved earnings whose amounts cancel" do
+      def omit_offsetting_earnings(item)
+        item.update_columns(bonus: 25, service_charge_wages: -25)
+      end
+
+      it "prints the saved earnings with dashes on the current statement" do
+        item = calculated_item(hourly_worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80)
+        omit_offsetting_earnings(item)
+
+        expect(statement_rows(item)).to eq([
+          [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "—" ],
+          [ "Bonus", "—", "—", "$25.00", "—" ],
+          [ "Service Charges", "—", "—", "$-25.00", "—" ]
+        ])
+      end
+
+      it "keeps dashes on later statements because the earlier omission cannot be attributed" do
+        worker = hourly_worker
+        omit_offsetting_earnings(calculated_item(worker, "hourly", Date.new(2026, 1, 15), hours_worked: 80))
+        item = calculated_item(worker, "hourly", Date.new(2026, 1, 29), hours_worked: 80)
+
+        expect(statement_rows(item)).to eq([ [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "—" ] ])
       end
     end
 

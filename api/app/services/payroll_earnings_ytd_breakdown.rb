@@ -92,9 +92,12 @@ class PayrollEarningsYtdBreakdown
   def historical_components
     return [] unless historical_balance
 
-    historical_balance.source_breakdown.to_h.fetch("earnings_breakdown", {}).filter_map do |label, amount|
+    earnings = historical_balance.source_breakdown.to_h["earnings_breakdown"]
+    return [] unless earnings.is_a?(Hash)
+
+    earnings.filter_map do |label, amount|
       value = BigDecimal(amount.to_s, exception: false)
-      next if label.to_s.blank? || value.nil? || value.zero?
+      next if label.to_s.blank? || value.nil? || !value.finite? || value.zero?
 
       component = Component.new(label: label.to_s, category: nil, hours: nil, rate: nil, amount: value)
       component unless non_taxable_component?(component)
