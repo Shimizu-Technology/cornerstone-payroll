@@ -77,12 +77,23 @@ it('shows a reconciliation failure without presenting an old page as refreshed',
 });
 describe('schedule eligibility note', () => {
   const ineligible = { ...calendar, eligible: false, cutoff_state: 'unpublished', eligibility_code: 'pay_schedule_not_effective', eligibility_error: 'This pay period begins before the confirmed payroll setup takes effect.' } as AirePayrollCalendarState;
-  it('stays neutral on a completed payroll and drops the setup action', (): void => {
-    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={ineligible} payPeriodStatus="committed" onRefresh={vi.fn()} /></MemoryRouter>);
+  const linkedRecord = { source_cutoff_at: '2026-08-31T03:06:59Z' };
+  it('stays neutral on a completed payroll with a linked record and drops the setup action', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={ineligible} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
     expect(screen.getByText('Time tracking scheduling does not apply to this completed payroll')).toBeTruthy();
     expect(screen.getByText(ineligible.eligibility_error!).closest('[role="status"]')?.className).toContain('bg-neutral-50');
     expect(screen.queryByText('This run is not ready for time tracking scheduling')).toBeNull();
     expect(screen.queryByRole('link', { name: /pay schedule/i })).toBeNull();
+  });
+  it('keeps the warning and setup action on a completed payroll without a linked record', (): void => {
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={ineligible} payPeriodStatus="committed" onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('This run is not ready for time tracking scheduling')).toBeTruthy();
+    expect(screen.queryByText('Time tracking scheduling does not apply to this completed payroll')).toBeNull();
+  });
+  it('keeps the warning when a completed payroll has a batch still being verified', (): void => {
+    const finalized_batch = { event_id: 'event-1', verification_status: 'pending', verification_attempts: 1, occurred_at: '2026-09-23T09:00:00+10:00' } as AirePayrollCalendarState['finalized_batch'];
+    render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...ineligible, finalized_batch }} payPeriodStatus="committed" linkedRecord={linkedRecord} onRefresh={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('This run is not ready for time tracking scheduling')).toBeTruthy();
   });
   it('keeps a connection failure as an alert on a completed payroll', (): void => {
     render(<MemoryRouter><AirePayrollCalendarCard payPeriodId={1} calendar={{ ...ineligible, publication: { id: 1, schedule_version: 1, publication_id: 'synthetic', delivery_status: 'failed', delivery_attempts: 2, last_error: 'Connection unavailable' } }} payPeriodStatus="committed" onRefresh={vi.fn()} /></MemoryRouter>);

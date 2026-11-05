@@ -134,7 +134,7 @@ export function AireSourceCheckpointSummary({
               : recordedEarlier ? 'Time tracking hours are linked. This payroll was recorded before line-by-line payment tracking; its checks show payment.'
                 : 'Time tracking hours are linked. Adding hours does not mark anyone paid.'}
       </p>}
-      {!calendar.eligible && calendar.eligibility_error && <p role="status" className={`text-sm ${committed ? 'text-neutral-700' : 'text-warning-900'}`}>{calendar.eligibility_error}</p>}
+      {!calendar.eligible && calendar.eligibility_error && <p role="status" className={`text-sm ${committed && aireRecord && !calendar.finalized_batch ? 'text-neutral-700' : 'text-warning-900'}`}>{calendar.eligibility_error}</p>}
       {(calendar.finalized_batch?.last_error || calendar.publication?.last_error) && <p role="alert" className="break-words text-sm text-danger-800">{calendar.finalized_batch?.last_error || calendar.publication?.last_error}</p>}
     </section>
   );
