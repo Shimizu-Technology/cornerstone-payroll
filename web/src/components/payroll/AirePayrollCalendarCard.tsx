@@ -15,7 +15,7 @@ import { canWriteCompany } from '@/lib/company-write-access';
 import { cutoffDistance, lockedBatchCopy, lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import { formatGuamDateTime } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
-import type { AirePayrollCalendarState } from '@/types';
+import type { AirePayrollCalendarState, PayPeriodStatus } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import { Card, CardContent } from '@/components/ui/card';
 type Props = {
   payPeriodId: number;
   calendar: AirePayrollCalendarState;
+  payPeriodStatus?: PayPeriodStatus;
   onRefresh: () => Promise<void> | void;
 };
 
@@ -51,7 +52,7 @@ function statusTone(state: AirePayrollCalendarState['cutoff_state']) {
   return 'default' as const;
 }
 
-export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Props) {
+export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, onRefresh }: Props) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
@@ -180,7 +181,17 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, onRefresh }: Pr
 
         </details>
 
-        {!calendar.eligible && calendar.eligibility_error && (
+        {!calendar.eligible && calendar.eligibility_error && payPeriodStatus === 'committed' && (
+          <div className="flex items-start gap-4 border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-sm text-neutral-700" role="status">
+            <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-neutral-950">Time tracking scheduling does not apply to this completed payroll</p>
+              <p className="mt-2 leading-6">{calendar.eligibility_error}</p>
+            </div>
+          </div>
+        )}
+
+        {!calendar.eligible && calendar.eligibility_error && payPeriodStatus !== 'committed' && (
           <div className="flex items-start gap-4 border-t border-warning-200 bg-warning-50 px-6 py-4 text-sm text-warning-950" role="status">
             <Clock3 className="h-4 w-4 shrink-0" aria-hidden="true" />
             <div className="min-w-0 flex-1">
