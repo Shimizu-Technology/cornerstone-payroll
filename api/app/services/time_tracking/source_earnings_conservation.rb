@@ -10,7 +10,7 @@ module TimeTracking
 
     # Presentation shares the financial basis check, without validating remote
     # provenance or changing already accepted historical payroll.
-    def self.hold_reason(item)
+    def self.hold_reason(item, employee: nil)
       return nil unless item.persisted? && item.import_source.to_s.start_with?("time_tracking:")
       return nil if item.pay_period.committed?
 
@@ -20,11 +20,19 @@ module TimeTracking
         (row.earning_snapshot["employment_type"] == "contractor" && row.earning_snapshot["contractor_pay_type"].blank?) }
         return { reason: "This imported payroll's original pay basis is unavailable. Review retained source earnings and original pay setup before recalculating; current setup cannot establish captured pay basis." }
       end
-      pay_basis_changed?(item, captured) ? { reason: PAY_BASIS_MESSAGE } : nil
+      current = if employee
+        [ employee.employment_type, employee.contractor_pay_type ] if employee.id == item.employee_id && employee.company_id == item.company_id
+      else
+        current_pay_basis(item)
+      end
+      pay_basis_changed?(item, captured, current: current) ? { reason: PAY_BASIS_MESSAGE } : nil
     end
 
-    def self.pay_basis_changed?(item, captured)
-      current = Employee.where(id: item.employee_id, company_id: item.company_id).pick(:employment_type, :contractor_pay_type)
+    def self.current_pay_basis(item)
+      Employee.where(id: item.employee_id, company_id: item.company_id).pick(:employment_type, :contractor_pay_type)
+    end
+
+    def self.pay_basis_changed?(item, captured, current: current_pay_basis(item))
       return true unless current
 
       captured.any? do |row|

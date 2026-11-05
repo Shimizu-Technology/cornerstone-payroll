@@ -29,6 +29,9 @@ class TimeTrackingManualAllocation < ApplicationRecord
       id: period.id, reference: period.id.to_s, start: period.start_date, finish: period.end_date)
   }
   scope :pending_payment_resolution, -> { where.not(payment_resolution_intent: {}).where(payment_resolution_receipt: {}) }
+  scope :not_voided, -> { where.not(status: "voided") }
+  scope :with_payment_activity, -> { not_voided.where("status = 'issued' OR payment_issue_intent <> '{}'::jsonb") }
+  scope :with_payment_cancellation_intent, -> { not_voided.where.not(payment_cancellation_intent: {}) }
 
   def payment_resolution_pending?
     payment_resolution_intent.present? && payment_resolution_receipt.blank?
