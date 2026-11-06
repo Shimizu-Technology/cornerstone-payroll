@@ -13,6 +13,7 @@ module QuickbooksHistory
       HistoricalYtdBridge.transaction do
         batch.company.lock!
         batch.lock!
+        @actor = ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: batch.company_id, lock: true)
         existing = batch.historical_ytd_bridges.order(revision: :desc, id: :desc).first
 
         raise ArgumentError, "Lock the approved QuickBooks history before preparing historical YTD" unless batch.locked?

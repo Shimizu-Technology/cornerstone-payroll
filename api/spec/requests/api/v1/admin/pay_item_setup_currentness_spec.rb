@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Recurring setup calculation currentness", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:company) { create(:company) }
   let!(:employee) { create(:employee, company: company) }
   let!(:accountant) { create(:user, company: company, organization: company.organization, role: "accountant") }
@@ -299,5 +300,77 @@ RSpec.describe "Recurring setup calculation currentness", type: :request do
     expect(baselines.map { |period| [ period.reload.attributes, period.payroll_items.reload.map(&:attributes), period.payroll_items.flat_map { |row| row.payroll_item_field_entries.reload.map(&:attributes) } ] }).to eq(baseline_snapshots)
   ensure
     ActiveJob::Base.queue_adapter = original_adapter if original_adapter
+  end
+  it "invalidates an approved imported run without changing its frozen source portions or saved money" do
+    period, item, entry, package = calculated_period(status: "approved")
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    uuid = SecureRandom.uuid
+    batch_id = "AIRE-PAY-CURRENTNESS-#{SecureRandom.uuid}"
+    line = { "source_user_uuid" => uuid, "source_time_entry_id" => "41", "line_key" => "operations:41",
+      "source_kind" => "current", "original_work_date" => period.start_date.iso8601,
+      "total_hours" => 4, "regular_hours" => 4, "overtime_hours" => 0 }
+    payload = { "schema_version" => "2.0", "batch_id" => batch_id,
+      "employees" => [ { "source_user_id" => "91", "source_user_uuid" => uuid, "adjustments" => [ line ] } ] }
+    checksum = TimeTracking::CanonicalPayload.checksum(payload)
+    import = create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source,
+      status: "applied", external_batch_id: batch_id, external_batch_checksum: checksum,
+      source_payload_hash: checksum, raw_payload: payload)
+    allocation = TimeTrackingEntryAllocation.create!(company: company, time_tracking_source: source,
+      time_tracking_import: import, pay_period: period, payroll_item: item, employee: employee,
+      source_user_id: "91", source_user_uuid: uuid, source_time_entry_id: "41",
+      line_key: "operations:41", source_kind: "current", original_work_date: period.start_date,
+      total_hours: 4, regular_hours: 4, overtime_hours: 0)
+    batch_ack = AirePayrollAcknowledgement.record!(time_tracking_import: import, status: "imported", occurred_at: Time.current)
+    entry_ack = AirePayrollEntryAcknowledgement.record_for_import!(time_tracking_import: import, status: "imported", occurred_at: Time.current).sole
+    batch_ack.mark_delivered!(at: Time.current)
+    entry_ack.mark_delivered!(at: Time.current)
+    frozen_rows = [ import.attributes, allocation.attributes, item.attributes, entry.attributes ]
+    old_receipts = [ batch_ack.reload.attributes, entry_ack.reload.attributes ]
+    expect(TimeTracking::Client).not_to receive(:new)
+
+    patch "#{path}/#{assignment.id}/pay_item", params: { employee_payroll_field: { amount: 300 } }, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(period.reload).to be_draft
+    expect(package.reload.status).to eq("superseded")
+    expect([ import.reload.attributes, allocation.reload.attributes, item.reload.attributes, entry.reload.attributes ]).to eq(frozen_rows)
+    expect([ batch_ack.reload.attributes, entry_ack.reload.attributes ]).to eq(old_receipts)
+    expect([ AirePayrollAcknowledgement.count, AirePayrollEntryAcknowledgement.count ]).to eq([ 1, 1 ])
+    expect(allocation).to be_readonly
+  end
+
+  it "keeps a committed reported-payment reservation and its financial hold when future setup changes" do
+    period, item, entry, package = calculated_period(status: "approved")
+    period.update!(status: "committed", committed_at: Time.current, committed_by_id: accountant.id)
+    item.update!(check_number: "30000")
+    create(:check_event, payroll_item: item, user: accountant, event_type: "delivered",
+      check_number: "30000", evidence_type: "hand_delivery", evidence_reference: "SYNTHETIC-EXISTING-HANDOFF")
+    EmployeeYtdTotal.create!(employee: employee, year: 2026, gross_pay: item.gross_pay, net_pay: item.net_pay)
+    CompanyYtdTotal.create!(company: company, year: 2026, gross_pay: item.gross_pay, net_pay: item.net_pay)
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    allocation = TimeTrackingManualAllocation.create!(company: company, time_tracking_source: source,
+      pay_period: period, payroll_item: item, employee: employee, created_by: accountant,
+      source_user_uuid: SecureRandom.uuid, source_time_entry_id: "41", source_time_entry_version: 2,
+      original_work_date: period.start_date, regular_hours: 4, overtime_hours: 0,
+      reconciliation_note: "Synthetic existing payment match awaiting exact source confirmation",
+      payment_resolution_intent: { "command_id" => SecureRandom.uuid, "review_pay_period_id" => period.id.to_s },
+      payment_resolution_receipt: {})
+    frozen_rows = [ period.attributes, item.attributes, entry.attributes, package.attributes, allocation.attributes ]
+    check_rows = item.check_events.map(&:attributes)
+    ytd_rows = [ EmployeeYtdTotal.where(employee_id: employee.id).map(&:attributes), CompanyYtdTotal.where(company_id: company.id).map(&:attributes) ]
+    expect(TimeTracking::Client).not_to receive(:new)
+
+    patch "#{path}/#{assignment.id}/pay_item", params: { employee_payroll_field: { amount: 300 } }, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(assignment.reload.amount).to eq(300)
+    expect(response.parsed_body["recalculation_pay_period_ids"]).to eq([])
+    expect([ period.reload.attributes, item.reload.attributes, entry.reload.attributes, package.reload.attributes, allocation.reload.attributes ]).to eq(frozen_rows)
+    expect(item.check_events.reload.map(&:attributes)).to eq(check_rows)
+    expect([ EmployeeYtdTotal.where(employee_id: employee.id).map(&:attributes), CompanyYtdTotal.where(company_id: company.id).map(&:attributes) ]).to eq(ytd_rows)
+    expect(allocation).to be_payment_resolution_pending
+    expect(period.update(status: "draft")).to be(false)
+    expect(period.errors.full_messages.join).to include("hours remain reserved")
+    expect(period.reload.attributes).to eq(frozen_rows.first)
   end
 end

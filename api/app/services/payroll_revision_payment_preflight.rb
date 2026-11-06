@@ -5,9 +5,11 @@
 class PayrollRevisionPaymentPreflight
   attr_reader :pay_period, :employee_items, :other_payments
 
-  def initialize(pay_period:, lock: false)
+  def initialize(pay_period:, lock: false, payroll_item: nil)
     @pay_period = pay_period
+    @locked = lock
     items = pay_period.payroll_items.reportable.order(:id)
+    items = items.where(id: payroll_item.id) if payroll_item
     @employee_items = (lock ? items.lock : items).to_a
     allocated_ids = PayrollLiabilityCheckAllocation.joins(payroll_liability_entry: :payroll_liability_posting)
       .where(payroll_liability_postings: { pay_period_id: pay_period.id }).select(:non_employee_check_id)
@@ -21,6 +23,9 @@ class PayrollRevisionPaymentPreflight
     blockers << "Only a committed, active payroll can be reversed" unless pay_period.committed? && !pay_period.voided? && pay_period.superseded_by_id.nil?
     blockers << "Copied or promoted history must use the historical correction workflow" if pay_period.training_baseline? || pay_period.promotion_source_pay_period_id.present?
     employee_items.each do |item|
+      if (pending = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(item))
+        blockers << "#{item.employee_full_name}: #{pending}"
+      end
       if item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?
         blockers << "#{item.employee_full_name}: direct-deposit reversal is not supported; verify the external payment first"
       end
@@ -47,7 +52,8 @@ class PayrollRevisionPaymentPreflight
     blockers << "This payroll has recorded paid or submitted tax filing evidence; use the filing correction workflow" if filing_evidence?
     if reopen
       if pay_period.time_tracking_imports.where(status: "applied").any?(&:finalized_batch?) ||
-          TimeTrackingEntryAllocation.where(payroll_item_id: employee_items.map(&:id)).exists?
+          TimeTrackingEntryAllocation.where(payroll_item_id: employee_items.map(&:id)).exists? ||
+          TimeTrackingManualAllocation.where(payroll_item_id: employee_items.map(&:id)).exists?
         blockers << "This payroll has linked time-source processing evidence; use a reviewed source correction"
       end
       later = PayPeriod.reportable_committed.where(company_id: pay_period.company_id)
@@ -73,13 +79,22 @@ class PayrollRevisionPaymentPreflight
   def ensure_eligible!(reopen: false)
     result = call(reopen: reopen)
     raise PayPeriodCorrectionService::InvalidStateError, result[:blockers].join(". ") unless result[:eligible]
+    @eligible_for_retirement = true
     self
+  end
+
+  def retirement_payment_ids
+    unless @locked && @eligible_for_retirement
+      raise PayPeriodCorrectionService::InvalidStateError, "Retirement requires a locked, successful payment preflight"
+    end
+
+    other_payments.reject(&:voided?).map(&:id)
   end
 
   def retire!(actor:, reason:)
     employee_items.each do |item|
       next if item.voided? || item.check_number.blank?
-      item.void!(user: actor, reason: reason)
+      item.void!(user: actor, reason: reason, payroll_obligation_retained: false)
     end
     other_payments.each do |payment|
       next if payment.voided?

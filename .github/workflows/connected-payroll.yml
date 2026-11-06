@@ -1,0 +1,202 @@
+name: Connected payroll certification
+
+on:
+  pull_request:
+    branches: [staging-v2]
+    paths:
+      - .github/workflows/connected-payroll.yml
+      - ops/staging-v2/**
+      - scripts/certify_aire_payroll_integration.sh
+      - scripts/local_certification/**
+      - scripts/certify_independent_payroll_connector.sh
+      - scripts/connector_certification/**
+  workflow_call:
+    inputs:
+      payroll_sha:
+        description: Full immutable Cornerstone Payroll commit SHA
+        required: true
+        type: string
+      aire_sha:
+        description: Full immutable AIRE Services commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: connected-payroll-${{ inputs.payroll_sha }}-${{ inputs.aire_sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+        with:
+          ruby-version: "3.3.7"
+      - name: Check certification clock startup and guards
+        run: |
+          ruby scripts/local_certification/test_clock.rb
+          ruby scripts/local_certification/test_finalized_wage_mapping.rb
+      - name: Check shell syntax and exact-pair gate behavior
+        run: |
+          bash -n ops/staging-v2/*.sh scripts/certify_aire_payroll_integration.sh scripts/local_certification/runtime.sh
+          python3 -m unittest discover -s ops/staging-v2 -p "test_*.py"
+          python3 scripts/local_certification/test_operator_result.py
+          bash -n scripts/certify_independent_payroll_connector.sh
+          python3 -m unittest discover -s scripts/connector_certification -p "test_*.py"
+
+  certify:
+    # Reusable workflows inherit the caller's workflow_dispatch event.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PAYROLL_SHA: ${{ inputs.payroll_sha }}
+      AIRE_SHA: ${{ inputs.aire_sha }}
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - name: Validate immutable inputs
+        run: |
+          [[ "$PAYROLL_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$AIRE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Shimizu-Technology/cornerstone-payroll
+          ref: ${{ inputs.payroll_sha }}
+          path: payroll
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Shimizu-Technology/aire-services
+          ref: ${{ inputs.aire_sha }}
+          path: aire
+          persist-credentials: false
+      - name: Verify both checked-out revisions
+        run: |
+          [[ "$(git -C payroll rev-parse HEAD)" == "$PAYROLL_SHA" ]]
+          [[ "$(git -C aire rev-parse HEAD)" == "$AIRE_SHA" ]]
+      - name: Check out the trusted certification implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: gate
+          persist-credentials: false
+      - name: Verify each candidate's exact-SHA quality and image workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Public AIRE metadata is read without forwarding this repo-scoped token.
+          AIRE_ACTIONS_PUBLIC_READ: "true"
+        run: gate/ops/staging-v2/verify-pair-certificate.sh --candidate-workflows-only "$PAYROLL_SHA" "$AIRE_SHA"
+      - name: Read pinned Ruby versions
+        id: versions
+        run: |
+          payroll_ruby="$(cat payroll/api/.ruby-version)"
+          aire_ruby="$(cat aire/backend/.ruby-version)"
+          [[ "$payroll_ruby" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$aire_ruby" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "payroll=$payroll_ruby" >> "$GITHUB_OUTPUT"
+          echo "aire=$aire_ruby" >> "$GITHUB_OUTPUT"
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+        with:
+          ruby-version: ${{ steps.versions.outputs.payroll }}
+          working-directory: payroll/api
+          bundler-cache: true
+      - name: Record payroll Ruby runtime
+        run: echo "PAYROLL_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
+        with:
+          ruby-version: ${{ steps.versions.outputs.aire }}
+          working-directory: aire/backend
+          bundler-cache: true
+      - name: Record AIRE Ruby runtime
+        run: echo "AIRE_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
+      - name: Install PostgreSQL client and listener inspection
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client lsof
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: payroll/.node-version
+          cache: npm
+          cache-dependency-path: payroll/web/package-lock.json
+      - name: Prepare the real operator browser
+        working-directory: payroll/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Certify the real HTTP boundary with disposable synthetic databases
+        env:
+          AIRE_REPO_PATH: ${{ github.workspace }}/aire
+          RUN_CONNECTED_BROWSER: "true"
+          CONNECTED_OPERATOR_RESULT_PATH: ${{ github.workspace }}/connected-operator-result.json
+        run: payroll/scripts/certify_aire_payroll_integration.sh
+      - name: Require assigned-accountant browser and source-receipt acceptance
+        run: python3 gate/scripts/local_certification/verify_operator_result.py connected-operator-result.json "$PAYROLL_SHA" "$AIRE_SHA"
+      - name: Certify an independent time producer over real HTTP
+        env:
+          PAYROLL_REPO_PATH: ${{ github.workspace }}/payroll
+          NEUTRAL_CERTIFICATION_RESULT: ${{ github.workspace }}/independent-producer-result.json
+        run: gate/scripts/certify_independent_payroll_connector.sh
+      - name: Retain synthetic operator browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: connected-manual-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: payroll/web/test-results/connected-manual
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Write non-secret exact-pair certificate
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          certificate = {
+              "schema_version": 2,
+              "certification": "passed",
+              "lane": "real-http-synthetic-v2",
+              "payroll_sha": os.environ["PAYROLL_SHA"],
+              "aire_sha": os.environ["AIRE_SHA"],
+              "workflow_sha": os.environ["WORKFLOW_SHA"],
+              "independent_producer": "passed",
+              "independent_result_sha256": __import__("hashlib").sha256(Path("independent-producer-result.json").read_bytes()).hexdigest(),
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }
+          Path("pair-certificate.json").write_text(json.dumps(certificate, indent=2) + "\n")
+          PY
+      - name: Retain independent producer evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: independent-payroll-producer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: independent-producer-result.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain only the pair certificate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: connected-payroll-pair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pair-certificate.json
+          if-no-files-found: error
+          retention-days: 90

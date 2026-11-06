@@ -16,6 +16,9 @@ class W2GuPreflightValidator
   def run
     findings = []
 
+    unless AnnualTaxConfig.for_year(year) || W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year)
+      findings << Finding.new(severity: "blocking", code: "W2_RULE_YEAR_UNCONFIGURED", message: "W-2 filing rules are not configured for #{year}.")
+    end
     findings.concat(employer_findings)
     employee_ids, source_findings = filing_employee_ids
     findings.concat(source_findings)
@@ -28,7 +31,8 @@ class W2GuPreflightValidator
       run_at: Time.current.iso8601,
       blocking_count: findings.count { |f| f.severity == "blocking" },
       warning_count: findings.count { |f| f.severity == "warning" },
-      findings: findings.map { |f| serialize(f) }
+      findings: findings.map { |f| serialize(f) },
+      employee_completeness: FilingEmployeeCompleteness.for(Employee.where(company_id: company.id, id: employee_ids).order(:last_name, :first_name, :id))
     }
   end
 
@@ -66,7 +70,7 @@ class W2GuPreflightValidator
       return out
     end
 
-    Employee.where(id: employee_ids).find_each do |employee|
+    Employee.where(company_id: company.id, id: employee_ids).find_each do |employee|
       unless employee.valid_filing_ssn?
         out << Finding.new(
           severity: "blocking",
@@ -90,23 +94,13 @@ class W2GuPreflightValidator
   end
 
   def filing_employee_ids
-    native_ids = PayrollItem
-      .joins(:pay_period)
-      .where(company_id: company.id)
-      .not_voided
-      .where(pay_periods: {
-        id: PayPeriod.reportable_committed
-          .where(company_id: company.id, pay_date: year_range)
-          .select(:id)
-      })
-      .distinct
-      .pluck(:employee_id)
+    native_ids = W2GuFilingPopulation.native_employee_ids(company: company, year: year)
 
     return [ native_ids, [] ] unless locked_historical_payroll?
 
     source = HistoricalPayrollFilingSource.new(company)
     source.validate!(range: year_range)
-    historical_ids = source.annual_balances(year).filter_map(&:employee_id)
+    historical_ids = source.annual_employee_ids(year)
     [ (native_ids + historical_ids).uniq, [] ]
   rescue ArgumentError => e
     finding = Finding.new(

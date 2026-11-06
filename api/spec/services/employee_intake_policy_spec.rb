@@ -131,14 +131,16 @@ RSpec.describe EmployeeIntakePolicy do
     expect(employee.tax_classification).to eq("w2")
   end
 
-  it "permits incremental completion after restoration but rejects clearing completed fields" do
+  it "rejects clearing completed fields while allowing fields that are still missing" do
     employee = incomplete_employee
     company.update!(employee_intake_expires_at: nil)
     employee.update!(address_line1: "123 Main Street")
     employee.update!(city: "Hagatna")
     expect(employee.update(address_line1: nil)).to be false
-    expect(employee.errors[:address_line1]).to include("can't be blank")
-    expect(described_class.summary(employee.reload)[:missing_fields]).not_to include("address_line1", "city")
+    expect(employee.reload.address_line1).to eq("123 Main Street")
+    expect(employee.update(hire_date: "", zip: "")).to be true
+    expect(described_class.summary(employee.reload)[:missing_fields]).not_to include("address_line1")
+    expect(described_class.summary(employee)[:missing_fields]).not_to include("city")
   end
 
   it "validates supplied identifiers and confirmation despite relaxed presence requirements" do
@@ -342,13 +344,80 @@ RSpec.describe EmployeeIntakePolicy do
       attributes: { status: "received", lock_version: requirement.lock_version }).call! }.to raise_error(EmployeeDocumentRequirementReviewService::Error, /reviewed outcome/)
   end
 
-  it "protects completed fields during client validation and rejects malformed dates" do
+  it "validates client edits of a legacy incomplete profile without requiring a new intake exception" do
+    employee = create(:employee, company: company)
+    employee.update_columns(ssn_encrypted: nil, hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { first_name: "Updated" })
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload).to have_attributes(first_name: "Updated", ssn_encrypted: nil, hire_date: nil, city: nil)
+  end
+
+  it "rejects clearing completed fields during client validation but allows already-blank fields" do
     employee = incomplete_employee
     employee.update!(city: "Hagatna")
     service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { city: "" })
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+    expect(employee.reload.city).to eq("Hagatna")
+    service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant, attrs: { first_name: "Updated", hire_date: "", address_line1: "" })
+    expect { service.update! }.not_to raise_error
+    expect(employee.reload).to have_attributes(first_name: "Updated", hire_date: nil, address_line1: nil)
     service = ClientEmployeeUpdateService.new(employee: employee.reload, company: company, requested_by: accountant, attrs: { hire_date: "nonsense" })
     expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+  end
+
+  %i[hire_date address_line1].each do |field|
+    it "protects a filled #{field} through client direct updates without an intake exception" do
+      employee = create(:employee, company: company)
+      original = employee.public_send(field)
+      service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+        attrs: { field => "" })
+      expect { service.update! }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(employee.reload.public_send(field)).to eq(original)
+
+      employee.update_columns(field => nil)
+      service = ClientEmployeeUpdateService.new(employee: employee, company: company, requested_by: accountant,
+        attrs: { field => "", first_name: "Updated" })
+      expect { service.update! }.not_to raise_error
+      expect(employee.reload.first_name).to eq("Updated")
+    end
+  end
+
+  it "rejects an explicit client creation receipt lacking proof before queuing or saving anything" do
+    enable_window
+    service = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_election_received: true, w4_effective_on: "2026-01-01" })
+    expect { service.create! }.to raise_error(ActiveRecord::RecordInvalid, /received election/i)
+    expect(company.employees).to be_empty
+    expect(EmployeeChangeRequest.where(company: company)).to be_empty
+  end
+
+  it "retains valid explicit client receipt through approval without making incomplete payroll setup ready" do
+    enable_window
+    result = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_election_received: true, w4_effective_on: "2026-01-01", w4_source_reference: "Synthetic received W-4" }).create!
+    expect(result.employee).to be_portal_pending_approval
+    result.change_request.apply!(actor: manager)
+    election = result.employee.reload.employee_w4_elections.sole
+    expect(election).to have_attributes(source: "client_approved", effective_on: Date.new(2026, 1, 1), w4_source_reference: "Synthetic received W-4")
+    expect(result.employee.intake_payroll_confirmed_at).to be_nil
+    expect(EmployeeIntakePolicy.payroll_ready?(result.employee, Date.new(2026, 1, 14))).to be false
+    expect(EmployeeDocumentReadiness.summary(result.employee)[:ready_for_payroll]).to be false
+  end
+
+  it "revalidates client creation receipt on approval while keeping a bad request and employee unchanged" do
+    enable_window
+    result = ClientEmployeeUpdateService.new(employee: Employee.new, company: company, requested_by: accountant,
+      attrs: { first_name: "Alex", last_name: "Worker", employment_type: "hourly", pay_rate: 20, pay_frequency: "biweekly",
+        w4_effective_on: "2026-01-01" }).create!
+    request = result.change_request
+    request.update!(proposed_changes: request.proposed_changes.merge("w4_election_received" => true))
+    before = result.employee.reload.attributes.deep_dup
+    expect { request.apply!(actor: manager) }.to raise_error(EmployeeW4ElectionChangeService::Error, /received election/i)
+    expect(result.employee.reload.attributes).to eq(before)
+    expect(request.reload.status).to eq("pending")
+    expect(result.employee.employee_w4_elections).to be_empty
   end
 
   it "applies intake exceptions and document requirements to new client entries and approval" do

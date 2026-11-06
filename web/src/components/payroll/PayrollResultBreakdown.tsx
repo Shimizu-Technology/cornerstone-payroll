@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { formatCurrency, formatDate } from '../../lib/utils';
-import { payrollComponentSource, type PayrollComponentDisclosure, type PayrollComponentLine } from '../../lib/payroll-tax-summary';
+import { payrollComponentSource, type PayrollComponentDisclosure, type PayrollComponentLine, type PayrollW4Provenance } from '../../lib/payroll-tax-summary';
 import type { PayrollItem } from '../../types';
 
 export function PayrollResultBreakdown({ disclosure }: { disclosure: PayrollComponentDisclosure }): ReactElement {
@@ -32,7 +32,7 @@ function ComponentList({ title, entries }: { title: string; entries: PayrollComp
   })}</dl> : <p className="mt-4 text-sm text-neutral-500">None applied.</p>}</section>;
 }
 
-export function PaycheckWithholdingContext({ item }: { item: PayrollItem }): ReactElement {
+export function PaycheckWithholdingContext({ item, provenance }: { item: PayrollItem; provenance?: PayrollW4Provenance | null }): ReactElement {
   const value = item.tax_rule_snapshot?.w4;
   const w4 = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
   const text = (key: string): string => String(w4?.[key] ?? 'Not recorded');
@@ -44,7 +44,9 @@ export function PaycheckWithholdingContext({ item }: { item: PayrollItem }): Rea
         <p>Filing status: <strong>{text('filing_status_entered').replaceAll('_', ' ')}</strong>. Form revision: {text('form_version')}. Applied from {w4.effective_on ? formatDate(String(w4.effective_on)) : 'an unrecorded effective date'}.</p>
         <p>Step 3 annual credit: <strong>{amount('step3_dependent_credit')}</strong>. This annual credit reduces calculated withholding across the year's pay periods; it is not extra pay. It can reduce federal income tax to zero even when the filing status is Single.</p>
         <p>Step 2 multiple jobs: {w4.step2_multiple_jobs === true ? 'Checked' : w4.step2_multiple_jobs === false ? 'Unchecked' : 'Not recorded'}. Step 4(a) annual other income: {amount('step4a_other_income')}. Step 4(b) annual deductions: {amount('step4b_deductions')}. Additional withholding applied to this paycheck: <strong>{formatCurrency(Number(item.additional_withholding || 0))}</strong>.</p>
-        <p className="text-neutral-500">Election #{text('election_id')} · Source: {text('election_source').replaceAll('_', ' ')}. The application effective date is separate from the form's signing date.</p>
+        {provenance ? <p className="text-neutral-500">Inherited historical evidence from original payroll item #{provenance.original_payroll_item_id}: Election #{provenance.election_id} · Source: {provenance.election_source.replaceAll('_', ' ')}. This correction uses the original frozen W-4 profile.</p>
+          : w4.election_id != null || w4.election_source != null ? <p className="text-neutral-500">Election #{text('election_id')} · Source: {text('election_source').replaceAll('_', ' ')}. The application effective date is separate from the form's signing date.</p>
+            : <p className="text-neutral-500">Election identity and source were not retained in this snapshot. The application effective date is separate from the form's signing date.</p>}
         {(w4.signed_on || w4.source_reference) ? <p className="text-neutral-500">{w4.signed_on ? `Signed ${formatDate(String(w4.signed_on))}. ` : ''}{w4.source_reference ? `Document reference: ${String(w4.source_reference)}` : ''}</p> : null}
       </> : <p>No W-4 snapshot was retained for this paycheck. Review its source records; today's employee settings may differ from those used for this result.</p>}
       {(item.withholding_tax_override != null || Number(item.withholding_tax_adjustment || 0) !== 0) && <p className="font-medium text-warning-800">This paycheck includes a manual federal withholding {item.withholding_tax_override != null ? `override of ${formatCurrency(Number(item.withholding_tax_override))}` : `adjustment of ${formatCurrency(Number(item.withholding_tax_adjustment))}`}.</p>}

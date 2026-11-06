@@ -5,6 +5,8 @@ require "timeout"
 
 RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service do
   self.use_transactional_tests = false
+  let!(:verification_tables) { ensure_verified_test_tax_years(2024, 2025, 2026) }
+  after { verification_tables.each(&:destroy!) }
 
   let!(:organization) { Organization.create!(name: "Lifecycle Concurrency #{SecureRandom.hex(4)}") }
   let!(:company) { create(:company, organization: organization, auto_create_fit_check: false) }
@@ -125,6 +127,15 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     )
 
     described_class.new(pay_period: pay_period, actor: actor).commit!
+    expect {
+      described_class.new(pay_period: second_period, actor: actor).commit!
+    }.to raise_error(described_class::InvalidTransitionError, /Recalculate/)
+    # A fresh calculation/review is required after the first commit.
+    second_period.payroll_items.each do |item|
+      item.update!(tax_rule_snapshot: item.tax_rule_snapshot.merge("annual_fica_context" =>
+        EmployeeYearFicaContext.new(employee: item.employee, year: second_period.pay_date.year,
+          excluding_pay_period_id: second_period.id).snapshot))
+    end
     described_class.new(pay_period: second_period, actor: actor).commit!
 
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(2_000)

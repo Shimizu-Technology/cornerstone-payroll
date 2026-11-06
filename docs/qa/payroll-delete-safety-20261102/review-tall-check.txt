@@ -1,0 +1,80 @@
+Taylor Statement
+
+PAY                                Hours     Rate       Current     YTD    TAXES                   Current             YTD
+Department 1                        10.00   10.00        100.00   100.00   Federal Income Tax         5.00             5.00
+TOTAL                                                    100.00   100.00   Social Security            6.20             6.20
+                                                                           Medicare                   1.45             1.45
+                                                                           TOTAL                     12.65            12.65
+
+                                                                           DEDUCTIONS            Current            YTD
+OTHER PAY                                           Current         YTD    Deduction 1              1.00            1.00
+                                                                           Deduction 2              1.00            1.00
+Non-Taxable Pay                                       20.00        20.00
+                                                                           Deduction 3              1.00            1.00
+                                                                           Deduction 4              1.00            1.00
+                                                                           Deduction 5              1.00            1.00
+                                                                           Deduction 6              1.00            1.00
+                                                                           Deduction 7              1.00            1.00
+Pay Period
+10/01/2026 - 10/15/2026                                                    Deduction 8              1.00            1.00
+                                                                           Deduction 9              1.00            1.00
+Pay Date
+10/23/2026                                                                 TOTAL                    9.00            9.00
+MEMO:
+                                                                           SUMMARY              Current               YTD
+                                                                           Total Pay            $100.00            $100.00
+                                                                           Non-Taxable Pay       $20.00             $20.00
+                                                                           Taxes                 $12.65             $12.65
+                                                                           Deductions             $9.00              $9.00
+
+                                                                           NET PAY:                               $98.35
+
+Taylor Statement
+
+PAY                                Hours     Rate       Current     YTD    TAXES                   Current             YTD
+Department 1                        10.00   10.00        100.00   100.00   Federal Income Tax         5.00             5.00
+TOTAL                                                    100.00   100.00   Social Security            6.20             6.20
+                                                                           Medicare                   1.45             1.45
+                                                                           TOTAL                     12.65            12.65
+
+                                                                           DEDUCTIONS            Current            YTD
+OTHER PAY                                           Current         YTD    Deduction 1              1.00            1.00
+                                                                           Deduction 2              1.00            1.00
+Non-Taxable Pay                                       20.00        20.00
+                                                                           Deduction 3              1.00            1.00
+                                                                           Deduction 4              1.00            1.00
+                                                                           Deduction 5              1.00            1.00
+                                                                           Deduction 6              1.00            1.00
+                                                                           Deduction 7              1.00            1.00
+Pay Period
+10/01/2026 - 10/15/2026                                                    Deduction 8              1.00            1.00
+                                                                           Deduction 9              1.00            1.00
+Pay Date
+10/23/2026                                                                 TOTAL                    9.00            9.00
+MEMO:
+                                                                           SUMMARY              Current               YTD
+                                                                           Total Pay            $100.00            $100.00
+                                                                           Non-Taxable Pay       $20.00             $20.00
+                                                                           Taxes                 $12.65             $12.65
+                                                                           Deductions             $9.00              $9.00
+
+                                                                           NET PAY:                               $98.35
+
+
+
+
+                                                                                                             10/23/2026
+
+
+                                                                                                                  98.35
+               Taylor Statement
+
+
+             Ninety-eight and 35/100
+
+
+               123 Marine Corps Dr
+               Hagatna, GU 96910
+
+ Payroll 10/01/2026 - 10/15/2026
+

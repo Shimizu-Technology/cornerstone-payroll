@@ -34,6 +34,7 @@ class NonEmployeeCheck < ApplicationRecord
   has_many :payroll_liability_check_allocations,
            inverse_of: :non_employee_check,
            dependent: :restrict_with_error
+  has_one :non_employee_check_supersession, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :line_items, allow_destroy: true
@@ -65,7 +66,7 @@ class NonEmployeeCheck < ApplicationRecord
             uniqueness: { scope: :company_id, allow_nil: true },
             allow_blank: true
 
-  scope :active, -> { where(voided: false) }
+  scope :active, -> { where(voided: false).where.not(id: NonEmployeeCheckSupersession.select(:non_employee_check_id)) }
   scope :printed, -> { where.not(printed_at: nil) }
   scope :unprinted, -> { where(printed_at: nil, voided: false) }
   scope :standalone, -> { where(pay_period_id: nil) }
@@ -92,6 +93,7 @@ class NonEmployeeCheck < ApplicationRecord
   def mark_printed!
     with_lock do
       raise ArgumentError, "Cannot print a voided check" if voided?
+      raise ArgumentError, "This software check is superseded by a payroll check" if non_employee_check_supersession
       raise ArgumentError, "Only check payments can be printed" unless payment_method == "check"
 
       update!(
@@ -104,6 +106,7 @@ class NonEmployeeCheck < ApplicationRecord
   def mark_paid!(actor:, payment_date:, confirmation_number: nil)
     with_lock do
       raise ArgumentError, "Cannot mark a voided payment as paid" if voided?
+      raise ArgumentError, "This software check is superseded by a payroll check" if non_employee_check_supersession
       return false if paid_at.present?
       if payment_method == "check" && !printed? && (!prepared? || !CheckPackagePreparation.current_for?(self))
         raise ArgumentError, "Generate a current check package before marking it paid"
@@ -129,6 +132,7 @@ class NonEmployeeCheck < ApplicationRecord
 
     with_lock do
       raise ArgumentError, "Already voided" if voided?
+      raise ArgumentError, "This software check is superseded by a payroll check" if non_employee_check_supersession
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
       update!(
@@ -140,6 +144,7 @@ class NonEmployeeCheck < ApplicationRecord
   end
 
   def check_status
+    return "superseded" if non_employee_check_supersession
     return "voided" if voided?
     return "paid" if paid_at.present?
     return "printed" if printed?

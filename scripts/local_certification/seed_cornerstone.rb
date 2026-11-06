@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "manual_printer_fixture"
 
 database_name = ActiveRecord::Base.connection_db_config.database.to_s
 unless Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" && database_name.start_with?("cornerstone_aire_certification_")
@@ -26,9 +27,12 @@ start_date = Date.iso8601(aire.fetch("start_date"))
 end_date = Date.iso8601(aire.fetch("end_date"))
 pay_date = Date.iso8601(aire.fetch("pay_date"))
 cutoff_at = Time.iso8601(aire.fetch("cutoff_at"))
+previous_end_date = start_date - 1.day
+previous_start_date = previous_end_date.day == 15 ? previous_end_date.beginning_of_month : previous_end_date.change(day: 16)
+previous_pay_date = cutoff_at.to_date - 7.days
 next_start_date = end_date + 1.day
 next_end_date = next_start_date.day == 16 ? next_start_date.end_of_month : next_start_date.change(day: 15)
-next_pay_date = next_end_date + 7.days
+next_pay_date = next_end_date.day == 15 ? next_end_date.end_of_month : next_end_date.next_month.change(day: 15)
 
 fixture = ApplicationRecord.transaction do
   organization = Organization.create!(
@@ -72,7 +76,7 @@ fixture = ApplicationRecord.transaction do
     company: company,
     frequency: "semimonthly",
     period_rule: "semimonthly",
-    pay_date_rule: "manual",
+    pay_date_rule: "semimonthly_15th_and_month_end",
     timezone: "Pacific/Guam",
     source: "operator_confirmed",
     confirmation_status: "confirmed",
@@ -81,7 +85,9 @@ fixture = ApplicationRecord.transaction do
     notes: "Confirmed for the isolated AIRE certification",
     effective_on: start_date.beginning_of_year,
     payroll_cutoff_days_before: 7,
-    payroll_cutoff_at_minutes: (cutoff_at.hour * 60) + cutoff_at.min
+    time_tracking_cutoff_rule: "after_previous_regular_payday",
+    time_tracking_cutoff_days: 7,
+    payroll_cutoff_at_minutes: 17 * 60
   )
   department = Department.create!(company: company, name: "Certification Operations")
   employee = Employee.create!(
@@ -132,6 +138,11 @@ fixture = ApplicationRecord.transaction do
     source_type: "aire_services",
     base_url: aire_base_url,
     shared_secret: aire.fetch("shared_secret"),
+    expected_source_instance_id: aire.fetch("integration_profile").fetch("source_instance_id"),
+    source_protocol: aire.fetch("integration_profile").fetch("protocol"),
+    source_protocol_version: aire.fetch("integration_profile").fetch("protocol_version"),
+    source_capabilities: aire.fetch("integration_profile").fetch("capabilities"),
+    identity_verified_at: Time.current,
     active: true
   )
   TimeTrackingDelegation.create!(
@@ -146,6 +157,46 @@ fixture = ApplicationRecord.transaction do
     employee: employee,
     source_user_id: aire.fetch("employee_id").to_s,
     source_user_uuid: aire.fetch("employee_uuid")
+  )
+  accountant = User.create!(organization: organization, company: company,
+    email: "manual-accountant@example.test", name: "Assigned Manual Accountant", role: "accountant", active: true)
+  CompanyAssignment.create!(user: accountant, company: company, granted_by: admin)
+  ManualPrinterFixture.seed!(company: company, accountant: accountant, admin: admin)
+  TimeTrackingDelegation.create!(company: company, time_tracking_source: source,
+    user: accountant, token: aire.fetch("manual_delegation_token"))
+  manual_employee = employee.dup
+  manual_employee.assign_attributes(first_name: "Morgan", last_name: "Manual",
+    email: aire.fetch("manual_employee_email"), ssn_encrypted: "900-00-0098")
+  manual_employee.save!
+  manual_wage_rate = EmployeeWageRate.create!(employee: manual_employee, label: aire.fetch("category_name"),
+    rate: 25, is_primary: true, active: true)
+  EmployeeDocumentReadiness.seed_new_hire!(employee: manual_employee, actor: admin)
+  manual_employee.employee_document_requirements.find_each do |requirement|
+    EmployeeDocumentRequirementReviewService.new(requirement: requirement, actor: admin,
+      attributes: { status: "waived", review_note: "Synthetic manual certification; no actual employee evidence",
+        lock_version: requirement.lock_version }).call!
+  end
+  TimeTrackingEmployeeMapping.create!(company: company, time_tracking_source: source, employee: manual_employee,
+    source_user_id: aire.fetch("manual_employee_id").to_s, source_user_uuid: aire.fetch("manual_employee_uuid"))
+  manual_periods = 3.times.map do |index|
+    PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: next_start_date, end_date: next_end_date, pay_date: next_pay_date, status: "draft",
+      run_purpose: "adjustment", run_purpose_source: "operator_selected",
+      notes: "Synthetic manual adjustment #{index + 1}; does not replace the published regular calendar")
+  end
+  browser_period = PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
+    start_date: next_start_date, end_date: next_end_date, pay_date: next_pay_date, status: "draft",
+    run_purpose: "adjustment", run_purpose_source: "operator_selected",
+    notes: "Reserved draft manual browser acceptance; untouched by the scripted certificate")
+  previous_pay_period = PayPeriod.create!(
+    company: company,
+    company_pay_schedule: schedule,
+    company_workweek: workweek,
+    start_date: previous_start_date,
+    end_date: previous_end_date,
+    pay_date: previous_pay_date,
+    status: "draft",
+    notes: "Synthetic previous regular payroll for target-run cutoff certification; never production"
   )
   pay_period = PayPeriod.create!(
     company: company,
@@ -172,9 +223,18 @@ fixture = ApplicationRecord.transaction do
     schema_version: 1,
     company_id: company.id,
     admin_email: admin.email,
+    manual_accountant_email: accountant.email,
+    manual_accountant_id: accountant.id,
+    manual_employee_id: manual_employee.id,
+    manual_employee_name: manual_employee.full_name,
+    manual_employee_wage_rate_id: manual_wage_rate.id,
+    manual_pay_period_ids: manual_periods.map(&:id),
+    manual_browser_pay_period_id: browser_period.id,
     employee_id: employee.id,
     employee_wage_rate_id: wage_rate.id,
     source_id: source.id,
+    previous_pay_period_id: previous_pay_period.id,
+    previous_regular_pay_date: previous_pay_date.iso8601,
     pay_period_id: pay_period.id,
     next_pay_period_id: next_pay_period.id,
     start_date: start_date.iso8601,

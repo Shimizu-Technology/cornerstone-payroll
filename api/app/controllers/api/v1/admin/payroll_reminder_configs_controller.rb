@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PayrollReminderConfigsController < BaseController
-        before_action :require_manager_or_admin!, only: [:update, :test]
+        before_action :require_manager_or_admin!, only: [ :update, :test ]
 
         # GET /api/v1/admin/payroll_reminder_config
         def show
@@ -14,12 +14,16 @@ module Api
 
         # PUT /api/v1/admin/payroll_reminder_config
         def update
-          config = current_company.payroll_reminder_config || current_company.build_payroll_reminder_config
+          current_company.with_lock do
+            config = current_company.payroll_reminder_config || current_company.build_payroll_reminder_config
+            config.lock! if config.persisted?
+            revalidate_current_company_write_access!(capability: :manage_client_configuration)
 
-          if config.update(config_params)
-            render json: { payroll_reminder_config: serialize(config) }
-          else
-            render json: { errors: config.errors.full_messages }, status: :unprocessable_entity
+            if config.update(config_params)
+              render json: { payroll_reminder_config: serialize(config) }
+            else
+              render json: { errors: config.errors.full_messages }, status: :unprocessable_entity
+            end
           end
         end
 
@@ -30,7 +34,7 @@ module Api
             return render json: { error: "Reminders must be enabled with at least one recipient" }, status: :unprocessable_entity
           end
 
-          unless ENV["RESEND_API_KEY"].present?
+          unless StagingOutboundPolicy.staging? || ENV["RESEND_API_KEY"].present?
             return render json: { error: "Email service not configured" }, status: :unprocessable_entity
           end
 
@@ -40,15 +44,41 @@ module Api
           end
 
           failures = []
+          captured = 0
+          sent = 0
           config.recipients.each do |email|
-            Resend::Emails.send({
+            payload = {
               from: from_email,
               to: email,
               subject: "Test: Payroll Reminder for #{current_company.name}",
               html: test_email_html
-            })
-          rescue StandardError => e
-            failures << { email: email, error: e.message }
+            }
+            # Resolve content before the final permission check. Release the
+            # short authorization transaction before calling the provider.
+            User.transaction do
+              revalidate_current_company_write_access!(capability: :manage_client_configuration)
+            end
+            begin
+              result = StagingMailTransport.deliver(payload)
+              StagingOutboundPolicy.staging? && result["staging_captured"] ? captured += 1 : sent += 1
+            rescue StandardError => e
+              if StagingOutboundPolicy.staging?
+                Rails.logger.error("[PayrollReminderTest] Failed company=#{current_company.id}: #{e.class}; content redacted")
+                failures << { error: "#{e.class}; content redacted" }
+              else
+                failures << { email: email, error: e.message }
+              end
+            end
+          end
+
+          if StagingOutboundPolicy.staging?
+            message = if sent.zero? && failures.empty?
+              "#{captured} recipient(s) captured in staging; no email was sent."
+            else
+              "Test email sent to #{sent} recipient(s); #{captured} captured in staging; #{failures.size} failed."
+            end
+            return render json: { message: message, sent: sent, captured: captured, failed: failures.size },
+                          status: failures.size == config.recipients.size ? :unprocessable_entity : :ok
           end
 
           if failures.size == config.recipients.size

@@ -28,6 +28,7 @@ class QuarterlyCompliancePacketBuilder
       w1: w1_section,
       swica: swica_section,
       federal_941: federal_941_section,
+      employee_completeness: FilingEmployeeCompleteness.for(Employee.where(company_id: company.id, id: swica_section[:employees].map { |row| row[:employee_id] }).order(:last_name, :first_name, :id)),
       review_checks: review_checks,
       component_taxability: component_taxability
     }
@@ -83,7 +84,7 @@ class QuarterlyCompliancePacketBuilder
     @payroll_items ||= PayrollItem.includes(:payroll_item_earnings, :payroll_item_deductions, :employee, :pay_period)
                                   .joins(:employee, :pay_period)
                                   .merge(pay_periods)
-                                  .not_voided.reportable
+                                  .financially_reportable.reportable
                                   .where.not(employment_type: "contractor")
                                   .order("employees.last_name ASC, employees.first_name ASC, pay_periods.pay_date ASC")
                                   .references(:employees, :pay_periods)
@@ -94,7 +95,7 @@ class QuarterlyCompliancePacketBuilder
     @excluded_contractor_items ||= PayrollItem.includes(:employee, :pay_period)
                                               .joins(:pay_period)
                                               .merge(pay_periods)
-                                              .not_voided.reportable
+                                              .financially_reportable.reportable
                                               .where(employment_type: "contractor")
                                               .order("pay_periods.pay_date ASC", :id)
                                               .references(:pay_periods)
@@ -121,6 +122,7 @@ class QuarterlyCompliancePacketBuilder
       generated_at: Time.current.iso8601,
       pay_periods_included: native_pay_period_rows.length + historical_pay_period_count,
       source_summary: {
+        **(prior_provider_history? ? { historical_source_systems: historical_source_systems } : {}),
         cornerstone: {
           pay_period_count: native_pay_period_rows.length,
           payroll_item_count: payroll_items.length
@@ -148,13 +150,23 @@ class QuarterlyCompliancePacketBuilder
     }
   end
 
+  def historical_source_systems
+    @historical_source_systems ||= historical_payroll_source.source_systems(range: quarter_start..quarter_end)
+  end
+
+  def prior_provider_history?
+    historical_source_systems.include?("prior_provider")
+  end
+
   def source_rules
     {
       guam_track: "Guam withholding belongs to Form 500 and W-1; SWICA reports quarterly employee wage detail.",
       federal_track: "Federal Form 941 reports Social Security, Medicare, Additional Medicare, deposits, and liability schedule.",
       form_941_guam_lines_2_3: "Skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
       schedule_b: "Schedule B is a liability schedule by pay date, not a payment list.",
-      imported_payroll: "Locked QuickBooks wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
+      imported_payroll: prior_provider_history? ?
+        "Locked historical wages (QuickBooks import or prior-provider history) feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability." :
+        "Locked QuickBooks wages feed quarterly W-1, SWICA, and Form 941 review. They never create a new Form 500 payment or Cornerstone payroll liability."
     }
   end
 
@@ -193,7 +205,7 @@ class QuarterlyCompliancePacketBuilder
         first = records.first
         {
           id: key,
-          source: "quickbooks",
+          source: first.source_system == "prior_provider" ? "prior_provider" : "quickbooks",
           read_only: true,
           payment_status: "paid_before_cornerstone",
           record_type: first.record_type,
@@ -254,7 +266,7 @@ class QuarterlyCompliancePacketBuilder
         total_guam_withholding: money(total_income_tax_withheld(payroll_items)),
         historical_payroll_excluded: true,
         excluded_historical_withholding: money(total_income_tax_withheld(historical_records)),
-        historical_exclusion_note: "QuickBooks payroll was paid before Cornerstone and does not create a second Form 500 deposit or payment task.",
+        historical_exclusion_note: "#{prior_provider_history? ? 'Historical' : 'QuickBooks'} payroll was paid before Cornerstone and does not create a second Form 500 deposit or payment task.",
         total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
         unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
         unreconciled_balance: money(total_income_tax_withheld(payroll_items).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
@@ -390,7 +402,7 @@ class QuarterlyCompliancePacketBuilder
         social_security_tips: money(records.sum { |record| social_security_tips_for_record(record) }),
         medicare_wages_tips: money(records.sum { |record| medicare_wages_for_record(record) }),
         pay_dates: records.map { |record| pay_date_for_record(record).iso8601 }.uniq.sort,
-        sources: records.map { |record| historical_record?(record) ? "quickbooks" : "cornerstone" }.uniq.sort
+        sources: records.map { |record| historical_record?(record) ? (record.source_system == "prior_provider" ? "prior_provider" : "quickbooks") : "cornerstone" }.uniq.sort
       }
     end
   end
@@ -463,7 +475,7 @@ class QuarterlyCompliancePacketBuilder
     checks << review_check(
       "form_500_payments_reconciled",
       form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
-      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported QuickBooks payments are not recreated.",
+      "Cornerstone Form 500 payment confirmations reconcile to Cornerstone payroll only; imported #{prior_provider_history? ? 'historical' : 'QuickBooks'} payments are not recreated.",
       details: {
         expected_withholding: form_500_section[:total_guam_withholding],
         imported_withholding_excluded: form_500_section[:excluded_historical_withholding],
@@ -486,6 +498,14 @@ class QuarterlyCompliancePacketBuilder
       "Pay component taxability map is present for payroll items with earnings detail.",
       details: { mapped_components: component_taxability.length },
       href: "/pay-periods"
+    )
+    reconciliation = federal_941_section.dig(:report, :withholding_reconciliation)
+    checks << review_check(
+      "form_941_withholding_reconciled",
+      reconciliation.present? && !reconciliation[:requires_review],
+      "Review employee withholding rounding and any remaining recorded-liability difference before filing Form 941.",
+      details: reconciliation || {},
+      href: "/reports"
     )
     checks << review_check(
       "form_941_lines_2_3_skipped",
@@ -617,7 +637,7 @@ class QuarterlyCompliancePacketBuilder
 
       PayrollItem.joins(:pay_period)
                  .where(company_id: company.id)
-                 .not_voided.reportable
+                 .financially_reportable.reportable
                  .where.not(employment_type: "contractor")
                  .where(pay_periods: {
                    id: PayPeriod.reportable_committed
@@ -648,7 +668,7 @@ class QuarterlyCompliancePacketBuilder
 
   def historical_period_group_key(record)
     if record.record_type == "source_snapshot"
-      "quickbooks:period:#{record.historical_pay_period_id}"
+      "#{record.source_system == 'prior_provider' ? 'prior_provider' : 'quickbooks'}:period:#{record.historical_pay_period_id}"
     else
       record.key
     end
@@ -700,19 +720,25 @@ class QuarterlyCompliancePacketBuilder
     federal_liability_for_items(native).to_d + imported_liability
   end
 
+  # Each source keeps its own amounts. A single-source quarter keeps the
+  # original labels; a mixed quarter names the source on every row.
   def historical_component_taxability
-    tips = historical_records.sum(0.to_d, &:reported_tips)
-    non_taxable = historical_records.sum(0.to_d, &:non_taxable_pay)
-    other_taxable = historical_records.sum(0.to_d, &:gross_pay) - tips - non_taxable
+    groups = historical_records.group_by { |record| record.source_system == "prior_provider" ? "prior_provider" : "quickbooks" }
+    groups.sort.flat_map do |source, records|
+      suffix = groups.size > 1 ? (source == "prior_provider" ? " (prior provider)" : " (QuickBooks)") : ""
+      tips = records.sum(0.to_d, &:reported_tips)
+      non_taxable = records.sum(0.to_d, &:non_taxable_pay)
+      other_taxable = records.sum(0.to_d, &:gross_pay) - tips - non_taxable
 
-    [
-      imported_component("regular", "Imported taxable wages", other_taxable),
-      imported_component("tips", "Imported reported tips", tips),
-      imported_component("non_taxable", "Imported non-taxable pay", non_taxable)
-    ].compact
+      [
+        imported_component("regular", "Imported taxable wages#{suffix}", other_taxable, source),
+        imported_component("tips", "Imported reported tips#{suffix}", tips, source),
+        imported_component("non_taxable", "Imported non-taxable pay#{suffix}", non_taxable, source)
+      ].compact
+    end
   end
 
-  def imported_component(category, label, amount)
+  def imported_component(category, label, amount, source)
     return if amount.zero?
 
     {
@@ -725,7 +751,7 @@ class QuarterlyCompliancePacketBuilder
       social_security_tips: category == "tips",
       medicare_wages_tips: taxable_earning_category?(category),
       non_taxable: non_taxable_category?(category),
-      source: "quickbooks"
+      source: source
     }
   end
 

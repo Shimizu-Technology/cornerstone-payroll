@@ -19,6 +19,8 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     settings = response.parsed_body.fetch("pay_schedule_settings")
     expect(settings.dig("pay_schedule", "period_rule")).to eq("manual")
     expect(settings.dig("pay_schedule", "payroll_cutoff_days_before")).to eq(7)
+    expect(settings.dig("pay_schedule", "time_tracking_cutoff_rule")).to eq("before_pay_date")
+    expect(settings.dig("pay_schedule", "time_tracking_cutoff_days")).to eq(7)
     expect(settings.dig("pay_schedule", "payroll_cutoff_at_minutes")).to eq(1_020)
     expect(settings.dig("workweek", "source")).to eq("legacy_system_default")
     expect(settings.dig("workweek", "confirmation_status")).to eq("needs_confirmation")
@@ -34,7 +36,7 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
 
     put "/api/v1/admin/pay_schedule_settings", params: { pay_schedule_settings: {} }
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+    expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
   end
 
   it "creates a confirmed effective-dated schedule and legal workweek" do
@@ -49,6 +51,8 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
           pay_date_rule: "days_after_period_end",
           pay_date_offset_days: 6,
           payroll_cutoff_days_before: 7,
+          time_tracking_cutoff_rule: "after_previous_regular_payday",
+          time_tracking_cutoff_days: 7,
           payroll_cutoff_at_minutes: 990,
           timezone: "Pacific/Guam",
           notes: "Confirmed by client"
@@ -66,10 +70,14 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     expect(company.company_pay_schedules.last).to have_attributes(
       confirmation_status: "confirmed",
       payroll_cutoff_days_before: 7,
+      time_tracking_cutoff_rule: "after_previous_regular_payday",
+      time_tracking_cutoff_days: 7,
       payroll_cutoff_at_minutes: 990
     )
     expect(response.parsed_body.dig("pay_schedule_settings", "pay_schedule")).to include(
       "payroll_cutoff_days_before" => 7,
+      "time_tracking_cutoff_rule" => "after_previous_regular_payday",
+      "time_tracking_cutoff_days" => 7,
       "payroll_cutoff_at_minutes" => 990
     )
     expect(company.company_workweeks.last).to be_confirmed

@@ -1,6 +1,8 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +22,10 @@ import { payrollReminderApi } from '@/services/api';
 import type { PayrollReminderConfig, PayrollReminderLog } from '@/services/api';
 
 export default function PayrollReminders() {
+  const { activeCompany, activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const canConfigure = scopeCompanyId === activeCompanyId && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const canSendTest = canConfigure && !isTestWorkspaceCompany(activeCompany);
   const [config, setConfig] = useState<PayrollReminderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,6 +78,7 @@ export default function PayrollReminders() {
   };
 
   const handleSave = async () => {
+    if (!canConfigure) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -100,6 +107,7 @@ export default function PayrollReminders() {
   };
 
   const handleSendTest = async () => {
+    if (!canSendTest) return;
     setTesting(true);
     setError(null);
     setSuccess(null);
@@ -337,12 +345,12 @@ export default function PayrollReminders() {
 
         {/* Action buttons */}
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={handleSave} disabled={saving || !hasChanges}>
+          <Button onClick={handleSave} disabled={saving || !hasChanges || !canConfigure}>
             {saving ? 'Saving...' : 'Save Settings'}
           </Button>
 
           {config?.enabled && recipients.length > 0 && (
-            <Button variant="outline" onClick={handleSendTest} disabled={testing}>
+            <Button variant="outline" onClick={handleSendTest} disabled={testing || !canSendTest}>
               <Send className="mr-1.5 h-4 w-4" />
               {testing ? 'Sending...' : 'Send Test Email'}
             </Button>

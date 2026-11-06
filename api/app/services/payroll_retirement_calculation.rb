@@ -56,7 +56,7 @@ class PayrollRetirementCalculation
     snapshot["catch_up_amount"] = ((@annual_additions || {}).fetch(:prior_catch_up, 0).to_d + (@annual_additions || {}).fetch(:current_catch_up, 0).to_d).to_s("F")
     snapshot["employer_match"] = { "traditional" => payroll_item.employer_retirement_match.to_d.to_s("F"),
       "roth" => payroll_item.employer_roth_retirement_match.to_d.to_s("F"), "prior_ytd" => prior_employer_match.to_s("F") }
-    if previous != snapshot["applied"]
+    if applied.values.sum(&:to_d) < previous.values.sum(&:to_d)
       snapshot["explanations"] = Array(snapshot["explanations"]) | [ "Employee contributions were reduced because the paycheck did not have enough available pay." ]
     end
     snapshot["sources"] = Array(snapshot["sources"]).map do |saved|
@@ -111,7 +111,7 @@ class PayrollRetirementCalculation
     end
     if contribution_sources.any? { |entry| entry[:bucket] == :roth && entry[:requested].positive? } &&
         (!election[:roth_available] || election[:plan_source_reference].blank?)
-      raise ArgumentError, "Verify that the plan permits designated Roth employee contributions before calculating this paycheck."
+      raise ArgumentError, "#{employee.full_name}: Open Employees → #{employee.full_name} → Pay setup → Set up retirement and confirm the plan permits designated Roth employee contributions. Add the verified plan document or administrator reference, then calculate payroll again."
     end
   end
 
@@ -540,7 +540,7 @@ class PayrollRetirementCalculation
     return historical_evidence.dig(:employer_match, :prior_ytd).to_d if historical_mode
     @prior_employer_match ||= begin
       period = payroll_item.pay_period
-      live = employee.payroll_items.joins(:pay_period).not_voided.reportable
+      live = employee.payroll_items.joins(:pay_period).financially_reportable.reportable
         .where(pay_periods: { id: PayPeriod.reportable_for_company(period.company).where(pay_date: Date.new(period.pay_date.year, 1, 1)..period.pay_date).select(:id) })
         .where("pay_periods.pay_date < ? OR (pay_periods.pay_date = ? AND pay_periods.id < ?)", period.pay_date, period.pay_date, period.id)
         .sum("payroll_items.employer_retirement_match + payroll_items.employer_roth_retirement_match").to_d
@@ -557,7 +557,7 @@ class PayrollRetirementCalculation
   def prior_payroll_items
     @prior_payroll_items ||= begin
       period = payroll_item.pay_period
-      employee.payroll_items.joins(:pay_period).not_voided.reportable
+      employee.payroll_items.joins(:pay_period).financially_reportable.reportable
         .where(pay_periods: { id: PayPeriod.reportable_for_company(period.company).where(pay_date: Date.new(tax_year, 1, 1)..period.pay_date).select(:id) })
         .where("pay_periods.pay_date < ? OR (pay_periods.pay_date = ? AND pay_periods.id < ?)", period.pay_date, period.pay_date, period.id)
         .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type).to_a
@@ -653,7 +653,7 @@ class PayrollRetirementCalculation
   def prior_catch_up
     return historical_evidence.dig(:annual_additions, :prior_catch_up).to_d if historical_mode
 
-    saved = prior_payroll_items.sum { |item| item.retirement_rule_snapshot.dig("annual_additions", "current_catch_up").to_d }
+    saved = prior_payroll_items.sum(0.to_d) { |item| PayrollRetirementCatchUp.for_item(item) }
     inferred = [ local_employee_deferral_before - regular_deferral_limit, 0.to_d ].max
     if inferred.positive? && !catch_up_available?
       raise ArgumentError, "Year-to-date deferrals exceed the regular retirement limit without verified catch-up eligibility. Reconcile the historical contributions with the plan administrator before processing more retirement contributions."

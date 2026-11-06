@@ -38,7 +38,7 @@ RSpec.describe TimeTracking::SourceConfigurationService do
         name: "Changed name",
         delegation_token: "not-allowed"
       )
-    end.to raise_error(ActiveRecord::RecordInvalid, /only available for AIRE Services/)
+    end.to raise_error(ActiveRecord::RecordInvalid, /does not support delegated payroll access/)
 
     expect(source.reload.name).not_to eq("Changed name")
     expect(TimeTrackingDelegation).not_to exist

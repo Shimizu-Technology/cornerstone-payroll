@@ -66,7 +66,13 @@ export function apiErrorMessage(data: unknown, status: number): string {
 // API Client for Cornerstone Payroll
 // ========================================
 
+import type { ConnectorHealth } from '@/lib/connector-health';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+
+export function resolveApiUrl(baseUrl: string, endpoint: string, origin = globalThis.location?.origin || 'http://localhost'): URL {
+  return new URL(`${baseUrl}${endpoint}`, origin);
+}
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
@@ -171,7 +177,7 @@ class ApiClient {
   }
 
   private buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-    const url = new URL(`${this.baseUrl}${endpoint}`);
+    const url = resolveApiUrl(this.baseUrl, endpoint);
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined) {
@@ -423,6 +429,11 @@ export class ApiError extends Error {
 // Create singleton instance
 const api = new ApiClient(API_BASE_URL);
 
+export const timeTrackingSourceHealthApi = {
+  read: (sourceId: number, companyId: number, signal?: AbortSignal): Promise<ConnectorHealth> =>
+    api.get<ConnectorHealth>(`/admin/time_tracking_sources/${sourceId}/health`, undefined, { companyId, signal }),
+};
+
 export default api;
 export { api as apiClient };
 export const setAuthToken = (token: string | null) => api.setAuthToken(token);
@@ -482,6 +493,8 @@ import type {
 
 // Employees (Admin API)
 export const employeesApi = {
+  hoursEvidence: (id: number, params: Record<string, string | number | undefined>) =>
+    api.get<import('@/lib/employee-hours-evidence').EmployeeHoursEvidence>(`/admin/employees/${id}/hours_evidence`, params),
   list: (params?: {
     company_id?: number;
     eligible_pay_period_id?: number;
@@ -726,10 +739,14 @@ export const clientDepartmentsApi = {
 };
 
 // Users (Admin API)
-interface UserCreateResponse {
-  data: User;
+export interface InvitationDeliveryResponse {
+  invitation_delivery_status: 'queued' | 'captured' | 'submitted' | 'failed' | 'not_requested';
   invitation_sent: boolean;
   invitation_error?: string | null;
+}
+
+interface UserCreateResponse extends InvitationDeliveryResponse {
+  data: User;
 }
 
 export const usersApi = {
@@ -803,11 +820,9 @@ export interface OrganizationSummary {
   updated_at: string;
 }
 
-export interface OrganizationCreateResponse {
+export interface OrganizationCreateResponse extends InvitationDeliveryResponse {
   data: OrganizationSummary;
   admin_user?: OrganizationAdminSummary | null;
-  invitation_sent: boolean;
-  invitation_error?: string | null;
 }
 
 export interface OrganizationCompanyTransferPreview {
@@ -843,7 +858,7 @@ export const organizationsApi = {
   update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status' | 'client_limit' | 'unlimited_clients'>>) =>
     api.patch<{ data: OrganizationSummary }>(`/admin/organizations/${id}`, { organization: data }),
   createAdminUser: (id: number, data: { email: string; name?: string }) =>
-    api.post<{ data: OrganizationAdminSummary; invitation_sent: boolean; invitation_error?: string | null }>(
+    api.post<InvitationDeliveryResponse & { data: OrganizationAdminSummary }>(
       `/admin/organizations/${id}/admin_users`,
       { user: data }
     ),
@@ -937,6 +952,15 @@ export interface TaxConfigFilingStatus {
   brackets?: TaxConfigBracket[];
 }
 
+export interface TaxYearReadiness {
+  verified_years: number[];
+  warnings: { tax_year: number; message: string }[];
+}
+
+export const taxYearReadinessApi = {
+  get: () => api.get<TaxYearReadiness>('/admin/tax_year_readiness'),
+};
+
 export interface TaxConfig {
   id: number;
   tax_year: number;
@@ -949,6 +973,11 @@ export interface TaxConfig {
   created_at: string;
   updated_at: string;
   filing_statuses: TaxConfigFilingStatus[];
+  verification_status: 'draft' | 'verified';
+  verified_by: string | null;
+  verified_at: string | null;
+  source_references: string | null;
+  review_digest?: string | null;
 }
 
 export interface TaxConfigAuditLog {
@@ -974,11 +1003,15 @@ export const taxConfigsApi = {
   list: () =>
     api.get<{ tax_configs: TaxConfig[] }>('/admin/tax_configs'),
   get: (id: number) =>
-    api.get<{ tax_config: TaxConfig }>(`/admin/tax_configs/${id}`),
+    api.get<{ tax_config: TaxConfig; previous_year: TaxConfig | null }>(`/admin/tax_configs/${id}`),
   auditLogs: (id: number) =>
     api.get<{ audit_logs: TaxConfigAuditLog[] }>(`/admin/tax_configs/${id}/audit_logs`),
   create: (data: { tax_year: number; copy_from_year?: number | null }) =>
     api.post<{ tax_config: TaxConfig; message: string }>('/admin/tax_configs', data),
+  verify: (id: number, source_note: string, reviewed_digest: string) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/verify`, { source_note, reviewed_digest }),
+  replaceWithholding: (id: number, filing_statuses: unknown) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/replace_withholding`, { filing_statuses }),
   activate: (id: number) =>
     api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/activate`),
   update: (id: number, data: Partial<Pick<TaxConfig, "ss_wage_base" | "ss_rate" | "medicare_rate" | "additional_medicare_rate" | "additional_medicare_threshold">>) =>
@@ -1006,6 +1039,7 @@ export const taxConfigsApi = {
 export type TimeTrackingSourceType = 'aire_services' | 'cornerstone_tax' | 'custom';
 
 export interface TimeTrackingSource {
+  connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
   id: number;
   company_id: number;
   name: string;
@@ -1014,6 +1048,17 @@ export interface TimeTrackingSource {
   active: boolean;
   shared_secret_configured: boolean;
   delegation_token_configured: boolean;
+  connection_uuid: string;
+  identity_verified: boolean;
+  source_instance_id?: string | null;
+  source_protocol?: string | null;
+  source_protocol_version?: string | null;
+  source_capabilities: string[];
+  supported_operations?: string[];
+  remote_source_identifier?: string | null;
+  authorization_origin?: string | null;
+  source_policy_constraints?: Record<string, string[]>;
+  identity_verified_at?: string | null;
   last_synced_at: string | null;
 }
 
@@ -1022,6 +1067,7 @@ export interface TimeTrackingSourceCreatePayload {
   source_type: TimeTrackingSourceType;
   base_url: string;
   shared_secret: string;
+  authorization_origin?: string;
   delegation_token?: string;
   active: boolean;
 }
@@ -1033,6 +1079,14 @@ export interface TimeTrackingSourceTestResponse {
   generated_at?: string;
   employee_count?: number;
   summary?: Record<string, unknown>;
+  identity_verified?: boolean;
+  connection_uuid?: string;
+  source_instance_id?: string | null;
+  source_protocol?: string | null;
+  source_protocol_version?: string | null;
+  source_capabilities?: string[];
+  supported_operations?: string[];
+  identity_verified_at?: string | null;
   cockpit_ready?: boolean;
   delegation_token_configured?: boolean;
   error?: string;
@@ -1042,12 +1096,15 @@ export interface TimeTrackingSourceUpdatePayload {
   name: string;
   base_url: string;
   shared_secret?: string;
+  authorization_origin?: string;
   delegation_token?: string;
   active: boolean;
 }
 
 export interface AireAccountLink {
   connected: boolean;
+  source_user_name?: string;
+  source_user_email?: string | null;
   aire_user_name?: string;
   aire_user_email?: string | null;
   linked_at?: string;
@@ -1096,6 +1153,9 @@ export interface TimeTrackingPreviewRow {
   employee_name: string | null;
   match_method: string;
   match_score: number;
+  suggested_employee_id?: number | null;
+  suggested_employee_name?: string | null;
+  suggestion_method?: 'email' | 'name' | null;
   regular_hours: number;
   overtime_hours: number;
   total_hours: number;
@@ -1107,7 +1167,51 @@ export interface TimeTrackingPreviewRow {
   ready: boolean;
 }
 
+export interface ExactTimeCorrectionLine {
+  source_time_entry_version?: number;
+  source_user_id: string;
+  source_time_entry_id: string;
+  line_key: string;
+  regular_hours: number;
+  overtime_hours: number;
+  total_hours: number;
+}
+
+export interface ExactTimeCorrectionPreview extends ExactTimeCorrectionLine {
+  preview_token: string;
+  source_change: Omit<ExactTimeCorrectionLine, 'source_user_id'>;
+  original_source_time_entry_version?: number | null;
+  original_pay_period_id: number;
+  original_payroll_item_id: number;
+  original_check_number: string | null;
+  frozen_origin_pay_period_id?: number;
+  frozen_origin_payroll_item_id?: number;
+  financial_successor_link_ids?: number[];
+  employee_name: string;
+  pay_date: string;
+  original: Record<string, number>;
+  corrected: Record<string, number>;
+  deltas: Record<string, number>;
+  accounting_only: true;
+}
+
+export interface ExactTimeCorrectionDisposition extends ExactTimeCorrectionLine {
+  verification_status?: 'verified' | 'needs_review';
+  verification_error?: string | null;
+  id: number;
+  corrective_pay_period_id: number;
+  corrective_payroll_item_id: number;
+  original_pay_period_id?: number;
+  original_payroll_item_id?: number;
+  frozen_origin_pay_period_id?: number;
+  frozen_origin_payroll_item_id?: number;
+  accounting_only: true;
+  source_receipt?: import('@/types').SourceAccountingReceiptState | null;
+}
+
 export interface TimeTrackingImportData {
+  correction_lines?: ExactTimeCorrectionLine[];
+  correction_dispositions?: ExactTimeCorrectionDisposition[];
   id: number;
   status: string;
   time_tracking_source_id: number;
@@ -1176,7 +1280,7 @@ export interface TimeTrackingImportResultError {
 }
 
 export const timeTrackingSourcesApi = {
-  list: () => api.get<{ time_tracking_sources: TimeTrackingSource[] }>('/admin/time_tracking_sources'),
+  list: () => api.get<{ time_tracking_sources: TimeTrackingSource[]; connected_payroll?: TimeTrackingSource['connected_payroll'] }>('/admin/time_tracking_sources'),
   create: (data: TimeTrackingSourceCreatePayload) =>
     api.post<{ time_tracking_source: TimeTrackingSource }>('/admin/time_tracking_sources', { time_tracking_source: data }),
   update: (id: number, data: TimeTrackingSourceUpdatePayload) =>
@@ -1247,6 +1351,15 @@ export interface RunPayrollFieldInputEntry {
   replace_request?: boolean;
 }
 
+export interface CorrectedHoursPreview {
+  required: boolean;
+  status: 'not_required' | 'needs_connection' | 'pending' | 'confirmed' | 'failed' | 'needs_review';
+  expected_digest?: string;
+  error?: string;
+  items: Array<{ payroll_item_id: number; employee_name: string; original_pay_period_id: number; original_payroll_item_id: number;
+    corrected_pay_period_id: number; work_start: string; work_end: string; regular_hours: number; overtime_hours: number }>;
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }, companyId?: number): Promise<PayPeriodListResponse> =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params, { companyId }),
@@ -1255,6 +1368,10 @@ export const payPeriodsApi = {
   publishAireCalendar: (id: number) =>
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState; created: boolean }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/publish`
+    ),
+  refreshAireCalendar: (id: number): Promise<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }> =>
+    api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
+      `/admin/pay_periods/${id}/aire_payroll_calendar/refresh`
     ),
   retryAireCalendarDelivery: (id: number) =>
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
@@ -1265,10 +1382,38 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit`,
       { ...params, employee_per_page: 100 }
     ),
+  airePaymentEvidence: (id: number) =>
+    api.get<import('@/types').AirePaymentEvidenceReview>(`/admin/pay_periods/${id}/aire_payroll_cockpit/payment_evidence`),
+  createAirePaymentHold: (id: number, data: {
+    source_time_entry_id: string; source_user_uuid: string; expected_version: number; command_id: string; reason: string;
+  }) => api.post<{ payment_attestation: import('@/types').AirePaymentEvidenceHold }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_attestations`, data),
+  retractAirePaymentHold: (id: number, holdId: string, data: {
+    source_user_uuid: string; expected_version: number; command_id: string; reason: string;
+  }) => api.post<{ payment_attestation: import('@/types').AirePaymentEvidenceHold }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_attestations/${encodeURIComponent(holdId)}/retract`, data),
+  resolveAirePaymentHold: (id: number, holdId: string, data: {
+    source_user_uuid: string; payroll_item_id: number; expected_version: number; reason: string;
+  }) => api.post<{ payment_resolution: import('@/types').ReportedPaymentResolution }>(
+    `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_attestations/${encodeURIComponent(holdId)}/resolve`, data),
+  retryAirePaymentResolution: (id: number, allocationId: number) =>
+    api.post<{ payment_resolution: import('@/types').ReportedPaymentResolution }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/payment_resolutions/${allocationId}/retry`),
+  lateHours: (id: number) => api.get<import('@/components/payroll/PayLateHours').LateHoursReview>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours`),
+  payLateHours: (id: number, data: { command_id: string; expected_version: number; pay_date: string; cases: { id: string; version: number }[] }) =>
+    api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours`, data),
+  retryLateHours: (id: number, runId: number) => api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours/${runId}/retry`, {}),
+  cancelLateHours: (id: number, runId: number, reason: string) => api.post<{ late_hours_run: import('@/components/payroll/PayLateHours').LateHoursRun }>(`/admin/pay_periods/${id}/aire_payroll_cockpit/late_hours/${runId}/cancel`, { reason }),
   airePayrollManualReview: (id: number) =>
     api.get<import('@/types').AirePayrollManualReview>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_review`
     ),
+  createAireManualAllocation: (id: number, data: import('@/types').AireManualAllocationInput) =>
+    api.post<{ manual_allocation: import('@/types').AireManualAllocation }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations`, data),
+  retryAireManualAllocation: (id: number, allocationId: number) =>
+    api.post<{ manual_allocation: import('@/types').AireManualAllocation }>(
+      `/admin/pay_periods/${id}/aire_payroll_cockpit/manual_allocations/${allocationId}/retry`),
   airePayrollTimeEntries: (id: number, params?: { employee_id?: string; approval_status?: string; page?: number }) =>
     api.get<import('@/types').AirePayrollTimeEntriesResponse>(
       `/admin/pay_periods/${id}/aire_payroll_cockpit/time_entries`,
@@ -1284,6 +1429,18 @@ export const payPeriodsApi = {
       `/admin/pay_periods/${id}/aire_payroll_cockpit/settlement_cases`,
       { ...params, per_page: 250 }
     ),
+  confirmAireEmployeeMapping: (
+    payPeriodId: number,
+    data: { source_user_id: string; source_user_uuid: string; employee_id: number }
+  ) => api.post<{
+    employee_mapping: {
+      source_user_id: string;
+      source_user_uuid: string;
+      employee_id: number;
+      employee_name: string;
+      status: 'mapped';
+    };
+  }>(`/admin/pay_periods/${payPeriodId}/aire_payroll_cockpit/employee_mapping`, data),
   reviewAireTimeEntry: (
     payPeriodId: number,
     timeEntryId: string,
@@ -1307,11 +1464,11 @@ export const payPeriodsApi = {
       command_id: string;
       expected_version: number;
       reason: string;
-      work_date: string;
-      start_time: string;
-      end_time: string;
-      time_category_id: string;
-      description: string;
+      work_date?: string;
+      start_time?: string;
+      end_time?: string;
+      time_category_id?: string;
+      description?: string;
       breaks?: Array<{ start_time: string; end_time: string }>;
     }
   ) => api.post<import('@/types').AirePayrollCommandResponse>(
@@ -1361,10 +1518,14 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; named_loan_payments?: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
+  runPayroll: (id: number, data?: { source_coverage_reason?: string; source_coverage_acknowledged?: boolean; employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; bonuses?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; named_loan_payments?: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
-  refreshSetup: (id: number, data: { includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
+  refreshSetup: (id: number, data: { source_coverage_reason?: string; source_coverage_acknowledged?: boolean; includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/refresh_setup`, data),
+  correctedHours: (id: number): Promise<{ corrected_hours: CorrectedHoursPreview }> =>
+    api.get<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/corrected_hours`),
+  connectCorrectedHours: (id: number, expected_digest: string): Promise<{ corrected_hours: CorrectedHoursPreview }> =>
+    api.post<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/connect_corrected_hours`, { expected_digest }),
   correctionPreflight: (id: number) =>
     api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight }>(`/admin/pay_periods/${id}/correction_preflight`),
   reopenUnpaid: (id: number, data: { reason: string; unpaid_acknowledgement: boolean; includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
@@ -1455,7 +1616,7 @@ export const payPeriodsApi = {
   // Preview is read-only - used to drive the modal's delta display.
   correctivePaycheckPreview: (
     id: number,
-    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs }
+    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs; pay_date?: string }
   ) =>
     api.post<CorrectivePaycheckPreview>(
       `/admin/pay_periods/${id}/corrective_paycheck_preview`,
@@ -1466,6 +1627,7 @@ export const payPeriodsApi = {
     data: {
       employee_id: number;
       corrected_inputs: CorrectivePaycheckInputs;
+      expected_review_digest: string;
       pay_date: string;
       reason: string;
       notes?: string;
@@ -1491,6 +1653,14 @@ export const payPeriodsApi = {
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
   previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
+  previewTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string }): Promise<{ correction: ExactTimeCorrectionPreview }> =>
+    api.post<{ correction: ExactTimeCorrectionPreview }>(`/admin/pay_periods/${id}/preview_time_tracking_correction`, data),
+  confirmTimeTrackingCorrection: (id: number, data: { import_id: number; source_user_id: string; source_time_entry_id: string; line_key: string; preview_token: string; reason: string; acknowledge_accounting_only: boolean }): Promise<{ disposition_id: number; import: TimeTrackingImportData }> =>
+    api.post<{ disposition_id: number; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/confirm_time_tracking_correction`, data),
+  timeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }): Promise<{ disposition: ExactTimeCorrectionDisposition }> =>
+    api.get<{ disposition: ExactTimeCorrectionDisposition }>(`/admin/pay_periods/${id}/time_tracking_correction_delivery`, data),
+  retryTimeTrackingCorrectionDelivery: (id: number, data: { import_id: number; disposition_id: number }): Promise<{ disposition: ExactTimeCorrectionDisposition }> =>
+    api.post<{ disposition: ExactTimeCorrectionDisposition }>(`/admin/pay_periods/${id}/retry_time_tracking_correction_delivery`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
   reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ data: { results: { reconciled: unknown[]; rounding_exceptions: TimeTrackingHistoricalRoundingException[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData } }> =>
@@ -2030,10 +2200,15 @@ export interface DashboardResponse {
       period_description: string;
       pay_date: string;
       status: string;
+      run_purpose?: string;
+      next_action?: string;
+      blocker?: string | null;
       employee_count: number;
       total_gross: number;
       total_net: number;
     } | null;
+    last_regular_payroll?: DashboardResponse['stats']['recent_payrolls'][number] | null;
+    last_adjustment_payroll?: DashboardResponse['stats']['recent_payrolls'][number] | null;
     ytd_totals: {
       year: number;
       gross_pay: number;
@@ -2049,6 +2224,7 @@ export interface DashboardResponse {
     recent_payrolls: {
       key?: string;
       record_type?: 'native' | 'imported';
+      run_purpose?: string;
       id: number;
       period_description: string;
       pay_date: string;
@@ -2064,10 +2240,19 @@ export interface DashboardResponse {
   };
 }
 
+export interface PayrollReportReviewWarning {
+  code: string;
+  message: string;
+  payroll_item_id: number;
+  employee_id: number;
+}
+
 export interface PayrollRegisterReport {
   report: {
+    review_warnings?: PayrollReportReviewWarning[];
     type: string;
     simple_payroll_register_enabled: boolean;
+    register_review?: Array<{ severity: string; employee?: string; issue: string; detail?: string }>;
     meta: {
       company_name?: string;
       generated_at?: string;
@@ -2076,7 +2261,7 @@ export interface PayrollRegisterReport {
       payroll_status_note?: string | null;
     };
     source?: {
-      system: 'cornerstone' | 'quickbooks_online';
+      system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
       label: string;
       locked: boolean;
       statement: string;
@@ -2137,6 +2322,12 @@ export interface PayrollRegisterReport {
     payroll_adjustments?: PayrollAdjustmentsDisclosure;
     employees: Array<PayrollItem & {
       total_retirement_payment?: number;
+      non_taxable_additions_total?: number;
+      payroll_adjustment_non_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      traditional_retirement_total?: number;
+      roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2144,6 +2335,12 @@ export interface PayrollRegisterReport {
     }>;
     contractors: Array<PayrollItem & {
       total_retirement_payment?: number;
+      non_taxable_additions_total?: number;
+      payroll_adjustment_non_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      traditional_retirement_total?: number;
+      roth_retirement_total?: number;
+      historical_loan_deductions_unclassified?: number;
       straight_loan_deduction?: number;
       installment_loan_payment?: number;
       employer_contributions_total?: number;
@@ -2238,7 +2435,7 @@ export interface PayrollAdjustmentsDisclosure {
 }
 
 export interface PayrollSourceSummary {
-  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone';
+  mode: 'committed_cornerstone_only' | 'locked_quickbooks_plus_committed_cornerstone' | 'locked_historical_plus_committed_cornerstone';
   source_statement: string;
   cornerstone: {
     payroll_count: number;
@@ -2253,6 +2450,7 @@ export interface PayrollSourceSummary {
     excluded_unlinked_gross_pay: number;
     excluded_unlinked_net_pay: number;
   };
+  prior_provider?: PayrollSourceSummary['quickbooks'];
   adjustments: {
     count: number;
     gross_pay_delta: number;
@@ -2268,6 +2466,11 @@ export interface PayrollSourceSummary {
 }
 
 export interface EmployeePayHistoryRecord {
+  period_start?: string;
+  period_end?: string;
+  total_hours?: number;
+  hours_basis?: 'saved_payroll_item' | 'signed_payroll_correction';
+  payment_evidence?: { status: 'issued' | 'printed' | 'prepared' | 'unissued' | 'voided'; label: string; effective_on: string | null };
   key: string;
   record_type: 'native' | 'imported' | 'adjustment';
   payroll_item_id: number | null;
@@ -2299,7 +2502,7 @@ export interface EmployeePayHistoryRecord {
   payment_method?: string | null;
   reason?: string;
   source: {
-    system: 'cornerstone' | 'quickbooks_online' | 'historical_adjustment';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider' | 'historical_adjustment';
     label: string;
     locked: boolean;
   };
@@ -2338,6 +2541,7 @@ export interface EmployeePayrollSummary {
 }
 
 export interface EmployeePayHistoryReport {
+  review_warnings?: PayrollReportReviewWarning[];
   period: PayrollReportPeriod;
   employee: { id: number; name: string; employment_type: string; pay_rate: number };
   history: EmployeePayHistoryRecord[];
@@ -2378,6 +2582,7 @@ export interface TaxSummaryReport {
 
 export interface YtdSummaryReport {
   report: {
+    review_warnings?: PayrollReportReviewWarning[];
     type: string;
     meta?: { company_name?: string; provisional?: boolean; payroll_status_note?: string | null };
     year: number | null;
@@ -2402,6 +2607,7 @@ export interface YtdSummaryReport {
       total_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
+      non_taxable_additions_total?: number;
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
@@ -2439,6 +2645,7 @@ export interface YtdSummaryReport {
       total_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
+      non_taxable_additions_total?: number;
       bonus?: number;
       straight_loan_deductions?: number;
       installment_loan_payments?: number;
@@ -2478,7 +2685,7 @@ export interface YtdSummaryReport {
       source_bucket_totals: Array<{ source: string; treatment: string; amount: number }>;
       classification_note: string;
     };
-    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
+    component_columns?: Array<{ key: string; label: string; short_label: string; identity_label: string; source_group?: 'quickbooks_history' | 'prior_provider_history' | 'historical_adjustment' | 'cornerstone_field' | 'cornerstone_adjustment'; treatment: string }>;
   };
 }
 
@@ -2539,7 +2746,14 @@ export interface AnnualPayrollSummaryReport {
   };
 }
 
+export interface OfficialFormTemplateStatus {
+  available: boolean;
+  supported_tax_years: number[];
+  message: string | null;
+}
+
 export interface Form941GuReport {
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_id: number;
@@ -2605,6 +2819,22 @@ export interface Form941GuReport {
     total_employee_taxes: number;
     total_employer_taxes: number;
   };
+  withholding_reconciliation?: {
+    method: string;
+    rounding: string;
+    expected_employee_ss: number;
+    expected_employee_base_medicare: number;
+    expected_employee_additional_medicare: number;
+    expected_employee_total: number;
+    recorded_employee_total: number;
+    employee_difference: number;
+    line7_suggestion: number | null;
+    recorded_employer_total: number;
+    recorded_total_liability: number;
+    recorded_liability_residual: number;
+    requires_review: boolean;
+    explanation: string;
+  };
   monthly_liability: {
     month: string;
     month_start: string;
@@ -2620,6 +2850,8 @@ export interface Form941GuReport {
 }
 
 export interface QuarterlyCompliancePacketReport {
+  employee_completeness?: import('@/types').FilingEmployeeCompleteness;
+  official_form_template?: OfficialFormTemplateStatus;
   meta: {
     report_type: string;
     company_name: string;
@@ -2667,7 +2899,7 @@ export interface QuarterlyCompliancePacketReport {
   } | null;
   pay_periods: {
     id: number | string;
-    source: 'cornerstone' | 'quickbooks';
+    source: 'cornerstone' | 'quickbooks' | 'prior_provider';
     read_only: boolean;
     payment_status?: 'paid_before_cornerstone';
     record_type?: string;
@@ -3084,8 +3316,8 @@ export const reportsApi = {
     api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
   w2GuFilingReadiness: (year: number) =>
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
-  w2GuMarkReady: (year: number, notes?: string) =>
-    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
+  w2GuMarkReady: (year: number, notes?: string, preflightFingerprint?: string | null) =>
+    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes, preflight_fingerprint: preflightFingerprint }),
   payrollFilingResponsibilities: (taxYear: number, quarter?: number) =>
     api.get<PayrollFilingResponsibilityResponse>('/admin/payroll_filing_responsibilities', {
       tax_year: taxYear,
@@ -3410,6 +3642,12 @@ export const checksApi = {
   }): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
     api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`, data),
 
+  confirmDirectDepositPayment: (payrollItemId: number, data: {
+    settled_on: string; bank_reference: string; attestation: boolean; note?: string;
+  }): Promise<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }> => api.post<{ payment_confirmation: { settled_on: string; bank_reference: string; confirmed_at: string }; already_confirmed: boolean }>(
+    `/admin/payroll_items/${payrollItemId}/direct_deposit/confirm_payment`, data
+  ),
+
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>
     api.patch<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/check_number`, {
@@ -3420,6 +3658,9 @@ export const checksApi = {
   // Void a check
   void: (payrollItemId: number, reason: string) =>
     api.post<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/void`, { reason }),
+
+  reversePaycheck: (payrollItemId: number, reason: string) =>
+    api.post<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reverse_paycheck`, { reason }),
 
   // Reissue a physical check (in-place check-number reassignment)
   reprint: (payrollItemId: number, reason: string, replacementCheckNumber?: string) =>
@@ -3581,6 +3822,8 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  client_capabilities?: string[];
+  client_management?: boolean;
   id: number;
   organization_id: number;
   organization_name?: string;
@@ -3601,6 +3844,8 @@ export interface CompanyListItem {
   test_workspace_sealed_at?: string | null;
   test_workspace_expired?: boolean;
   test_workspace_read_only?: boolean;
+  workspace_can_write?: boolean;
+  workspace_write_permissions?: Record<string, boolean> | null;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
   migration_source_company_name?: string | null;
@@ -3803,11 +4048,12 @@ interface AuthApiUser {
   role: string;
   organization_id?: number;
   organization_name?: string;
-  company_id: number;
-  company_name: string;
+  company_id: number | null;
+  company_name: string | null;
   home_company_id: number;
   assigned_company_ids: number[];
   capabilities: string[];
+  company_capabilities?: Record<string, string[]>;
 }
 
 export const companiesApi = {
@@ -3904,9 +4150,11 @@ export interface CompanyPayScheduleSetting {
   period_rule: 'manual' | 'weekly' | 'biweekly' | 'semimonthly';
   period_start_weekday?: number | null;
   period_anchor_date?: string | null;
-  pay_date_rule: 'manual' | 'days_after_period_end';
+  pay_date_rule: 'manual' | 'days_after_period_end' | 'semimonthly_15th_and_month_end';
   pay_date_offset_days?: number | null;
   payroll_cutoff_days_before: number;
+  time_tracking_cutoff_rule: 'before_pay_date' | 'after_previous_regular_payday';
+  time_tracking_cutoff_days: number;
   payroll_cutoff_at_minutes: number;
   timezone: string;
   source: ScheduleSource;
@@ -3941,7 +4189,7 @@ export const payScheduleSettingsApi = {
   get: () => api.get<PayScheduleSettingsResponse>('/admin/pay_schedule_settings'),
   update: (data: {
     effective_on: string;
-    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'payroll_cutoff_days_before' | 'payroll_cutoff_at_minutes' | 'timezone' | 'notes'>;
+    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'payroll_cutoff_days_before' | 'payroll_cutoff_at_minutes' | 'time_tracking_cutoff_rule' | 'time_tracking_cutoff_days' | 'timezone' | 'notes'>;
     workweek: Pick<CompanyWorkweekSetting, 'starts_on_weekday' | 'starts_at_minutes' | 'timezone' | 'notes'>;
   }) => api.put<PayScheduleSettingsResponse>('/admin/pay_schedule_settings', { pay_schedule_settings: data }),
 };
@@ -4098,6 +4346,7 @@ export interface Form500Fields {
 // Company Assignments (RBAC)
 // ============================================================
 export interface CompanyAssignment {
+  client_management?: boolean;
   id: number;
   user_id: number;
   user_name: string;
@@ -4117,6 +4366,10 @@ export const companyAssignmentsApi = {
     api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
   create: (data: { user_id: number; company_id: number; workspace_access_level?: 'operator' | 'reviewer' | 'workspace_admin'; expires_at?: string }) =>
     api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
+  updateClientManagement: (id: number, enabled: boolean): Promise<{ data: CompanyAssignment }> =>
+    api.patch<{ data: CompanyAssignment }>(`/admin/company_assignments/${id}`, {
+      company_assignment: { client_management: enabled },
+    }),
   remove: (id: number) =>
     api.delete(`/admin/company_assignments/${id}`),
   bulkUpdate: (userId: number, companyIds: number[]) =>
@@ -5029,6 +5282,9 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   markPaid: (id: number, data: { payment_date: string; confirmation_number?: string }) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_paid`, data),
+  payrollMatches: (id: number): Promise<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }> => api.get<{ payroll_matches: Array<{ payroll_item_id: number; employee_name: string; pay_period_id: number; pay_date: string; check_number: string; net_pay: number }> }>(`/admin/non_employee_checks/${id}/payroll_matches`),
+  supersedeWithPayrollItem: (id: number, payrollItemId: number, reason: string, recipientVerified: boolean): Promise<{ non_employee_check: NonEmployeeCheck }> =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/supersede_with_payroll_item`, { payroll_item_id: payrollItemId, reason, recipient_verified: recipientVerified }),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
   checkPdf: (id: number, options?: { startingSlot?: number }) =>
@@ -5469,6 +5725,7 @@ export interface HistoricalPaycheck {
   period_type: 'regular' | 'opening_summary';
   payment_method?: string | null;
   check_number?: string | null;
+  provider_payment_reference?: string | null;
   source_status: string;
   reconciliation_status: 'matched' | 'opening_summary' | 'unmatched';
   hours_total: string;
@@ -5585,13 +5842,14 @@ export interface PayrollHistoryRecord {
   test_workspace_role?: 'baseline' | 'practice' | null;
   notes?: string | null;
   compliance_warnings?: string[];
+  annual_fica_review_note?: string | null;
   employee_count: number;
   total_gross: number;
   total_net: number;
   processed_at?: string | null;
   processed_by_name?: string | null;
   source: {
-    system: 'cornerstone' | 'quickbooks_online';
+    system: 'cornerstone' | 'quickbooks_online' | 'prior_provider';
     label: string;
     detail: string;
     locked: boolean;
@@ -5620,10 +5878,10 @@ export interface ClientPayrollHistoryResponse {
 
 export const payrollHistoryApi = {
   list: (
-    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks'; register_eligible?: boolean },
+    params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },
@@ -5858,7 +6116,7 @@ export interface HistoricalReportResponse {
 }
 
 export const historicalImportsApi = {
-  list: (params?: { page?: number; per_page?: number }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
+  list: (params?: { page?: number; per_page?: number; exclude_source_system?: string }): Promise<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }> =>
     api.get<{ data: HistoricalImportBatch[]; meta: PaginationMeta & { archive: HistoricalArchiveSummary; import_providers: HistoricalImportProvider[] } }>('/admin/historical_imports', params),
   show: (id: number, params?: { page?: number; per_page?: number; period_id?: number; year?: number; search?: string }): Promise<{ data: HistoricalImportDetail; meta: PaginationMeta }> =>
     api.get<{ data: HistoricalImportDetail; meta: PaginationMeta }>(`/admin/historical_imports/${id}`, params),
@@ -6056,14 +6314,24 @@ export const expensesApi = {
 };
 
 // Auth
+export function clearPriorProviderDrafts(): void {
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith('prior-provider-history:')) sessionStorage.removeItem(key);
+    }
+  } catch { /* Storage can be unavailable in restricted browser contexts. */ }
+}
+
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
-  createCableTicket: () => api.post<{ ticket: string; expires_in: number }>('/cable_ticket'),
+  createCableTicket: (companyId: number) => api.post<{ ticket: string; expires_in: number }>('/cable_ticket', undefined, { companyId }),
   login: (token: string) => {
     api.setAuthToken(token);
     return api.get<{ user: AuthApiUser }>('/auth/me');
   },
   logout: () => {
+    clearPriorProviderDrafts();
     api.setAuthToken(null);
     companiesApi.clearActiveCompanyId();
   },

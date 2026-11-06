@@ -49,7 +49,24 @@ class PayPeriodCorrectionService
       raise InvalidStateError, "Only committed pay periods can be voided" unless locked.committed?
       raise AlreadyVoidedError, "This pay period has already been voided" if locked.voided?
       raise AlreadySupersededError, "This pay period already has a correction run" if locked.superseded_by_id.present?
+      if NonEmployeeCheckSupersession.joins(:payroll_item).where(payroll_items: { pay_period_id: locked.id }).exists?
+        raise InvalidStateError, "This pay period contains a payroll check linked to a duplicate software record; review that reconciliation before voiding"
+      end
+      linked_items = locked.payroll_items.select(:id)
+      linked_originals = TimeTrackingEntryAllocation.where(payroll_item_id: linked_items).select(:id)
+      linked_accounting_items = PayrollItem.where(correction_for_payroll_item_id: linked_items).select(:id)
+      if TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: linked_items).exists? ||
+        TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: linked_accounting_items).exists? ||
+        TimeTrackingCorrectionDisposition.where(original_allocation_id: linked_originals).exists?
+        raise InvalidStateError, "This payroll has an exact source accounting correction. Voiding is held until the correction disposition and source receipt can be reversed together; review the linked correction with payroll support."
+      end
       payments = PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!
+      PayrollLiabilityPaymentGuard.ensure_clear!(
+        pay_period: locked,
+        error_class: InvalidStateError,
+        action: "voiding this payroll",
+        retirement_preflight: payments
+      )
 
       was_correction_run = locked.correction_run?
       source_pay_period_id = locked.source_pay_period_id
@@ -79,7 +96,7 @@ class PayPeriodCorrectionService
       # Commit and void both lock employee YTD rows. Keep a deterministic
       # employee order across pay periods so concurrent financial operations
       # cannot acquire the same YTD rows in opposite orders.
-      all_items = locked.payroll_items.order(:employee_id, :id).to_a
+      all_items = locked.payroll_items.financially_reportable.order(:employee_id, :id).to_a
       employee_ids = all_items.map(&:employee_id).uniq
 
       emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
@@ -117,6 +134,17 @@ class PayPeriodCorrectionService
           PayrollTaxSyncService.configured? ? { tax_sync_idempotency_key: "cpr-#{locked.id}-void-#{SecureRandom.uuid}" } : {}
         )
       )
+
+      PayrollYtdSnapshotRefresh.call(pay_period: locked, employee_ids: employee_ids)
+      manual_ids = locked.time_tracking_manual_allocations.where.not(status: "voided").pluck(:id)
+      if manual_ids.any?
+        ActiveRecord.after_all_transactions_commit { manual_ids.each { |id| AireManualAllocationSyncJob.perform_later(id) } }
+      end
+
+      source_void_ids = TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: locked, void_event: event).map(&:id)
+      if source_void_ids.any?
+        ActiveRecord.after_all_transactions_commit { AirePayrollEntryAcknowledgement.dispatch_pending!(ids: source_void_ids) }
+      end
 
       # If a committed correction run is being voided, release source linkage so
       # operators can create another correction run from the original source.
@@ -264,10 +292,18 @@ class PayPeriodCorrectionService
     # check was voided. Check voiding is an issuance/audit concern, not a payroll
     # inclusion flag, and operators need the employee row present so they can
     # recalculate or zero it out explicitly in the correction run.
-    source.payroll_items.reportable.find_each(batch_size: 500) do |source_item|
+    # A later correction retains the last corrected inputs, not the first
+    # superseded payroll's obsolete inputs. The native audit chain identifies
+    # the actual generation even when its void event belongs to the root.
+    previous = PayPeriodCorrectionEvent.where(pay_period: source, action_type: "correction_run_committed")
+      .includes(:resulting_pay_period).order(id: :desc).filter_map(&:resulting_pay_period)
+      .find { |period| period.voided? && period.company_id == source.company_id }
+    copy_source = previous || source
+    copy_source.payroll_items.where(payroll_reversed_at: nil).reportable.find_each(batch_size: 500) do |source_item|
       copied = target.payroll_items.create!(
         company_id:               target.company_id,
         employee_id:              source_item.employee_id,
+        financial_correction_origin_item: source_item,
         employment_type:          source_item.employment_type,
         pay_rate:                 source_item.pay_rate,
         scheduled_hours:          source_item.scheduled_hours,
@@ -306,7 +342,7 @@ class PayPeriodCorrectionService
         copied.payroll_item_field_entries.create!(entry.attributes.except("id", "payroll_item_id", "created_at", "updated_at"))
       end
     end
-    source.pay_period_excluded_employees.each do |excluded|
+    copy_source.pay_period_excluded_employees.each do |excluded|
       target.pay_period_excluded_employees.create!(excluded.attributes.except("id", "pay_period_id", "created_at", "updated_at"))
     end
   end

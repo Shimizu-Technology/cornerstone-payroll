@@ -14,7 +14,10 @@ class EmployeeW4ElectionChangeService
   end
 
   def call!
-    return if employee.contractor? || attributes.empty?
+    return if employee.contractor?
+
+    validate_received_election!
+    return if attributes.empty?
 
     # Never manufacture an initial election for an intake exception lacking a dated election.
     if employee.intake_exception.present? && employee.employee_w4_elections.none? && attributes[:w4_effective_on].blank? && employee.w4_effective_on.blank?
@@ -45,6 +48,20 @@ class EmployeeW4ElectionChangeService
     election
   rescue Date::Error
     raise Error, "Provide a valid received election signed date"
+  end
+
+  # An explicit receipt assertion needs its own submitted evidence. Ordinary
+  # initial/legacy elections without that assertion keep their existing contract.
+  def validate_received_election!
+    return unless election_received && !employee.contractor?
+
+    unless attributes[:w4_effective_on].present? && (attributes[:w4_signed_on].present? || attributes[:w4_source_reference].present?)
+      raise Error, "Provide the received election effective date and signed date or source reference"
+    end
+    Date.iso8601(attributes[:w4_effective_on].to_s)
+    Date.iso8601(attributes[:w4_signed_on].to_s) if attributes[:w4_signed_on].present?
+  rescue Date::Error
+    raise Error, "Provide a valid received election effective or signed date"
   end
 
   def validate_default_replacement!(prior: employee.employee_w4_elections.recent_first.first, values: complete_values)

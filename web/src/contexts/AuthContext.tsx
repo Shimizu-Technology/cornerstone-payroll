@@ -10,10 +10,11 @@ interface User {
   role: string;
   organization_id?: number;
   organization_name?: string;
-  company_id: number;
-  company_name: string;
+  company_id: number | null;
+  company_name: string | null;
   assigned_company_ids: number[];
   capabilities: string[];
+  company_capabilities?: Record<string, string[]>;
 }
 
 interface AuthContextType {
@@ -45,6 +46,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     company_name: user.company_name,
     assigned_company_ids: user.assigned_company_ids || [],
     capabilities: user.capabilities || [],
+    company_capabilities: user.company_capabilities || {},
   };
 }
 
@@ -92,7 +94,10 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
-        signOut: async () => setUser(null),
+        signOut: async () => {
+          setUser(null);
+          authApi.logout();
+        },
         refreshUser: async () => {
           const res = await authApi.me();
           setUser(mapAuthUser(res.user));
@@ -194,6 +199,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
+          authApi.logout();
           await clerkSignOut();
         },
         refreshUser,

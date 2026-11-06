@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "openssl"
+
 # Issues a corrective paycheck for a single employee against an
 # already-committed pay period — without voiding the original.
 #
@@ -8,11 +10,11 @@
 #
 # 1. We *recompute* what the original payroll item should have been with
 #    the corrected inputs. The recompute uses the original period's pay
-#    date / tax year and the YTD context that existed *just before* the
-#    original was committed, so the tax math matches what would have been
-#    withheld had the corrected inputs been entered originally.
+#    date / tax year and frozen employee/FIT rules. FICA deltas are then
+#    reconciled against the employee's real cumulative committed year,
+#    including later runs and active signed corrections.
 #
-# 2. We compute deltas: corrected_value - original_value for gross,
+# 2. We compute deltas: corrected_value - already_recorded_value for gross,
 #    FIT, SS, Medicare, employer SS, employer Medicare, retirement,
 #    additional withholding, deductions, and net pay.
 #
@@ -35,7 +37,7 @@
 # CompanyYtdTotal, W-2 boxes, tax sync line items, reports) sums
 # `payroll_items.gross_pay` etc. across `reportable_committed`
 # pay_periods. A delta-valued supplemental therefore *just works*:
-# `original.gross + supplemental.gross_delta = corrected.gross`.
+# `original.gross + active supplementals.gross = corrected.gross`.
 # The check the operator hands the employee is the supplemental's
 # `net_pay` (the net delta), which is exactly what we owe them.
 #
@@ -57,6 +59,7 @@ class IssueCorrectivePaycheckService
   class OriginalNotFoundError   < CorrectionError; end
   class UnsupportedEmployeeError < CorrectionError; end
   class MissingHistoricalContextError < CorrectionError; end
+  class StalePreviewError < CorrectionError; end
 
   # Fields the operator can override when issuing a correction. Anything
   # not provided falls back to the original item's value.
@@ -81,12 +84,20 @@ class IssueCorrectivePaycheckService
     service_charge_wages
     qualified_overtime_compensation
   ].freeze
+  NUMERIC_INPUT_FIELDS = (CORRECTABLE_INPUT_FIELDS - %i[tip_pool custom_earnings custom_deductions custom_columns_data]).freeze
+  ZERO_BASELINE_INPUT_FIELDS = %i[service_charge_wages qualified_overtime_compensation].freeze
+  SINGLE_RATE_HOUR_FIELDS = { "regular_hours" => :hours_worked, "overtime_hours" => :overtime_hours,
+    "holiday_hours" => :holiday_hours, "pto_hours" => :pto_hours }.freeze
 
   # Fields whose deltas we transcribe onto the supplemental row. These
   # are the calculator's outputs; storing the deltas here is what makes
   # the YTD/W-2/report aggregates land on the corrected totals.
   DELTA_OUTPUT_FIELDS = %i[
     gross_pay
+    bonus
+    non_taxable_pay
+    insurance_payment
+    loan_payment
     withholding_tax
     social_security_tax
     medicare_tax
@@ -121,16 +132,17 @@ class IssueCorrectivePaycheckService
   # @param reason              [String]     mandatory explanation
   # @param actor               [User, nil]  user initiating the correction
   # @param notes               [String, nil] optional supplemental period notes
-  def self.preview(original_pay_period:, employee:, corrected_inputs:)
+  def self.preview(original_pay_period:, employee:, corrected_inputs:, pay_date: nil)
     new(
       original_pay_period: original_pay_period,
       employee:            employee,
-      corrected_inputs:    corrected_inputs
+      corrected_inputs:    corrected_inputs,
+      pay_date: pay_date
     ).preview
   end
 
   def self.issue!(original_pay_period:, employee:, corrected_inputs:,
-                  pay_date:, reason:, actor: nil, notes: nil)
+                  pay_date:, reason:, actor: nil, notes: nil, expected_review_digest: nil)
     new(
       original_pay_period: original_pay_period,
       employee:            employee,
@@ -138,12 +150,13 @@ class IssueCorrectivePaycheckService
       pay_date:            pay_date,
       reason:              reason,
       actor:               actor,
-      notes:               notes
+      notes:               notes,
+      expected_review_digest: expected_review_digest
     ).issue!
   end
 
   def initialize(original_pay_period:, employee:, corrected_inputs:,
-                 pay_date: nil, reason: nil, actor: nil, notes: nil)
+                 pay_date: nil, reason: nil, actor: nil, notes: nil, expected_review_digest: nil, source_accounting_target: nil)
     @original_pay_period = original_pay_period
     @employee            = employee
     @corrected_inputs    = (corrected_inputs || {}).symbolize_keys
@@ -152,6 +165,8 @@ class IssueCorrectivePaycheckService
     @reason              = reason
     @actor               = actor
     @notes               = notes
+    @expected_review_digest = expected_review_digest
+    @source_accounting_target = source_accounting_target
   end
 
   # Returns the original snapshot, the recomputed corrected snapshot, and
@@ -159,8 +174,11 @@ class IssueCorrectivePaycheckService
   # preview before the operator commits.
   def preview
     validate_for_preview!
+    assert_source_accounting_negative! if @source_accounting_target
+    validate_component_ledger!
     {
       original:  snapshot(original_item),
+      recorded: recorded_snapshot,
       corrected: snapshot(corrected_item),
       deltas:    delta_hash,
       meta: {
@@ -168,19 +186,24 @@ class IssueCorrectivePaycheckService
         original_payroll_item_id: original_item.id,
         employee_id: @employee.id,
         employee_name: @employee.full_name,
+        active_corrective_count: active_correctives.length,
+        legacy_unposted_employer_component: @legacy_employer_omissions || [],
+        legacy_employer_posting_compatibility: @legacy_employer_evidence || [],
+        review_digest: review_digest,
         will_generate_check: net_delta.positive?,
         is_zero_change: zero_change?
       }
     }
+  rescue *PayrollCalculationHistory::ERRORS => e
+    raise MissingHistoricalContextError, e.message
   end
 
   def issue!
     validate_for_issue!
-    raise InvalidStateError, "Corrected inputs do not change anything" if zero_change?
-
     PayPeriod.transaction do
       # Lock the original to prevent a concurrent void/correction on top
       # of us. We also re-read the latest state under lock.
+      Company.lock.find(@original_pay_period.company_id)
       locked_original = PayPeriod.lock("FOR UPDATE").find(@original_pay_period.id)
 
       # Re-read the payroll item under a row-level lock so
@@ -200,12 +223,29 @@ class IssueCorrectivePaycheckService
               "Original payroll item no longer exists for this employee on the locked period"
       end
       @original_item = refreshed
+      @original_pay_period = locked_original
+      %i[payroll_item_earnings payroll_item_deductions payroll_item_field_entries].each do |association|
+        original_item.public_send(association).order(:id).lock("FOR UPDATE").load
+      end
+      # A supplemental void takes its period lock before reversing YTD. Lock
+      # those periods before reading the effective ledger or acquiring YTD.
+      prior_ids = original_item.correction_payroll_items.distinct.pluck(:pay_period_id)
+      PayPeriod.where(id: prior_ids).order(:id).lock("FOR UPDATE").load
+      original_item.correction_payroll_items.order(:id).lock("FOR UPDATE").load
       # Force corrected_item to be rebuilt against the freshly-locked
       # original (its inputs are derived from `original_item.*`).
+      @annual_fica_context = nil
+      @annual_retirement_context = nil
       @corrected_item = nil
       @recalculated_original_item = nil
+      @active_correctives = nil
+      @effective_inputs = nil
 
       assert_correctable!(locked_original)
+      validate_for_issue!
+      validate_component_ledger!
+      validate_review_digest!
+      raise InvalidStateError, "The corrected target is already recorded; inputs do not change the remaining financial balance" if zero_change?
 
       supplemental = create_supplemental_period!(locked_original)
       corrective_item = create_corrective_item!(
@@ -214,6 +254,11 @@ class IssueCorrectivePaycheckService
       )
 
       commit_supplemental!(supplemental)
+      if @legacy_employer_evidence.present?
+        AuditLog.record!(user: @actor, company_id: supplemental.company_id, action: "payroll#corrective_paycheck_issued",
+          record_type: "PayrollItem", record_id: corrective_item.id,
+          metadata: { legacy_unposted_employer_component: @legacy_employer_omissions, legacy_employer_posting_compatibility: @legacy_employer_evidence })
+      end
 
       # Reload with associations so callers (and the API payload) see the
       # final committed state including check number assignment etc.
@@ -222,6 +267,8 @@ class IssueCorrectivePaycheckService
 
       [ supplemental, corrective_item ]
     end
+  rescue *PayrollCalculationHistory::ERRORS => e
+    raise MissingHistoricalContextError, e.message
   end
 
   private
@@ -231,11 +278,28 @@ class IssueCorrectivePaycheckService
   # ---------------------------------------------------------------------
   def validate_for_preview!
     raise OriginalNotFoundError, "Original payroll item not found for employee in this pay period" if original_item.nil?
+    assert_original_payroll_included!
+    pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
+    raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
+    validate_same_tax_year!
 
     if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
             "Contractor payroll items don't have a tax surface to correct; edit the contractor item directly"
+    end
+    if original_item.salary? && original_item.timekeeping_context_snapshot["overtime_status"] == "nonexempt" &&
+        @corrected_inputs.key?(:overtime_hours) && @corrected_inputs[:overtime_hours].to_d != original_item.overtime_hours.to_d
+      raise UnsupportedEmployeeError, "Nonexempt salary overtime hour changes require a reviewed daily salary-coverage correction"
+    end
+    columns = @corrected_inputs[:custom_columns_data]
+    categorized_target = columns.is_a?(Hash) && (columns["wage_rate_hours"].present? || columns[:wage_rate_hours].present?)
+    if categorized_target
+      raise UnsupportedEmployeeError, "Categorized or multi-rate payroll corrections require a category-level review; this corrective paycheck cannot safely recompute them"
+    end
+    verified_single_rate_row if original_item.wage_rate_hours.present?
+    if @corrected_inputs.key?(:custom_columns_data) && @corrected_inputs[:custom_columns_data] != effective_inputs[:custom_columns_data]
+      raise UnsupportedEmployeeError, "Custom column changes require a component-level review before issuing a corrective paycheck"
     end
 
     unless PayrollCalculationContext.valid_for_correction?(original_item.calculation_context_snapshot)
@@ -244,8 +308,17 @@ class IssueCorrectivePaycheckService
     end
   end
 
+  def validate_same_tax_year!
+    date = parsed_pay_date_for_validation
+    return unless date && date.year != @original_pay_period.pay_date.year
+
+    raise InvalidStateError,
+      "Prior-year corrections require a separately reviewed prior-year process; this paycheck cannot move wages between tax years."
+  end
+
   def validate_for_issue!
     validate_for_preview!
+    assert_source_accounting_negative! if @source_accounting_target
     raise ArgumentError, "reason is required" if @reason.blank?
     raise ArgumentError, "pay_date is required" if @pay_date.blank?
 
@@ -288,15 +361,40 @@ class IssueCorrectivePaycheckService
     Date.parse(@pay_date.to_s) rescue nil
   end
 
+  def assert_original_payroll_included!
+    unless original_item.payroll_included?
+      raise InvalidStateError, "Cannot issue a corrective paycheck for a financially reversed original"
+    end
+  end
+
   def assert_correctable!(period)
+    assert_original_payroll_included!
+    pending_resolution = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(original_item)
+    raise InvalidStateError, pending_resolution if pending_resolution
     validate_named_loan_replay!
-    unless period.can_issue_corrective_paycheck?
+    unless period.can_issue_corrective_paycheck? || verified_source_accounting_target?(period)
       raise InvalidStateError,
             "Pay period must be a regular committed (non-voided) period to issue a corrective paycheck"
     end
     if original_item.voided?
       raise InvalidStateError,
             "Cannot issue a corrective paycheck for an item whose original check is voided"
+    end
+  end
+
+  def verified_source_accounting_target?(period)
+    return false unless @source_accounting_target.is_a?(TimeTracking::PaidCorrectionTarget)
+    context = @source_accounting_target.assert_for!(original_item, @corrected_inputs)
+    context[:linked] && period.correction_run? && period.committed? && !period.voided?
+  end
+
+  def assert_source_accounting_negative!
+    unless @source_accounting_target.is_a?(TimeTracking::PaidCorrectionTarget)
+      raise InvalidStateError, "Source accounting requires a verified payment target"
+    end
+    @source_accounting_target.assert_for!(original_item, @corrected_inputs)
+    unless delta_hash[:gross_pay].to_d.negative? && net_delta.negative?
+      raise InvalidStateError, "Source accounting can only record a negative adjustment without a new payment"
     end
   end
 
@@ -320,11 +418,220 @@ class IssueCorrectivePaycheckService
   # original was processed.
   # ---------------------------------------------------------------------
   def corrected_item
-    @corrected_item ||= build_and_calculate_item(@corrected_inputs)
+    @corrected_item ||= begin
+      item = build_and_calculate_item(effective_inputs.merge(@corrected_inputs))
+      item.insurance_payment = PayrollInsuranceComponents.scalar_amount(item)
+      reconcile_annual_fica!(item)
+      item
+    end
+  end
+
+  def annual_fica_context
+    @annual_fica_context ||= EmployeeYearFicaContext.new(employee: @employee, year: @original_pay_period.pay_date.year)
+  end
+
+  def reconcile_annual_fica!(item)
+    increments = annual_fica_context.increment(
+      wages_delta: item.medicare_taxable_wages.to_d - recorded_value(:medicare_taxable_wages),
+      tips_delta: item.cash_tips_reported.to_d - recorded_value(:cash_tips_reported),
+      rules: original_item.tax_rule_snapshot,
+      correcting_bases: { wages: recorded_value(:social_security_taxable_wages), tips: recorded_value(:social_security_taxable_tips) }
+    )
+    old_employee_tax = item.social_security_tax.to_d + item.medicare_tax.to_d
+    increments.each { |field, amount| item.public_send("#{field}=", recorded_value(field) + amount) }
+    tax_change = item.social_security_tax.to_d + item.medicare_tax.to_d - old_employee_tax
+    item.total_deductions = (item.total_deductions.to_d + tax_change).round(2)
+    item.net_pay = (item.net_pay.to_d - tax_change).round(2)
+    item.tax_rule_snapshot = item.tax_rule_snapshot.merge("annual_fica_context" => annual_fica_context.snapshot)
+  rescue EmployeeYearFicaContext::UnreconciledLedgerError => e
+    raise MissingHistoricalContextError, e.message
   end
 
   def recalculated_original_item
-    @recalculated_original_item ||= build_and_calculate_item({})
+    @recalculated_original_item ||= build_and_calculate_item(original_inputs)
+  end
+
+  def original_inputs
+    CORRECTABLE_INPUT_FIELDS.index_with { |field| original_item.public_send(field) }.deep_dup
+  end
+
+  def verified_single_rate_row
+    rows = original_item.wage_rate_hours
+    raw_rows = original_item.custom_columns_data["wage_rate_hours"] || original_item.custom_columns_data[:wage_rate_hours]
+    error = "The categorized or multi-rate historical snapshot is ambiguous or incomplete; review the native rate and earning evidence before correcting this payroll"
+    unless original_item.employment_type == "hourly" && rows.one? && raw_rows.is_a?(Array) && raw_rows.one? && raw_rows.first.is_a?(Hash)
+      raise UnsupportedEmployeeError, error
+    end
+    raw = raw_rows.first.stringify_keys
+    row = rows.first
+    required = %w[employee_wage_rate_id label rate active] + SINGLE_RATE_HOUR_FIELDS.keys
+    valid = required.all? { |key| raw.key?(key) } && raw["label"].is_a?(String) && raw["label"].strip.present? && raw["active"] == true &&
+      row["employee_wage_rate_id"].to_s.match?(/\A[1-9]\d*\z/) &&
+      EmployeeWageRate.exists?(id: row["employee_wage_rate_id"], employee_id: original_item.employee_id)
+    rate = BigDecimal(raw.fetch("rate").to_s)
+    valid &&= rate.finite? && rate.positive? && rate == original_item.pay_rate.to_d
+    valid &&= SINGLE_RATE_HOUR_FIELDS.all? do |key, field|
+      hours = BigDecimal(raw.fetch(key).to_s)
+      hours.finite? && !hours.negative? && hours == original_item.public_send(field).to_d
+    end
+    earnings = original_item.payroll_item_earnings.select { |earning| earning.category.in?(%w[regular overtime holiday pto]) }
+    valid &&= earnings.any? && SINGLE_RATE_HOUR_FIELDS.all? do |key, field|
+      category = key.delete_suffix("_hours")
+      expected_hours = original_item.public_send(field).to_d
+      matches = earnings.select { |earning| earning.category == category }
+      next matches.empty? if expected_hours.zero?
+
+      expected_rate = rate * (category == "overtime" ? 1.5.to_d : 1.to_d)
+      label = category == "regular" ? row["label"] : "#{row['label']} #{category == 'pto' ? 'PTO' : category == 'overtime' ? 'OT' : 'Holiday'}"
+      matches.one? && matches.first.persisted? && matches.first.label == label && matches.first.hours.to_d == expected_hours &&
+        matches.first.rate.to_d == expected_rate && matches.first.amount.to_d == (expected_hours * expected_rate).round(2)
+    end
+    raise UnsupportedEmployeeError, error unless valid
+
+    row
+  rescue ArgumentError, TypeError, KeyError
+    raise UnsupportedEmployeeError, "The historical rate snapshot is invalid; review the native earning evidence before correcting this payroll"
+  end
+
+  def single_rate_columns(columns, inputs, recorded: false)
+    row = verified_single_rate_row
+    if inputs.fetch(:pay_rate).to_d != row.fetch("rate").to_d
+      raise UnsupportedEmployeeError, "A categorized rate change needs a category-level review; keep the verified historical rate for this hourly correction"
+    end
+    SINGLE_RATE_HOUR_FIELDS.each do |key, field|
+      hours = inputs.fetch(field).to_d
+      raise UnsupportedEmployeeError, "The recorded hours must be finite" unless hours.finite?
+      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if !recorded && hours.negative?
+      row[key] = hours.to_f
+    end
+    (columns || {}).deep_dup.merge("wage_rate_hours" => [ row ])
+  end
+
+  def active_correctives
+    @active_correctives ||= original_item.correction_payroll_items.financially_reportable
+      .joins(:pay_period).merge(PayPeriod.reportable_committed).order(:id).to_a.tap do |items|
+        items.each do |item|
+          unless item.company_id == original_item.company_id && item.employee_id == original_item.employee_id &&
+              item.pay_period.company_id == original_item.company_id && item.pay_period.supplemental? &&
+              item.pay_period.corrects_pay_period_id == original_item.pay_period_id
+            raise MissingHistoricalContextError, "A prior correction has inconsistent payroll ownership; review its history before issuing another correction"
+          end
+        end
+      end
+  end
+
+  def effective_inputs
+    @effective_inputs ||= active_correctives.each_with_object(original_inputs) do |item, inputs|
+      context = item.calculation_context_snapshot["corrective_paycheck"]
+      unless context.is_a?(Hash) && context["version"] == 1 && context["input_adjustments"].is_a?(Hash)
+        raise MissingHistoricalContextError, "A prior correction is missing its verified input history; review the earlier corrective payroll before creating another correction"
+      end
+      context.fetch("input_adjustments").each do |key, operation|
+        field = key.to_sym
+        unless CORRECTABLE_INPUT_FIELDS.include?(field) && operation.is_a?(Hash)
+          raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+        end
+        inputs[field] = case operation["mode"]
+        when "delta"
+          unless NUMERIC_INPUT_FIELDS.include?(field) && operation["value"].is_a?(String)
+            raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+          end
+          raise MissingHistoricalContextError, "A prior correction's input baseline is no longer available; review its voided correction history" if inputs[field].nil? && !ZERO_BASELINE_INPUT_FIELDS.include?(field)
+          inputs[field].to_d + BigDecimal(operation.fetch("value"))
+        when "set"
+          operation.fetch("value").deep_dup
+        else
+          raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+        end
+        if NUMERIC_INPUT_FIELDS.include?(field) && !inputs[field].nil?
+          inputs[field] = BigDecimal(inputs[field].to_s)
+          raise ArgumentError, "non-finite input" unless inputs[field].finite?
+        end
+      end
+    end.tap do |inputs|
+      if original_item.wage_rate_hours.present?
+        # A void can leave the remaining signed deltas below zero. This is
+        # recorded accounting history, not the absolute target to calculate.
+        inputs[:custom_columns_data] = single_rate_columns(inputs[:custom_columns_data], inputs, recorded: true)
+      end
+    end
+  rescue ArgumentError, TypeError, KeyError
+    raise MissingHistoricalContextError, "A prior correction has invalid input history; review the earlier corrective payroll"
+  end
+
+  def input_adjustments
+    CORRECTABLE_INPUT_FIELDS.each_with_object({}) do |field, adjustments|
+      before = effective_inputs[field]
+      after = corrected_item.public_send(field)
+      next if before == after
+
+      adjustments[field.to_s] = if (before.is_a?(Numeric) || (before.nil? && ZERO_BASELINE_INPUT_FIELDS.include?(field))) && after.is_a?(Numeric)
+        { "mode" => "delta", "value" => (after.to_d - before.to_d).to_s("F") }
+      else
+        { "mode" => "set", "value" => after.as_json }
+      end
+    end
+  end
+
+  def recorded_value(field)
+    if field == :insurance_payment
+      return [ original_item, *active_correctives ].sum { |item| PayrollInsuranceComponents.scalar_amount(item) }
+    end
+    original_value = REPORTING_DELTA_FIELDS.include?(field) ? original_reporting_value(field) : original_item.public_send(field).to_d
+    original_value + active_correctives.sum { |item| item.public_send(field).to_d }
+  end
+
+  def recorded_snapshot
+    snapshot(original_item).merge(
+      (DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS).index_with { |field| recorded_value(field).round(2).to_f },
+      effective_inputs.slice(:hours_worked, :overtime_hours, :holiday_hours, :pto_hours, :bonus, :reported_tips, :tips_paid_out, :pay_rate)
+        .transform_values { |value| value.to_f },
+      effective_inputs.slice(:custom_earnings, :custom_deductions, :custom_columns_data)
+    )
+  end
+
+  def review_digest
+    item_fields = CORRECTABLE_INPUT_FIELDS.map(&:to_s) + DELTA_OUTPUT_FIELDS.map(&:to_s) + REPORTING_DELTA_FIELDS.map(&:to_s) +
+      %w[id company_id employee_id pay_period_id updated_at voided voided_at calculation_context_snapshot tax_rule_snapshot retirement_rule_snapshot]
+    period_fields = %w[id company_id pay_date status correction_status committed_at voided_at updated_at]
+    state = {
+      version: 2,
+      annual_fica_context: annual_fica_context.snapshot,
+      annual_retirement_context: annual_retirement_context.snapshot,
+      original_period: @original_pay_period.attributes.slice(*period_fields),
+      original_item: original_item.attributes.slice(*item_fields),
+      component_deltas: component_ledger.snapshot,
+      legacy_unposted_employer_component: @legacy_employer_omissions || [],
+      legacy_employer_posting_compatibility: @legacy_employer_evidence || [],
+      original_earnings: original_item.payroll_item_earnings.order(:id).map { |earning| earning.attributes.slice("id", "category", "label", "rate", "hours", "amount", "updated_at") },
+      active_correctives: active_correctives.map do |item|
+        { item: item.attributes.slice(*item_fields), period: item.pay_period.attributes.slice(*period_fields) }
+      end,
+      corrected_snapshot: snapshot(corrected_item),
+      intended_inputs: CORRECTABLE_INPUT_FIELDS.index_with { |field| corrected_item.public_send(field) }
+    }
+    OpenSSL::HMAC.hexdigest("SHA256", Rails.application.secret_key_base, JSON.generate(canonical_review_state(state.as_json)))
+  end
+
+  def canonical_review_state(value)
+    case value
+    when Hash
+      value.sort.to_h.transform_values { |entry| canonical_review_state(entry) }
+    when Array
+      value.map { |entry| canonical_review_state(entry) }
+    else
+      value
+    end
+  end
+
+  def validate_review_digest!
+    return if @expected_review_digest.nil?
+
+    valid = @expected_review_digest.is_a?(String) && @expected_review_digest.match?(/\A[0-9a-f]{64}\z/) &&
+      ActiveSupport::SecurityUtils.secure_compare(@expected_review_digest, review_digest)
+    return if valid
+
+    raise StalePreviewError, "The correction preview changed. Refresh and review the current remaining balance before issuing this correction"
   end
 
   def build_and_calculate_item(overrides)
@@ -366,6 +673,14 @@ class IssueCorrectivePaycheckService
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot
     )
     temp.pay_period = @original_pay_period
+    SINGLE_RATE_HOUR_FIELDS.each_value do |field|
+      hours = temp.public_send(field).to_d
+      raise UnsupportedEmployeeError, "The corrected absolute hours must be nonnegative" if hours.negative? || !hours.finite?
+    end
+    if original_item.wage_rate_hours.present?
+      target_inputs = SINGLE_RATE_HOUR_FIELDS.values.index_with { |field| temp.public_send(field) }.merge(pay_rate: temp.pay_rate)
+      temp.custom_columns_data = single_rate_columns(temp.custom_columns_data, target_inputs)
+    end
     temp.payroll_adjustments = original_item.payroll_adjustments.deep_dup
     temp.tax_rule_snapshot = original_item.tax_rule_snapshot.deep_dup
     temp.retirement_rule_snapshot = original_item.retirement_rule_snapshot.deep_dup
@@ -393,7 +708,7 @@ class IssueCorrectivePaycheckService
 
   def clone_original_payroll_field_entries!(temp)
     original_item.payroll_item_field_entries.each do |entry|
-      temp.payroll_item_field_entries.build(
+      copied = temp.payroll_item_field_entries.build(
         payroll_field_definition_id: entry.payroll_field_definition_id,
         label: entry.label,
         kind: entry.kind,
@@ -408,6 +723,8 @@ class IssueCorrectivePaycheckService
         notes: entry.notes,
         metadata: entry.metadata.deep_dup
       )
+      mirror = PayrollComponentMirrors.deduction_for(original_item, entry)
+      PayrollComponentMirrors.record!(copied, mirror) if mirror
     end
   end
 
@@ -446,7 +763,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     scope = @employee.payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
@@ -462,7 +779,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     @employee.payroll_items
       .joins(:pay_period)
-      .not_voided
+      .financially_reportable
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
@@ -500,19 +817,19 @@ class IssueCorrectivePaycheckService
 
   def delta_hash
     financial_deltas = DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
-      h[field] = (corrected_item.public_send(field).to_f - original_item.public_send(field).to_f).round(2)
+      h[field] = (corrected_item.public_send(field).to_d - recorded_value(field)).round(2).to_f
     end
     reporting_deltas = REPORTING_DELTA_FIELDS.each_with_object({}) do |field, deltas|
-      deltas[field] = (corrected_item.public_send(field).to_d - original_reporting_value(field)).round(2)
+      deltas[field] = (corrected_item.public_send(field).to_d - recorded_value(field)).round(2)
     end
 
     financial_deltas.merge(reporting_deltas).merge(
-      hours_worked_delta:   (corrected_item.hours_worked.to_f - original_item.hours_worked.to_f).round(2),
-      overtime_hours_delta: (corrected_item.overtime_hours.to_f - original_item.overtime_hours.to_f).round(2),
-      holiday_hours_delta:  (corrected_item.holiday_hours.to_f - original_item.holiday_hours.to_f).round(2),
-      pto_hours_delta:      (corrected_item.pto_hours.to_f - original_item.pto_hours.to_f).round(2),
-      reported_tips_delta:  (corrected_item.reported_tips.to_f - original_item.reported_tips.to_f).round(2),
-      tips_paid_out_delta:  (corrected_item.tips_paid_out.to_f - original_item.tips_paid_out.to_f).round(2)
+      hours_worked_delta:   (corrected_item.hours_worked.to_d - effective_inputs[:hours_worked].to_d).round(2),
+      overtime_hours_delta: (corrected_item.overtime_hours.to_d - effective_inputs[:overtime_hours].to_d).round(2),
+      holiday_hours_delta:  (corrected_item.holiday_hours.to_d - effective_inputs[:holiday_hours].to_d).round(2),
+      pto_hours_delta:      (corrected_item.pto_hours.to_d - effective_inputs[:pto_hours].to_d).round(2),
+      reported_tips_delta:  (corrected_item.reported_tips.to_d - effective_inputs[:reported_tips].to_d).round(2),
+      tips_paid_out_delta:  (corrected_item.tips_paid_out.to_d - effective_inputs[:tips_paid_out].to_d).round(2)
     )
   end
 
@@ -524,12 +841,13 @@ class IssueCorrectivePaycheckService
   end
 
   def net_delta
-    (corrected_item.net_pay.to_f - original_item.net_pay.to_f).round(2)
+    (corrected_item.net_pay.to_d - recorded_value(:net_pay)).round(2)
   end
 
   # No meaningful change → nothing to do.
   def zero_change?
-    delta_hash.slice(*DELTA_OUTPUT_FIELDS).values.all? { |v| v.abs < 0.005 }
+    delta_hash.slice(*(DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS)).values.all? { |v| v.abs < 0.005 } &&
+      component_ledger.snapshot.values.all?(&:empty?)
   end
 
   # ---------------------------------------------------------------------
@@ -558,7 +876,30 @@ class IssueCorrectivePaycheckService
     @notes.present? ? "#{base}\n#{@notes}" : base
   end
 
-  def create_corrective_item!(supplemental:, original_item:)
+  def component_ledger
+    CorrectivePayrollComponents.new(original: original_item, corrected: corrected_item, active: active_correctives)
+  end
+
+  def annual_retirement_context
+    @annual_retirement_context ||= CorrectiveRetirementContext.new(employee: @employee, original: original_item, active: active_correctives, pay_date: @pay_date)
+  end
+
+  def validate_component_ledger!
+    component_ledger # Reject unsupported histories before any component/posting checks.
+    annual_retirement_context.validate!(corrected_item)
+    @legacy_employer_omissions = [ original_item, *active_correctives ].flat_map do |item|
+      PayrollInsuranceComponents.verify_postings!(item)
+      PayrollLiabilityPostingService.verify_employer_contributions!(item)
+    end
+    @legacy_employer_evidence = [ original_item, *active_correctives ].filter_map { |item| PayrollLegacyEmployerComponents.evidence(item) }
+    supplemental = PayPeriod.new(company: @original_pay_period.company, cycle: "supplemental", run_purpose: "correction",
+      corrects_pay_period_id: @original_pay_period.id, pay_date: @pay_date || @original_pay_period.pay_date)
+    create_corrective_item!(supplemental: supplemental, original_item: original_item, persist: false)
+  rescue PayrollInsuranceComponents::AmbiguousHistoryError, PayrollLiabilityPostingService::InvalidStateError, PayrollComponentMirrors::AmbiguousHistoryError => e
+    raise MissingHistoricalContextError, e.message
+  end
+
+  def create_corrective_item!(supplemental:, original_item:, persist: true)
     deltas = delta_hash
 
     item = supplemental.payroll_items.build(
@@ -579,6 +920,14 @@ class IssueCorrectivePaycheckService
       pto_hours:       deltas[:pto_hours_delta],
       timekeeping_source: "correction_reference",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
+      calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
+        "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments,
+          "catch_up_ledger_version" => 1, "catch_up_classification_delta" => annual_retirement_context.catch_up_delta(corrected_item).to_s("F") }.tap do |context|
+          context["legacy_unposted_employer_component"] = @legacy_employer_omissions if @legacy_employer_omissions.present?
+          context["legacy_employer_posting_compatibility"] = @legacy_employer_evidence if @legacy_employer_evidence.present?
+          context["source_accounting_target"] = @source_accounting_target.resolve.fetch(:evidence) if @source_accounting_target
+        end
+      ),
 
       # Tip deltas are stored too because W-2GU / 941 / SWICA reporting derives
       # Social Security tips and YTD tip totals from these input columns, while
@@ -591,6 +940,8 @@ class IssueCorrectivePaycheckService
       # pipeline (YTD update / check number assignment) treats them as
       # the supplemental's authoritative values without a recalculate.
       gross_pay:                       deltas[:gross_pay],
+      bonus:                           deltas[:bonus],
+      non_taxable_pay:                 deltas[:non_taxable_pay],
       withholding_tax:                 deltas[:withholding_tax],
       social_security_tax:             deltas[:social_security_tax],
       medicare_tax:                    deltas[:medicare_tax],
@@ -617,13 +968,11 @@ class IssueCorrectivePaycheckService
       tax_rule_snapshot:               corrected_item.tax_rule_snapshot,
       retirement_rule_snapshot:        corrected_item.retirement_rule_snapshot,
 
-      # No deductions on the corrective row — the original period already
-      # captured the period's deductions; the corrective covers only the
-      # missing wages + their associated taxes.
-      loan_payment:                    0.0,
-      insurance_payment:               0.0
+      loan_payment:                    deltas[:loan_payment],
+      insurance_payment:               deltas[:insurance_payment]
     )
-    item.save!
+    component_ledger.apply!(item)
+    item.save! if persist
     item
   end
 
@@ -632,6 +981,7 @@ class IssueCorrectivePaycheckService
   # the delta values authoritatively).
   def commit_supplemental!(supplemental)
     supplemental.update!(status: "committed", committed_at: Time.current)
+    PayrollYtdSnapshotRefresh.call(pay_period: supplemental, employee_ids: [ @employee.id ])
 
     # YTD and check number — same primitives the regular commit uses.
     supplemental.payroll_items.each do |item|
@@ -646,6 +996,11 @@ class IssueCorrectivePaycheckService
       pay_period: supplemental,
       actor: @actor
     )
+
+    supplemental.payroll_items.each do |item|
+      PayrollInsuranceComponents.verify_postings!(item)
+      PayrollLiabilityPostingService.verify_employer_contributions!(item)
+    end
 
     # Only assign a check number if there's actually money to pay out.
     # Negative net (clawback) supplementals exist as accounting entries
@@ -675,7 +1030,7 @@ class IssueCorrectivePaycheckService
   def create_supplemental_fit_check!(supplemental)
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
-      .not_voided
+      .financially_reportable
       .sum { |item| item.total_income_tax_withheld }
 
     return if fit_total.to_f <= 0 # no positive FIT delta → no deposit needed

@@ -1,0 +1,101 @@
+[
+  {
+    "file": "web/src/components/payroll/ChecksPanel.tsx",
+    "before": "ae964ba034b3ca0dc6789b67a619df9f58ffbaba408bc1f3a6b34e24e006f7c8",
+    "after": "ae964ba034b3ca0dc6789b67a619df9f58ffbaba408bc1f3a6b34e24e006f7c8",
+    "identical": true,
+    "destination": "Checks & payments (Supporting notes/history → Activity)"
+  },
+  {
+    "file": "web/src/components/checks/NonEmployeeChecksPanel.tsx",
+    "before": "41ec96f94e6af849f4d6f655864391bba475b6c6607add394e59334432fbf22e",
+    "after": "41ec96f94e6af849f4d6f655864391bba475b6c6607add394e59334432fbf22e",
+    "identical": true,
+    "destination": "Checks & payments (Supporting notes/history → Activity)"
+  },
+  {
+    "file": "web/src/components/checks/UnifiedCheckPrintDialog.tsx",
+    "before": "baaf580d0e5b4fdef9f25f3a22ade8e4f7a64ae3e6c20f9497ef3e76542c15bc",
+    "after": "baaf580d0e5b4fdef9f25f3a22ade8e4f7a64ae3e6c20f9497ef3e76542c15bc",
+    "identical": true,
+    "destination": "Shared dialog; existing guarded trigger retained"
+  },
+  {
+    "file": "web/src/components/payroll/AirePaymentEvidenceHolds.tsx",
+    "before": "86d7715795362eae19e36ec31100d3a769c6774edc818f673b2d64660ee8c76b",
+    "after": "86d7715795362eae19e36ec31100d3a769c6774edc818f673b2d64660ee8c76b",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/payroll/AireManualPaymentReconciliation.tsx",
+    "before": "704a7e66ad0239db48e2137ae649b41f282350e222842f9e24c82d2ac088b315",
+    "after": "704a7e66ad0239db48e2137ae649b41f282350e222842f9e24c82d2ac088b315",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/reports/ReportsDownloadPanel.tsx",
+    "before": "03b406d18d5d36d9d5b6d0abb96fc13557406d49559e501e8193eca326534d7c",
+    "after": "78adc54de17ac64ce5c762064e2e06fd1ff15064a9367336e777a884a3bc7d36",
+    "identical": false,
+    "destination": "Reports",
+    "change": "Explicit read-only presentation: six permitted GET artifacts; writer default preserved"
+  },
+  {
+    "file": "web/src/components/payroll/PayrollFinalRecordPanel.tsx",
+    "before": "71770684dfe1cbfe3472256a6634d91981d62838cb14cc79e5d65a36033623b1",
+    "after": "71770684dfe1cbfe3472256a6634d91981d62838cb14cc79e5d65a36033623b1",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/payroll/PayrollLiabilityPanel.tsx",
+    "before": "29bda51a40ab4b0049f7eb3a7252712022c920d334df6ed433dea8538e12def0",
+    "after": "29bda51a40ab4b0049f7eb3a7252712022c920d334df6ed433dea8538e12def0",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/records/RecordActivityTimeline.tsx",
+    "before": "ae331b05e0eb6c83dffcfb79e0dbf874c9e4ece804d2f61f843a48fa421f1696",
+    "after": "ae331b05e0eb6c83dffcfb79e0dbf874c9e4ece804d2f61f843a48fa421f1696",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/audit/AuditEventDetails.tsx",
+    "before": "6f466cb4c2e0dbb910e0028a509eb1f4aa295ea0f512a33ba6729ba797a6dd8d",
+    "after": "6f466cb4c2e0dbb910e0028a509eb1f4aa295ea0f512a33ba6729ba797a6dd8d",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/payroll/CorrectionPanel.tsx",
+    "before": "8cc3c19e3c3cda6a684a71878247fbdec9710016ebbe744fc50120c5970396d4",
+    "after": "8cc3c19e3c3cda6a684a71878247fbdec9710016ebbe744fc50120c5970396d4",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "before": "d117f800da1aa43f32783acbcdc9cae8ae5487391ccde5a314155fb49aee3bd4",
+    "after": "d117f800da1aa43f32783acbcdc9cae8ae5487391ccde5a314155fb49aee3bd4",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
+    "before": "48af6af1b76839df0bfb48f7e2633dfe3d7824e18474b9c44ddba211ff288cdd",
+    "after": "48af6af1b76839df0bfb48f7e2633dfe3d7824e18474b9c44ddba211ff288cdd",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  },
+  {
+    "file": "web/src/pages/client/ClientPayPeriodDetail.tsx",
+    "before": "5f117de663305bdd8e1352534f92ff942ee2fc17de268597c48f39f9d19fa3bd",
+    "after": "5f117de663305bdd8e1352534f92ff942ee2fc17de268597c48f39f9d19fa3bd",
+    "identical": true,
+    "destination": "Payroll → existing section"
+  }
+]

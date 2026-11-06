@@ -8,9 +8,15 @@ module QuickbooksHistory
 
     module_function
 
-    def ensure_authorized!(actor:, company_id:)
-      return if actor&.payroll_access_allowed? && actor.can_access_company?(company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+    # Call with lock: true inside the business transaction, after its row locks.
+    # Return a fresh actor so attribution and policy never reuse cached grants.
+    def ensure_authorized!(actor:, company_id:, lock: false)
+      if lock
+        actor = User.lock.find_by(id: actor&.id)
+        CompanyAssignment.where(company_id: company_id, user_id: actor&.id).lock.load
+      end
+      return actor if actor&.payroll_access_allowed? && actor.can_access_company?(company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: Company.find_by(id: company_id))
 
       raise NotAuthorized, ERROR_MESSAGE
     end

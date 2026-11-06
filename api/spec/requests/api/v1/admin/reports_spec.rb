@@ -120,6 +120,52 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
     end
 
+    it "selects the current regular workflow before a later empty draft or adjustment" do
+      current = create(:pay_period, company: company, start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-10-31")
+      create(:pay_period, company: company, start_date: "2026-11-01", end_date: "2026-11-15", pay_date: "2026-11-30")
+      create(:pay_period, company: company, start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-11-01", run_purpose: "adjustment")
+      get "/api/v1/admin/reports/dashboard"
+      expect(response.parsed_body.dig("stats", "current_pay_period")).to include(
+        "id" => current.id, "run_purpose" => "regular", "next_action" => "Enter hours and pay"
+      )
+    end
+
+    %w[calculated approved].each do |status|
+      it "uses current-state coverage copy for an acknowledged manual #{status} run" do
+        period = create(:pay_period, company: company, status: status,
+          start_date: "2026-10-01", end_date: "2026-10-15", pay_date: "2026-10-31")
+        allow(AirePayrollCalendar::Presenter).to receive(:call).with(period).and_return(enabled: true, cutoff_at: "2026-10-22T07:00:00Z")
+        get "/api/v1/admin/reports/dashboard"
+        current = response.parsed_body.dig("stats", "current_pay_period")
+        expect(current.fetch("blocker")).to eq("No time tracking hours were imported for this run. Review the selected employees and manual hours.")
+        expect(current.fetch("blocker")).not_to include("before calculating")
+      end
+    end
+
+    it "labels the latest regular and adjustment distinctly even after many adjustments" do
+      6.times do |index|
+        create(:pay_period, :committed, company: company, start_date: "2026-09-01", end_date: "2026-09-14",
+          pay_date: Date.new(2026, 9, 19) + index, run_purpose: "adjustment")
+      end
+      get "/api/v1/admin/reports/dashboard"
+      stats = response.parsed_body.fetch("stats")
+      expect(stats.fetch("last_regular_payroll")).to include("id" => native_period.id, "run_purpose" => "regular", "pay_date" => "2026-09-18")
+      expect(stats.fetch("last_adjustment_payroll")).to include("run_purpose" => "adjustment", "pay_date" => "2026-09-24")
+      expect(stats.fetch("recent_payrolls").first).to include("run_purpose" => "adjustment")
+    end
+
+    it "includes additional withholding once in the company summary" do
+      item = native_period.payroll_items.first
+      item.update_columns(withholding_tax: 0, additional_withholding: 5)
+      travel_to Date.new(2026, 9, 20) do
+        get "/api/v1/admin/reports/dashboard"
+      end
+      # Imported withholding is 90; modern base 0 plus extra 5 is 95 total.
+      expect(response.parsed_body.dig("stats", "ytd_totals", "withholding_tax")).to eq(95.0)
+      expect(item.reload.withholding_tax.to_f).to eq(0)
+      expect(item.additional_withholding.to_f).to eq(5)
+    end
+
     it "combines committed Cornerstone and locked QuickBooks payroll in YTD and recent payrolls" do
       travel_to Date.new(2026, 9, 20) do
         get "/api/v1/admin/reports/dashboard"
@@ -443,6 +489,22 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", amount: 1100.00)
       item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 100.00)
       item.payroll_item_earnings.create!(category: "non_taxable", label: "Non-Taxable Pay", amount: 25.00)
+    end
+
+    it "warns for included employees once, without SSNs, and permits a draft" do
+      employee.update_columns(ssn_encrypted: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+      create(:employee, company: company, department: department, first_name: "Unpaid").update_columns(ssn_encrypted: nil)
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      expect(response).to have_http_status(:ok)
+      warnings = response.parsed_body.dig("report", "employee_completeness")
+      expect(warnings).to include("missing_ssn_count" => 1, "missing_address_count" => 1)
+      expect(warnings.fetch("employees")).to eq([
+        { "employee_id" => employee.id, "name" => employee.full_name, "missing_fields" => %w[ssn address], "edit_path" => "/companies/#{company.id}/employees/#{employee.id}/edit" }
+      ])
+      expect(warnings.to_json).not_to include("ssn_last", "ssn_encrypted", "Unpaid")
+      post "/api/v1/admin/reports/quarterly_compliance_packet_official_form_preview", params: { year: 2026, quarter: 2, form_type: "swica", fields: {} }
+      expect(response).to have_http_status(:ok)
+      expect(response.media_type).to eq("application/pdf")
     end
 
     it "builds a Q2 packet by pay date, not period end date" do
@@ -1307,6 +1369,31 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         medicare_tax: 43.50)
     end
 
+    it "returns live missing-detail warnings before preflight and clears them after profile completion" do
+      employee.update_columns(ssn_encrypted: "12345678", city: nil)
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      warnings = response.parsed_body.fetch("employee_completeness")
+      expect(warnings).to include("missing_ssn_count" => 1, "missing_address_count" => 1)
+      expect(warnings.fetch("employees").first).to include("employee_id" => employee.id, "missing_fields" => %w[ssn address], "edit_path" => "/companies/#{company.id}/employees/#{employee.id}/edit")
+      expect(warnings.to_json).not_to include("12345678", "123-45-6789", "ssn_last")
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response.parsed_body.dig("preflight", "employee_completeness")).to eq(warnings)
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+      expect(response.parsed_body.dig("report", "employee_completeness")).to eq(warnings)
+      employee.update_columns(ssn_encrypted: "123-45-6789", city: "Tamuning")
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.fetch("employee_completeness")).to include("employees" => [], "missing_ssn_count" => 0, "missing_address_count" => 0)
+    end
+
+    it "loads employee details without running preflight or validating historical ledgers" do
+      expect(W2GuPreflightValidator).not_to receive(:new)
+      expect_any_instance_of(HistoricalPayrollFilingSource).not_to receive(:validate!)
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("employee_completeness").fetch("employees")).to be_empty
+    end
+
     it "returns nil when no readiness row exists for year" do
       get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
 
@@ -1357,6 +1444,74 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         medicare_tax: 43.50)
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
       expect(response).to have_http_status(:ok)
+    end
+
+    it "requires a fresh explicit review when clean reportable payroll changes after readiness" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "First review" }
+      expect(response).to have_http_status(:ok)
+      original = W2FilingReadiness.find_by!(company: company, year: 2025)
+      original_fingerprint = original.ready_fingerprint
+      late_period = create(:pay_period, :committed, company: company, start_date: Date.new(2025, 2, 1), end_date: Date.new(2025, 2, 14), pay_date: Date.new(2025, 2, 18))
+      create(:payroll_item, company: company, employee: employee, pay_period: late_period, gross_pay: 100, reported_tips: 0)
+
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("stale")
+      expect(original.reload.status).to eq("filing_ready") # GET preserves the previous review.
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:conflict)
+      expect(original.reload.ready_fingerprint).to eq(original_fingerprint)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("preflight_passed")
+      expect(original.reload.attestation_history.length).to eq(1)
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed late payroll" }
+      expect(response).to have_http_status(:ok)
+      expect(original.reload.attestation_history.map { |review| review["notes"] }).to eq([ "First review", "Reviewed late payroll" ])
+      expect(original.ready_fingerprint).not_to eq(original_fingerprint)
+    end
+
+    it "detects full SSN changes while ignoring unrelated employee contact metadata" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      fingerprint = W2FilingReadiness.find_by!(company: company, year: 2025).ready_fingerprint
+      employee.update!(email: "updated-contact@example.test")
+      expect(W2FilingInputsFingerprint.new(company: company.reload, year: 2025).call).to eq(fingerprint)
+      employee.update!(ssn_encrypted: "987-65-6789") # Displayed last four remain unchanged.
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response.parsed_body.dig("filing", "status")).to eq("stale")
+    end
+
+    it "does not accept an older browser's preflight after another operator refreshes it" do
+      old_fingerprint = W2FilingReadiness.find_by!(company: company, year: 2025).preflight_fingerprint
+      employee.update!(address_line1: "Updated filing address")
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, preflight_fingerprint: old_fingerprint }
+      expect(response).to have_http_status(:conflict)
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025).marked_ready_at).to be_nil
+    end
+
+    it "lets an explicitly delegated accountant mark this client ready with attributed evidence" do
+      accountant = create(:user, company: company, role: "accountant")
+      create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin_user)
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Delegated client review" }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025)).to have_attributes(
+        status: "filing_ready", marked_ready_by_id: accountant.id)
+      expect(accountant.reload.role).to eq("accountant")
+    end
+
+    it "denies a revoked accountant grant before marking this client ready" do
+      accountant = create(:user, company: company, role: "accountant")
+      assignment = create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: admin_user)
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(accountant)
+      assignment.update!(client_management: false)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(W2FilingReadiness.find_by!(company: company, year: 2025).marked_ready_at).to be_nil
     end
 
     it "returns 403 for manager users (admin-only approval action)" do
@@ -1735,6 +1890,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("ytd", "custom_earnings_total").to_f).to eq(50.00)
       expect(report.dig("ytd", "custom_deductions_total").to_f).to eq(40.00)
       expect(report.dig("ytd", "total_deductions").to_f).to eq(275.63)
+    end
+
+    it "returns saved hours and distinguishes printed checks from delivery evidence" do
+      item = employee.payroll_items.first
+      item.update!(hours_worked: 40.5, overtime_hours: 0, holiday_hours: 2, pto_hours: 4,
+        check_number: "HOURS-100", check_printed_at: Time.current)
+      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "history", 0)).to include(
+        "hours_worked" => 40.5, "overtime_hours" => 0.0, "holiday_hours" => 2.0,
+        "pto_hours" => 4.0, "total_hours" => 46.5, "hours_basis" => "saved_payroll_item",
+        "payment_evidence" => include("status" => "printed")
+      )
     end
 
     it "reports the recorded payment method for a direct-deposit paycheck" do
@@ -2279,6 +2447,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(pdf_text).to include("Employer Social", "Security", "Medicare")
       expect(pdf_text).to include("Employer Traditional 401(k)", "Employer Roth 401(k) Match")
       expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
+      expect(pdf_text).to include("Non taxable additions total", "Employer taxes total")
+      expect(pdf_text).not_to include("non_taxable_additions_total", "employer_taxes_total")
     end
   end
 
@@ -2331,7 +2501,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         category: "insurance"
       )
       [ 45.0, 60.0 ].each_with_index do |amount, index|
-        item.payroll_item_field_entries.create!(
+        field_entry = item.payroll_item_field_entries.create!(
           payroll_field_definition: index.zero? ? field : nil,
           label: "Employer Health",
           kind: "employer_contribution",
@@ -2348,12 +2518,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           category: "employer_contribution",
           sub_category: "insurance"
         )
-        item.payroll_item_deductions.create!(
+        deduction = item.payroll_item_deductions.create!(
           deduction_type: deduction_type,
           label: "Employer Health",
           category: "employer_contribution",
           amount: amount
         )
+        PayrollComponentMirrors.record!(field_entry, deduction)
+        field_entry.save!
       end
 
       get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
@@ -2719,9 +2891,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
 
       employee_sheet = workbook.sheet("Employees")
-      headers = employee_sheet.row(1)
-      hourly_row = employee_sheet.row(2)
-      salary_row = employee_sheet.row(3)
+      headers = employee_sheet.row(4)
+      hourly_row = employee_sheet.row(5)
+      salary_row = employee_sheet.row(6)
       treatments.each do |label, (kind, treatment, amount)|
         effect = case kind
         when "deduction" then "in deductions"
@@ -2774,7 +2946,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         workbook.sheet("Payroll Adjustments Detail").row(row_number)
       end
       expect(detail_rows).to include(include(hourly_employee.full_name, "Employee loan", "manual", 40.0))
-      employee_headers = workbook.sheet("Employees").row(1)
+      employee_headers = workbook.sheet("Employees").row(4)
       expect(employee_headers).to include(a_string_matching(/Payroll Adjustment - Employee loan \(Post tax deduction; manual pay-period entry; item #\d+\/4\)/))
     end
 
@@ -2830,7 +3002,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       workbook = workbook_from_response
       expect(workbook.sheets.first).to eq("Employees")
-      expect(workbook.sheets).not_to include("Payroll Register", "Register Review")
+      expect(workbook.sheets).not_to include("Payroll Register")
+      expect(workbook.sheets).to include("Register Review")
       expect(workbook.sheets).to include("Earnings Detail", "Deductions Detail", "Report Info")
     end
 
@@ -3534,5 +3707,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       rows = CSV.parse(response.body, headers: true)
       expect(rows.map { |row| row["Payment method"] }).to eq([ "Direct deposit", "Direct deposit", "Not recorded" ])
     end
+  end
+  it "formats YTD PDF company totals and basis without changing spreadsheet numbers" do
+    period = create(:pay_period, :committed, company: company,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: company, employee: employee, pay_period: period,
+      hours_worked: 1000, gross_pay: 181_113.23, net_pay: 166_498.1)
+
+    get "/api/v1/admin/reports/ytd_summary_pdf", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    totals = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text)
+      .drop_while { |text| !text.include?("Company Totals") }
+      .take_while { |text| !text.include?("Payroll Sources") }.join("\n")
+    expect(totals).to include("$181,113.23", "$166,498.10", "1,000.00", "Pay date", "Federal/Guam income tax")
+    expect(totals).not_to include("pay_date", "$2,026.00", "166498.1", "Source labeled after tax 401k")
+
+    get "/api/v1/admin/reports/ytd_summary_xlsx", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    workbook = Roo::Spreadsheet.open(StringIO.new(response.body), extension: :xlsx)
+    expect(workbook.sheet("Company Totals").to_a).to include([ "Gross pay", 181_113.23 ], [ "Net pay", 166_498.1 ])
   end
 end

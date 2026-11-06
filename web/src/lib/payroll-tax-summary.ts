@@ -1,3 +1,4 @@
+import type { PayrollReportReviewWarning } from '@/services/api';
 import type { PayrollItem } from '../types';
 
 // medicare_tax is the saved employee total, including Additional Medicare.
@@ -27,12 +28,22 @@ export interface PayrollComponentLine {
 }
 
 export interface PayrollComponentDisclosure {
+  review_warnings?: PayrollReportReviewWarning[];
   earnings: PayrollComponentLine[];
   other_pay: PayrollComponentLine[];
   taxes: PayrollComponentLine[];
   deductions: PayrollComponentLine[];
   employer_contributions: PayrollComponentLine[];
+  w4_provenance?: PayrollW4Provenance | null;
   reconciliation: { gross_pay: number; other_pay: number; employee_taxes: number; other_deductions: number; net_pay: number };
+}
+
+export interface PayrollW4Provenance {
+  origin: 'original_payroll_snapshot';
+  original_payroll_item_id: number;
+  original_pay_period_id: number;
+  election_id: number;
+  election_source: string;
 }
 
 export function payrollComponentSource(source?: string | null): string | undefined {
@@ -41,6 +52,8 @@ export function payrollComponentSource(source?: string | null): string | undefin
     case 'manual': return 'This payroll';
     case 'one_time': return 'One-time bonus';
     case 'legacy_snapshot': return 'Saved adjustment';
+    case 'correction_reference': return 'Derived from saved correction inputs';
+    case 'correction_total': return 'Saved gross adjustment; detailed earnings were not retained';
     default: return undefined;
   }
 }

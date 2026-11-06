@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::Employees", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:company) { create(:company) }
   let!(:department) { create(:department, company: company) }
   let!(:admin_user) do
@@ -27,6 +28,28 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(admin_user)
+  end
+
+  describe "editing incomplete existing employees" do
+    it "saves a name and wage change without requiring missing SSN, hire date or address" do
+      employee = create(:employee, company: company, department: department)
+      employee.update_columns(ssn_encrypted: nil, hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+
+      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { first_name: "Updated", pay_rate: 27 } }
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload).to have_attributes(first_name: "Updated", pay_rate: 27, ssn_encrypted: nil, hire_date: nil, address_line1: nil)
+    end
+
+    it "allows personal details to remain blank but still rejects a malformed supplied SSN" do
+      employee = create(:employee, company: company, department: department)
+      employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { hire_date: "", address_line1: "", city: "", state: "", zip: "" } }
+      expect(response).to have_http_status(:ok)
+      patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { ssn: "123", ssn_confirmation: "123" } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.to_s).to include("9 digits")
+    end
   end
 
   describe "GET /api/v1/admin/employees" do
@@ -753,7 +776,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           { "code" => "verify_hire_date", "message" => "Verify hire date", "fields" => [ "hire_date" ] },
           { "code" => "employee_address_missing", "message" => "Verify address", "fields" => %w[address_line1 city state zip] }
         ]
-        employee.update!(configuration_source: "quickbooks_history", configuration_review_status: "needs_review",
+        # Seed a retained import snapshot, rather than clearing a completed profile through an edit.
+        employee.update_columns(configuration_source: "quickbooks_history", configuration_review_status: "needs_review",
           configuration_review_items: review_items, ssn_encrypted: "000000001", hire_date: nil,
           address_line1: nil, city: nil, state: nil, zip: nil)
         original_rate = employee.pay_rate
@@ -787,16 +811,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.first_name).to eq(original_name)
       end
 
-      it "requires legacy incomplete filing data to be completed before saving edits" do
+      it "saves ordinary edits while legacy filing details are outstanding" do
         employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
 
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { first_name: "No Address Yet" }
         }
 
-        expect(response).to have_http_status(:unprocessable_entity)
-        expect(response.parsed_body.dig("details").keys).to include("address_line1", "city", "state", "zip")
-        expect(employee.reload.first_name).not_to eq("No Address Yet")
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload.first_name).to eq("No Address Yet")
         expect(employee.address_line1).to be_nil
       end
     end

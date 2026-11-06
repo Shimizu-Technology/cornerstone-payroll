@@ -11,18 +11,24 @@ module AirePayrollCalendar
     end
 
     def call
+      return { status: "paused" } unless ConnectedPayrollMode.enabled?
+      return { publication_id: @publication_id, status: "quarantined" } if StagingQuarantine.suppressed?("aire_payroll_calendar_publications", @publication_id)
       publication = claim!
       return publication if publication.is_a?(Hash)
 
       period = publication.aire_payroll_calendar_period
-      response = @client_factory.call(period.time_tracking_source).publish_payroll_calendar_period(
-        external_pay_period_id: period.external_pay_period_id,
-        payload: publication.payload,
-        idempotency_key: publication.publication_id
-      )
-      source_state = response.fetch("payroll_calendar_period")
-      validate_response!(period, publication, source_state)
-      mark_delivered!(publication, source_state)
+      period.time_tracking_source.with_lock do
+        response = @client_factory.call(period.time_tracking_source).publish_payroll_calendar_period(
+          external_pay_period_id: period.external_pay_period_id,
+          payload: publication.payload,
+          idempotency_key: publication.publication_id
+        )
+        source_state = response.fetch("payroll_calendar_period")
+        validate_response!(period, publication, source_state)
+        result = mark_delivered!(publication, source_state)
+        SourceState.new(period.time_tracking_source).record(source_state)
+        result
+      end
     rescue StandardError => e
       mark_failed!(e) if @attempt_claimed
       { publication_id: @publication_id, status: "failed", error: safe_error(e) }
@@ -37,6 +43,15 @@ module AirePayrollCalendar
         ).find(@publication_id)
         return { publication_id: publication.id, status: "delivered" } if publication.delivered?
         return { publication_id: publication.id, status: "skipped" } if publication.next_delivery_attempt_at&.>(@now)
+
+        unless publication.aire_payroll_calendar_period.time_tracking_source.historical_reconciliation_complete?
+          publication.update!(
+            delivery_enqueued_until: nil,
+            next_delivery_attempt_at: retry_allowed?(publication) ? @now + 5.minutes : nil,
+            last_error: "Historical payroll reconciliation approval is required before delivering this calendar"
+          )
+          return { publication_id: publication.id, status: "held" }
+        end
 
         publication.update!(
           delivery_attempts: publication.delivery_attempts + 1,
@@ -57,9 +72,15 @@ module AirePayrollCalendar
              source_state["publication_id"] == publication.publication_id &&
              source_state.values_at("start_date", "end_date", "pay_date") ==
                expected.values_at("start_date", "end_date", "pay_date") &&
-             same_instant?(source_state["cutoff_at"], expected["cutoff_at"])
+             same_instant?(source_state["cutoff_at"], expected["cutoff_at"]) &&
+             (!expected.key?("overtime_policy") || source_state["overtime_policy"] == expected["overtime_policy"]) &&
+             %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_state[key] == expected[key] }
         raise TimeTracking::Client::Error, "AIRE returned calendar state that does not match this publication"
       end
+    end
+
+    def retry_allowed?(publication)
+      publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now
     end
 
     def same_instant?(left, right)
@@ -94,7 +115,7 @@ module AirePayrollCalendar
         publication.update!(
           delivery_status: "failed",
           delivery_enqueued_until: nil,
-          next_delivery_attempt_at: publication.cutoff_at <= @now ? nil : @now + delay,
+          next_delivery_attempt_at: retry_allowed?(publication) ? @now + delay : nil,
           last_response_status: error.respond_to?(:response_status) ? error.response_status : nil,
           last_error: safe_error(error)
         )

@@ -23,6 +23,7 @@ class TimeTrackingImport < ApplicationRecord
   belongs_to :time_tracking_source
   belongs_to :applied_by, class_name: "User", optional: true
   belongs_to :reconciled_by, class_name: "User", optional: true
+  has_many :time_tracking_correction_dispositions, dependent: :restrict_with_error
   has_many :aire_payroll_acknowledgements, dependent: :restrict_with_error
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
@@ -34,6 +35,10 @@ class TimeTrackingImport < ApplicationRecord
   validates :source_processing_status, inclusion: { in: SOURCE_PROCESSING_STATUSES }, allow_nil: true
   validate :finalized_batch_snapshot_is_immutable, on: :update
   validate :reconciliation_evidence_is_immutable, on: :update
+
+  def supplemental_batch?
+    raw_payload["purpose"] == "supplemental"
+  end
 
   def finalized_batch?
     external_batch_id.present? || external_batch_checksum.present? || contract_version.present? || source_cutoff_at.present?

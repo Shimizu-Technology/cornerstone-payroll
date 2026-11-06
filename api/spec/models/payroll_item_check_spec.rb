@@ -162,7 +162,41 @@ RSpec.describe PayrollItem, type: :model do
       )
     end
 
-    it "records a void after delivery without erasing the earlier payment history" do
+    it "records one durable receipt for each exact payable line" do
+      TimeTrackingEntryAllocation.create!(
+        company: company,
+        time_tracking_source: source,
+        time_tracking_import: time_tracking_import,
+        pay_period: pay_period,
+        payroll_item: item,
+        employee: employee,
+        source_user_id: allocation.source_user_id,
+        source_user_uuid: allocation.source_user_uuid,
+        source_time_entry_id: allocation.source_time_entry_id,
+        line_key: "training:3010",
+        source_kind: "correction",
+        original_work_date: pay_period.start_date,
+        category_snapshot: { "name" => "Training" },
+        total_hours: -2,
+        regular_hours: -2,
+        overtime_hours: 0
+      )
+
+      item.mark_printed!(user: admin_user)
+
+      receipts = item.aire_payroll_entry_acknowledgements.where(status: "payment_prepared").order(:source_line_key)
+      expect(receipts.pluck(:source_line_key, :source_kind, :total_hours)).to eq([
+        [ "flight:3000", "current", 8.to_d ],
+        [ "training:3010", "correction", -2.to_d ]
+      ])
+      expect(receipts.pluck(:source_event_key).uniq.length).to eq(2)
+      expect(receipts).to all(have_attributes(contract_version: "2.0"))
+    end
+
+    it "records instrument cancellation after delivery without erasing earned payroll" do
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_cancellation_v1" ])
       item.mark_printed!(user: admin_user)
       item.mark_delivered!(
         user: admin_user,
@@ -176,11 +210,16 @@ RSpec.describe PayrollItem, type: :model do
       expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
         "payment_prepared",
         "payment_issued",
-        "payment_voided"
+        "payment_cancelled"
       )
     end
 
     it "acknowledges cancellation of an original check when delivery changes, while payroll remains committed and payable" do
+      source = time_tracking_import.time_tracking_source
+      source.update!(expected_source_instance_id: SecureRandom.uuid, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current,
+        source_capabilities: TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_cancellation_v1" ])
+      item.time_tracking_entry_allocations.update_all(source_user_uuid: SecureRandom.uuid)
       committed_acks = AirePayrollEntryAcknowledgement.record_for_import!(
         time_tracking_import: time_tracking_import, status: "committed", occurred_at: Time.current,
         payroll_item_id: item.id
@@ -199,11 +238,11 @@ RSpec.describe PayrollItem, type: :model do
       expect(item.attributes.slice(*money.keys)).to eq(money)
       expect(pay_period.reload).to be_committed
       expect(committed_acks.map { |ack| ack.reload.status }).to eq([ "committed" ])
-      cancellation = item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_voided")
+      cancellation = item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_cancelled")
       expect(cancellation).to have_attributes(payment_method: "paper_check", payment_reference: "5001")
       expect(cancellation.check_event.details).to include("original_check_cancelled" => true)
       expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
-        "committed", "payment_prepared", "payment_issued", "payment_voided"
+        "committed", "payment_prepared", "payment_issued", "payment_cancelled"
       )
       expect(item.aire_payroll_entry_acknowledgements.where(payment_method: "direct_deposit", status: "payment_issued")).to be_empty
     end

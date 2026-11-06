@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe PayrollReminderService do
+  before { ensure_verified_test_tax_years(2024, 2026) }
   let(:company) { create(:company, name: "Test Corp", pay_frequency: "biweekly") }
 
   before do
@@ -28,7 +29,7 @@ RSpec.describe PayrollReminderService do
         create(:payroll_reminder_config,
                company: company,
                enabled: true,
-               recipients: ["boss@test.com"],
+               recipients: [ "boss@test.com" ],
                days_before_due: 3,
                send_overdue_alerts: true)
       end
@@ -52,7 +53,7 @@ RSpec.describe PayrollReminderService do
         expect(log).to be_present
         expect(log.reminder_type).to eq("upcoming")
         expect(log.pay_period_id).to eq(pay_period.id)
-        expect(log.recipients_snapshot).to eq(["boss@test.com"])
+        expect(log.recipients_snapshot).to eq([ "boss@test.com" ])
       end
 
       it "does not send duplicate reminders" do
@@ -73,7 +74,7 @@ RSpec.describe PayrollReminderService do
         create(:payroll_reminder_config,
                company: company,
                enabled: true,
-               recipients: ["boss@test.com"],
+               recipients: [ "boss@test.com" ],
                days_before_due: 3,
                send_overdue_alerts: true)
       end
@@ -109,7 +110,7 @@ RSpec.describe PayrollReminderService do
         create(:payroll_reminder_config,
                company: company,
                enabled: true,
-               recipients: ["boss@test.com"],
+               recipients: [ "boss@test.com" ],
                days_before_due: 3,
                send_overdue_alerts: false)
       end
@@ -211,7 +212,7 @@ RSpec.describe PayrollReminderService do
       end
 
       it "skips all reminders" do
-        create(:payroll_reminder_config, company: company, enabled: true, recipients: ["boss@test.com"])
+        create(:payroll_reminder_config, company: company, enabled: true, recipients: [ "boss@test.com" ])
         expect(Resend::Emails).not_to receive(:send)
         described_class.run_all!
       end

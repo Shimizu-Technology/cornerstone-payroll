@@ -35,7 +35,7 @@ module Api
         CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
 
         before_action :set_pay_period,    only: [ :index, :rehearsal_preview_pdf, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :mark_delivered, :confirm_direct_deposit_payment, :void, :reverse_paycheck, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -48,14 +48,14 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:time_tracking_entry_allocations, { check_events: :user }, employee: :department)
+                             .includes(:time_tracking_entry_allocations, :aire_payroll_entry_acknowledgements, :time_tracking_manual_allocations, { check_events: :user }, employee: :department)
                              .left_outer_joins(:employee)
                              .reportable.with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
-          statement_items = @pay_period.payroll_items.not_voided.reportable
-            .includes(:employee, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries)
+          statement_items = @pay_period.payroll_items.financially_reportable.reportable
+            .includes(:employee, :direct_deposit_payment_confirmation, :payroll_item_earnings, :payroll_item_deductions, :payroll_item_field_entries, :check_events, :aire_payroll_entry_acknowledgements, :time_tracking_manual_allocations)
             .select { |item| EarningsStatementEligibility.printable?(item) }
             .sort_by { |item| [ item.employee.last_name.to_s.downcase, item.employee.first_name.to_s.downcase, item.id ] }
           deposit_items = statement_items.select do |item|
@@ -65,14 +65,22 @@ module Api
           render json: {
             checks: loaded_items.map { |item| check_item_json(item) },
             direct_deposit_items: deposit_items.map do |item|
-              { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f }
+              { id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name, net_pay: item.net_pay.to_f,
+                source_payment_blocker: TimeTracking::FinancialCorrectionService.payment_blocker(item),
+                payment_cancellation_sync: PaymentCancellationSyncState.for(item),
+                payment_confirmation: item.direct_deposit_payment_confirmation && {
+                  settled_on: item.direct_deposit_payment_confirmation.settled_on.iso8601,
+                  bank_reference: item.direct_deposit_payment_confirmation.bank_reference,
+                  confirmed_at: item.direct_deposit_payment_confirmation.created_at.iso8601
+                } }
             end,
             earnings_statement_items: statement_items.map do |item|
               {
                 id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name,
                 gross_pay: item.gross_pay.to_f, total_deductions: item.total_deductions.to_f,
                 net_pay: item.net_pay.to_f, payment_delivery_method: item.effective_payment_delivery_method,
-                statement_only: !item.net_pay.to_d.positive?
+                statement_only: !item.net_pay.to_d.positive?,
+                payment_cancellation_sync: PaymentCancellationSyncState.for(item)
               }
             end,
             meta: {
@@ -148,6 +156,7 @@ module Api
             return render json: { error: "No checks to print for this pay period (all items have $0 net pay)" }, status: :unprocessable_entity
           end
 
+          printable_items.reject(&:voided?).each(&:ensure_financial_source_payment_ready!)
           render_company = render_company_for(@pay_period.company)
           combined_pdf =
             if render_company.first_hawaiian_4up_checks?
@@ -235,6 +244,7 @@ module Api
         # Download a single check PDF.
         # -----------------------------------------------------------------------
         def show
+          @payroll_item.ensure_financial_source_payment_ready! unless @payroll_item.voided?
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
           end
@@ -325,6 +335,38 @@ module Api
         # Void a check with a written reason.
         # Body: { reason: "..." }
         # -----------------------------------------------------------------------
+        # Records externally completed bank payment. This does not initiate ACH.
+        def confirm_direct_deposit_payment
+          user = User.find(current_user_id)
+          confirmation = nil
+          already_confirmed = false
+          @payroll_item.with_lock do
+            confirmation = @payroll_item.direct_deposit_payment_confirmation
+            if confirmation
+              already_confirmed = true
+            else
+              confirmation = @payroll_item.create_direct_deposit_payment_confirmation!(
+                user: user,
+                settled_on: Date.iso8601(params.require(:settled_on).to_s),
+                bank_reference: params.require(:bank_reference).to_s.strip,
+                note: params[:note].to_s.strip.presence,
+                ip_address: request.remote_ip
+              ) if ActiveModel::Type::Boolean.new.cast(params[:attestation])
+              raise ArgumentError, "Confirm that the bank transfer was completed" unless confirmation
+            end
+          end
+          render json: {
+            payment_confirmation: {
+              settled_on: confirmation.settled_on.iso8601,
+              bank_reference: confirmation.bank_reference,
+              confirmed_at: confirmation.created_at.iso8601
+            },
+            already_confirmed: already_confirmed
+          }
+        rescue ActiveRecord::RecordNotFound, ActionController::ParameterMissing, Date::Error, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def void
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
@@ -342,6 +384,13 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
+        end
+
+        def reverse_paycheck
+          ReversePaycheckService.call(payroll_item: @payroll_item, actor: User.find(current_user_id), reason: params[:reason])
+          render json: { payroll_item: check_item_json(@payroll_item.reload) }
+        rescue ArgumentError, ActiveRecord::RecordInvalid, PayrollLiabilityPostingService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -384,7 +433,12 @@ module Api
             period.lock!
             @payroll_item.lock!
             raise ArgumentError, "Check actions are only available for committed pay periods" unless period.committed?
-            raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reissue: paycheck has been reversed" unless @payroll_item.payroll_included?
+            raise ArgumentError, "Review the linked source accounting correction before reissuing" if @payroll_item.source_accounting_correction_linked?
+            raise ArgumentError, "Review the duplicate check reconciliation before reissuing" if @payroll_item.duplicate_check_linked?
+            if (blocker = TimeTracking::PaymentCancellationBridge.blocker_for(@payroll_item))
+              raise ArgumentError, blocker
+            end
             if CheckReconciliationStatus.for(@payroll_item) == "cleared"
               raise ArgumentError, "Reverse the clearing evidence before reissuing this check"
             end
@@ -392,14 +446,17 @@ module Api
 
             original_check_number = @payroll_item.check_number
 
+            cancel_payment = PayrollPaymentMethodEligibility.new(@payroll_item).check_has_activity?
             # Step 1: Void the old physical check (audit trail only — item itself stays active)
             @payroll_item.check_events.create!(
               user: user,
               event_type: "voided",
               check_number: original_check_number,
               reason: reason,
+              evidence_reference: reason.first(200),
+              details: { payroll_obligation_retained: true, payment_delivery_change: cancel_payment, original_check_cancelled: cancel_payment },
               ip_address: request.remote_ip
-            )
+            ) unless @payroll_item.voided?
 
             # Step 2: Reserve or validate the replacement check number
             new_check_number = requested_check_number.present? ? reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number) : company.next_check_number!
@@ -409,7 +466,9 @@ module Api
               reprint_of_check_number: original_check_number,
               check_number:    new_check_number,
               check_printed_at: nil,
-              check_print_count: 0
+              check_print_count: 0,
+              voided: false, voided_at: nil, voided_by_user_id: nil, void_reason: nil,
+              check_prepared_at: nil, check_prepared_source_updated_at: nil
             )
 
             # Step 6: Log the reprint event
@@ -566,6 +625,8 @@ module Api
           selected_profile = selected_profile_for(@company.organization_id, target_stock_type)
 
           Company.transaction do
+            @company.lock!
+            revalidate_current_company_write_access!(company: @company, capability: :manage_client_check_settings)
             if calibration_attributes.present? && selected_profile.present?
               if expected_profile_version.blank?
                 raise ArgumentError, "Reload the selected printer profile before saving calibration"
@@ -669,7 +730,13 @@ module Api
             }, status: :unprocessable_entity
           end
 
-          @company.update!(next_check_number: new_number)
+          @company.with_lock do
+            revalidate_current_company_write_access!(company: @company, capability: :manage_client_check_settings)
+            if new_number < @company.next_check_number.to_i
+              return render json: { error: "Next check number cannot move backward" }, status: :unprocessable_entity
+            end
+            @company.update!(next_check_number: new_number)
+          end
           render json: { check_settings: company_check_settings_json(@company) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -807,6 +874,9 @@ module Api
         end
 
         def set_company
+          if params[:company_id].present? && params[:company_id].to_s != current_company_id.to_s
+            return render json: { error: "Company context does not match the requested client" }, status: :forbidden
+          end
           @company = Company.find_by(id: current_company_id)
           render json: { error: "Company not found" }, status: :not_found and return unless @company
         end
@@ -827,11 +897,15 @@ module Api
             net_pay: item.net_pay,
             gross_pay: item.gross_pay,
             check_status: item.check_status,
+            source_payment_blocker: TimeTracking::FinancialCorrectionService.payment_blocker(item),
             reconciliation_status: CheckReconciliationStatus.for(item),
+            payment_cancellation_sync: PaymentCancellationSyncState.for(item),
             aire_linked: item.time_tracking_entry_allocations.any?,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
+            payroll_included: item.payroll_included?,
+            payroll_reversed_at: item.payroll_reversed_at,
             voided: item.voided,
             voided_at: item.voided_at,
             void_reason: item.void_reason,

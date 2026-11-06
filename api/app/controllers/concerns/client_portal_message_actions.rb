@@ -2,6 +2,7 @@
 
 module ClientPortalMessageActions
   extend ActiveSupport::Concern
+  include ExplicitCompanyAccess
 
   included do
     before_action :set_portal_thread

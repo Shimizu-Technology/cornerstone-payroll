@@ -77,6 +77,28 @@ RSpec.describe QuarterlyComplianceOfficialForms::W1 do
     }
   end
 
+  it "places the balance due inside Text1423 and leaves credit and receipts blank" do
+    source = PDF::Reader.new(described_class::TEMPLATE_PATH.to_s)
+    widgets = source.objects[source.pages.first.attributes.fetch(:Annots)].map { |ref| source.objects[ref] }
+    named = lambda do |widget|
+      widget[:T] || source.objects[widget.fetch(:Parent)][:T]
+    end
+    balance_widget = widgets.find { |widget| named.call(widget) == "Text1423" }
+    page = PDF::Reader.new(StringIO.new(described_class.new(report: report,
+      fields: { total_guam_withholding: 1234.56 }).generate)).pages.first
+    text_at = lambda do |rect|
+      left, bottom, right, top = rect
+      page.runs.select { |run| run.x.between?(left, right) && run.y.between?(bottom, top) }
+        .sort_by(&:x).map(&:text).join
+    end
+
+    expect(described_class::TOTALS.fetch(:line5)).to eq(balance_widget.fetch(:Rect))
+    expect(text_at.call(balance_widget.fetch(:Rect))).to eq("1234.56")
+    %w[Text1420 Text1422].each do |name|
+      expect(text_at.call(widgets.find { |widget| named.call(widget) == name }.fetch(:Rect))).to eq("")
+    end
+  end
+
   describe "#generate" do
     it "derives liability months from pay dates when reviewed rows omit month" do
       report = {
@@ -195,6 +217,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
   let(:report) do
     {
       meta: {
+        company_id: company.id,
         company_name: company.name,
         ein: company.ein,
         year: 2026,
@@ -231,7 +254,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
         draws << [ box, text, options ]
       end
 
-      form.send(:draw_employee_row, Object.new, employee_rows.first, 0)
+      form.send(:draw_employee_row, Prawn::Document.new, employee_rows.first, 0)
 
       expect(draws).to include(
         [ [ 630, 399.0, 750, 416.0 ], "A", { size: 7, align: :center } ],
@@ -248,7 +271,7 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
         draws << [ box, text, options ]
       end
 
-      form.send(:draw_employee_row, Object.new, employee_rows.last, 10)
+      form.send(:draw_employee_row, Prawn::Document.new, employee_rows.last, 10)
 
       expect(draws).to include(
         [ [ 873.755005, 71.496902, 978.130615, 88.371994 ], "111.00", { size: 7, align: :right } ]

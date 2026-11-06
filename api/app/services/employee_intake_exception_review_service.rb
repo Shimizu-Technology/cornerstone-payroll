@@ -4,12 +4,13 @@ class EmployeeIntakeExceptionReviewService
   class Error < StandardError; end
 
   def self.call!(employee:, actor:, attributes:)
-    raise Error, "Manager or administrator access required" unless actor.organization_admin? || actor.manager?
+    raise Error, "Manager or administrator access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: employee.company)
     raise Error, "Employee is outside your company access" unless actor.can_access_company?(employee.company_id)
     attrs = attributes.to_h.symbolize_keys
     Employee.transaction do
       employee.company.lock!
       employee.lock!
+      raise Error, "Manager or administrator access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: employee.company)
       raise Error, "This employee has no intake exception" if employee.intake_exception.blank?
       exception = employee.intake_exception.deep_dup
       if attrs.key?(:follow_up_due_on)

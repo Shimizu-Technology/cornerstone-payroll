@@ -36,7 +36,7 @@ class InvoiceLogoStorageService
     end
 
     extension = content_type == "image/png" ? ".png" : ".jpg"
-    key = "invoice-brand/organization-#{profile.organization_id}/profile-#{profile.id}/#{SecureRandom.uuid}#{extension}"
+    key = StagingStoragePolicy.new_key("invoice-brand/organization-#{profile.organization_id}/profile-#{profile.id}/#{SecureRandom.uuid}#{extension}")
     @storage.upload(key, StringIO.new(bytes), content_type: content_type)
     profile.update!(logo_storage_key: key, logo_content_type: content_type,
                     logo_sha256: Digest::SHA256.hexdigest(bytes), logo_byte_size: bytes.bytesize)

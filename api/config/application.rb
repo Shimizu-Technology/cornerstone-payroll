@@ -1,4 +1,5 @@
 require_relative "boot"
+require_relative "../lib/canonical_proxy_headers"
 
 # Load environment variables from .env
 require "dotenv"
@@ -45,6 +46,12 @@ module Api
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # Run after initializer middleware registrations (including CORS) so this
+    # remains outermost, before Rails logging and either client-IP resolver.
+    initializer "canonical_proxy_headers", after: :load_config_initializers, before: :build_middleware_stack do |app|
+      app.middleware.insert_before 0, CanonicalProxyHeaders
+    end
 
     trusted_proxy_cidrs = ENV.fetch("TRUSTED_PROXY_CIDRS", "")
                                .split(",")

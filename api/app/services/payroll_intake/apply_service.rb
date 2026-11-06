@@ -22,6 +22,7 @@ module PayrollIntake
       results = { applied: [], skipped: [], errors: [] }
 
       ActiveRecord::Base.transaction do
+        Company.lock.find(company.id)
         pay_period.with_lock do
           raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 
@@ -275,8 +276,6 @@ module PayrollIntake
         calculated_by_id: actor&.id,
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: nil,
         intake_stale_reason: nil,
         intake_stale_session: nil
@@ -325,7 +324,7 @@ module PayrollIntake
       payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.clear_wage_rate_hours!
       payroll_item.employment_type = employee.employment_type
-      payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+      payroll_item.pay_rate = employee.default_payroll_rate
     end
 
     def reset_stale_intake_item_fields!(payroll_item, employee)

@@ -35,7 +35,7 @@ class ClientDocumentPreviewGenerator
       )
 
       unless status.success?
-        raise GenerationFailed, [stderr.presence, stdout.presence, "LibreOffice conversion failed"].compact.join("\n")
+        raise GenerationFailed, [ stderr.presence, stdout.presence, "LibreOffice conversion failed" ].compact.join("\n")
       end
 
       pdf_path = Dir[File.join(output_dir, "*.pdf")].first
@@ -99,7 +99,7 @@ class ClientDocumentPreviewGenerator
     return if status.success?
 
     Rails.logger.warn(
-      "Spreadsheet preview optimization failed for document #{document.id}: #{[stderr.presence, stdout.presence].compact.join("\n")}"
+      "Spreadsheet preview optimization failed for document #{document.id}: #{[ stderr.presence, stdout.presence ].compact.join("\n")}"
     )
   rescue StandardError => e
     Rails.logger.warn("Spreadsheet preview optimization errored for document #{document.id}: #{e.message}")
@@ -123,7 +123,7 @@ class ClientDocumentPreviewGenerator
 
   def build_preview_key(original_filename)
     base_name = File.basename(original_filename.to_s, ".*").gsub(/[^A-Za-z0-9.\-_]/, "_")
-    "client_documents/company_#{document.company_id}/previews/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{base_name}.pdf"
+    StagingStoragePolicy.new_key("client_documents/company_#{document.company_id}/previews/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{base_name}.pdf")
   end
 
   def libreoffice_binary

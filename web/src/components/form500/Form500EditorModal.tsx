@@ -1,7 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Download, Eye, Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,7 @@ const quarterOptions = [
 ];
 
 export function Form500EditorModal({ open, onClose, payPeriodId }: Form500EditorModalProps) {
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [form, setForm] = useState<Form500Fields | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -41,7 +42,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
   const cleanupPreview = useCallback(() => {
     setPreviewState((prev) => {
       if (prev.pdfUrl) URL.revokeObjectURL(prev.pdfUrl);
-      return { open: false, blobData: null, pdfUrl: null, title: 'Form 500 Preview' };
+      return { ...prev, open: false };
     });
   }, []);
 
@@ -69,16 +70,6 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
 
     void loadForm();
   }, [cleanupPreview, loadForm, open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !previewState.open) onClose();
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [onClose, open, previewState.open]);
 
   const updateField = <K extends keyof Form500Fields>(field: K, value: Form500Fields[K]) => {
     setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
@@ -154,17 +145,14 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
     }
   };
 
-  if (!open) return null;
-
-  return createPortal(
+  return (
     <>
-      <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
-      <div className="fixed inset-0 z-[61] flex items-center justify-center p-4">
-        <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+        <DialogContent aria-label="Form 500" className="dialog-wide dialog-center-mobile flex h-[90dvh] max-w-6xl flex-col overflow-hidden! p-0!">
           <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:py-5">
             <div className="min-w-0">
-              <h2 className="text-2xl font-semibold text-gray-900">Form 500</h2>
-              <p className="mt-1 text-sm text-gray-500">
+              <DialogTitle className="text-2xl font-semibold text-neutral-950">Form 500</DialogTitle>
+              <p className="mt-1 text-sm text-neutral-500">
                 Save the official Guam deposit form to this pay period, preview it in-app, and reprint it later.
               </p>
               {payPeriodLabel ? <p className="mt-2 text-sm font-medium text-primary-700">{payPeriodLabel}</p> : null}
@@ -183,7 +171,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4 sm:px-6 sm:py-6">
+          <div className="flex-1 overflow-y-auto bg-neutral-50 px-4 py-4 sm:px-6 sm:py-6">
             {error ? (
               <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
             ) : null}
@@ -254,8 +242,8 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
                 </section>
 
                 <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-                  <p className="text-sm font-semibold text-gray-900">Tax Type</p>
-                  <p className="mt-1 text-sm text-gray-500">Choose the filing type that matches this deposit.</p>
+                  <p className="text-sm font-semibold text-neutral-900">Tax Type</p>
+                  <p className="mt-1 text-sm text-neutral-500">Choose the filing type that matches this deposit.</p>
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <CheckboxField
                       label="Income tax withholding on wages"
@@ -296,7 +284,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
                 <Download className="mr-2 h-4 w-4" />
                 Download PDF
               </Button>
-              <Button variant="outline" onClick={openPdfPreview} disabled={loading || saving || !form}>
+              <Button variant="outline" onClick={(event) => { previewTriggerRef.current = event.currentTarget; void openPdfPreview(); }} disabled={loading || saving || !form}>
                 <Eye className="mr-2 h-4 w-4" />
                 Preview PDF
               </Button>
@@ -306,26 +294,26 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
               </Button>
             </div>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <PdfPreviewOverlay
         open={previewState.open}
         title={previewState.title}
         pdfUrl={previewState.pdfUrl}
         onClose={cleanupPreview}
+        returnFocusRef={previewTriggerRef}
         onDownload={handlePreviewDownload}
         onPrint={handlePreviewPrint}
       />
-    </>,
-    document.body
+    </>
   );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
+      <span className="mb-1 block text-sm font-medium text-neutral-700">{label}</span>
       {children}
     </label>
   );
@@ -341,7 +329,7 @@ function CheckboxField({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-xl border border-neutral-200 px-4 py-3 text-sm text-gray-700">
+    <label className="flex items-start gap-3 rounded-xl border border-neutral-200 px-4 py-3 text-sm text-neutral-700">
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" />
       <span>{label}</span>
     </label>
@@ -355,6 +343,7 @@ function PdfPreviewOverlay({
   onClose,
   onDownload,
   onPrint,
+  returnFocusRef,
 }: {
   open: boolean;
   title: string;
@@ -362,23 +351,12 @@ function PdfPreviewOverlay({
   onClose: () => void;
   onDownload: () => void;
   onPrint: () => void;
+  returnFocusRef: React.RefObject<HTMLElement | null>;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleEsc);
-    return () => document.removeEventListener('keydown', handleEsc);
-  }, [onClose, open]);
-
-  if (!open) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[70] flex flex-col">
-      <div className="fixed inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative z-[71] m-3 flex h-full flex-col sm:m-6">
-        <div className="flex items-center justify-between rounded-t-lg bg-gray-900 px-4 py-3 text-white">
+  return (
+    <Dialog returnFocusRef={returnFocusRef} open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent aria-label={title} className="dialog-wide dialog-center-mobile flex h-[90dvh] flex-col overflow-hidden! p-0!">
+        <div className="flex items-center justify-between rounded-t-lg bg-neutral-900 px-4 py-3 text-white">
           <h3 className="mr-4 truncate text-sm font-semibold sm:text-base">{title}</h3>
           <div className="flex items-center gap-2">
             <button
@@ -405,21 +383,20 @@ function PdfPreviewOverlay({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden rounded-b-lg bg-gray-200">
+        <div className="min-h-0 flex-1 overflow-hidden rounded-b-lg bg-neutral-200">
           {pdfUrl ? (
             <iframe src={pdfUrl} title={title} className="h-full w-full border-0 bg-white" />
           ) : (
             <div className="flex h-full items-center justify-center">
-              <div className="text-center text-gray-500">
+              <div className="text-center text-neutral-700">
                 <Loader2 className="mx-auto h-7 w-7 animate-spin" />
                 <p className="mt-3 text-sm font-medium">Generating Form 500 PDF…</p>
               </div>
             </div>
           )}
         </div>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
 

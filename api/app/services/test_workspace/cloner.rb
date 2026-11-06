@@ -72,7 +72,7 @@ module TestWorkspace
 
     def copy_baseline_period!(source, maps)
       target = create_period!(source, maps)
-      source.payroll_items.not_voided.order(:id).each do |source_item|
+      source.payroll_items.financially_reportable.order(:id).each do |source_item|
         target_item = copy_record!(
           source_item,
           company: company,
@@ -153,7 +153,7 @@ module TestWorkspace
         employees: [ source_company.employees.count, company.employees.count ],
         payrolls: [ source_periods.count, company.pay_periods.where(test_workspace_role: "baseline").count ],
         payroll_items: [
-          source_periods.sum { |period| period.payroll_items.not_voided.count },
+          source_periods.sum { |period| period.payroll_items.financially_reportable.count },
           company.pay_periods.where(test_workspace_role: "baseline").joins(:payroll_items).count
         ]
       }

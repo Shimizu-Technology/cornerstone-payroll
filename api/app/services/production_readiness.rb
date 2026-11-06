@@ -26,7 +26,8 @@ class ProductionReadiness
   class Report
     attr_reader :checks, :generated_at, :revision
 
-    def initialize(checks:, generated_at: Time.current, revision: ENV.fetch("RENDER_GIT_COMMIT", ENV.fetch("GIT_COMMIT", "unknown")))
+    def initialize(checks:, connected_payroll: ConnectedPayrollMode.capability, generated_at: Time.current, revision: ENV.fetch("RENDER_GIT_COMMIT", ENV.fetch("GIT_COMMIT", "unknown")))
+      @connected_payroll = connected_payroll
       @checks = checks
       @generated_at = generated_at
       @revision = revision
@@ -45,7 +46,8 @@ class ProductionReadiness
         generated_at: generated_at.iso8601,
         revision: revision,
         passed: passed?,
-        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } }
+        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } },
+        connected_payroll: @connected_payroll
       }
     end
   end
@@ -67,6 +69,7 @@ class ProductionReadiness
     encryption_credentials: Rails.application.credentials,
     encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
     tax_configuration_valid: -> { AnnualTaxConfig.official_2026_configuration? },
+    tax_year_readiness: -> { TaxYearReadiness.new.as_json },
     http_get: nil
   )
     @env = env
@@ -85,13 +88,16 @@ class ProductionReadiness
     @encryption_credentials = encryption_credentials
     @encrypted_data_probe = encrypted_data_probe
     @tax_configuration_valid = tax_configuration_valid
+    @tax_year_readiness = tax_year_readiness
     @http_get = http_get || method(:default_http_get)
   end
 
   def run(live: environment.production?)
+    return StagingReadiness.new(env: env).run(live: live) if StagingOutboundPolicy.staging?(env)
+
     checks = configuration_checks
     checks.concat(live_dependency_checks) if live
-    Report.new(checks: checks)
+    Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: env, environment: environment))
   end
 
   private
@@ -128,7 +134,9 @@ class ProductionReadiness
         )
       end,
       check("official 2026 payroll tax and withholding configuration is loaded") { tax_configuration_valid.call }
-    ]
+    ] + @tax_year_readiness.call.fetch(:warnings).map do |warning|
+      Check.new(name: "#{warning.fetch(:tax_year)} payroll tax tables are verified", passed: false, detail: warning.fetch(:message))
+    end
   end
 
   def live_dependency_checks
@@ -251,7 +259,7 @@ class ProductionReadiness
 
   def r2_round_trip
     storage = storage_factory.call
-    key = "production-readiness/#{SecureRandom.uuid}.txt"
+    key = StagingStoragePolicy.new_key("production-readiness/#{SecureRandom.uuid}.txt")
     payload = "cornerstone-payroll-readiness-#{SecureRandom.hex(24)}"
 
     storage.upload(key, StringIO.new(payload), content_type: "text/plain")

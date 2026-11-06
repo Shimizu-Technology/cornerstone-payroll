@@ -1,0 +1,451 @@
+# frozen_string_literal: true
+
+module TimeTracking
+  # This approves accounting coverage only. It has no write or payment API.
+  class HistoryDispositionVerifier
+    TYPES = %w[accountant_attributed_paid_category historical_baseline paid_under_prior_daily_weekly_ot_policy historical_baseline_pending_overtime legacy_frozen_batch_baseline pending_review pending_overtime owed not_payable no_payable_hours payment_evidence_pending].freeze
+    LABELS = {
+      "accountant_attributed_paid_category" => "Accountant-attributed categories in committed manual payroll; source and payment unchanged",
+      "historical_baseline" => "Already represented in manual payroll; delivery not asserted",
+      "paid_under_prior_daily_weekly_ot_policy" => "Represented under the prior daily8/weekly40 policy; source approval and payment delivery unchanged",
+      "historical_baseline_pending_overtime" => "Represented regular hours plus exact frozen overtime hold; overtime approval and payment unchanged",
+      "legacy_frozen_batch_baseline" => "Legacy frozen representation; lower-strength unchanged-source evidence; approval and delivery unchanged",
+      "pending_overtime" => "Frozen unpaid overtime awaiting approval; no payment asserted",
+      "pending_review" => "Pending accounting review; approval unchanged",
+      "owed" => "Genuinely owed; explicit routing still required",
+      "not_payable" => "Denied; remains not payable",
+      "no_payable_hours" => "Zero payable hours",
+      "payment_evidence_pending" => "Reported payment held pending exact evidence"
+    }.freeze
+    SOURCE_FIELDS = %w[version work_date hours source_user_uuid employee category state history_evidence].freeze
+
+    def initialize(source:, company:, actor:, client:, rounding_acknowledgements: [], component_bindings: [], employee_mappings: nil, batch_cache: nil)
+      @source, @company, @actor, @client = source, company, actor, client
+      @batches = {}
+      @rounding_acknowledgements, @component_bindings = rounding_acknowledgements, component_bindings
+      @employee_mappings = employee_mappings
+      @batch_cache = batch_cache
+    end
+
+    def refresh_runs!(run_ids: nil)
+      # One fresh local read per coverage pass, including the completion lock.
+      # Do not perform a company/run query for each of thousands of lines.
+      runs = @company.pay_periods.where(status: "committed")
+      runs = runs.where(id: run_ids) unless run_ids.nil?
+      @runs = runs.index_by { |run| run.id.to_s }
+      @employees = (@employee_mappings || @source.time_tracking_employee_mappings.where(company: @company)).index_by(&:source_user_uuid)
+      @run_items = PayrollItem.where(company: @company, pay_period_id: @runs.values.map(&:id))
+        .includes(:payroll_item_earnings, :pay_period).order(:id).to_a.group_by { |item| item.pay_period_id.to_s }
+      @run_checksums = @run_items.to_h do |id, items|
+        [ id, CanonicalPayload.checksum({ "run" => @runs.fetch(id).attributes,
+          "items" => items.map { |item| { "item" => item.attributes, "earnings" => item.payroll_item_earnings.sort_by(&:id).map(&:attributes) } } }) ]
+      end
+      @rounding_review = HistoricalRoundingReview.new(source: @source, actor: @actor,
+        acknowledgements: @rounding_acknowledgements, component_bindings: @component_bindings)
+      @batches = (@batch_cache || {}).reject { |_, payload| payload.dig("export", "prior_overtime_policy").present? }
+      @unavailable_batches = {}
+      @source_inventory_checksums = nil
+      @category_attribution = AccountantPaidCategoryAttribution.new(source: @source, actor: @actor)
+    end
+
+    def discover_rounding_variances!(inventory)
+      run_ids = inventory.flat_map do |row|
+        Array(row.dig("history_evidence", "baseline_lines")).filter_map { |line| line.dig("processing", "external_pay_period_id") }
+      end.uniq
+      refresh_runs!(run_ids: run_ids)
+      @prior_policy_review = PriorOvertimePolicyReview.new(source: @source, inventory: inventory.index_by { |row| row.fetch("id") },
+        runs: @runs, batch_loader: method(:batch), legacy_verifier: method(:legacy_frozen_verified?))
+      @source_inventory_checksums = inventory.group_by { |row| row.fetch("source_user_uuid") }.transform_values do |rows|
+        CanonicalPayload.checksum(rows.sort_by { |row| row.fetch("id").to_s }.map { |row| row.slice("id", *SOURCE_FIELDS) })
+      end
+      inventory.each do |row|
+        lines = row.dig("history_evidence", "baseline_lines")
+        next if lines.blank?
+
+        next if accountant_category_attributions(row).any?
+
+        legacy = lines.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        prior = prior_policy_review_evidence(row).any?
+        unless baseline_verified?(lines, row, legacy_frozen: legacy, discover: true, prior_policy: prior) || overtime_hold_verified?(row, discover: true)
+          @rounding_review.blockers << { "source_time_entry_id" => row.fetch("id"), "reason" => "Baseline evidence or earning component requires review" }
+        end
+      end
+      rounding_variances
+    end
+
+    def rounding_variances
+      @rounding_review&.table || []
+    end
+
+    def rounding_review_blockers
+      @rounding_review&.blockers&.uniq || []
+    end
+
+    def rounding_acknowledgements_valid?
+      return false if @unavailable_batches&.any?
+
+      @rounding_review&.acknowledgements_valid? || (@rounding_acknowledgements == [] && @component_bindings == [])
+    end
+
+    def accountant_category_attributions(current)
+      Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
+        line = current.fetch("history_evidence").fetch("baseline_lines").find { |candidate| candidate.fetch("batch_id") == id }
+        next unless line.dig("processing", "status") == "committed" && line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+        run_id = line.dig("processing", "external_pay_period_id").to_s
+        mapping = @employees && @employees[current.fetch("source_user_uuid")]
+        next unless mapping && @runs[run_id] && mapping.source_user_id == current.dig("employee", "id")
+        payload = review_batch(id, current)
+        next unless payload
+
+        employee = payload.fetch("employees").find { |row| row["source_user_id"] == mapping.source_user_id }
+        next unless employee
+        @category_attribution.call(batch: payload, run: @runs.fetch(run_id), mapping: mapping, employee: employee,
+          items: Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id },
+          run_checksum: @run_checksums.fetch(run_id), inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")))
+      end
+    end
+
+    def prior_policy_review_evidence(current)
+      Array(current.dig("history_evidence", "baseline_lines")).map { |line| line.fetch("batch_id") }.uniq.filter_map do |id|
+        line = current.fetch("history_evidence").fetch("baseline_lines").find { |row| row.fetch("batch_id") == id }
+        next unless line.dig("processing", "status") == "committed" && line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+
+        payload = review_batch(id, current)
+        next unless payload
+
+        employee = payload.fetch("employees").find { |row| row["source_user_id"] == current.dig("employee", "id") }
+        run_id = line.dig("processing", "external_pay_period_id").to_s
+        mapping = @employees && @employees[current.fetch("source_user_uuid")]
+        next unless employee && mapping && @runs[run_id] && line.dig("processing", "status") == "committed" &&
+          line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+
+        review = @prior_policy_review&.call(batch: payload, employee: employee)
+        next unless review
+
+        items = Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id }
+        next unless prior_paid_split_matches?(review.fetch(:employee), items)
+
+        review.fetch(:evidence).merge("run_id" => @runs.fetch(run_id).id, "employee_id" => mapping.employee_id,
+          "baseline_evidence_class" => line["legacy_frozen_evidence"].present? ? "legacy_frozen_batch_baseline" : "historical_baseline",
+          "paid_split" => { "regular_hours" => items.sum { |item| decimal(item.hours_worked) }.to_s("F"),
+            "overtime_hours" => items.sum { |item| decimal(item.overtime_hours) }.to_s("F") })
+      end
+    end
+
+    # Select this evidence class only when the committed employee REG/OT split
+    # actually supports it. A failed candidate must not pollute discovery for a
+    # truthful original frozen baseline with stale policy variances.
+    def prior_paid_split_matches?(employee, items)
+      return false if items.empty? || items.any? { |item| !item.payroll_included? }
+
+      lines = employee.fetch("adjustments")
+      source_regular = lines.sum { |line| decimal(line.fetch("regular_hours")) }
+      source_overtime = lines.sum { |line| decimal(line.fetch("overtime_hours")) }
+      paid_regular = items.sum { |item| decimal(item.hours_worked) }
+      paid_overtime = items.sum { |item| decimal(item.overtime_hours) }
+      source_regular + source_overtime == paid_regular + paid_overtime &&
+        (paid_regular - source_regular).abs <= HistoricalRoundingReview::LIMIT &&
+        (paid_overtime - source_overtime).abs <= HistoricalRoundingReview::LIMIT
+    end
+
+    def verified?(disposition, current)
+      return false unless disposition.is_a?(Hash) && TYPES.include?(disposition["disposition"]) &&
+        disposition["actor_id"] == @actor.id && disposition["reason"].is_a?(String) &&
+        disposition["reason"].strip.length.between?(10, 2_000) && disposition["evidence"].is_a?(String) &&
+        disposition["evidence"].strip.length.between?(10, 2_000) && current["source_user_uuid"].present? &&
+        disposition["source_instance_id"] == @source.expected_source_instance_id &&
+        disposition["source_time_entry_id"] == current.fetch("id") &&
+        disposition["source_time_entry_version"] == current.fetch("version") &&
+        disposition["source_user_uuid"] == current.fetch("source_user_uuid") &&
+        disposition["source"] == current.slice(*SOURCE_FIELDS) &&
+        current.key?("work_date") && current.key?("category") &&
+        current["state"].is_a?(Hash) && current["state"].key?("approval_status")
+
+      evidence = current.fetch("history_evidence")
+      return false unless evidence.fetch("payable_content_checksum").match?(/\A[0-9a-f]{64}\z/) &&
+        evidence["baseline_lines"].is_a?(Array) && evidence["active_manual_allocation_ids"].is_a?(Array) &&
+        evidence["active_cases"].is_a?(Array)
+
+      baseline = evidence.fetch("baseline_lines")
+      unallocated = evidence.fetch("active_manual_allocation_ids").empty? && evidence["payment_attestation"].nil?
+      unheld = evidence.fetch("active_cases").none? { |record| record["status"].in?(%w[open scheduled]) }
+      pending = current.dig("state", "approval_status").in?([ nil, "pending" ])
+      case disposition.fetch("disposition")
+      when "accountant_attributed_paid_category"
+        expected = accountant_category_attributions(current)
+        legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        unallocated && !pending && expected.any? && disposition["attributed_categories"] == expected &&
+          baseline_verified?(baseline, current, legacy_frozen: legacy, category_attribution: true)
+      when "paid_under_prior_daily_weekly_ot_policy"
+        legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+        expected = prior_policy_review_evidence(current)
+        unallocated && (!pending || legacy) && expected.any? && disposition["prior_overtime_policy"] == expected &&
+          baseline_verified?(baseline, current, legacy_frozen: legacy, prior_policy: true)
+      when "historical_baseline"
+        unallocated && !pending && baseline_verified?(baseline, current)
+      when "historical_baseline_pending_overtime"
+        attributed = accountant_category_attributions(current)
+        unallocated && unheld && baseline.any? && (attributed.empty? || disposition["attributed_categories"] == attributed) && overtime_hold_verified?(current)
+      when "legacy_frozen_batch_baseline"
+        unallocated && baseline_verified?(baseline, current, legacy_frozen: true)
+      when "pending_overtime"
+        unallocated && unheld && baseline.empty? && overtime_hold_verified?(current)
+      when "pending_review"
+        return false unless unallocated && unheld && pending
+
+        prior = prior_policy_review_evidence(current) if baseline.any?
+        represented = if baseline.empty?
+          true
+        elsif prior.present? && disposition["prior_overtime_policy"] == prior
+          legacy = baseline.all? { |line| line["payable_content_checksum"].blank? && line["legacy_frozen_evidence"].present? }
+          baseline_verified?(baseline, current, legacy_frozen: legacy, prior_policy: true)
+        else
+          baseline_verified?(baseline, current)
+        end
+        represented
+      when "owed"
+        unallocated && evidence["pending_overtime"].nil? && baseline.empty? && decimal(current.fetch("hours")).positive? &&
+          current.dig("state", "status") == "completed" && current.dig("state", "approval_status") == "approved" &&
+          current.dig("lifecycle", "status") == "ready_for_cutoff" &&
+          evidence.fetch("active_cases").one? && evidence.fetch("active_cases").all? do |record|
+            record["version"] == current.fetch("version") && record["source_user_uuid"] == current.fetch("source_user_uuid") &&
+              record["status"].in?(%w[open scheduled]) && decimal(record.fetch("held_total_hours")) == decimal(current.fetch("hours"))
+          end
+      when "not_payable"
+        unallocated && unheld && baseline.empty? && current.dig("state", "approval_status") == "denied" &&
+          current.dig("lifecycle", "status") == "not_payable"
+      when "no_payable_hours"
+        unallocated && unheld && baseline.empty? && decimal(current.fetch("hours")).zero?
+      when "payment_evidence_pending"
+        report = evidence["payment_attestation"]
+        baseline.empty? && evidence.fetch("active_manual_allocation_ids").empty? && report.is_a?(Hash) &&
+          report["source_changed"] == false && report["id"].present? &&
+          decimal(report.fetch("hours")) == decimal(current.fetch("hours")) &&
+          current.dig("lifecycle", "status") == "payment_attested_pending_evidence"
+      end
+    rescue KeyError, ArgumentError, TypeError, NoMethodError
+      false
+    end
+
+    private
+
+    def baseline_verified?(lines, current, legacy_frozen: false, discover: false, covered_hours: nil, allow_overtime_hold: false, prior_policy: false, category_attribution: false)
+      refresh_runs! unless @runs
+      # A multi-day source may be represented across adjacent batches. Each
+      # line still verifies against its own batch, run and employee balance.
+      return false if lines.empty?
+      return false unless lines.map { |line| line.fetch("line_key") }.uniq.length == lines.length
+      return false unless lines.sum { |line| decimal(line.fetch("total_hours")) } == decimal(covered_hours || current.fetch("hours"))
+      return false unless segments_represented?(lines, current, partial: allow_overtime_hold) && lines.all? { |line| line_inside_batch?(line) }
+
+      lines.all? do |line|
+        processing = line.fetch("processing")
+        run_id = processing.fetch("external_pay_period_id").to_s
+        run = @runs ? @runs[run_id] : @company.pay_periods.find_by(id: run_id)
+        next false unless run&.committed? && processing["status"] == "committed" &&
+          processing["external_system"] == "cornerstone_payroll_manual" && line["processing_conflict"] == false &&
+          (legacy_frozen ? legacy_frozen_verified?(line, current) : line["current_content_matches"] == true) &&
+          line["source_user_uuid"] == current.fetch("source_user_uuid") &&
+          line["source_time_entry_id"] == current.fetch("id") &&
+          run.start_date.iso8601 == line.fetch("batch_start_date") && run.end_date.iso8601 == line.fetch("batch_end_date") &&
+          decimal(line.fetch("regular_hours")) + decimal(line.fetch("overtime_hours")) == decimal(line.fetch("total_hours"))
+
+        payload = review_batch(line.fetch("batch_id"), current)
+        next false unless payload && payload.dig("export", "checksum") == line.fetch("batch_checksum") &&
+          payload.fetch("start_date") == line.fetch("batch_start_date") && payload.fetch("end_date") == line.fetch("batch_end_date")
+        unless allow_overtime_hold
+          next false if Array(payload["exclusions"]).any? do |exclusion|
+            exclusion["source_time_entry_id"] == current.fetch("id") && decimal(exclusion.fetch("held_total_hours")).positive?
+          end
+        end
+        if legacy_frozen
+          next false unless Time.iso8601(payload.fetch("export").fetch("finalized_at_precise")) ==
+            Time.iso8601(line.fetch("legacy_frozen_evidence").fetch("batch_finalized_at"))
+        end
+        source_employee = payload.fetch("employees").find do |row|
+          if line["identity_basis"] == "reviewed_legacy_owner"
+            row["source_user_uuid"].blank? && row["source_user_id"] == line.fetch("source_user_id") &&
+              current.dig("employee", "id") == line.fetch("source_user_id")
+          else
+            row["source_user_uuid"] == current.fetch("source_user_uuid")
+          end
+        end
+        mapping = @employees[current.fetch("source_user_uuid")]
+        next false unless source_employee && mapping && mapping.source_user_id == current.dig("employee", "id")
+        frozen_lines = source_employee.fetch("adjustments")
+        frozen = frozen_lines.find do |row|
+          row["source_time_entry_id"] == current.fetch("id") && row["line_key"] == line.fetch("line_key")
+        end
+        exact_line = frozen && frozen["source_time_entry_version"] == line.fetch("source_time_entry_version") &&
+          frozen["original_work_date"] == line.fetch("work_date") && frozen["category"] == line.fetch("category") &&
+          frozen["source_kind"] == line.fetch("source_kind") &&
+          %w[total_hours regular_hours overtime_hours].all? { |key| decimal(frozen.fetch(key)) == decimal(line.fetch(key)) }
+        next false unless exact_line
+
+        policy = prior_policy && @prior_policy_review&.call(batch: payload, employee: source_employee)
+        next false if prior_policy && !policy
+
+        if category_attribution || (allow_overtime_hold && accountant_category_attributions(current).any?)
+          next accountant_category_attributions(current).any? { |record| record["batch_id"] == payload.fetch("batch_id") }
+        end
+
+        @rounding_review.verify!(batch: payload, run: run, mapping: mapping, source_employee: policy ? policy.fetch(:employee) : source_employee,
+          policy_evidence: policy ? policy.fetch(:evidence) : nil,
+          items: Array(@run_items[run_id]).select { |item| item.employee_id == mapping.employee_id },
+          run_checksum: @run_checksums.fetch(run_id),
+          source_inventory_checksum: @source_inventory_checksums&.fetch(current.fetch("source_user_uuid")) ||
+            CanonicalPayload.checksum([ current.slice("id", *SOURCE_FIELDS) ]), discover: discover)
+      end
+    end
+
+    # AIRE splits overnight work into payable segments at Guam midnight, so a
+    # later segment carries the next day's date. Each represented line must
+    # equal one current segment, or not exceed it beside a frozen overtime hold.
+    def segments_represented?(lines, current, partial:)
+      segments = current.fetch("history_evidence")["payable_segments"]
+      return false unless segments.is_a?(Array) && segments.any? && segments.all?(Hash)
+
+      hours = segments.to_h { |segment| [ Date.iso8601(segment.fetch("work_date")).iso8601, decimal(segment.fetch("total_hours")) ] }
+      return false unless hours.length == segments.length && hours.values.sum == decimal(current.fetch("hours"))
+
+      dates = lines.map { |line| line.fetch("work_date") }
+      return false unless dates.uniq.length == dates.length
+
+      lines.all? do |line|
+        segment = hours[line.fetch("work_date")]
+        represented = decimal(line.fetch("total_hours"))
+        segment && (partial ? represented <= segment : represented == segment)
+      end
+    rescue KeyError, ArgumentError, TypeError, NoMethodError
+      false
+    end
+
+    # Mirrors the batch payload rule: current work falls inside its batch, and
+    # carried or corrected work may be earlier but never later.
+    def line_inside_batch?(line)
+      date = Date.iso8601(line.fetch("work_date"))
+      return false if date > Date.iso8601(line.fetch("batch_end_date"))
+
+      line.fetch("source_kind") != "current" || date >= Date.iso8601(line.fetch("batch_start_date"))
+    rescue KeyError, ArgumentError, TypeError
+      false
+    end
+
+    def overtime_hold_verified?(current, discover: false)
+      return false unless current.dig("state", "status") == "completed" &&
+        current.dig("state", "approval_status") == "approved" &&
+        current.dig("state", "overtime_status").in?([ nil, "none", "pending" ])
+
+      lines = current.fetch("history_evidence").fetch("baseline_lines")
+      return full_overtime_hold_verified?(current) if lines.empty?
+      return false if lines.map { |line| line.fetch("batch_id") }.uniq.length != 1
+      return false unless lines.all? do |line|
+        decimal(line.fetch("overtime_hours")).zero? && line.dig("processing", "status") == "committed" &&
+          line.dig("processing", "external_system") == "cornerstone_payroll_manual"
+      end
+
+      payload = review_batch(lines.first.fetch("batch_id"), current)
+      return false unless payload
+      exclusions = Array(payload["exclusions"]).select { |row| row["source_time_entry_id"] == current.fetch("id") }
+      return false unless exclusions.one?
+
+      hold = exclusions.sole
+      held = decimal(hold.fetch("held_total_hours"))
+      represented = lines.sum { |line| decimal(line.fetch("total_hours")) }
+      exact_hold = hold["reason"] == "pending_overtime" && hold["allocation_review_reason"].nil? &&
+        hold["source_user_uuid"] == current.fetch("source_user_uuid") &&
+        hold["source_user_id"] == current.dig("employee", "id") && hold["original_work_date"] == current.fetch("work_date") &&
+        hold["category"] == lines.first.fetch("category") && decimal(hold.fetch("held_regular_hours")).zero? &&
+        held.positive? && decimal(hold.fetch("held_overtime_hours")) == held && represented.positive? &&
+        represented + held == decimal(current.fetch("hours"))
+      exact_hold && baseline_verified?(lines, current, discover: discover, covered_hours: represented, allow_overtime_hold: true)
+    end
+
+    def full_overtime_hold_verified?(current)
+      proof = current.fetch("history_evidence").fetch("pending_overtime")
+      return false unless proof.is_a?(Hash) && proof["kind"] == "pending_overtime" &&
+        proof["source_time_entry_version"] == current.fetch("version") &&
+        proof["payable_content_checksum"] == current.dig("history_evidence", "payable_content_checksum") &&
+        decimal(proof.fetch("represented_regular_hours")).zero?
+
+      payload = review_batch(proof.fetch("batch_id"), current)
+      return false unless payload && payload.dig("export", "checksum") == proof.fetch("batch_checksum")
+      return false if payload.fetch("employees").any? do |employee|
+        employee.fetch("adjustments").any? { |line| line["source_time_entry_id"] == current.fetch("id") }
+      end
+      exclusions = payload.fetch("exclusions").select { |row| row["source_time_entry_id"] == current.fetch("id") }
+      return false unless exclusions.one?
+
+      hold = exclusions.sole
+      hold.except("display_name", "email") == proof.fetch("frozen_exclusion") &&
+        hold["reason"] == "pending_overtime" && hold["allocation_review_reason"].nil? &&
+        hold["source_user_id"] == current.dig("employee", "id") && hold["source_user_uuid"] == current.fetch("source_user_uuid") &&
+        hold["original_work_date"] == current.fetch("work_date") &&
+        %w[id key name].all? { |key| hold.dig("category", key).to_s == current.dig("category", key).to_s } &&
+        decimal(hold.fetch("held_regular_hours")).zero? && decimal(hold.fetch("held_total_hours")).positive? &&
+        decimal(hold.fetch("held_total_hours")) == decimal(current.fetch("hours")) &&
+        decimal(hold.fetch("held_overtime_hours")) == decimal(current.fetch("hours"))
+    end
+
+    def legacy_frozen_verified?(line, current)
+      proof = line.fetch("legacy_frozen_evidence")
+      finalized = Time.iso8601(proof.fetch("batch_finalized_at"))
+      finalized <= Time.current && proof["kind"] == "legacy_frozen_batch_baseline" &&
+        proof["evidence_strength"] == "retained_snapshot_and_unchanged_source" &&
+        proof["eligible"] == true && proof["blockers"] == [] && proof["payload_checksum_verified"] == true &&
+        proof["source_user_id"] == current.dig("employee", "id") && proof["source_user_uuid"] == current.fetch("source_user_uuid") &&
+        proof["source_version"] == current.fetch("version") && proof["later_edit_audit_count"] == 0 &&
+        Time.iso8601(proof.fetch("source_created_at")) <= finalized && Time.iso8601(proof.fetch("source_updated_at")) <= finalized &&
+        (%w[user_id work_date hours time_category] - proof.fetch("retained_snapshot_fields")).empty? &&
+        %w[source_observation_checksum revision_observation_checksum].all? { |key| proof.fetch(key).match?(/\A[0-9a-f]{64}\z/) } &&
+        line.fetch("snapshot_checksum").match?(/\A[0-9a-f]{64}\z/)
+    end
+
+    # Missing or invalid authenticated exports are blockers, never an empty
+    # baseline or permission to reuse a receipt. Retry only on a fresh pass.
+    def review_batch(id, current)
+      return unavailable_batch(id, current) if @unavailable_batches&.key?(id)
+
+      batch(id)
+    rescue Client::Error, PayrollBatchPayloadValidator::Error, KeyError, ArgumentError, TypeError, NoMethodError
+      @unavailable_batches ||= {}
+      @unavailable_batches[id] = true
+      unavailable_batch(id, current)
+    end
+
+    def unavailable_batch(id, current)
+      @rounding_review&.blockers&.push({ "source_time_entry_id" => current.fetch("id"), "batch_id" => id,
+        "reason" => "Authenticated historical batch is unavailable or invalid; refresh before approving" })
+      nil
+    end
+
+    def batch(id)
+      raise ArgumentError, "Authenticated historical batch is unavailable or invalid" if @unavailable_batches&.key?(id)
+
+      @batches[id] ||= begin
+        payload = @client.payroll_batch(batch_id: id)
+        PayrollBatchPayloadValidator.new(payload: payload, start_date: payload.fetch("start_date"),
+          end_date: payload.fetch("end_date"), allow_legacy_uncategorized: true).validate!
+        raise ArgumentError, "Historical batch ID differs" unless payload.fetch("batch_id") == id
+
+        # Policy observations include current source/settings evidence. Share
+        # only immutable batch exports between fresh verification passes.
+        @batch_cache[id] = payload if @batch_cache && payload.dig("export", "prior_overtime_policy").nil?
+        payload
+      end
+    rescue Client::Error, PayrollBatchPayloadValidator::Error, KeyError, ArgumentError, TypeError, NoMethodError
+      @unavailable_batches ||= {}
+      @unavailable_batches[id] = true
+      # The prior-policy context loader also calls this method. Normalize its
+      # failure into an invalid evidence result, retaining the blocking flag.
+      raise ArgumentError, "Authenticated historical batch is unavailable or invalid"
+    end
+
+    def decimal(value)
+      number = BigDecimal(value.to_s)
+      raise ArgumentError unless number.finite? && number >= 0
+
+      number
+    end
+  end
+end

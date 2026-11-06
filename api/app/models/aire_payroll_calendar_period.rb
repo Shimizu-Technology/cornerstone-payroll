@@ -19,6 +19,7 @@ class AirePayrollCalendarPeriod < ApplicationRecord
             format: { with: /\A[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i }
   validates :pay_period_id, uniqueness: { scope: :time_tracking_source_id }
   validate :relationships_share_company
+  validate :source_supports_calendar_publication, on: :create
   validate :immutable_identity, on: :update
 
   before_validation :assign_external_pay_period_id, on: :create
@@ -28,7 +29,7 @@ class AirePayrollCalendarPeriod < ApplicationRecord
   end
 
   def latest_delivered_publication
-    publications.where(delivery_status: "delivered").order(schedule_version: :desc).first
+    publications.where(delivery_status: "delivered").reorder(schedule_version: :desc).first
   end
 
   def latest_verified_event
@@ -48,9 +49,13 @@ class AirePayrollCalendarPeriod < ApplicationRecord
     if time_tracking_source && time_tracking_source.company_id != company_id
       errors.add(:time_tracking_source, "must belong to the same company")
     end
-    if time_tracking_source && time_tracking_source.source_type != "aire_services"
-      errors.add(:time_tracking_source, "must be an AIRE Services source")
-    end
+  end
+
+  def source_supports_calendar_publication
+    return unless time_tracking_source
+    return if time_tracking_source.supports?(:payroll_calendar_v2)
+
+    errors.add(:time_tracking_source, "must support payroll calendar publication")
   end
 
   def immutable_identity

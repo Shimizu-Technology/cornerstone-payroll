@@ -1,0 +1,117 @@
+{
+  "fixture_only": true,
+  "endpoint": "POST /api/v1/payroll/batches/:public_id/obligation_events",
+  "request": {
+    "event_id": "40000000-0000-4000-8000-000000000001",
+    "status": "committed",
+    "occurred_at": "2026-10-02T09:00:00.000000Z",
+    "external_system": "cornerstone_payroll",
+    "external_pay_period_id": "3",
+    "external_payroll_item_id": "2",
+    "contract_version": "2.0",
+    "source_time_entry_id": "1",
+    "source_user_uuid": "50000000-0000-4000-8000-000000000001",
+    "source_line_key": "fixture-line-1",
+    "source_kind": "current",
+    "total_hours": "4.0",
+    "regular_hours": "4.0",
+    "overtime_hours": "0.0",
+    "metadata": {},
+    "obligation_correction": {
+      "contract": "payroll_obligation_correction_v1",
+      "command_id": "10000000-0000-4000-8000-000000000001",
+      "source_instance_id": "20000000-0000-4000-8000-000000000001",
+      "batch_checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_work_date": "2026-10-01",
+      "source_time_entry_version": 0,
+      "predecessor": {
+        "external_pay_period_id": "2",
+        "external_payroll_item_id": "1",
+        "payment_voided_event_id": "30000000-0000-4000-8000-000000000001"
+      },
+      "successor": {
+        "external_pay_period_id": "3",
+        "external_payroll_item_id": "2"
+      },
+      "financial_assertion": {
+        "version": 1,
+        "kind": "whole_payroll_void_and_corrective_commit",
+        "root_pay_period_id": "2",
+        "voided_pay_period_id": "2",
+        "successor_pay_period_id": "3",
+        "predecessor_payroll_item_id": "1",
+        "successor_payroll_item_id": "2",
+        "void_event_id": "11",
+        "correction_created_event_id": "12",
+        "successor_committed_event_id": "13",
+        "reversal_posting_ids": [
+          "21"
+        ]
+      }
+    }
+  },
+  "response": {
+    "entry_processing": {
+      "event_id": "40000000-0000-4000-8000-000000000001",
+      "status": "committed",
+      "occurred_at": "2026-10-02T09:00:00.000000Z",
+      "external_system": "cornerstone_payroll",
+      "external_pay_period_id": "3",
+      "external_payroll_item_id": "2",
+      "contract_version": "2.0",
+      "source_time_entry_id": "1",
+      "source_user_uuid": "50000000-0000-4000-8000-000000000001",
+      "source_line_key": "fixture-line-1",
+      "source_kind": "current",
+      "total_hours": "4.0",
+      "regular_hours": "4.0",
+      "overtime_hours": "0.0",
+      "metadata": {}
+    },
+    "obligation_correction": {
+      "binding_id": "1",
+      "request_digest": "da6f9129aa9fc9a10bd6441602b23185121395f461283429bb0bc14400cd5ed2",
+      "command": {
+        "contract": "payroll_obligation_correction_v1",
+        "command_id": "10000000-0000-4000-8000-000000000001",
+        "source_instance_id": "20000000-0000-4000-8000-000000000001",
+        "batch_checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_work_date": "2026-10-01",
+        "source_time_entry_version": 0,
+        "predecessor": {
+          "external_pay_period_id": "2",
+          "external_payroll_item_id": "1",
+          "payment_voided_event_id": "30000000-0000-4000-8000-000000000001"
+        },
+        "successor": {
+          "external_pay_period_id": "3",
+          "external_payroll_item_id": "2"
+        },
+        "financial_assertion": {
+          "version": 1,
+          "kind": "whole_payroll_void_and_corrective_commit",
+          "root_pay_period_id": "2",
+          "voided_pay_period_id": "2",
+          "successor_pay_period_id": "3",
+          "predecessor_payroll_item_id": "1",
+          "successor_payroll_item_id": "2",
+          "void_event_id": "11",
+          "correction_created_event_id": "12",
+          "successor_committed_event_id": "13",
+          "reversal_posting_ids": [
+            "21"
+          ]
+        }
+      }
+    },
+    "integration": {
+      "protocol": "shimizu_time_payroll",
+      "protocol_version": "1.0",
+      "source_type": "aire_services",
+      "source_instance_id": "20000000-0000-4000-8000-000000000001",
+      "capabilities": [
+        "payroll_obligation_correction_v1"
+      ]
+    }
+  }
+}

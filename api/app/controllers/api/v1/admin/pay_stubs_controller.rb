@@ -4,6 +4,10 @@ module Api
   module V1
     module Admin
       class PayStubsController < BaseController
+        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
         before_action :set_payroll_item, only: [ :show, :generate, :download ]
         before_action :require_statement_activity, only: [ :generate, :download ]
 
@@ -57,7 +61,12 @@ module Api
           # Try to get from storage first
           # The delivery method can be changed for an unissued committed run.
           # A previously stored PDF may still name the old method or check.
-          if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive?
+          # Older stored statements may contain accountant-only review notes.
+          # Non-taxable statements need the reconciled payment summary too.
+          # Regenerate affected history while preserving other archived PDFs.
+          statement = PayrollStatementYtdBreakdown.new(@payroll_item)
+          if r2_configured? && @payroll_item.payment_delivery_method.blank? && @payroll_item.net_pay.to_d.positive? &&
+              statement.review_warnings.empty? && statement.other_pay.empty?
             storage = R2StorageService.new
             key = existing_storage_key(storage: storage)
             pdf_data = storage.download(key) if key.present?
@@ -87,7 +96,7 @@ module Api
           results = { success: [], errors: [] }
 
           all_items = pay_period.payroll_items
-                                .not_voided.reportable
+                                .financially_reportable.reportable
                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                                 .to_a
           eligible_items = all_items.select { |item| EarningsStatementEligibility.printable?(item) }
@@ -158,11 +167,11 @@ module Api
               return render json: { error: "One or more selected pay stubs were not found" }, status: :not_found
             end
 
-            voided_items = selected_items.select(&:voided?)
+            voided_items = selected_items.reject(&:payroll_included?)
             if voided_items.any?
               names = voided_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
               return render json: {
-                error: "Voided checks do not have printable pay stubs",
+                error: "Reversed payroll does not have printable pay stubs",
                 details: "Remove #{names} from the selection and try again."
               }, status: :unprocessable_entity
             end
@@ -191,7 +200,7 @@ module Api
 
             items = selected_items
           else
-            all_items = base_items.not_voided.reportable.to_a
+            all_items = base_items.financially_reportable.reportable.to_a
             items = all_items.select do |item|
               EarningsStatementEligibility.printable?(item) && (!deposit_only || (item.effective_payment_delivery_method == "direct_deposit" && item.net_pay.to_d.positive?))
             end
@@ -237,7 +246,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .not_voided.reportable
+                         .financially_reportable.reportable
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)
@@ -277,7 +286,7 @@ module Api
           return if EarningsStatementEligibility.printable?(@payroll_item)
 
           render json: {
-            error: @payroll_item.voided? ? "Voided payroll does not have a current earnings statement" : "This payroll record has no earnings-statement activity"
+            error: !@payroll_item.payroll_included? ? "Reversed payroll does not have a current earnings statement" : "This payroll record has no earnings-statement activity"
           }, status: :unprocessable_entity
         end
 
@@ -286,6 +295,10 @@ module Api
         end
 
         def pay_stub_key(item)
+          StagingStoragePolicy.new_key(production_pay_stub_key(item))
+        end
+
+        def production_pay_stub_key(item)
           year = item.pay_period.pay_date.year
           pay_date = item.pay_period.pay_date.strftime("%Y%m%d")
           "paystubs/#{year}/company_#{item.company_id}/employee_#{item.employee_id}/payroll_item_#{item.id}_#{pay_date}.pdf"
@@ -301,7 +314,7 @@ module Api
           return nil unless r2_configured?
 
           storage ||= R2StorageService.new
-          [ pay_stub_key(item), legacy_pay_stub_key(item) ].uniq.find do |key|
+          [ pay_stub_key(item), production_pay_stub_key(item), legacy_pay_stub_key(item) ].uniq.find do |key|
             storage.exists?(key)
           end
         rescue StandardError

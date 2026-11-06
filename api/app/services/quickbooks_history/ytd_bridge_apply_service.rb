@@ -19,6 +19,7 @@ module QuickbooksHistory
         bridge.company.lock!
         bridge.historical_import_batch.lock!
         bridge.lock!
+        @actor = ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: bridge.company_id, lock: true)
         next bridge if bridge.applied?
 
         plan = YtdBridgePlan.new(batch: bridge.historical_import_batch).call

@@ -23,7 +23,7 @@ class ScopePrinterProfilesToOrganization < ActiveRecord::Migration[8.0]
     dedupe_names_for_organization_scope!
     dedupe_defaults_for_organization_scope!
 
-    if index_exists?(:printer_profiles, [:user_id, :name], name: "index_printer_profiles_on_user_id_and_name")
+    if index_exists?(:printer_profiles, [ :user_id, :name ], name: "index_printer_profiles_on_user_id_and_name")
       remove_index :printer_profiles, name: "index_printer_profiles_on_user_id_and_name"
     end
     if index_exists?(:printer_profiles, :user_id, name: "index_printer_profiles_one_default_per_user")
@@ -34,7 +34,7 @@ class ScopePrinterProfilesToOrganization < ActiveRecord::Migration[8.0]
     end
     remove_column :printer_profiles, :user_id
 
-    add_index :printer_profiles, [:organization_id, :name], unique: true,
+    add_index :printer_profiles, [ :organization_id, :name ], unique: true,
       name: "index_printer_profiles_on_organization_id_and_name"
     add_index :printer_profiles, :organization_id, unique: true,
       where: "is_default = TRUE",
@@ -74,7 +74,7 @@ class ScopePrinterProfilesToOrganization < ActiveRecord::Migration[8.0]
     dedupe_names_for_user_scope!
     dedupe_defaults_for_user_scope!
 
-    if index_exists?(:printer_profiles, [:organization_id, :name], name: "index_printer_profiles_on_organization_id_and_name")
+    if index_exists?(:printer_profiles, [ :organization_id, :name ], name: "index_printer_profiles_on_organization_id_and_name")
       remove_index :printer_profiles, name: "index_printer_profiles_on_organization_id_and_name"
     end
     if index_exists?(:printer_profiles, :organization_id, name: "index_printer_profiles_one_default_per_organization")
@@ -85,7 +85,7 @@ class ScopePrinterProfilesToOrganization < ActiveRecord::Migration[8.0]
     end
     remove_column :printer_profiles, :organization_id
 
-    add_index :printer_profiles, [:user_id, :name], unique: true,
+    add_index :printer_profiles, [ :user_id, :name ], unique: true,
       name: "index_printer_profiles_on_user_id_and_name"
     add_index :printer_profiles, :user_id, unique: true,
       where: "is_default = TRUE",

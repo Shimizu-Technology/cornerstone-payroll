@@ -20,13 +20,22 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(response).to have_http_status(:ok)
   end
 
+  it "returns the connected payroll capability at the top level, even for a client with no sources" do
+    authenticate_as(create(:user, company: company, role: "admin"))
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    get "/api/v1/admin/time_tracking_sources"
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["time_tracking_sources"]).to eq([])
+    expect(response.parsed_body["connected_payroll"]).to include("enabled" => false, "message" => "Connected payroll is paused")
+  end
+
   it "allows accountants to read the non-secret source metadata needed by the import modal" do
     authenticate_as(create(:user, company: company, role: "accountant"))
 
     get "/api/v1/admin/time_tracking_sources"
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to eq("time_tracking_sources" => [])
+    expect(response.parsed_body).to eq("time_tracking_sources" => [], "connected_payroll" => { "mode" => "enabled", "enabled" => true, "message" => nil })
   end
 
   it "denies managers access to integration configuration" do
@@ -126,7 +135,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     expect(client).to have_received(:create_payroll_account_link_session).with(
       external_actor_id: manager.id,
       external_actor_email: "chels@example.com",
-      return_url: "https://payroll.shimizu-technology.com/time-tracking-sources?source_id=#{source.id}"
+      return_url: "https://payroll.shimizu-technology.com/app/time-account-connection?source_id=#{source.id}"
     )
   end
 
@@ -164,7 +173,7 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     post "/api/v1/admin/time_tracking_sources/#{source.id}/aire_account_link"
 
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to include("only available for AIRE Services")
+    expect(response.parsed_body.fetch("error")).to include("does not support account linking")
   end
 
   it "keeps a successful source connection result when the optional cockpit probe is unavailable" do
@@ -172,8 +181,15 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     source = create(:time_tracking_source, company: company, source_type: "aire_services")
     client = instance_double(TimeTracking::Client)
     allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    instance_id = SecureRandom.uuid
     allow(client).to receive(:time_summary).and_return(
       "source" => "aire_services",
+      "integration" => {
+        "protocol" => "shimizu_time_payroll",
+        "protocol_version" => "1.0",
+        "source_instance_id" => instance_id,
+        "capabilities" => %w[time_summary_v1 finalized_batch_v2]
+      },
       "generated_at" => Time.current.iso8601,
       "employees" => [],
       "summary" => {}
@@ -186,6 +202,18 @@ RSpec.describe "Api::V1::Admin::TimeTrackingSources", type: :request do
     post "/api/v1/admin/time_tracking_sources/#{source.id}/test_connection"
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to include("ok" => true, "cockpit_ready" => false)
+    expect(response.parsed_body).to include(
+      "ok" => true,
+      "cockpit_ready" => false,
+      "identity_verified" => true,
+      "source_instance_id" => instance_id,
+      "source_protocol" => "shimizu_time_payroll",
+      "source_capabilities" => %w[finalized_batch_v2 time_summary_v1]
+    )
+    expect(source.reload).to have_attributes(
+      expected_source_instance_id: instance_id,
+      source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0"
+    )
   end
 end

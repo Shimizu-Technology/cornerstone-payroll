@@ -9,10 +9,18 @@ class PayrollItem < ApplicationRecord
   MANUAL_ADJUSTMENTS_SOURCE = "manual"
 
   belongs_to :pay_period
+  has_one :fica_basis_proof, class_name: "PayrollItemFicaBasisProof", dependent: :restrict_with_exception
   belongs_to :employee
   belongs_to :company
   belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
+  has_one :non_employee_check_supersession, dependent: :restrict_with_error
+  belongs_to :financial_correction_origin_item, class_name: "PayrollItem", optional: true
+  has_many :time_tracking_financial_correction_links, dependent: :restrict_with_error
+
+  has_one :direct_deposit_payment_confirmation, dependent: :restrict_with_error
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
   has_many :check_events, dependent: :restrict_with_error
   has_many :check_reconciliation_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
@@ -53,6 +61,7 @@ class PayrollItem < ApplicationRecord
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validate :retained_correction_pay_basis_reconciles, on: :update
   # Hours / wage validations only apply to non-correction rows. A correction
   # row stores deltas (corrected_value - original_value), which can legitimately
   # be negative when the correction reduces hours/wages.
@@ -75,6 +84,7 @@ class PayrollItem < ApplicationRecord
   validate :direct_deposit_has_no_check_number
   validate :custom_deductions_are_valid
   validate :payroll_adjustments_are_valid
+  validate :imported_source_inputs_reconcile
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }
@@ -99,12 +109,20 @@ class PayrollItem < ApplicationRecord
   # Check-related scopes
   # ---------------------------------------------------------------------------
   scope :with_check_number,  -> { where.not(check_number: nil) }
+  # Instrument availability only. Financial readers must use financially_reportable.
   scope :not_voided,         -> { where(voided: false) }
+  scope :financially_reportable, -> {
+    where(payroll_reversed_at: nil).where(pay_period_id: PayPeriod.where.not(correction_status: "voided").or(PayPeriod.where(correction_status: nil)).select(:id))
+  }
   scope :checks_only,        -> { with_check_number.not_voided }
   scope :voided_checks,      -> { where(voided: true) }
   scope :reportable,         -> { where.not(id: PayrollItemLegacyDisposition.select(:payroll_item_id)) }
   scope :printed,            -> { where.not(check_printed_at: nil) }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
+
+  def payroll_included?
+    payroll_reversed_at.nil? && !pay_period.voided?
+  end
 
   def check_prepared?
     check_printed_at.present? || (check_prepared_at.present? && check_prepared_source_updated_at == updated_at)
@@ -113,6 +131,7 @@ class PayrollItem < ApplicationRecord
   # A verified package prepares a check without asserting that paper was printed.
   # Keep updated_at stable: the package manifest snapshots the rendering inputs.
   def mark_package_prepared!(user:, ip_address: nil)
+    ensure_financial_source_payment_ready!
     return if check_prepared_at.present? && check_prepared_source_updated_at == updated_at
 
     update_columns(check_prepared_at: Time.current, check_prepared_source_updated_at: updated_at)
@@ -128,11 +147,13 @@ class PayrollItem < ApplicationRecord
   # @param ip_address [String, nil]
   # @return [Hash] { already_printed: Boolean, event: CheckEvent }
   def mark_printed!(user:, ip_address: nil)
+    ensure_financial_source_payment_ready!
     raise ArgumentError, "Cannot mark a voided check as printed" if voided?
     raise ArgumentError, "No check number assigned" if check_number.blank?
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE — prevents concurrent print-count undercount
+      ensure_financial_source_payment_ready!
       raise ArgumentError, "Cannot mark a voided check as printed" if voided? # re-check under lock
       raise ArgumentError, "No check number assigned" if check_number.blank? # re-check under lock
 
@@ -154,6 +175,7 @@ class PayrollItem < ApplicationRecord
   end
 
   def mark_delivered!(user:, delivered_on:, delivery_method:, attestation:, evidence_reference: nil, note: nil, ip_address: nil)
+    ensure_financial_source_payment_ready!
     raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
     raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
     raise ArgumentError, "Check actions are only available for committed pay periods" unless pay_period.committed?
@@ -167,6 +189,7 @@ class PayrollItem < ApplicationRecord
 
     ApplicationRecord.transaction do
       lock!
+      ensure_financial_source_payment_ready!
       raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
       raise ArgumentError, "Generate a current check package before marking it delivered" unless check_printed_at.present? || (check_prepared? && CheckPackagePreparation.current_for?(self))
 
@@ -195,7 +218,58 @@ class PayrollItem < ApplicationRecord
   # @param reason [String] required written reason (min 10 chars)
   # @param ip_address [String, nil]
   # @return [CheckEvent]
-  def void!(user:, reason:, ip_address: nil)
+  def duplicate_check_linked?
+    NonEmployeeCheckSupersession.exists?(payroll_item_id: id)
+  end
+
+  def ensure_financial_source_payment_ready!
+    TimeTracking::FinancialCorrectionService.require_payment_ready!(self)
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise ArgumentError, e.message
+  end
+
+  def source_accounting_correction_linked?
+    TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: id).exists? ||
+      TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: correction_payroll_items.select(:id)).exists? ||
+      TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
+  end
+
+  # The same three links as source_accounting_correction_linked?, for a run.
+  def self.source_accounting_correction_linked_ids(ids)
+    dispositions = TimeTrackingCorrectionDisposition
+    (dispositions.where(corrective_payroll_item_id: ids).pluck(:corrective_payroll_item_id) +
+      where(correction_for_payroll_item_id: ids, id: dispositions.select(:corrective_payroll_item_id)).pluck(:correction_for_payroll_item_id) +
+      TimeTrackingEntryAllocation.where(payroll_item_id: ids, id: dispositions.select(:original_allocation_id)).pluck(:payroll_item_id)).to_set
+  end
+
+  validate :pending_payment_resolution_cannot_change, on: :update
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
+  before_create :prevent_retired_history_mutation
+  before_update :guard_pending_payment_resolution
+
+  def pending_payment_resolution_cannot_change
+    return unless changes_to_save.keys.any? { |key| key != "updated_at" }
+    message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+    errors.add(:base, message) if message
+  end
+
+  def guard_pending_payment_resolution
+    return unless changes_to_save.keys.any? { |key| key != "updated_at" }
+
+    self.class.where(id: id).lock.pluck(:id)
+    return unless (message = TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self))
+
+    errors.add(:base, message)
+    raise ActiveRecord::RecordInvalid, self
+  end
+
+  def void!(user:, reason:, ip_address: nil, payroll_obligation_retained: true)
+    message = payroll_obligation_retained ? TimeTracking::PaymentCancellationBridge.blocker_for(self) : TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+    raise ArgumentError, message if message
+    raise ArgumentError, "This paycheck has already been reversed" unless payroll_included?
+    raise ArgumentError, "This item has an exact source accounting correction. Voiding is held until its disposition and source receipt can be reversed together; review the linked correction with payroll support." if source_accounting_correction_linked?
+    raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
     raise ArgumentError, "Already voided" if voided?
     raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
     raise ArgumentError, "No check number assigned" if check_number.blank?
@@ -203,9 +277,15 @@ class PayrollItem < ApplicationRecord
 
     ApplicationRecord.transaction do
       lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
+      message = payroll_obligation_retained ? TimeTracking::PaymentCancellationBridge.blocker_for(self) : TimeTracking::PaymentCancellationBridge.resolution_blocker_for(self)
+      raise ArgumentError, message if message
+      raise ArgumentError, "This paycheck has already been reversed" unless payroll_included?
+      raise ArgumentError, "This item has an exact source accounting correction; review the linked correction before voiding" if source_accounting_correction_linked?
       raise ArgumentError, "Already voided" if voided? # re-check under lock
+      raise ArgumentError, "This payroll check is linked to a duplicate software record; review that reconciliation before voiding" if duplicate_check_linked?
       raise ArgumentError, "Reverse the clearing evidence before voiding this check" if CheckReconciliationStatus.for(self) == "cleared"
 
+      cancel_payment = payroll_obligation_retained && PayrollPaymentMethodEligibility.new(self).check_has_activity?
       update!(
         voided: true,
         voided_at: Time.current,
@@ -217,6 +297,12 @@ class PayrollItem < ApplicationRecord
         event_type: "voided",
         check_number: check_number,
         reason: reason,
+        evidence_reference: reason.to_s.strip.first(200),
+        details: {
+          payroll_obligation_retained: payroll_obligation_retained,
+          payment_delivery_change: cancel_payment,
+          original_check_cancelled: cancel_payment
+        },
         ip_address: ip_address
       )
     end
@@ -235,6 +321,16 @@ class PayrollItem < ApplicationRecord
     return "prepared" if check_prepared?
     return "unprinted" if check_number.present?
     nil
+  end
+
+  # Only a linked, same-owner supplemental written by the correction service
+  # may carry signed JSON/field/earning components. Ordinary payroll retains
+  # its nonnegative input rules.
+  def signed_correction_components?
+    correction_entry? && calculation_context_snapshot.dig("corrective_paycheck", "component_ledger_version") == 1 &&
+      pay_period&.supplemental? && pay_period.run_purpose == "correction" &&
+      correction_for_payroll_item&.company_id == company_id && correction_for_payroll_item.employee_id == employee_id &&
+      pay_period.company_id == company_id && pay_period.corrects_pay_period_id == correction_for_payroll_item.pay_period_id
   end
 
   def total_hours
@@ -322,7 +418,7 @@ class PayrollItem < ApplicationRecord
 
     employee_defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
     defaults = pay_period&.recurring_items_enabled? ? employee_defaults : []
-    current = self.class.normalize_payroll_adjustments(payroll_adjustments)
+    current = self.class.normalize_payroll_adjustments(payroll_adjustments, signed: signed_correction_components?)
     return unless new_record? || current.empty? || payroll_adjustments_default_snapshot? || legacy_adjustments_subset_of_defaults?(current, employee_defaults)
 
     self.payroll_adjustments = defaults
@@ -455,12 +551,12 @@ class PayrollItem < ApplicationRecord
     payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
   end
 
-  def self.normalize_custom_deduction_entries(entries)
+  def self.normalize_custom_deduction_entries(entries, signed: false)
     Array(entries).filter_map do |entry|
       data = normalize_json_entry(entry)
       label = data["label"].to_s.strip
       amount = BigDecimal(data["amount"].to_s)
-      next if label.blank? || amount <= 0 || !amount.finite?
+      next if label.blank? || !amount.finite? || (signed ? amount.zero? : amount <= 0)
 
       { "label" => label, "amount" => amount.round(2).to_f }
     rescue ArgumentError, FloatDomainError
@@ -480,6 +576,9 @@ class PayrollItem < ApplicationRecord
   end
 
   def overtime_pay
+    if signed_correction_components?
+      return payroll_item_earnings.select { |earning| earning.category == "overtime" }.sum { |earning| earning.amount.to_d }
+    end
     return salary_overtime_pay if salary?
     return 0 unless hourly?
 
@@ -553,8 +652,9 @@ class PayrollItem < ApplicationRecord
   end
 
   # Calculate and store all values
-  def calculate!
+  def calculate!(annual_fica_context: nil)
     ApplicationRecord.transaction do
+      PayrollCorrectionPayBasisGuard.validate!(self)
       # Validate a clean copy of the persisted period. Calculating an item built
       # through `pay_period.payroll_items` leaves that unsaved item in the
       # association target; validating the in-memory parent would recursively
@@ -570,10 +670,13 @@ class PayrollItem < ApplicationRecord
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
       end
 
-      calculator = PayrollCalculator.for(employee, self)
+      calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
       calculator.calculate
       save!
+      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true)
     end
+  rescue *PayrollCalculationHistory::ERRORS => e
+    raise PayrollCalculationHistory::HoldError, PayrollCalculationHistory.message(e)
   end
 
   def wage_rate_hours
@@ -581,6 +684,7 @@ class PayrollItem < ApplicationRecord
     Array(entries).map do |entry|
       normalized = normalize_wage_rate_entry(entry)
       {
+        **normalized.stringify_keys.slice("source_bucket_key", "source_lines"),
         "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
         "label" => normalized["label"] || normalized[:label],
         "rate" => (normalized["rate"] || normalized[:rate]).to_f,
@@ -601,6 +705,7 @@ class PayrollItem < ApplicationRecord
       next if label.blank?
 
       {
+        **normalized.stringify_keys.slice("source_bucket_key", "source_lines"),
         "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
         "label" => label,
         "rate" => round_currency_value(normalized["rate"] || normalized[:rate]).to_f,
@@ -622,6 +727,37 @@ class PayrollItem < ApplicationRecord
 
   private
 
+  def prevent_retired_history_mutation
+    return unless PayPeriod.where(id: pay_period_id, status: "retired_history").exists?
+
+    errors.add(:base, "Retired prior-provider payroll is read-only evidence")
+    throw :abort
+  end
+
+  def retained_correction_pay_basis_reconciles
+    inputs = %w[employment_type pay_rate hours_worked overtime_hours holiday_hours pto_hours scheduled_hours
+      salary_override bonus reported_tips tips_paid_out service_charge_wages non_taxable_pay custom_columns_data
+      gross_pay withholding_tax withholding_tax_adjustment withholding_tax_override additional_withholding
+      additional_withholding_override custom_earnings custom_deductions payroll_adjustments loan_deduction]
+    return if (changed_attribute_names_to_save & (inputs + PayrollCorrectionPayBasisGuard::IDENTITY_ATTRIBUTES)).empty?
+
+    PayrollCorrectionPayBasisGuard.validate!(self)
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
+
+  def imported_source_inputs_reconcile
+    # Old committed imports may lack complete source/capture proof. Operational
+    # payment evidence must remain usable without recalculating that history.
+    # Financial input edits and every editable/finalization path still validate.
+    input_fields = %w[hours_worked overtime_hours pay_rate employment_type custom_columns_data gross_pay employee_id company_id pay_period_id]
+    return if pay_period&.committed? && (changed_attribute_names_to_save & input_fields).empty?
+
+    TimeTracking::SourceEarningsConservation.validate!(self)
+  rescue ArgumentError => e
+    errors.add(:base, e.message)
+  end
+
   def legacy_adjustments_subset_of_defaults?(current, defaults)
     remaining_defaults = defaults.dup
 
@@ -642,8 +778,8 @@ class PayrollItem < ApplicationRecord
     self.tips_paid_out = round_currency_value(tips_paid_out)
     normalize_reported_tips_for_paid_out! unless correction_entry?
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
-    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
-    self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments)
+    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions, signed: signed_correction_components?)
+    self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments, signed: signed_correction_components?)
 
     return unless custom_columns_data.is_a?(Hash)
 
@@ -698,7 +834,7 @@ class PayrollItem < ApplicationRecord
     end
 
     custom_deductions.each do |deduction|
-      unless deduction.is_a?(Hash) && deduction["label"].present? && deduction["amount"].to_f.positive?
+      unless deduction.is_a?(Hash) && deduction["label"].present? && (signed_correction_components? ? deduction["amount"].to_d.nonzero? : deduction["amount"].to_d.positive?)
         errors.add(:custom_deductions, "must include a label and positive amount")
       end
     end
@@ -713,7 +849,7 @@ class PayrollItem < ApplicationRecord
     end
 
     payroll_adjustments.each do |adjustment|
-      unless adjustment.is_a?(Hash) && adjustment["label"].present? && adjustment["amount"].to_f.positive? && PayrollAdjustable::ADJUSTMENT_TREATMENTS.include?(adjustment["treatment"].to_s)
+      unless adjustment.is_a?(Hash) && adjustment["label"].present? && (signed_correction_components? ? adjustment["amount"].to_d.nonzero? : adjustment["amount"].to_d.positive?) && PayrollAdjustable::ADJUSTMENT_TREATMENTS.include?(adjustment["treatment"].to_s)
         errors.add(:payroll_adjustments, "must include a label, positive amount, and valid tax treatment")
       end
     end

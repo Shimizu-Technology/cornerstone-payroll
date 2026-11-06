@@ -13,15 +13,15 @@ module Api
         # `:supplemental_pay_periods`) are deliberately omitted.
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :record_client_approval,
                       :create_correction_run, :reopen_unpaid, :refresh_setup, :generate_fit_check,
-                      :corrective_paychecks, :adopt_confirmed_workweek
+                      :corrective_paychecks, :adopt_confirmed_workweek, :connect_corrected_hours
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
           :promoted_payment_preview, :prepare_promoted_payment,
           :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
-          :comparison, :payroll_field_inputs, :client_review, :record_client_approval
+          :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :corrected_hours, :connect_corrected_hours
         ]
-        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup ]
+        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup, :generate_fit_check ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -54,6 +54,20 @@ module Api
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true)
           }
+        end
+
+        def corrected_hours
+          service = TimeTracking::FinancialCorrectionService.new(pay_period: @pay_period, actor: current_user)
+          render json: { corrected_hours: service.preview }
+        rescue TimeTracking::FinancialCorrectionService::Error => e
+          render json: { corrected_hours: { required: true, status: "needs_review", error: e.message, items: [] } }
+        end
+
+        def connect_corrected_hours
+          service = TimeTracking::FinancialCorrectionService.new(pay_period: @pay_period, actor: current_user)
+          render json: { corrected_hours: service.confirm!(expected_digest: params.require(:expected_digest)) }
+        rescue TimeTracking::FinancialCorrectionService::Error, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/adopt_confirmed_workweek
@@ -95,7 +109,7 @@ module Api
           )
           render json: { source_pay_period: pay_period_json(@pay_period.reload),
             correction_run: pay_period_json(correction, include_items: true) }, status: :created
-        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, ActiveRecord::RecordInvalid => e
+        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -106,9 +120,11 @@ module Api
             raise ArgumentError, "Only draft, calculated, or approved payroll can refresh setup"
           end
           scope_attributes = refresh_scope_attributes
+          ids = @pay_period.payroll_items.pluck(:employee_id)
+          return unless ids.empty? || source_coverage_acknowledged?
+
           @pay_period.invalidate_calculation!(reason: "Employee/client setup refreshed; previous approval is no longer valid")
           @pay_period.update!(scope_attributes)
-          ids = @pay_period.payroll_items.pluck(:employee_id)
           if ids.empty?
             render json: { pay_period: pay_period_json(@pay_period, include_items: true), results: { success: [], skipped: [], errors: [] } }
           else
@@ -141,8 +157,8 @@ module Api
           @pay_period.status = "draft"
 
           ActiveRecord::Base.transaction do
+            locked_company = Company.lock.find(current_company_id)
             if starting_check_number.present?
-              locked_company = Company.lock.find(current_company_id)
               apply_starting_check_number!(starting_check_number, company: locked_company)
             end
             @pay_period.save!
@@ -232,7 +248,7 @@ module Api
               source_period_id = nil
               correction_event = nil
 
-              ActiveRecord::Base.transaction do
+              ActiveRecord::Base.transaction(requires_new: true) do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
                 unless locked_run.draft? && locked_run.correction_run?
                   locked_run.errors.add(:base, "Can only delete draft correction run pay periods")
@@ -245,6 +261,8 @@ module Api
                   locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
                   raise ActiveRecord::RecordInvalid.new(locked_run)
                 end
+
+                locked_run.ensure_deletable!
 
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
@@ -300,13 +318,19 @@ module Api
             return render json: { error: "Cannot delete a committed pay period" }, status: :unprocessable_entity
           end
 
-          ActiveRecord::Base.transaction do
+          # The action rescues below, inside the financial-lock transaction. A
+          # savepoint must roll back child deletes before that rescue renders 422.
+          @pay_period.with_lock(requires_new: true) do
+            @pay_period.ensure_deletable!
             PayrollImportRecord.where(pay_period_id: @pay_period.id).delete_all
             @pay_period.destroy!
           end
           head :no_content
-        rescue ActiveRecord::InvalidForeignKey, ActiveRecord::RecordNotDestroyed => e
-          render json: { error: "Could not delete pay period: #{e.message}" }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotDestroyed => e
+          reason = e.record.errors.full_messages.to_sentence.presence || "This run has linked payroll records that must be kept."
+          render json: { error: "Could not delete payroll run. #{reason}" }, status: :unprocessable_entity
+        rescue ActiveRecord::InvalidForeignKey, ActiveRecord::DeleteRestrictionError
+          render json: { error: "This payroll run is linked to retained payroll or payment evidence and cannot be deleted. Keep the run for its payroll history." }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/run_payroll
@@ -315,6 +339,8 @@ module Api
           unless @pay_period.draft? || @pay_period.calculated?
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end
+          return unless source_coverage_acknowledged?
+
           if params.key?(:named_loan_payments) && !params[:named_loan_payments].respond_to?(:to_unsafe_h)
             return render json: { error: "Named loan inputs must be an object keyed by employee" }, status: :unprocessable_entity
           end
@@ -322,11 +348,9 @@ module Api
           PayrollGoLiveGate.new(company: @pay_period.company, pay_date: @pay_period.pay_date)
             .require_live_payroll!(parallel_run: @pay_period.parallel_run?)
 
-          # Determine which employees to calculate:
-          # 1. If explicit employee_ids are passed, use those
-          # 2. If imported payroll items exist, use imported employees + salary + contractors
-          #    (don't auto-create hourly employees not present in the import)
-          # 3. Otherwise, include all active employees for normal payroll runs/recalculations
+          # Explicit selections remain authoritative. The worksheet receives the
+          # same initial defaults below, including salary after hourly imports.
+          # Recalculations and special runs retain their selected roster.
           submitted_employee_ids = submitted_payroll_employee_ids
           excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id)
           if params.key?(:employee_ids) && Array(params[:employee_ids]).empty?
@@ -334,18 +358,8 @@ module Api
           end
           employee_ids = if params.key?(:employee_ids)
             Array(params[:employee_ids])
-          elsif @pay_period.correction_run?
-            @pay_period.payroll_items.pluck(:employee_id)
-          elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
-            imported_ids = @pay_period.payroll_items.pluck(:employee_id)
-            eligible = Employee.where(company_id: current_company_id).eligible_for_period(@pay_period.start_date, @pay_period.end_date)
-            salary_ids = eligible.where(employment_type: "salary").pluck(:id)
-            contractor_ids = eligible.where(employment_type: "contractor").pluck(:id)
-            (imported_ids + salary_ids + contractor_ids + submitted_employee_ids).uniq
           else
-            Employee.where(company_id: current_company_id)
-                    .eligible_for_period(@pay_period.start_date, @pay_period.end_date)
-                    .pluck(:id)
+            PayPeriodDefaultRoster.new(@pay_period).employee_ids(additional_employee_ids: submitted_employee_ids)
           end
           employee_ids = employee_ids.map(&:to_i).uniq - excluded_employee_ids
 
@@ -361,7 +375,9 @@ module Api
                                      .includes(:company, :employee_deductions, :deduction_types, :employee_loans, :employee_w4_elections, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
 
-          preload_ytd_caches!(employees_by_id.values, @pay_period)
+          history_errors = preload_ytd_caches!(employees_by_id.values, @pay_period)
+          annual_fica_contexts = EmployeeYearFicaContext.batch(company: current_company, employees: employees_by_id.values,
+            year: @pay_period.pay_date.year, excluding_pay_period_id: @pay_period.id)
           payroll_field_input_applier = PayrollFieldInputApplier.new(
             pay_period: @pay_period,
             company_id: current_company_id
@@ -370,10 +386,16 @@ module Api
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             next unless employee
+            if history_errors[employee.id]
+              results[:errors] << { employee_id: employee.id, name: employee.full_name, error: history_errors[employee.id] }
+              next
+            end
 
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              PayrollCorrectionPayBasisGuard.validate!(payroll_item)
+              pay_basis_changed = payroll_item.persisted? && payroll_item.employment_type != employee.employment_type
               # Draft/calculated rows must reflect the employee classification used by
               # the calculator. Otherwise a contractor-to-W-2 change can calculate
               # FICA while retaining a contractor snapshot that reporting excludes.
@@ -387,6 +409,9 @@ module Api
               payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
 
               sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+              if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
+                payroll_item.pay_rate = employee.default_payroll_rate
+              end
               payroll_item.sync_default_custom_earnings!(employee)
               payroll_item.sync_default_payroll_adjustments!(employee)
 
@@ -406,6 +431,10 @@ module Api
                   payroll_item.pto_hours = hours_data[:pto] if hours_data[:pto]
                 end
               end
+
+              # Reject altered frozen inputs before field/loan draft writes can
+              # persist; the calculator and finalization recheck independently.
+              TimeTracking::SourceEarningsConservation.validate!(payroll_item)
 
               # Apply salary override for variable-salary employees
               if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
@@ -495,7 +524,7 @@ module Api
                 unless @preserve_entered_pay_rates || payroll_item.timekeeping_source == "correction_reference"
                   PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 end
-                payroll_item.calculate!
+                payroll_item.calculate!(annual_fica_context: annual_fica_contexts.fetch(employee.id))
                 case PayrollItemActivity.classify(payroll_item)
                 when :verified_empty
                   # The worksheet includes the active roster, but an employee
@@ -508,6 +537,8 @@ module Api
                   results[:success] << { employee_id: employee.id, name: employee.full_name }
                 end
               end
+            rescue *PayrollCalculationHistory::ERRORS => e
+              results[:errors] << { employee_id: employee.id, name: employee.full_name, error: PayrollCalculationHistory.message(e) }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: e.message }
             end
@@ -520,9 +551,7 @@ module Api
               calculated_at: Time.current,
               calculated_by_id: current_user_id,
               approved_at: nil,
-              approved_by_id: nil,
-              unapproved_at: nil,
-              unapproved_by_id: nil
+              approved_by_id: nil
             }
             if @pay_period.intake_stale_session&.status == "applied"
               calculation_attributes.merge!(
@@ -598,8 +627,11 @@ module Api
         def approve
           lifecycle_service.approve!
           render json: { pay_period: pay_period_json(@pay_period) }
-        rescue PayPeriodLifecycleService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid, PayPeriodLifecycleService::Error => e
+          guidance = if PriorProviderHistory::Discovery.available?(current_company, period: @pay_period)
+            " Were these already paid by a previous provider? Record them as prior-provider history from this client's pay runs."
+          end
+          render json: { error: "#{e.message}#{guidance}" }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/unapprove
@@ -754,7 +786,7 @@ module Api
                   redacted_fields: changes[:redacted_fields].presence,
                   reason: reason,
                   voided_at: event.created_at,
-                  business_summary: pay_period_business_summary(@pay_period)
+                  business_summary: pay_period_business_summary(@pay_period, include_voided_period: true)
                 }.compact,
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent,
@@ -868,7 +900,8 @@ module Api
           preview = IssueCorrectivePaycheckService.preview(
             original_pay_period: @pay_period,
             employee:            employee,
-            corrected_inputs:    permit_corrective_paycheck_inputs
+            corrected_inputs:    permit_corrective_paycheck_inputs,
+            pay_date: params[:pay_date]
           )
 
           render json: preview
@@ -877,7 +910,7 @@ module Api
         end
 
         # POST /api/v1/admin/pay_periods/:id/corrective_paychecks
-        # Body: { employee_id, corrected_inputs: {...}, pay_date, reason, notes }
+        # Body: { employee_id, corrected_inputs: {...}, expected_review_digest, pay_date, reason, notes }
         # Creates and commits a supplemental pay_period containing one
         # corrective payroll_item linked to the original. Returns the
         # supplemental pay_period and the corrective item.
@@ -887,6 +920,10 @@ module Api
             return render json: { error: "Employee not found in this company" }, status: :not_found
           end
 
+          if params[:expected_review_digest].blank?
+            return render json: { error: "Refresh the correction preview and review the current remaining balance before issuing this correction" }, status: :unprocessable_entity
+          end
+
           supplemental, corrective_item = IssueCorrectivePaycheckService.issue!(
             original_pay_period: @pay_period,
             employee:            employee,
@@ -894,7 +931,8 @@ module Api
             pay_date:            params[:pay_date],
             reason:              params[:reason],
             actor:               current_user,
-            notes:               params[:notes]
+            notes:               params[:notes],
+            expected_review_digest: params[:expected_review_digest]
           )
 
           render json: {
@@ -928,6 +966,10 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/generate_fit_check
         def generate_fit_check
+          if @pay_period.voided?
+            return render json: { error: "Cannot generate a FIT check for a voided payroll" }, status: :unprocessable_entity
+          end
+
           unless @pay_period.status == "committed"
             return render json: { error: "FIT check can only be generated for committed pay periods" }, status: :unprocessable_entity
           end
@@ -956,7 +998,7 @@ module Api
             }
           end
 
-          committed_items = @pay_period.payroll_items.not_voided.to_a
+          committed_items = @pay_period.payroll_items.financially_reportable.to_a
           create_fit_tax_deposit_check!(committed_items)
 
           fit_check = NonEmployeeCheck.find_by(fit_query)
@@ -995,6 +1037,17 @@ module Api
 
         private
 
+        # Both full-run calculation paths use this decision under the financial
+        # lock. Refresh must check before invalidating approval or changing scope.
+        def source_coverage_acknowledged?
+          return true unless PayrollSourceCoverage.acknowledgement_required?(@pay_period)
+          return true if params[:source_coverage_acknowledged] == true && params[:source_coverage_reason].to_s.strip.present?
+
+          render json: { error: "Enter a reason and acknowledge that hourly employees from time tracking will be missing unless entered manually.",
+                         code: "source_coverage_acknowledgement_required" }, status: :unprocessable_entity
+          false
+        end
+
         def audit_record
           @pay_period
         end
@@ -1007,17 +1060,21 @@ module Api
 
         def audit_record_metadata(record)
           return {} unless record.is_a?(PayPeriod)
-          return {} unless %w[run_payroll approve unapprove commit void].include?(action_name)
+          return {} unless %w[run_payroll refresh_setup approve unapprove commit void].include?(action_name)
 
           summary = pay_period_business_summary(record)
-          if action_name == "run_payroll" && defined?(@payroll_audit_results) && @payroll_audit_results
+          if %w[run_payroll refresh_setup].include?(action_name) && defined?(@payroll_audit_results) && @payroll_audit_results
             summary[:employees_processed] = @payroll_audit_results.fetch(:success, []).size
             summary[:employees_failed] = @payroll_audit_results.fetch(:errors, []).size
             summary[:outcome] = summary[:employees_failed].positive? ? "partial" : "completed"
           end
 
           metadata = { business_summary: summary }
-          if action_name == "run_payroll" && defined?(@payroll_review_package) && @payroll_review_package
+          if %w[run_payroll refresh_setup].include?(action_name) && params[:source_coverage_reason].present?
+            metadata[:source_coverage_reason] = params[:source_coverage_reason].to_s.strip.truncate(1000)
+            metadata[:source_coverage_acknowledged] = params[:source_coverage_acknowledged] == true
+          end
+          if %w[run_payroll refresh_setup].include?(action_name) && defined?(@payroll_review_package) && @payroll_review_package
             metadata[:review_revision] = {
               id: @payroll_review_package.id,
               revision: @payroll_review_package.revision,
@@ -1027,8 +1084,11 @@ module Api
           metadata
         end
 
-        def pay_period_business_summary(record)
-          aggregates = record.payroll_items.not_voided.reportable.pick(
+        def pay_period_business_summary(record, include_voided_period: false)
+          # A void audit describes the wages reversed, even after the parent
+          # period has left financial reports. Individually reversed rows stay excluded.
+          items = include_voided_period ? record.payroll_items.where(payroll_reversed_at: nil) : record.payroll_items.financially_reportable
+          aggregates = items.reportable.pick(
             Arel.sql("COUNT(*)"),
             Arel.sql("COALESCE(SUM(gross_pay), 0)"),
             Arel.sql("COALESCE(SUM(total_deductions), 0)"),
@@ -1113,7 +1173,7 @@ module Api
             voided: false
           )
 
-          w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
+          w2_items = items.select { |i| i.employment_type != "contractor" && i.payroll_included? }
           total_fit = w2_items.sum(&:total_income_tax_withheld)
           return if total_fit <= 0
 
@@ -1162,7 +1222,7 @@ module Api
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items
           if items.loaded?
-            arr = items.to_a.reject { |item| item.voided? || item.legacy_disposition.present? }
+            arr = items.to_a.reject { |item| !item.payroll_included? || item.legacy_disposition.present? }
             {
               count: arr.size,
               gross: arr.sum { |i| i.gross_pay.to_f },
@@ -1171,7 +1231,7 @@ module Api
               employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
             }
           else
-            row = items.not_voided.reportable.pick(
+            row = items.financially_reportable.reportable.pick(
               Arel.sql("COUNT(*)"),
               Arel.sql("COALESCE(SUM(gross_pay), 0)"),
               Arel.sql("COALESCE(SUM(net_pay), 0)"),
@@ -1194,7 +1254,7 @@ module Api
           # for the `supplemental_pay_periods_count` field without firing an
           # extra `SELECT COUNT(*)` query on every show/update/etc. request.
           @pay_period = PayPeriod
-            .includes(:payroll_items, :voided_by, :source_pay_period, :company_workweek,
+            .includes({ payroll_items: :legacy_disposition }, :voided_by, :source_pay_period, :company_workweek,
                       :correction_events, :supplemental_pay_periods)
             .find(params[:id])
 
@@ -1258,6 +1318,7 @@ module Api
 
           json = {
             id: pay_period.id,
+            source_correction_required: include_items && pay_period.committed? && !pay_period.voided? && TimeTracking::FinancialCorrectionService.required_for?(pay_period),
             company_id: pay_period.company_id,
             start_date: pay_period.start_date,
             end_date: pay_period.end_date,
@@ -1265,6 +1326,7 @@ module Api
             status: pay_period.status,
             notes: pay_period.notes,
             run_purpose: pay_period.run_purpose,
+            late_hours_origin_pay_period_id: pay_period.late_hours_run&.origin_pay_period_id,
             includes_base_salary: pay_period.includes_base_salary,
             includes_recurring_items: pay_period.includes_recurring_items,
             run_purpose_source: pay_period.run_purpose_source,
@@ -1279,6 +1341,8 @@ module Api
             company_pay_schedule_id: pay_period.company_pay_schedule_id,
             company_workweek_id: pay_period.company_workweek_id,
             compliance_warnings: pay_period.compliance_warnings,
+            annual_fica_review_note: pay_period.annual_fica_review_note,
+            prior_provider_history_available: PriorProviderHistory::Discovery.available?(pay_period.company, period: pay_period),
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             intake_stale_at: pay_period.intake_stale_at,
@@ -1349,14 +1413,19 @@ module Api
           end
 
           if include_items
-            print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period) if pay_period.committed?
-            json[:payroll_items] = pay_period.payroll_items.reportable.includes(
+            print_activity = PayrollPaymentMethodEligibility.print_activity_for_period(pay_period)
+            items = pay_period.payroll_items.reportable.includes(
               :check_events, :check_reconciliation_events, :payroll_item_field_entries,
+              :payroll_item_earnings, :payroll_item_deductions, :direct_deposit_payment_confirmation,
+              :financial_correction_origin_item, :correction_for_payroll_item,
               :time_tracking_entry_allocations, employee: :department
-            ).map do |item|
-              payroll_item_json(item, print_activity: print_activity)
+            ).to_a
+            payment_lookup = PayrollPaymentEligibilityLookup.new(items)
+            json[:payroll_items] = items.map do |item|
+              payroll_item_json(item, print_activity: print_activity, payment_lookup: payment_lookup)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
+            json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids
           end
 
           json
@@ -1375,9 +1444,10 @@ module Api
           user
         end
 
-        def payroll_item_json(item, print_activity: nil)
+        def payroll_item_json(item, print_activity: nil, payment_lookup: nil)
           {
             id: item.id,
+            payroll_included: item.payroll_included?,
             employee_id: item.employee_id,
             employee_first_name: item.employee&.first_name,
             employee_last_name: item.employee&.last_name,
@@ -1394,6 +1464,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item, employee: item.employee),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
             bonus_source: item.bonus_source,
@@ -1443,12 +1514,17 @@ module Api
             department_id: item.employee&.department_id,
             department_name: item.employee&.department&.name,
             custom_earnings: item.custom_earnings || [],
+            draft_earning_sources: {
+              custom_earnings: item.custom_columns_data.to_h[PayrollItem::CUSTOM_EARNINGS_SOURCE_KEY],
+              payroll_adjustments: item.custom_columns_data.to_h[PayrollItem::PAYROLL_ADJUSTMENTS_SOURCE_KEY],
+              payroll_adjustments_overridden: item.payroll_adjustments_overridden?
+            },
             check_number: item.check_number,
             payment_delivery_method: item.payment_delivery_method,
             effective_payment_delivery_method: item.effective_payment_delivery_method,
             earnings_statement_eligible: EarningsStatementEligibility.printable?(item),
             employee_payment_delivery_method: item.employee&.payment_delivery_method,
-            payment_method_change: PayrollPaymentMethodEligibility.new(item, print_activity: print_activity).call,
+            payment_method_change: PayrollPaymentMethodEligibility.new(item, print_activity: print_activity, lookup: payment_lookup).call,
             check_printed_at: item.check_printed_at,
             check_prepared_at: item.check_prepared_at,
             check_print_count: item.check_print_count,
@@ -1559,6 +1635,9 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+            raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
+          end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
 
@@ -1568,13 +1647,16 @@ module Api
           payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
-          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          unless payroll_item.timekeeping_source == "correction_reference"
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          end
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
-          return if payroll_item.wage_rate_hours.present?
+          return if payroll_item.timekeeping_source == "correction_reference"
+          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          payroll_item.pay_rate = employee.default_payroll_rate
         end
 
         # Compact summary of a corrective payroll_item — shipped back to the
@@ -1862,7 +1944,8 @@ module Api
         # and cache the results on the Employee instances so PayrollCalculator
         # can reuse them during run_payroll without N per-employee aggregate reads.
         def preload_ytd_caches!(employees, pay_period)
-          return if employees.empty?
+          history_errors = {}
+          return history_errors if employees.empty?
 
           year = pay_period.pay_date.year
           eids = employees.map(&:id)
@@ -1876,7 +1959,7 @@ module Api
           if committed_period_ids.any?
             aggregate_columns = Employee.ytd_aggregate_columns_for_year(year)
             rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
-                              .not_voided
+                              .financially_reportable
                               .group(:employee_id)
                               .pluck(
                                 :employee_id,
@@ -1885,9 +1968,18 @@ module Api
             ytd_map = rows.each_with_object({}) do |(employee_id, *values), map|
               map[employee_id] = aggregate_columns.keys.zip(values.map(&:to_f)).to_h
             end
-            retirement_totals = PayrollRetirementTotals.for_scope_by_employee(
-              PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).not_voided
-            )
+            retirement_scope = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids).financially_reportable
+            retirement_totals = begin
+              PayrollRetirementTotals.for_scope_by_employee(retirement_scope)
+            rescue *PayrollCalculationHistory::ERRORS
+              # Keep the fast batch path for healthy history. On a known hold,
+              # isolate strict reads by employee; never cache partial totals.
+              employees.each_with_object({}) do |employee, totals|
+                totals.merge!(PayrollRetirementTotals.for_scope_by_employee(retirement_scope.where(employee_id: employee.id)))
+              rescue *PayrollCalculationHistory::ERRORS => e
+                history_errors[employee.id] = PayrollCalculationHistory.message(e)
+              end
+            end
             retirement_totals.each { |employee_id, totals| ytd_map.fetch(employee_id).merge!(totals) }
           else
             ytd_map = {}
@@ -1911,6 +2003,8 @@ module Api
           end
 
           employees.each do |emp|
+            next if history_errors[emp.id]
+
             data = ytd_map[emp.id] || Employee::YTD_AGGREGATE_COLUMNS.keys.index_with { 0.0 }
             data = emp.merge_historical_ytd(
               data,
@@ -1925,6 +2019,7 @@ module Api
               totals: data
             )
           end
+          history_errors
         end
       end
     end

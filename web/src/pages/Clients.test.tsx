@@ -421,7 +421,7 @@ describe('Clients name-only rename', () => {
     await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(6, { name: "MoSa's Hotbox, Inc." }));
     expect(apiMocks.update).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('Client name updated.')).toBeTruthy();
-    expect(screen.queryByRole('dialog', { name: 'Rename client' })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename client' })).toBeNull());
     resolveRefresh();
   });
 
@@ -436,7 +436,7 @@ describe('Clients name-only rename', () => {
     dialog = await openRename(user);
     await user.click(within(dialog).getByRole('button', { name: 'Save client name' }));
     expect(apiMocks.update).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('keeps failed saves available without reporting success', async () => {
@@ -503,7 +503,7 @@ describe('Clients name-only rename', () => {
     await act(async () => { resolveSave(); });
     await waitFor(() => expect(refreshCompanies).toHaveBeenCalledOnce());
     expect(apiMocks.list).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByText('Client name updated.')).toBeNull();
     apiMocks.activeCompanyId = 6;
   });
@@ -517,7 +517,7 @@ describe('Clients name-only rename', () => {
     rendered.rerender(<FeedbackProvider scopeKey="rename-test"><Clients /></FeedbackProvider>);
     resolveSave();
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByText('Client name updated.')).toBeNull();
     expect(refreshCompanies).not.toHaveBeenCalled();
     expect(apiMocks.list).toHaveBeenCalledTimes(1);
@@ -535,4 +535,95 @@ describe('Clients name-only rename', () => {
     await screen.findAllByText(rehearsal.name);
     expect(screen.queryByRole('button', { name: `Rename ${rehearsal.name}` })).toBeNull();
   });
+});
+
+
+describe('Client create/edit field labels', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.auth = { isAdmin: true, isAccountant: false, isManager: false };
+    apiMocks.list.mockResolvedValue({ companies: [target] });
+    apiMocks.get.mockResolvedValue({ company: { ...target, phone: '(671) 555-0100' } });
+    apiMocks.create.mockResolvedValue({ company: target });
+    refreshCompanies.mockResolvedValue(undefined);
+  });
+
+  const expectNamedFields = () => {
+    const fields = [
+      screen.getByRole('textbox', { name: /^Client Name/ }),
+      ...['EIN', 'Phone', 'Email', 'Address Line 1', 'Address Line 2', 'City', 'State', 'ZIP', 'Bank Name', 'Bank Address', 'Next Check Number']
+        .map(name => screen.getByRole('textbox', { name })),
+      screen.getByRole('combobox', { name: 'Pay Frequency' }),
+      screen.getByRole('combobox', { name: 'Check Stock Type' }),
+    ];
+    expect(fields.every(field => field.id !== '')).toBe(true);
+    expect(new Set(fields.map(field => field.id)).size).toBe(14);
+  };
+
+  it('opens a named create form, focuses Client Name from its label and preserves normal create values', async () => {
+    const user = userEvent.setup();
+    render(<FeedbackProvider scopeKey="client-label-create"><Clients /></FeedbackProvider>);
+    await user.click(await screen.findByRole('button', { name: 'Add New Client' }));
+    expectNamedFields();
+    const name = screen.getByRole('textbox', { name: /^Client Name/ });
+    await user.click(screen.getByText(/Client Name/, { selector: 'label' }));
+    expect(document.activeElement).toBe(name);
+    await user.type(name, 'Synthetic labelled client');
+    await user.type(screen.getByRole('textbox', { name: 'EIN' }), '123456789');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Pay Frequency' }), 'monthly');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Check Stock Type' }), 'bottom_check');
+    const number = screen.getByRole('textbox', { name: 'Next Check Number' });
+    await user.clear(number);
+    await user.type(number, '5001');
+    expect(screen.getByRole('switch', { name: 'Simple payroll register Excel format' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Historical payroll workspace' })).toBeTruthy();
+    expect(screen.getByRole('switch', { name: 'Require client approval before payroll approval' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Create Client' }));
+    await waitFor(() => expect(apiMocks.create).toHaveBeenCalledTimes(1));
+    expect(apiMocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Synthetic labelled client', ein: '12-3456789', pay_frequency: 'monthly',
+      check_stock_type: 'bottom_check', next_check_number: 5001,
+      simple_payroll_register_enabled: false, historical_payroll_enabled: false, client_payroll_approval_required: false,
+    }));
+    expect(apiMocks.update).not.toHaveBeenCalled();
+  });
+
+  it('associates the loaded edit fields and cancels contact edits without updating the client', async () => {
+    const user = userEvent.setup();
+    render(<FeedbackProvider scopeKey="client-label-edit"><Clients /></FeedbackProvider>);
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    await screen.findByRole('heading', { name: 'Edit Client' });
+    expectNamedFields();
+    expect(apiMocks.get).toHaveBeenCalledWith(target.id);
+    expect((screen.getByRole('textbox', { name: /^Client Name/ }) as HTMLInputElement).value).toBe(target.name);
+    const phone = screen.getByRole('textbox', { name: 'Phone' }) as HTMLInputElement;
+    expect(phone.value).toBe('(671) 555-0100');
+    await user.click(screen.getByText('Phone', { selector: 'label', exact: true }));
+    expect(document.activeElement).toBe(phone);
+    await user.clear(phone);
+    await user.type(phone, '(671) 555-0199');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('heading', { name: 'Edit Client' })).toBeNull();
+    expect(apiMocks.update).not.toHaveBeenCalled();
+    expect(apiMocks.create).not.toHaveBeenCalled();
+  });
+  it('uses the client-specific editable fields for a delegated accountant and sends only those fields', async () => {
+    const user = userEvent.setup();
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false };
+    apiMocks.get.mockResolvedValue({ company: { ...target, editable_fields: ['name', 'ein', 'phone'] } });
+    apiMocks.update.mockResolvedValue({ company: target });
+    render(<Clients />);
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    const name = await screen.findByRole('textbox', { name: /Client Name/ });
+    expect(name.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('combobox', { name: 'Pay Frequency' }).hasAttribute('disabled')).toBe(true);
+    await user.clear(name);
+    await user.type(name, 'Delegated client name');
+    await user.click(screen.getByRole('button', { name: 'Update Client' }));
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(target.id, {
+      name: 'Delegated client name', ein: '', phone: '',
+    }));
+    expect(screen.queryByRole('button', { name: 'Create test workspace' })).toBeNull();
+  });
+
 });

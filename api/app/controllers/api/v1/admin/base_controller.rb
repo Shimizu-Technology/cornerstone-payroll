@@ -5,6 +5,15 @@ module Api
     module Admin
       class BaseController < ApplicationController
         include Auditable
+        include ExplicitCompanyAccess
+
+        class CompanyWriteAccessChanged < StandardError; end
+        rescue_from CompanyWriteAccessChanged do
+          render json: {
+            error: "This client workspace is unavailable or your access has changed. Your changes were not saved. Select the intended client after your access is restored.",
+            code: "company_context_unavailable"
+          }, status: :forbidden
+        end
 
         before_action :require_staff_access!
         before_action :enforce_finance_context!
@@ -15,6 +24,20 @@ module Api
         before_action :enforce_high_impact_role_policy!
 
         private
+
+        # Call after locking the company, inside the business write transaction.
+        # Use fresh identity/assignment records instead of a request's memoized
+        # access list so expiry or revocation cannot race an employee save.
+        def revalidate_current_company_write_access!(company: current_company, capability: nil)
+          actor = User.lock.find_by(id: current_user&.id)
+          company.company_assignments.where(user_id: actor&.id).lock.load if company
+          capability ||= StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name)
+          allowed = StaffRolePolicy.allowed?(actor, :staff_workspace) &&
+            (!capability || StaffRolePolicy.allowed?(actor, capability, company: company)) &&
+            actor&.payroll_access_allowed? && company && actor.can_access_company?(company.id) &&
+            TestWorkspaceAccessPolicy.allowed?(user: actor, company: company, request_method: request.request_method, capability: capability)
+          raise CompanyWriteAccessChanged unless allowed
+        end
 
         def enforce_finance_context!
           return unless finance_request?
@@ -105,7 +128,9 @@ module Api
             user: current_user,
             company: current_company,
             request_method: request.request_method,
-            capability: capability
+            capability: capability,
+            controller_path: controller_path,
+            action_name: action_name
           )
 
           render json: {
@@ -123,17 +148,27 @@ module Api
           end
           return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name)
 
-          render json: {
-            error: "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
-          }, status: :forbidden
+          message = if finance_request?
+            "You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue."
+          else
+            "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
+          end
+          render json: { error: message }, status: :forbidden
         end
 
         def require_capability!(capability, error: nil)
-          return if StaffRolePolicy.allowed?(current_user, capability)
+          company = capability_company if StaffRolePolicy::DELEGATABLE_CAPABILITIES.include?(capability)
+          return if StaffRolePolicy.allowed?(current_user, capability, company: company)
 
           render json: {
             error: error || StaffRolePolicy.error_message(capability)
           }, status: :forbidden
+        end
+
+        def capability_company
+          # Company routes identify their resource independently of the header.
+          target_id = params[:id] if controller_path == "api/v1/admin/companies"
+          target_id.present? ? Company.find_by(id: target_id) : current_company
         end
 
         def require_historical_payroll_enabled!

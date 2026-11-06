@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useLocation, useOutlet } from 'react-router';
 import { FlaskConical, Menu, PanelLeftOpen, X } from 'lucide-react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
+import { FinanceWriteNotice } from '@/components/finance/FinanceWriteNotice';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
@@ -14,13 +17,13 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 }
 
 export function Layout() {
-  const { activeCompany, activeCompanyId, activeOrganizationName } = useCompany();
+  const { activeCompany, activeCompanyId, activeOrganizationName, activeOrganizationId } = useCompany();
   const location = useLocation();
   const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const outlet = useOutlet();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const pendingMobileCommand = useRef<'all' | 'companies' | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteMode, setCommandPaletteMode] = useState<'all' | 'companies'>('all');
   const [collapsed, setCollapsed] = useState(() => {
@@ -40,15 +43,19 @@ export function Layout() {
   }, []);
 
   const openCommandPalette = useCallback((mode: 'all' | 'companies' = 'all') => {
+    if (mobileNavOpen) {
+      pendingMobileCommand.current = mode;
+      setMobileNavOpen(false);
+      return;
+    }
     setCommandPaletteMode(mode);
     setCommandPaletteOpen(true);
-  }, []);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setMobileNavOpen(false);
-        setCommandPaletteOpen(false);
+        if (!document.querySelector('[data-dialog-portal]')) setCommandPaletteOpen(false);
         return;
       }
 
@@ -158,6 +165,8 @@ export function Layout() {
             className="inline-flex items-center justify-center rounded-xl border border-neutral-300 bg-white p-2 text-neutral-700 shadow-sm transition hover:bg-neutral-50"
             onClick={() => setMobileNavOpen(true)}
             aria-label="Open navigation"
+            aria-expanded={mobileNavOpen}
+            aria-haspopup="dialog"
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -168,17 +177,17 @@ export function Layout() {
           <div className="h-9 w-9" />
         </div>
 
-        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
-          {activeCompany && (activeCompany.test_workspace ?? activeCompany.payroll_environment === 'migration_rehearsal') && (
+        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-neutral-50" aria-live="polite">
+          {!financePage && activeCompany && (activeCompany.test_workspace ?? activeCompany.payroll_environment === 'migration_rehearsal') && (
             <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 sm:px-6">
               <div className="mx-auto flex max-w-screen-2xl items-start gap-2.5 text-sm">
                 <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <div>
                   <span className="font-semibold">
-                    {readOnlyWorkspace ? 'Read-only backup' : activeCompany.test_workspace_purpose_label || 'Test workspace'} — no live payroll.
+                    {readOnlyWorkspace ? 'Read-only workspace' : activeCompany.test_workspace_purpose_label || 'Test workspace'} — no live payroll.
                   </span>{' '}
                   {readOnlyWorkspace
-                    ? 'This preserved snapshot is for review and recovery only. Changes and operational actions are blocked.'
+                    ? companyReadOnlyMessage(activeCompany)
                     : 'Changes stay in this test workspace. Payroll cannot be committed. Only VOID-marked test checks can be previewed and downloaded; real checks, payments, communications, and filing-ready actions remain blocked.'}
                   {activeCompany.migration_source_company_name && (
                     <span className="text-amber-800"> Source: {activeCompany.migration_source_company_name}.</span>
@@ -187,12 +196,13 @@ export function Layout() {
               </div>
             </div>
           )}
+          {financePage && <FinanceWriteNotice />}
           <div
             className={`min-h-full transition-opacity duration-200 ease-out ${
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'
             }`}
           >
-            <div key={displayedCompanyId ?? 'no-company'} className="min-h-full">
+            <div key={financePage ? `finance:${activeOrganizationId ?? 'no-organization'}` : displayedCompanyId ?? 'no-company'} className="min-h-full">
               {outlet ?? <Outlet />}
             </div>
           </div>
@@ -223,30 +233,19 @@ export function Layout() {
         onModeChange={setCommandPaletteMode}
       />
 
-      {mobileNavOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
-          <button
-            type="button"
-            className="absolute inset-0 bg-neutral-950/35"
-            aria-label="Close navigation"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <div className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[320px]">
-            <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => {
-              setMobileNavOpen(false);
-              openCommandPalette('all');
-            }} />
-            <button
-              type="button"
-              className="ml-2 mt-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/30 bg-white/10 text-white backdrop-blur-sm"
-              onClick={() => setMobileNavOpen(false)}
-              aria-label="Close navigation"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen} placement="left" onAfterClose={() => {
+        const mode = pendingMobileCommand.current;
+        pendingMobileCommand.current = null;
+        if (mode) openCommandPalette(mode);
+      }}>
+        <DialogContent variant="drawer" aria-label="Navigation">
+          <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => openCommandPalette('all')} />
+          <button type="button" className="absolute right-3 top-3 z-40 inline-flex h-9 w-9 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100"
+            onClick={() => setMobileNavOpen(false)} aria-label="Close navigation">
+            <X className="h-4 w-4" />
+          </button>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

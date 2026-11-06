@@ -17,6 +17,89 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
   end
 
+  context "when a scheduled regular run has no imported time tracking hours" do
+    let!(:employee) { create(:employee, :contractor, company: company, pay_rate: 1000) }
+
+    before do
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: period)
+      period.update!(status: "draft", approved_at: nil, approved_by_id: nil)
+      item.update!(employment_type: "contractor", pay_rate: 1000, hours_worked: 0)
+    end
+
+    %w[run_payroll refresh_setup].each do |action|
+      [ {}, { source_coverage_reason: "Manual contractor fee only" },
+        { source_coverage_acknowledged: true },
+        { source_coverage_reason: "   ", source_coverage_acknowledged: true },
+        { source_coverage_reason: "Manual contractor fee only", source_coverage_acknowledged: false } ].each do |acknowledgement|
+        it "rejects #{action} without both reason and acknowledgement (#{acknowledgement.inspect}) before changing saved payroll" do
+          before_period = period.attributes
+          before_item = item.attributes
+          post "/api/v1/admin/pay_periods/#{period.id}/#{action}", params: {
+            includes_recurring_items: false, includes_base_salary: false, employee_ids: [ employee.id ]
+          }.merge(acknowledgement), as: :json
+          expect(response).to have_http_status(:unprocessable_entity)
+          expect(response.parsed_body.fetch("error")).to match(/reason and acknowledge/i)
+          expect(period.reload.attributes).to eq(before_period)
+          expect(item.reload.attributes).to eq(before_item)
+          expect(AuditLog.where(record_id: period.id, action: "pay_periods##{action}")).to be_empty
+        end
+      end
+    end
+
+    it "refreshes a fresh saved draft only after acknowledgement, records its reason, and requires a new acknowledgement to recalculate" do
+      acknowledgement = { source_coverage_reason: "  Manual contractor fee only; hourly payroll follows separately.  ", source_coverage_acknowledged: true }
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: {
+        includes_recurring_items: false, includes_base_salary: false
+      }.merge(acknowledgement), as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      expect(period.reload).to have_attributes(status: "calculated", includes_recurring_items: false, includes_base_salary: false)
+      expect(item.reload.gross_pay).to eq(1000.to_d)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ employee.id ])
+      audit = AuditLog.where(record_id: period.id, action: "pay_periods#refresh_setup").last
+      expect(audit.metadata).to include("source_coverage_reason" => acknowledgement[:source_coverage_reason].strip,
+        "source_coverage_acknowledged" => true)
+      expect(audit.metadata.dig("business_summary", "employees_processed")).to eq(1)
+
+      %w[run_payroll refresh_setup].each do |action|
+        post "/api/v1/admin/pay_periods/#{period.id}/#{action}", as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(item.reload.gross_pay).to eq(1000.to_d)
+        post "/api/v1/admin/pay_periods/#{period.id}/#{action}", params: acknowledgement, as: :json
+        expect(response).to have_http_status(:ok)
+        expect(AuditLog.where(record_id: period.id, action: "pay_periods##{action}").last.metadata)
+          .to include("source_coverage_reason" => acknowledgement[:source_coverage_reason].strip)
+      end
+    end
+
+    it "allows empty-roster setup refresh without claiming a calculation" do
+      item.destroy!
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", params: { includes_recurring_items: false }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(period.reload.status).to eq("draft")
+      expect(period.includes_recurring_items).to be(false)
+      expect(response.parsed_body.dig("results", "success")).to eq([])
+    end
+
+    it "guards approved refresh before withdrawing approval" do
+      period.update!(status: "approved", approved_at: Time.current, approved_by_id: actor.id)
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(period.reload.status).to eq("approved")
+      expect(period.approved_by_id).to eq(actor.id)
+    end
+  end
+
+  def commit_calculated_original!
+    # Retained correction evidence must come from the original calculation,
+    # before reopening or changing today's profile. Never backfill its schedule.
+    item.calculate!
+    expect(item.reload.tax_rule_snapshot).to include("engine" => "legacy_tax_table", "pay_frequency" => "biweekly")
+    expect(item.calculation_context_snapshot.fetch("employee")).to include("pay_frequency" => "biweekly")
+    period.update!(status: "committed", committed_at: Time.current)
+  end
+
   it "recalculates approved payroll using current setup, preserves entered rates and manual deductions, and keeps the existing scope" do
     expect(PayrollTimeAllocationService).not_to receive(:call!)
     employee.update!(default_custom_earnings: [ { "label" => "Current bonus", "amount" => 50 } ])
@@ -34,7 +117,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   end
 
   it "preserves the reopened payroll rate when its saved hours are explicitly resubmitted" do
-    period.update!(status: "committed", committed_at: Time.current)
+    commit_calculated_original!
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
     expect(response).to have_http_status(:created)
@@ -53,6 +136,37 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     expect(employee.reload.pay_rate).to eq(16.to_d)
   end
 
+  it "holds an uncalculated legacy original instead of inferring its frequency from current matching setup" do
+    item.update!(tax_rule_snapshot: {})
+    expect(item.calculation_context_snapshot).to eq({})
+    expect(item.tax_rule_snapshot).to eq({})
+    period.update!(status: "committed", committed_at: Time.current)
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Review legacy unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    expect(response).to have_http_status(:created)
+    correction = PayPeriod.find(response.parsed_body.dig("correction_run", "id"))
+    copied = correction.payroll_items.sole
+    retained = copied.attributes
+    original = item.reload.attributes
+    expect_any_instance_of(PayrollFieldInputApplier).not_to receive(:apply!)
+    expect(NamedPayrollLoanInput).not_to receive(:apply!)
+
+    post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 80, overtime: 0 } },
+      payroll_field_inputs: { employee.id.to_s => { "999" => { mode: "override", amount: 10 } } },
+      named_loan_payments: { employee.id.to_s => { "999" => { mode: "override", amount: 20 } } }
+    }, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("results", "success")).to be_empty
+    expect(response.parsed_body.dig("results", "errors").sole["error"]).to include("original hourly pay frequency is missing")
+    expect(copied.reload.attributes).to eq(retained)
+    expect(item.reload.attributes).to eq(original)
+    expect(copied.payroll_item_earnings).to be_empty
+    expect(copied.payroll_item_field_entries).to be_empty
+    expect(copied.loan_transactions).to be_empty
+  end
+
   it "recalculates copied multi-rate hours at saved rates after profile rates change or deactivate" do
     primary = employee.employee_wage_rates.create!(label: "Primary", rate: 12, is_primary: true)
     secondary = employee.employee_wage_rates.create!(label: "Secondary", rate: 20)
@@ -61,7 +175,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
       { "employee_wage_rate_id" => secondary.id, "label" => "Secondary", "rate" => 20, "regular_hours" => 40 }
     ]
     item.update!(wage_rate_hours: buckets)
-    period.update!(status: "committed", committed_at: Time.current)
+    commit_calculated_original!
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
     correction_id = response.parsed_body.dig("correction_run", "id")
@@ -97,7 +211,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   it "rejects foreign and invented inactive wage-rate IDs in correction drafts" do
     saved = employee.employee_wage_rates.create!(label: "Saved", rate: 12)
     item.update!(wage_rate_hours: [ { "employee_wage_rate_id" => saved.id, "label" => "Saved", "rate" => 12, "regular_hours" => 80 } ])
-    period.update!(status: "committed", committed_at: Time.current)
+    commit_calculated_original!
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
     correction_id = response.parsed_body.dig("correction_run", "id")
@@ -110,7 +224,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
           { employee_wage_rate_id: rate.id, label: rate.label, rate: 100, regular_hours: 80 }
         ] } }
       }, as: :json
-      expect(response.parsed_body.dig("results", "errors").size).to eq(1)
+      expect(response.parsed_body.dig("results", "errors").sole["error"]).to match(/Wage rate does not belong|Inactive wage rate was not part/)
       expect(PayPeriod.find(correction_id).payroll_items.sole.wage_rate_hours.first["employee_wage_rate_id"]).to eq(saved.id)
     end
   end
@@ -123,7 +237,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
       { "employee_wage_rate_id" => secondary.id, "label" => secondary.label, "rate" => 20, "regular_hours" => 40 }
     ]
     item.update!(wage_rate_hours: buckets)
-    period.update!(status: "committed", committed_at: Time.current)
+    commit_calculated_original!
     primary.destroy_with_employee_lock!
     post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
       params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
@@ -148,6 +262,54 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     expect(response).to have_http_status(:ok)
     expect(copied.reload.gross_pay).to eq(1280.to_d)
     expect(copied.wage_rate_hours.map { |entry| entry["rate"] }).to eq([ 12.0, 20.0 ])
+  end
+
+  it "rejects invented legacy rates and stripped original IDs through calculation and item editing" do
+    rate = employee.employee_wage_rates.create!(label: "Captured", rate: 12)
+    bucket = { "employee_wage_rate_id" => rate.id, "label" => "Captured", "rate" => 12, "regular_hours" => 80 }
+    item.update!(wage_rate_hours: [ bucket ])
+    commit_calculated_original!
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction = PayPeriod.find(response.parsed_body.dig("correction_run", "id"))
+    copied = correction.payroll_items.sole
+    before = copied.attributes
+    controller = Api::V1::Admin::PayrollItemsController
+    allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+
+    [ bucket.except("employee_wage_rate_id"), bucket.except("employee_wage_rate_id").merge("label" => "Injected", "rate" => 999) ].each do |input|
+      post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+        employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ input ] } }
+      }, as: :json
+      expect(response.parsed_body.dig("results", "errors").sole["error"]).to include("Retain one identifiable original legacy wage-rate bucket")
+      expect(copied.reload.attributes).to eq(before)
+      patch "/api/v1/admin/pay_periods/#{correction.id}/payroll_items/#{copied.id}",
+        params: { payroll_item: { wage_rate_hours: [ input ] }, auto_calculate: true }, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(copied.reload.attributes).to eq(before)
+    end
+  end
+
+  it "recalculates legitimate original legacy buckets while rejecting requested rate changes" do
+    bucket = { "label" => "Legacy", "rate" => 12, "regular_hours" => 80, "is_primary" => true }
+    item.update!(wage_rate_hours: [ bucket ])
+    commit_calculated_original!
+    post "/api/v1/admin/pay_periods/#{period.id}/reopen_unpaid",
+      params: { reason: "Refresh unpaid payroll", unpaid_acknowledgement: true }, as: :json
+    correction = PayPeriod.find(response.parsed_body.dig("correction_run", "id"))
+    post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ bucket.merge("regular_hours" => 40) ] } }
+    }, as: :json
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    copied = correction.payroll_items.sole
+    expect(copied.reload.gross_pay).to eq(480.to_d)
+    post "/api/v1/admin/pay_periods/#{correction.id}/run_payroll", params: {
+      employee_ids: [ employee.id ], hours: { employee.id.to_s => { wage_rates: [ bucket.merge("rate" => 99) ] } }
+    }, as: :json
+    expect(response.parsed_body.dig("results", "errors").sole["error"]).to include("reviewed wage-rate correction")
+    expect(copied.reload.gross_pay).to eq(480.to_d)
+    expect(item.reload.wage_rate_hours.sole["rate"]).to eq(12.0)
   end
 
   it "supersedes an already approved client review even if the monetary calculation remains the same" do
@@ -207,7 +369,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
   end
 
   it "shows preflight eligibility and requires the explicit unpaid attestation for a financial reversal" do
-    period.update!(status: "committed", committed_at: Time.current)
+    commit_calculated_original!
     get "/api/v1/admin/pay_periods/#{period.id}/correction_preflight"
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("correction_preflight", "eligible")).to be(true)

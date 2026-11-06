@@ -8,6 +8,7 @@ import {
   BadgeDollarSign,
   Banknote,
   CalendarDays,
+  Clock3,
   CheckCircle2,
   Pencil,
   ReceiptText,
@@ -28,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeStatusConfig,
@@ -53,6 +55,8 @@ import { employeesApi, payStubsApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
+import { SavedHours } from '@/components/employees/SavedHours';
+import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
@@ -76,6 +80,7 @@ const tabs: Array<{ id: EmployeeWorkspaceTab; label: string; icon: typeof UserRo
   { id: 'overview', label: 'Overview', icon: UserRound },
   { id: 'pay-setup', label: 'Pay setup', icon: Settings2 },
   { id: 'pay-history', label: 'Pay history', icon: ReceiptText },
+  { id: 'hours-payroll', label: 'Hours & payroll', icon: Clock3 },
   { id: 'activity', label: 'Activity', icon: Activity },
 ];
 const tabIds = new Set(tabs.map((tab) => tab.id));
@@ -93,7 +98,8 @@ export function EmployeeWorkspace(): ReactElement {
   }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const employeeId = parsePositiveRouteId(idParam) ?? 0;
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const activeTab = (tabParam ?? 'overview') as EmployeeWorkspaceTab;
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -282,9 +288,9 @@ export function EmployeeWorkspace(): ReactElement {
             <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}>
               <ArrowLeft className="h-4 w-4" />Back
             </Link>
-            <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
+            {!readOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}>
               <Pencil className="h-4 w-4" />Edit employee
-            </Link>
+            </Link>}
           </div>
         }
       />
@@ -306,12 +312,21 @@ export function EmployeeWorkspace(): ReactElement {
         label="Employee workspace sections"
         tabs={tabs.map((tab) => ({
           ...tab,
-          href: employeePath(companyId, employeeId, tab.id, { returnTo }),
+          href: (() => {
+            const href = employeePath(companyId, employeeId, tab.id, { returnTo });
+            const query = new URLSearchParams(href.split('?')[1]);
+            ['hours_source', 'hours_start', 'hours_end', 'hours_cursor', 'detail_cursor', 'period', 'history_year', 'history_source', 'retirement_year'].forEach((key) => {
+              const value = searchParams.get(key);
+              if (value) query.set(key, value);
+            });
+            return `${href.split('?')[0]}?${query}`;
+          })(),
           count: tab.id === 'pay-history' ? history.length : undefined,
         }))}
       />
 
       <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+        {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">{companyReadOnlyMessage(activeCompany)}</p>}
         {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900" role="status">
@@ -333,6 +348,7 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         {activeTab === 'pay-setup' && (
           <PaySetup
+            readOnly={readOnly}
             employee={employee}
             editHref={employeeEditPath(companyId, employeeId, { returnTo: currentPath })}
             reviewNotes={reviewNotes}
@@ -350,6 +366,7 @@ export function EmployeeWorkspace(): ReactElement {
         {activeTab === 'pay-history' && (
           <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} />
         )}
+        {activeTab === 'hours-payroll' && <EmployeeHoursPayroll employeeId={employeeId} companyId={companyId} report={payHistory} returnTo={currentPath} />}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
       </main>
     </div>
@@ -425,6 +442,7 @@ function EmployeeOverview({
 }
 
 interface PaySetupProps {
+  readOnly: boolean;
   employee: Employee;
   editHref: string;
   reviewNotes: Record<string, string>;
@@ -439,7 +457,7 @@ interface PaySetupProps {
   retirementYear?: number;
 }
 
-function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
+function PaySetup({ readOnly, employee, editHref, reviewNotes, reviewSourceReferences, reviewEffectiveDates, reviewBusyCode, onReviewNoteChange, onReviewSourceReferenceChange, onReviewEffectiveDateChange, onResolveReview, onEmployeeReload, retirementYear }: PaySetupProps): ReactElement {
   const adjustmentCount = (employee.default_payroll_adjustments || []).filter((item) => item.active !== false).length;
   const wageRateCount = (employee.wage_rates || []).filter((item) => item.active !== false).length;
   const currentW4 = employee.current_w4_election;
@@ -466,7 +484,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
                 <div key={item.code} className="rounded-2xl border border-warning-200 bg-white p-4">
                   <p className="font-semibold text-neutral-950">{item.message}</p>
                   {item.fields.length > 0 && <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">Review fields: {item.fields.map((field) => field.replaceAll('_', ' ')).join(', ')}</p>}
-                  {requiresCertificationEvidence && (
+                  {!readOnly && requiresCertificationEvidence && (
                     <div className="mt-4 rounded-xl border border-primary-100 bg-primary-50/60 p-4">
                       <p className="text-sm font-semibold text-primary-950">Certification evidence</p>
                       <p className="mt-1 text-sm leading-6 text-primary-800">Use the current signed plan, employee form, loan statement, employer confirmation, or other authoritative record—not the predecessor configuration by itself.</p>
@@ -489,19 +507,19 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
                       </div>
                     </div>
                   )}
-                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                  {!readOnly && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                     <label className="block space-y-2">
                       <span className="block text-sm font-medium text-neutral-700">What was verified or corrected?</span>
                       <Textarea className="min-h-24 bg-white" value={reviewNotes[item.code] || ''} onChange={(event) => onReviewNoteChange(item.code, event.target.value)} placeholder="Example: Confirmed signed W-4 effective 01/01/2026 with the employer." />
                     </label>
                     <Button disabled={!readyToRecord || reviewBusyCode !== null} onClick={() => onResolveReview(item)}>{reviewBusyCode === item.code ? 'Recording…' : requiresCertificationEvidence ? 'Record certification' : 'Mark reviewed'}</Button>
-                  </div>
+                  </div>}
                 </div>
               );
             })}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-neutral-600">Need to correct a date, address, W-4, rate, or recurring payroll item first?</p>
-              <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>
+              {!readOnly && <Link className="inline-flex min-h-12 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 hover:border-primary-300 hover:text-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit employee setup</Link>}
             </div>
             {(employee.configuration_review_resolutions || []).length > 0 && (
               <div className="border-t border-neutral-200 pt-4">
@@ -541,7 +559,7 @@ function PaySetup({ employee, editHref, reviewNotes, reviewSourceReferences, rev
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm"><Settings2 className="h-5 w-5" /></span>
           <h2 className="mt-4 font-display text-xl font-extrabold tracking-tight text-neutral-950">Edit source settings</h2>
           <p className="mt-2 text-sm leading-6 text-neutral-600">Wage, tax, and other employee fields use the validated employee form. Payment method and retirement settings have their own controls here.</p>
-          <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>
+          {!readOnly && <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800" to={editHref}><Pencil className="h-4 w-4" />Edit payroll setup</Link>}
         </CardContent>
       </Card>
       </div>
@@ -612,8 +630,14 @@ interface PayHistoryProps {
 }
 
 function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
-  const [yearFilter, setYearFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'cornerstone' | 'quickbooks'>('all');
+  const [historyParams, setHistoryParams] = useSearchParams();
+  const yearFilter = historyParams.get('history_year') || 'all';
+  const sourceFilter = historyParams.get('history_source') || 'all';
+  const setHistoryFilter = (key: string, value: string): void => {
+    const next = new URLSearchParams(historyParams);
+    if (value === 'all') next.delete(key); else next.set(key, value);
+    setHistoryParams(next);
+  };
   const [stubLoadingId, setStubLoadingId] = useState<number | null>(null);
   const [stubError, setStubError] = useState<string | null>(null);
   const [stubArtifact, setStubArtifact] = useState<PdfArtifact | null>(null);
@@ -648,15 +672,15 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
       <CardHeader className="gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><CardTitle>Pay history</CardTitle><p className="mt-2 text-sm text-neutral-500">Every linked QuickBooks record and committed Cornerstone paycheck appears here. Imported records are locked and cannot be edited or recalculated.</p></div>
         {report && report.history.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs font-semibold text-neutral-600">Year
-              <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+            <label className="min-w-0 text-xs font-semibold text-neutral-600">Year
+              <select value={yearFilter} onChange={(event) => setHistoryFilter('history_year', event.target.value)} className="mt-1 block h-11 w-full min-w-0 max-w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900 sm:h-10">
                 <option value="all">All years</option>
                 {years.map((year) => <option key={year} value={year}>{year}</option>)}
               </select>
             </label>
-            <label className="text-xs font-semibold text-neutral-600">Source
-              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)} className="mt-1 block h-10 rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900">
+            <label className="min-w-0 text-xs font-semibold text-neutral-600">Source
+              <select value={sourceFilter} onChange={(event) => setHistoryFilter('history_source', event.target.value)} className="mt-1 block h-11 w-full min-w-0 max-w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-900 sm:h-10">
                 <option value="all">All sources</option>
                 <option value="cornerstone">Cornerstone</option>
                 <option value="quickbooks">QuickBooks / adjustments</option>
@@ -691,6 +715,8 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <div><p className="text-xs text-neutral-500">Deductions</p><p className="tabular-nums">{formatCurrency(item.total_deductions)}</p></div>
                   <div><p className="text-xs text-neutral-500">Payment</p><p>{payrollPaymentLabel(item)}</p>{item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}</div>
                 </div>
+                <SavedHours item={item} />
+                {item.net_pay > 0 && <p className="text-sm text-neutral-600">{item.payment_evidence?.label || 'Payment evidence not available'}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
                     <Button variant="outline" size="sm" className="min-h-11" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
@@ -704,7 +730,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
           </div>
           <div className="hidden sm:block">
           <Table>
-            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Pay date</TableHead><TableHead>Pay run</TableHead><TableHead>Source</TableHead><TableHead>Saved hours</TableHead><TableHead>Gross</TableHead><TableHead>Deductions</TableHead><TableHead>Net</TableHead><TableHead>Payment</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader>
             <TableBody striped>
               {visibleHistory.map((item) => (
                 <TableRow key={item.key}>
@@ -718,10 +744,11 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   </TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
                   <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge></TableCell>
+                  <TableCell><SavedHours item={item} /></TableCell>
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell>{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
+                  <TableCell>{item.net_pay > 0 && <p className="text-xs text-neutral-500">{item.payment_evidence?.label || 'Payment evidence not available'}</p>}{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
                   <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
                     <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
                   </div></TableCell>

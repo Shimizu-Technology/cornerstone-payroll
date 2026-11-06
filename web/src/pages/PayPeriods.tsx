@@ -1,5 +1,7 @@
+import { PriorProviderHistoryNotice, PriorProviderHistoryRecordedNotice } from '@/components/payroll/PriorProviderHistoryNotice';
+import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/components/payroll/PayrollCalculationIssues';
-import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
@@ -32,10 +34,13 @@ import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
+import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { correctionRunPath, currentAppPath, importedPayRunPath, payRunPath, type PayRunWorkspaceTab } from '@/lib/routes';
 import { ApiError, companiesApi, payrollHistoryApi, payPeriodsApi, payScheduleSettingsApi, type PayrollGoLiveGateState, type PayrollHistoryRecord } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
   regular: 'Regular payroll',
@@ -103,7 +108,7 @@ function PayPeriodMobileCard({
         </Badge>
         {!period.includes_base_salary && <Badge variant="info">No base salary</Badge>}
         <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
-          {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />QuickBooks import</> : 'Cornerstone'}
+          {period.record_type === 'imported' ? <><LockKeyhole className="mr-2 h-3 w-3" />{period.source.label}</> : 'Cornerstone'}
         </Badge>
         {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning"><LockKeyhole className="mr-2 h-3 w-3" />Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
         {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
@@ -143,8 +148,7 @@ export function PayPeriods() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
   const trainingReplayWorkspace = activeCompany?.test_workspace_purpose === 'training_replay';
-  const readOnlyWorkspace = activeCompany?.test_workspace_purpose === 'backup_snapshot'
-    || Boolean(activeCompany?.test_workspace_sealed_at);
+  const readOnlyWorkspace = !canWriteCompany(activeCompany);
   const returnTo = currentAppPath(location.pathname, location.search);
   const payRunDestination = (payRunId: number, tab: PayRunWorkspaceTab): string => (
     activeCompanyId
@@ -154,6 +158,10 @@ export function PayPeriods() {
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  const { dismiss: dismissFeedback } = useFeedback();
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+  const [deletingPeriod, setDeletingPeriod] = useState<PayPeriod | null>(null);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [calculationResult, setCalculationResult] = useState<{ id: number; summary: string; failed: boolean; failures: PayrollCalculationFailure[]; year: number; names: Map<number, string> } | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
@@ -165,10 +173,12 @@ export function PayPeriods() {
   const [payPeriodCompanyId, setPayPeriodCompanyId] = useState<number | null>(null);
   const searchTerm = searchParams.get('search') || '';
   const sourceParam = searchParams.get('source') || 'all';
-  const sourceFilter = (['all', 'cornerstone', 'quickbooks'].includes(sourceParam) ? sourceParam : 'all') as 'all' | 'cornerstone' | 'quickbooks';
+  const sourceFilter = (['all', 'cornerstone', 'quickbooks', 'prior_provider'].includes(sourceParam) ? sourceParam : 'all') as 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider';
   const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
   const [totalPages, setTotalPages] = useState(0);
   const [years, setYears] = useState<number[]>([]);
+  const [historyAvailable, setHistoryAvailable] = useState(false);
+  const [recordedHistoryCount, setRecordedHistoryCount] = useState<number | null>(null);
   const [goLiveGate, setGoLiveGate] = useState<PayrollGoLiveGateState | null>(null);
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status', 'source'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
@@ -210,6 +220,7 @@ export function PayPeriods() {
     setTotalPages(0);
     setYears([]);
     setGoLiveGate(null);
+    setHistoryAvailable(false);
     setPayPeriodCompanyId(null);
   }, [payPeriodViewKey]);
 
@@ -220,6 +231,9 @@ export function PayPeriods() {
     mutationGenerationRef.current += 1;
     setIsCreateOpen(false);
     setIsEditOpen(false);
+    setDeletingPeriod(null);
+    setDeleteAcknowledged(false);
+    setDeleteSuccess(null);
     setIsSubmitting(false);
     setIsEditSubmitting(false);
     setActionInFlight(null);
@@ -316,6 +330,8 @@ export function PayPeriods() {
       setTotalPages(response.meta.total_pages);
       setYears(response.meta.years);
       setGoLiveGate(response.meta.payroll_go_live ?? null);
+      setHistoryAvailable(response.meta.prior_provider_history_available ?? false);
+      setRecordedHistoryCount(response.meta.prior_provider_history_recorded?.period_count ?? null);
       payPeriodCompanyIdRef.current = requestedCompanyId;
       setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
@@ -326,6 +342,8 @@ export function PayPeriods() {
         setTotalPages(0);
         setYears([]);
         setGoLiveGate(null);
+        setHistoryAvailable(false);
+        setRecordedHistoryCount(null);
       }
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -362,6 +380,7 @@ export function PayPeriods() {
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (readOnlyWorkspace) return;
     const startingCheckNumber = formData.starting_check_number.trim();
 
     if (formData.end_date <= formData.start_date) {
@@ -400,11 +419,18 @@ export function PayPeriods() {
   };
 
   const handleRunPayroll = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`run-${id}`);
       setError(null);
       setCalculationResult(null);
+      const current = await payPeriodsApi.get(id);
+      if (!isCurrentMutation()) return;
+      if (needsSourceCoverageAcknowledgement(current.pay_period)) {
+        navigate(payRunDestination(id, 'work'));
+        return;
+      }
       const response = await payPeriodsApi.runPayroll(id);
       if (!isCurrentMutation()) return;
       const failed = response.results.errors.length;
@@ -421,6 +447,7 @@ export function PayPeriods() {
   };
 
   const openEditModal = (period: PayPeriod) => {
+    if (readOnlyWorkspace) return;
     setEditingPayPeriod(period);
     setEditError(null);
     setError(null);
@@ -438,6 +465,7 @@ export function PayPeriods() {
 
   const handleEdit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (readOnlyWorkspace) return;
     if (!editingPayPeriod) return;
 
     if (editFormData.end_date <= editFormData.start_date) {
@@ -488,6 +516,7 @@ export function PayPeriods() {
   };
 
   const handleApprove = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`approve-${id}`);
@@ -504,6 +533,7 @@ export function PayPeriods() {
   };
 
   const handleCommit = async (id: number) => {
+    if (readOnlyWorkspace) return;
     const period = payPeriodCompanyId === activeCompanyId
       ? payPeriods.find((candidate) => candidate.record_type === 'native' && candidate.id === id)
       : undefined;
@@ -528,10 +558,45 @@ export function PayPeriods() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this pay period?')) {
-      return;
+  const openDeleteDialog = async (id: number) => {
+    if (readOnlyWorkspace || actionInFlight !== null) return;
+    const isCurrentMutation = currentMutationGuard();
+    try {
+      setActionInFlight(`delete-details-${id}`);
+      setError(null);
+      if (deleteSuccess) dismissFeedback({ tone: 'success', message: deleteSuccess });
+      setDeleteSuccess(null);
+      const { pay_period } = await payPeriodsApi.get(id, activeCompanyId ?? undefined);
+      if (!isCurrentMutation()) return;
+      setDeleteAcknowledged(false);
+      setDeletingPeriod(pay_period);
+    } catch (err) {
+      if (isCurrentMutation()) setError(err instanceof Error ? err.message : 'Could not load the pay run. Try again.');
+    } finally {
+      if (isCurrentMutation()) setActionInFlight(null);
     }
+  };
+
+  // Missing item details must never bypass the entered-hours acknowledgement.
+  const deleteNeedsAcknowledgement = deletingPeriod !== null && (
+    (deletingPeriod.employee_count ?? 0) >= 10
+    || !Array.isArray(deletingPeriod.payroll_items)
+    || deletingPeriod.payroll_items.some((item) =>
+      [item.total_hours, item.hours_worked, item.overtime_hours, item.holiday_hours, item.pto_hours]
+        .some((hours) => Number(hours) !== 0 && Number.isFinite(Number(hours)))
+      || item.wage_rate_hours?.some((rate) =>
+        [rate.regular_hours, rate.overtime_hours, rate.holiday_hours, rate.pto_hours]
+          .some((hours) => Number(hours) !== 0 && Number.isFinite(Number(hours))))
+    )
+  );
+  const deletedRunName = deletingPeriod
+    ? `${activeCompany?.name ?? 'Client'} — ${formatDateRange(deletingPeriod.start_date, deletingPeriod.end_date)} (pay date ${formatDate(deletingPeriod.pay_date)})`
+    : '';
+
+  const handleDelete = async () => {
+    if (readOnlyWorkspace || !deletingPeriod || actionInFlight !== null
+      || (deleteNeedsAcknowledgement && !deleteAcknowledged)) return;
+    const { id } = deletingPeriod;
     const isCurrentMutation = currentMutationGuard();
     try {
       setActionInFlight(`delete-${id}`);
@@ -539,10 +604,13 @@ export function PayPeriods() {
       await payPeriodsApi.delete(id);
       if (!isCurrentMutation()) return;
       setPayPeriods((prev) => prev.filter((period) => period.key !== `native:${id}`));
+      setDeleteSuccess(`Deleted ${deletedRunName}.`);
+      setDeletingPeriod(null);
+      setDeleteAcknowledged(false);
       void loadPayPeriodsRef.current(true);
     } catch (err) {
       if (!isCurrentMutation()) return;
-      setError(err instanceof Error ? err.message : 'Failed to delete pay period');
+      setError(err instanceof Error ? err.message : 'Failed to delete pay run');
     } finally {
       if (isCurrentMutation()) setActionInFlight(null);
     }
@@ -587,7 +655,7 @@ export function PayPeriods() {
         return;
       }
 
-      const today = new Date();
+      const today = new Date(`${guamBusinessDate()}T12:00:00`);
       let startDate: Date;
       let endDate: Date;
       if (schedule.period_rule === 'semimonthly') {
@@ -615,8 +683,12 @@ export function PayPeriods() {
 
       const payDate = schedule.pay_date_rule === 'days_after_period_end'
         ? new Date(endDate)
+        : schedule.pay_date_rule === 'semimonthly_15th_and_month_end'
+          ? endDate.getDate() === 15
+            ? new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0)
+            : new Date(endDate.getFullYear(), endDate.getMonth() + 1, 15)
         : null;
-      if (payDate) payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
+      if (payDate && schedule.pay_date_rule === 'days_after_period_end') payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
 
       const selectedPayDate = payDate ? toDateInput(payDate) : '';
       if (!createDatesEditedRef.current) {
@@ -628,7 +700,7 @@ export function PayPeriods() {
         }));
         if (!isComparisonOnlyPayDate(selectedPayDate)) void loadCurrentNextCheckNumber();
       }
-      setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
+      setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${schedule.pay_date_rule === 'semimonthly_15th_and_month_end' ? '; scheduled paydays are the 15th and month end, including weekends and holidays' : payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
     } catch {
       if (!isCurrentRequest()) return;
       if (!createDatesEditedRef.current) {
@@ -670,6 +742,7 @@ export function PayPeriods() {
   };
 
   const openCreateModal = () => {
+    if (readOnlyWorkspace) return;
     createDatesEditedRef.current = false;
     setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
     void setDefaultDates();
@@ -680,6 +753,22 @@ export function PayPeriods() {
     setIsCreateOpen(true);
     if (!comparisonOnlyForSelectedPayDate) void loadCurrentNextCheckNumber();
   };
+
+  // Keep the period end and payday explicit after a historical boundary.
+  useEffect(() => {
+    const after = searchParams.get('new_after');
+    if (readOnlyWorkspace || trainingReplayWorkspace || !after || !/^\d{4}-\d{2}-\d{2}$/.test(after)) return;
+    const date = new Date(`${after}T12:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== after) return;
+    date.setUTCDate(date.getUTCDate() + 1);
+    createDatesEditedRef.current = true;
+    setFormData({ start_date: date.toISOString().slice(0, 10), end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
+    setScheduleContext('First live payroll after the recorded history. Confirm the period end and first unpaid pay date with the client.');
+    setIsCreateOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('new_after');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, readOnlyWorkspace, trainingReplayWorkspace, activeCompanyId]);
 
   const handleCreateOpenChange = (open: boolean) => {
     setIsCreateOpen(open);
@@ -716,9 +805,9 @@ export function PayPeriods() {
     <div>
       <Header
         title="Pay Periods"
-        description="Review every payroll run in one place. QuickBooks imports are visible for continuity and remain read-only."
+        description="Choose a pay period to review its employees, totals and next step. Imported prior-provider history is read-only."
         actions={
-          readOnlyWorkspace || trainingReplayWorkspace ? undefined : (
+          readOnlyWorkspace || trainingReplayWorkspace || recordedHistoryCount !== null ? undefined : (
             <Button onClick={openCreateModal}>
               {goLiveGate?.comparison_only ? 'New Comparison Run' : 'New Pay Period'}
             </Button>
@@ -727,6 +816,9 @@ export function PayPeriods() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        <TaxYearWarning companyId={activeCompanyId} />
+        {historyAvailable && recordedHistoryCount === null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryNotice companyId={activeCompanyId} />}
+        {recordedHistoryCount !== null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryRecordedNotice companyId={activeCompanyId} periodCount={recordedHistoryCount} />}
         {trainingReplayWorkspace && (
           <div className="mb-4">
             <h2 className="sr-only">Complete the practice payrolls from oldest to newest</h2>
@@ -747,6 +839,7 @@ export function PayPeriods() {
           </div>
         )}
         {/* Error display */}
+        {deleteSuccess && <ActionFeedback tone="success" message={deleteSuccess} />}
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
         {calculationResult && <ActionFeedback tone={calculationResult.failed ? 'error' : 'success'} message={calculationResult.summary}>
           <p>{calculationResult.summary}</p>
@@ -793,7 +886,7 @@ export function PayPeriods() {
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
@@ -812,6 +905,7 @@ export function PayPeriods() {
               <option value="all">All sources</option>
               <option value="cornerstone">Cornerstone</option>
               <option value="quickbooks">QuickBooks imports</option>
+              <option value="prior_provider">Prior-provider history</option>
             </Select>
             <Select
               value={sortBy}
@@ -851,14 +945,18 @@ export function PayPeriods() {
         {/* Pay Period Table */}
         <Card>
           {loading ? (
-            <div className="p-8 text-center text-gray-500">Loading...</div>
+            <div className="p-8 text-center text-neutral-600">Loading...</div>
           ) : visiblePayPeriods.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-neutral-600">
               {searchTerm
                 ? 'No pay periods match the current filters.'
                 : readOnlyWorkspace
-                  ? 'No pay periods were preserved in this backup.'
-                  : 'No pay periods found. Create your first pay period to get started.'}
+                  ? 'This workspace has no pay periods to review.'
+                  : recordedHistoryCount !== null
+                    ? (yearFilter || statusFilter || sourceFilter !== 'all'
+                      ? 'No pay periods match the current filters.'
+                      : 'Recorded previous-provider pay runs appear here after year-to-date is turned on.')
+                    : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
             <>
@@ -873,7 +971,7 @@ export function PayPeriods() {
                     onView={() => navigate(recordDestination(period, 'overview'))}
                     onEnterHours={() => navigate(recordDestination(period, 'work'))}
                     onEdit={() => openEditModal(period as PayPeriod)}
-                    onDelete={() => handleDelete(period.id)}
+                    onDelete={() => openDeleteDialog(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
                     onApprove={() => handleApprove(period.id)}
                     onCommit={() => handleCommit(period.id)}
@@ -884,7 +982,7 @@ export function PayPeriods() {
                 <Table stickyHeader containerClassName="max-h-[32rem]">
                   <TableHeader>
                 <TableRow>
-                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-gray-50">Pay Period</TableHead>
+                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-neutral-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
                   <TableHead>Purpose</TableHead>
                   <TableHead>Employees</TableHead>
@@ -892,24 +990,24 @@ export function PayPeriods() {
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Processed</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-neutral-200 bg-neutral-50 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {visiblePayPeriods.map((period, index) => {
                   const statusLabel = period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status;
-                  const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                  const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-neutral-100';
                   const periodReadOnly = readOnlyWorkspace || period.test_workspace_role === 'baseline';
                   const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
                       <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {formatDateRange(period.start_date, period.end_date)}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="text-sm text-gray-700">
+                        <span className="text-sm text-neutral-700">
                           {new Date(period.pay_date).toLocaleDateString('en-US', {
                             weekday: 'short',
                             month: 'short',
@@ -924,24 +1022,24 @@ export function PayPeriods() {
                           </Badge>
                           {!period.includes_base_salary && <span className="text-xs font-medium text-primary-700">No base salary</span>}
                           <Badge variant={period.record_type === 'imported' ? 'warning' : 'default'}>
-                            {period.record_type === 'imported' ? 'QuickBooks import' : 'Cornerstone'}
+                            {period.record_type === 'imported' ? period.source.label : 'Cornerstone'}
                           </Badge>
                           {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
                           {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="text-sm text-gray-700">
+                        <span className="text-sm text-neutral-700">
                           {period.employee_count || 0}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {period.total_gross ? formatCurrency(period.total_gross) : '—'}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
-                        <span className="font-medium text-gray-900">
+                        <span className="font-medium text-neutral-900">
                           {period.total_net ? formatCurrency(period.total_net) : '—'}
                         </span>
                       </TableCell>
@@ -966,28 +1064,28 @@ export function PayPeriods() {
                       <TableCell className={rowTone}>
                         {period.processed_at ? (
                           <div className="text-sm">
-                            <p className="font-medium text-gray-900">
+                            <p className="font-medium text-neutral-900">
                               {formatGuamDateTimeShort(period.processed_at)}
                             </p>
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-neutral-600">
                               {period.processed_by_name ? `by ${period.processed_by_name}` : 'Operator not recorded'}
                             </p>
                           </div>
                         ) : (
-                          <span className="text-sm text-gray-400">Not processed</span>
+                          <span className="text-sm text-neutral-600">Not processed</span>
                         )}
                       </TableCell>
-                      <TableCell className={`text-right ${rowTone}`}>
-                        <div className="flex items-center justify-end gap-3">
+                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-neutral-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
+                        <div className="flex max-w-[232px] flex-wrap items-center justify-end gap-2 [&_button]:min-h-11">
                           <div className="flex items-center gap-1 text-sm">
                             <button
-                              className="text-gray-500 hover:text-gray-800 hover:underline"
+                              className="text-neutral-600 hover:text-neutral-800 hover:underline"
                               onClick={() => navigate(recordDestination(period, 'overview'))}
                             >
                               View
                             </button>
-                            {!periodReadOnly && period.capabilities.edit && <><span className="text-gray-300">·</span><button className="text-gray-500 hover:text-gray-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!periodReadOnly && period.capabilities.delete && <><span className="text-gray-300">·</span><button className="text-red-400 hover:text-red-600 hover:underline" onClick={() => handleDelete(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
+                            {!periodReadOnly && period.capabilities.edit && <><span className="text-neutral-300">·</span><button className="text-neutral-600 hover:text-neutral-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
+                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => openDeleteDialog(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
                           </div>
 
                           {!periodReadOnly && period.capabilities.enter_hours && (
@@ -1053,56 +1151,93 @@ export function PayPeriods() {
         )}
 
         {/* Workflow explanation */}
-        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-8">
-          <div className="p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
+        {!readOnlyWorkspace && !trainingReplayWorkspace && <Card className="mt-6">
+          <details className="p-4">
+            <summary className="cursor-pointer py-1 font-semibold text-primary-800">How payroll moves from draft to payment</summary>
+            <h3 className="sr-only">Payroll Workflow</h3>
             <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-gray-600">1</span>
+                <div className="w-8 h-8 bg-neutral-100 rounded-full flex items-center justify-center">
+                  <span className="text-sm font-medium text-neutral-600">1</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Draft</p>
-                  <p className="text-sm text-gray-500">Create pay period</p>
+                  <p className="font-medium text-neutral-900">Draft</p>
+                  <p className="text-sm text-neutral-600">Create pay period</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-yellow-600">2</span>
+                  <span className="text-sm font-medium text-warning-800">2</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Calculated</p>
-                  <p className="text-sm text-gray-500">Review totals</p>
+                  <p className="font-medium text-neutral-900">Calculated</p>
+                  <p className="text-sm text-neutral-600">Review totals</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-blue-600">3</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Approved</p>
-                  <p className="text-sm text-gray-500">Ready to commit</p>
+                  <p className="font-medium text-neutral-900">Approved</p>
+                  <p className="text-sm text-neutral-600">Ready to commit</p>
                 </div>
               </div>
-              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
+              <div className="hidden flex-1 h-px bg-neutral-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-green-600">4</span>
+                  <span className="text-sm font-medium text-success-800">4</span>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">Committed</p>
-                  <p className="text-sm text-gray-500">Locked & finalized</p>
+                  <p className="font-medium text-neutral-900">Committed</p>
+                  <p className="text-sm text-neutral-600">Locked & finalized</p>
                 </div>
               </div>
             </div>
-          </div>
+            <p className="mt-4 text-sm text-neutral-600">Committed payroll is saved. Prepare checks and record issuance or bank confirmation separately in Checks & direct deposit.</p>
+          </details>
         </Card>}
       </div>
 
       {/* Create Pay Period Modal */}
-      <Dialog open={isCreateOpen} onOpenChange={handleCreateOpenChange}>
+      <Dialog open={deletingPeriod !== null} onOpenChange={(open) => {
+        if (!open && actionInFlight === null) {
+          setDeletingPeriod(null);
+          setDeleteAcknowledged(false);
+        }
+      }}>
+        <DialogContent className="w-full max-w-lg" aria-describedby="delete-pay-run-description">
+          <DialogHeader>
+            <DialogTitle>Delete unfinished pay run?</DialogTitle>
+            <DialogDescription id="delete-pay-run-description">
+              This permanently deletes this unfinished run and its entered hours. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deletingPeriod && <dl className="my-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>dd]:break-words">
+            <dt className="font-medium">Client</dt><dd>{activeCompany?.name ?? 'Client'}</dd>
+            <dt className="font-medium">Period</dt><dd>{formatDateRange(deletingPeriod.start_date, deletingPeriod.end_date)}</dd>
+            <dt className="font-medium">Pay date</dt><dd>{formatDate(deletingPeriod.pay_date)}</dd>
+            <dt className="font-medium">Status</dt><dd>{payPeriodStatusConfig[deletingPeriod.status]?.label ?? deletingPeriod.status}</dd>
+            <dt className="font-medium">Employees</dt><dd>{deletingPeriod.employee_count ?? deletingPeriod.payroll_items?.length ?? 'Unavailable'}</dd>
+            <dt className="font-medium">Gross pay</dt><dd>{formatCurrency(deletingPeriod.total_gross ?? 0)}</dd>
+          </dl>}
+          {deleteNeedsAcknowledgement && <label className="mb-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0" checked={deleteAcknowledged}
+              disabled={actionInFlight !== null} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />
+            I understand this deletes the entered hours
+          </label>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeletingPeriod(null); setDeleteAcknowledged(false); }} disabled={actionInFlight !== null}>Cancel</Button>
+            <Button variant="danger" onClick={() => void handleDelete()} disabled={actionInFlight !== null || (deleteNeedsAcknowledgement && !deleteAcknowledged)}>
+              {actionInFlight?.startsWith('delete-') ? 'Deleting…' : 'Delete pay run'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCreateOpen && !readOnlyWorkspace} onOpenChange={handleCreateOpenChange}>
         <DialogContent>
           <form onSubmit={handleCreate}>
             <DialogHeader>
@@ -1185,6 +1320,7 @@ export function PayPeriods() {
                 </div>
               </div>
               <div className="space-y-2">
+                <TaxYearWarning companyId={activeCompanyId} payDate={formData.pay_date} />
                 <Label htmlFor="pay_date">Pay Date</Label>
                 <Input
                   id="pay_date"
@@ -1215,7 +1351,7 @@ export function PayPeriods() {
                   onChange={(e) => setFormData({ ...formData, starting_check_number: e.target.value })}
                   placeholder="Use current check settings"
                 />
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-neutral-600">
                   {loadingCheckSettings
                     ? 'Checking current company check settings...'
                     : checkSettingsError
@@ -1273,7 +1409,7 @@ export function PayPeriods() {
       </Dialog>
 
       {/* Edit Pay Period Modal */}
-      <Dialog open={isEditOpen} onOpenChange={handleEditOpenChange}>
+      <Dialog open={isEditOpen && !readOnlyWorkspace} onOpenChange={handleEditOpenChange}>
         <DialogContent>
           <form onSubmit={handleEdit}>
             <DialogHeader>
@@ -1317,6 +1453,7 @@ export function PayPeriods() {
                 </div>
               </div>
               <div className="space-y-2">
+                <TaxYearWarning companyId={activeCompanyId} payDate={editFormData.pay_date} />
                 <Label htmlFor="edit_pay_date">Pay Date</Label>
                 <Input
                   id="edit_pay_date"

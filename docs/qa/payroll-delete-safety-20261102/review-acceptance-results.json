@@ -1,0 +1,71 @@
+{
+  "runtime_commit": "9a18ed42",
+  "viewport_sizes": [
+    [
+      1440,
+      900
+    ],
+    [
+      390,
+      844
+    ]
+  ],
+  "agent_executed": true,
+  "synthetic_only": true,
+  "N1": "Calculate10hours, DELETE204 then absent in list",
+  "N2": "DELETE422; full run/items/earnings/field entries/reviews/import JSON identical; reopened10hours",
+  "N3": "Back/sidebar/company/organization Cancel preserved17h; accepted Reports and later19h edit still guarded; scope Leave one prompt; browserBack23hCancel retained",
+  "recovery": {
+    "hours": 12,
+    "bonus": 25,
+    "gross": 145,
+    "net": 133.91,
+    "reload_retained": true
+  },
+  "normal_statement": {
+    "gross": 100,
+    "non_taxable": 20,
+    "taxes": 12.65,
+    "other_deductions": 0,
+    "net": 107.35,
+    "single_batch_preview_download": true
+  },
+  "tall_check": {
+    "deductions": 9,
+    "gross": 100,
+    "non_taxable": 20,
+    "taxes": 12.65,
+    "net": 98.35,
+    "rendered_visually_checked": true
+  },
+  "independent_reviews": [
+    {
+      "commit": "8be5580c",
+      "status": "two material findings fixed"
+    },
+    {
+      "commit": "a6a4c8ec",
+      "status": "clean static source review"
+    },
+    {
+      "range": "a6a4c8ec..9a18ed42",
+      "status": "clean narrow source review"
+    },
+    {
+      "commit": "e81a715121b4406adf904c821a2b28a506499490",
+      "status": "clean narrow YTD source review; current withholding exactly once"
+    }
+  ],
+  "limits": [
+    "Desktop Chromium emulated390width, no physical phone",
+    "No printer/provider/payment/filing/deployment certification",
+    "No staging or production access"
+  ],
+  "final_pdf_runtime_commit": "e81a715121b4406adf904c821a2b28a506499490",
+  "final_pdf_http_requests": [
+    "GET /api/v1/admin/pay_stubs/3/download",
+    "POST /api/v1/admin/pay_stubs/batch_pdf"
+  ],
+  "final_pdf_pages": 1,
+  "final_ytd_regression": "Calculated and committed:100+20-12.65-3additionalwithholding-9deductions=95.35, one page"
+}

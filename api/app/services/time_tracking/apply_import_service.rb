@@ -19,6 +19,10 @@ module TimeTracking
       AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
       AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries]) if acknowledgement_ids[:entries].any?
       results
+    ensure
+      @correction_coverage = nil
+      @ordinary_processed_payload = nil
+      @source_employees_by_id = nil
     end
 
     private
@@ -28,14 +32,27 @@ module TimeTracking
       # Hold the source row through the enclosing payroll transaction so a
       # concurrent settings update cannot disable it midway through application.
       raise ArgumentError, "Time tracking source is inactive" unless @source.lock!.active?
+      if finalized_batch?
+        @source.connector.require!(:finalized_batch_v2)
+        @source.connector.require!(:exact_line_receipts_v2)
+        unless @source.historical_reconciliation_complete?
+          raise ArgumentError, "Approve complete historical payroll reconciliation before applying new payroll time"
+        end
+      end
       results = nil
 
       @import.with_lock(requires_new: true) do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
+        @correction_coverage = CorrectionCoverage.new(@import, locked_snapshot: true)
+        @ordinary_processed_payload = nil
+        @source_employees_by_id = nil
         validate_preview_provenance!
         validate_negative_adjustment_acknowledgement!
 
-        rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
+        rows = Array(ordinary_processed_payload["rows"] || ordinary_processed_payload[:rows])
+        if @mappings.map { |mapping| (mapping[:source_user_id] || mapping["source_user_id"]).to_s }.uniq.size != @mappings.size
+          raise ArgumentError, "Map each source employee exactly once"
+        end
         mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
         employee_ids = rows.filter_map do |row|
           source_user_id = row["source_user_id"].to_s
@@ -55,7 +72,7 @@ module TimeTracking
           include_value = override.key?(:include) || override.key?("include") ? (override[:include] || override["include"]) : true
           include_row = ActiveModel::Type::Boolean.new.cast(include_value)
           if finalized_batch? && !include_row
-            results[:errors] << { source_user_id: source_user_id, error: "Finalized AIRE batch rows cannot be skipped" }
+            results[:errors] << { source_user_id: source_user_id, error: "Finalized time tracking batch rows cannot be skipped" }
             next
           end
           unless include_row
@@ -87,7 +104,15 @@ module TimeTracking
             next
           end
           if excluded_employee_ids.include?(employee.id)
-            results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
+            if finalized_batch?
+              results[:errors] << {
+                source_user_id: source_user_id,
+                employee_id: employee.id,
+                error: "Finalized time tracking batch includes an employee excluded from this pay period; resolve the exclusion before importing"
+              }
+            else
+              results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
+            end
             next
           end
 
@@ -117,7 +142,7 @@ module TimeTracking
           if item.new_record?
             item.company_id = @company.id
             item.employment_type = employee.employment_type
-            item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+            item.pay_rate = employee.default_payroll_rate
           end
           item.sync_default_payroll_adjustments!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
@@ -143,6 +168,7 @@ module TimeTracking
             payroll_item: item,
             source_employee: source_employee_for(row)
           ).call if finalized_batch?
+          TimeTracking::SourceEarningsConservation.validate!(item) if finalized_batch?
 
           results[:applied] << {
             employee_id: employee.id,
@@ -156,6 +182,7 @@ module TimeTracking
           raise ActiveRecord::Rollback
         end
 
+        correction_coverage.verify_complete! if finalized_batch?
         @import.update!(
           status: "applied",
           applied_at: Time.current,
@@ -167,8 +194,8 @@ module TimeTracking
             time_tracking_import: @import,
             status: "imported",
             occurred_at: @import.applied_at
-          )
-          acknowledgement_ids[:batch] << acknowledgement.id
+          ) unless @import.supplemental_batch?
+          acknowledgement_ids[:batch] << acknowledgement.id if acknowledgement
           acknowledgement_ids[:entries].concat(
             AirePayrollEntryAcknowledgement.record_for_import!(
               time_tracking_import: @import,
@@ -184,6 +211,13 @@ module TimeTracking
 
     def validate_preview_provenance!
       payload = @import.processed_payload
+      if @source.source_type == "aire_services"
+        policies = TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)
+        actual = CanonicalPayload.checksum(policies)
+        if (payload["category_configuration_checksum"].present? || policies.any?) && payload["category_configuration_checksum"] != actual
+          raise ArgumentError, "AIRE category configuration changed; refresh this time import preview before applying it"
+        end
+      end
       if finalized_batch?
         validate_finalized_batch_provenance!(payload)
       elsif payload["validation_version"] != "time_summary_v1" || payload["schema_version"] != PayloadValidator::CONTRACT_VERSION
@@ -212,7 +246,8 @@ module TimeTracking
       PayrollBatchPayloadValidator.new(
         payload: raw,
         start_date: @import.start_date,
-        end_date: @import.end_date
+        end_date: @import.end_date,
+        expected_source: @source.connector.source_identifier
       ).validate!
       checksum = raw.dig("export", "checksum")
       unless payload["validation_version"] == BatchImportPreviewService::VALIDATION_VERSION &&
@@ -224,10 +259,10 @@ module TimeTracking
              @import.source_payload_hash == checksum &&
              @import.contract_version == raw["schema_version"] &&
              @import.source_cutoff_at == Time.iso8601(raw.fetch("cutoff_at"))
-        raise ArgumentError, "AIRE payroll batch provenance changed; refresh and investigate before applying"
+        raise ArgumentError, "Time tracking payroll batch provenance changed; refresh and investigate before applying"
       end
     rescue PayrollBatchPayloadValidator::Error
-      raise ArgumentError, "AIRE payroll batch integrity check failed; refresh and investigate before applying"
+      raise ArgumentError, "Time tracking payroll batch integrity check failed; refresh and investigate before applying"
     end
 
     def validate_negative_adjustment_acknowledgement!
@@ -237,8 +272,16 @@ module TimeTracking
       end
     end
 
+    def correction_coverage
+      @correction_coverage || raise(ArgumentError, "Correction coverage requires the locked import")
+    end
+
+    def ordinary_processed_payload
+      @ordinary_processed_payload ||= finalized_batch? ? correction_coverage.processed_payload : @import.processed_payload
+    end
+
     def negative_adjustment_count
-      @import.processed_payload["negative_adjustment_count"].to_i
+      ordinary_processed_payload["negative_adjustment_count"].to_i
     end
 
     def finalized_batch?
@@ -262,18 +305,48 @@ module TimeTracking
 
     def apply_imported_hours!(item, employee, row, override, preserved_holiday_hours:, preserved_pto_hours:)
       if finalized_batch? && [ row["total_hours"], row["regular_hours"], row["overtime_hours"] ].any? { |value| value.to_d.negative? }
-        return "This AIRE correction produces negative payroll hour totals; use the payroll correction workflow instead."
+        return "This time tracking correction produces negative payroll hour totals; use the payroll correction workflow instead."
       end
 
       categories = Array(row["categories"] || row[:categories]).select do |category|
-        finalized_batch? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
+        if finalized_batch?
+          %w[total_hours regular_hours overtime_hours].any? { |field| (category[field] || category[field.to_sym]).to_d.nonzero? }
+        else
+          category_total_hours(category).positive?
+        end
       end
-      active_rates = employee.active_wage_rates.to_a
-      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
-        return "This AIRE correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
+      # An older saved preview predates source-line worksheet metadata. Derive
+      # it from the validated frozen batch, never from caller-supplied references.
+      if finalized_batch?
+        frozen_categories = SourceCategoryBuckets.call(source_employee_for(row).fetch("adjustments")).map(&:deep_stringify_keys)
+        categories = categories.map do |category|
+          category = category.deep_stringify_keys
+          frozen = frozen_categories.find do |candidate|
+            mapping_identity(candidate["source_category_id"], candidate["key"], candidate["name"], nil, candidate["source_kinds"].join(",")) ==
+              mapping_identity(category["source_category_id"], category["key"], category["name"], nil, Array(category["source_kinds"]).join(","))
+          end
+          raise ArgumentError, "Frozen source earning dimension changed; refresh the import" unless frozen &&
+            %w[total_hours regular_hours overtime_hours].all? { |field| frozen[field].to_d == category[field].to_d }
+          category.merge("source_lines" => frozen["source_lines"])
+        end
+      end
+      active_rates = @pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates.to_a
+      if finalized_batch?
+        supplied_keys = wage_rate_overrides_by_category_key(override).keys
+        known_keys = categories.flat_map { |category| category_override_keys(category) }
+        unless (supplied_keys - known_keys).empty?
+          raise ArgumentError, "An earning mapping does not match this frozen source dimension; refresh the import"
+        end
       end
       uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && categories.any? &&
-                        (finalized_batch? || active_rates.length > 1)
+                        (finalized_batch? || active_rates.length > 1 || active_rates.any? { |rate| rate.rate.nil? } ||
+                          wage_rate_overrides_by_category_key(override).any?)
+      # Unset rates are setup placeholders, not zero-dollar earning types. Keep
+      # them in the mapping-required decision above, but never serialize them.
+      active_rates = active_rates.reject { |rate| rate.rate.nil? }
+      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
+        return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
+      end
 
       unless uses_multi_rate
         item.clear_wage_rate_hours!
@@ -315,7 +388,7 @@ module TimeTracking
 
     def build_finalized_batch_wage_rate_entries(item, categories, active_rates, override, preserved_holiday_hours:, preserved_pto_hours:)
       override_by_category_key = wage_rate_overrides_by_category_key(override)
-      hours_by_dimension = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0 } }
+      hours_by_dimension = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0, source_lines: [] } }
 
       categories.each do |category|
         rate = wage_rate_for_category(category, active_rates, override_by_category_key)
@@ -323,9 +396,14 @@ module TimeTracking
 
         source_kind = Array(category["source_kinds"] || category[:source_kinds]).first || "current"
         original_work_dates = Array(category["original_work_dates"] || category[:original_work_dates]).map(&:to_s).sort
-        bucket = hours_by_dimension[[ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]]
+        # Current-period lines that resolve to the same rate share one earning
+        # line (e.g. Flight and Solo both paid at Flight Hours). Carryover and
+        # correction lines keep their date range, which their labels show.
+        dimension = source_kind == "current" ? [ rate.id, source_kind, nil, nil ] : [ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]
+        bucket = hours_by_dimension[dimension]
         bucket[:regular_hours] += category_regular_hours(category)
         bucket[:overtime_hours] += category_overtime_hours(category)
+        bucket[:source_lines].concat(Array(category["source_lines"] || category[:source_lines]))
       end
 
       preserved_by_rate_id = finalized_preserved_hours_by_rate_id(
@@ -343,6 +421,8 @@ module TimeTracking
         imported = hours_by_dimension.fetch([ rate_id, source_kind, first_date, last_date ])
         is_primary = rate.is_primary && primary_rate_ids.add?(rate.id)
         {
+          source_bucket_key: CanonicalPayload.checksum({ "rate_id" => rate.id, "source_lines" => imported[:source_lines].sort_by { |line| [ line["source_time_entry_id"].to_s, line["line_key"].to_s ] } }.deep_stringify_keys),
+          source_lines: imported[:source_lines],
           employee_wage_rate_id: rate.id,
           label: finalized_rate_label(rate, source_kind: source_kind, first_date: first_date, last_date: last_date),
           rate: rate.rate.to_f,
@@ -409,7 +489,7 @@ module TimeTracking
       else
         "current period"
       end
-      "#{rate.label} · AIRE #{provenance} · $#{format('%.2f', rate.rate.to_f)}/hr"
+      "#{rate.label} · #{@source.connector.aire_policy? ? 'AIRE' : @source.name} #{provenance} · $#{format('%.2f', rate.rate.to_f)}/hr"
     end
 
     def date_range_label(first_date, last_date)
@@ -486,7 +566,13 @@ module TimeTracking
         mapping = mapping.to_unsafe_h if mapping.respond_to?(:to_unsafe_h)
         mapping = mapping.to_h if mapping.respond_to?(:to_h)
         rate_id = mapping["employee_wage_rate_id"] || mapping[:employee_wage_rate_id]
+        if finalized_batch? && rate_id.blank?
+          raise ArgumentError, "Select an earning type for every supplied finalized source dimension"
+        end
         next if rate_id.blank?
+        if finalized_batch? && !(mapping["source_kind"] || mapping[:source_kind]).to_s.in?(TimeTrackingEntryAllocation::SOURCE_KINDS)
+          raise ArgumentError, "Retain the exact source kind for each finalized earning mapping; refresh this import"
+        end
 
         effective_rate_cents = mapping["source_effective_rate_cents"] || mapping[:source_effective_rate_cents]
         identity = mapping_identity(
@@ -496,9 +582,12 @@ module TimeTracking
           effective_rate_cents,
           mapping["source_kind"] || mapping[:source_kind]
         )
+        if identity.present? && acc.key?(identity)
+          raise ArgumentError, "Conflicting earning mappings; map each source dimension exactly once"
+        end
         acc[identity] = rate_id.to_i if identity.present?
 
-        if effective_rate_cents.blank?
+        if !finalized_batch? && effective_rate_cents.blank?
           [
             mapping["source_category_id"] || mapping[:source_category_id],
             mapping["source_category_key"] || mapping[:source_category_key],
@@ -511,6 +600,13 @@ module TimeTracking
     end
 
     def wage_rate_for_category(category, active_rates, override_by_category_key)
+      policy = @source.source_type == "aire_services" && TimeTrackingCategoryMapping.find_by(time_tracking_source: @source,
+        source_category_key: TimeTrackingCategoryMapping.category_key(category), import_enabled: true)
+      if policy
+        rate = policy.matching_rate(active_rates)
+        raise ArgumentError, "#{policy.source_category_key} requires this employee's active #{policy.required_rate_description} rate; configure that rate before importing" unless rate
+        return rate
+      end
       override_rate_id = category_override_keys(category).filter_map { |key| override_by_category_key[key] }.first
       return active_rates.find { |rate| rate.id == override_rate_id } if override_rate_id.present?
 
@@ -544,6 +640,8 @@ module TimeTracking
         category["effective_rate_cents"] || category[:effective_rate_cents],
         Array(category["source_kinds"] || category[:source_kinds]).join(",")
       )
+      return [ identity ] if finalized_batch?
+
       [ identity ] + [
         category["source_category_id"] || category[:source_category_id],
         category["key"] || category[:key],
@@ -650,7 +748,7 @@ module TimeTracking
     end
 
     def source_employee_for(row)
-      @source_employees_by_id ||= Array(@import.raw_payload["employees"]).index_by { |employee| employee.fetch("source_user_id").to_s }
+      @source_employees_by_id ||= correction_coverage.ordinary_employees.index_by { |employee| employee.fetch("source_user_id").to_s }
       @source_employees_by_id.fetch(row.fetch("source_user_id").to_s)
     end
 

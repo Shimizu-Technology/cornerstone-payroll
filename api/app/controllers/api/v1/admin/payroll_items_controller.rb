@@ -12,7 +12,7 @@ module Api
         def index
           @payroll_items = @pay_period.payroll_items.includes(:payroll_item_field_entries, :employee)
           @payroll_items = @payroll_items.reportable if @pay_period.committed?
-          reportable_items = @payroll_items.not_voided
+          reportable_items = @payroll_items.financially_reportable
 
           render json: {
             payroll_items: @payroll_items.map { |item| payroll_item_json(item) },
@@ -106,6 +106,7 @@ module Api
           @payroll_item.reload
 
           attrs = payroll_item_params
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
@@ -158,6 +159,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
           @payroll_item.reload
+          PayrollCorrectionPayBasisGuard.validate!(@payroll_item)
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.employment_type = @payroll_item.employee.employment_type
@@ -178,6 +180,13 @@ module Api
             # save too, so failed recalculation cannot leave old totals behind.
             raise ActiveRecord::Rollback if response.status >= 400
           end
+          if @history_calculation_failed
+            # Input changes roll back above, but the prior calculation must no
+            # longer be approvable after a strict history hold was discovered.
+            @pay_period.reload.with_lock do
+              invalidate_prior_calculation!("Benefit or retirement history needs administrator or accountant review before calculation.")
+            end
+          end
         end
 
         def calculate_with_timekeeping!(payroll_item)
@@ -185,6 +194,9 @@ module Api
             PayrollTimeAllocationService.call!(payroll_item: payroll_item) unless payroll_item.timekeeping_source == "correction_reference"
             payroll_item.calculate!
           end
+        rescue PayrollCalculationHistory::HoldError
+          @history_calculation_failed = true
+          raise
         end
 
         def invalidate_prior_calculation!(reason)
@@ -214,8 +226,10 @@ module Api
             :qualified_overtime_compensation,
             :check_date, :check_memo,
             wage_rate_hours: [
+              :source_bucket_key,
               :employee_wage_rate_id, :label, :rate, :regular_hours,
-              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
+              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active,
+              { source_lines: [ :source_time_entry_id, :line_key, :source_time_entry_version, :source_kind, :original_work_date, :total_hours, :regular_hours, :overtime_hours ] }
             ],
             custom_earnings: [ :label, :amount ],
             custom_deductions: [ :label, :amount ],
@@ -331,6 +345,7 @@ module Api
         def payroll_item_json(item, detailed: false)
           json = {
             id: item.id,
+            payroll_included: item.payroll_included?,
             employee_id: item.employee_id,
             employee_name: item.employee_full_name,
             contractor_pay_type: item.employee&.contractor_pay_type,
@@ -345,6 +360,7 @@ module Api
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             timekeeping_source: item.timekeeping_source,
+            correction_pay_basis_hold: PayrollCorrectionPayBasisGuard.hold_reason(item) || TimeTracking::SourceEarningsConservation.hold_reason(item),
             timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             total_hours: item.total_hours,
             bonus: item.bonus,
@@ -401,6 +417,13 @@ module Api
           }
 
           if detailed
+            json[:check_status] = item.check_status
+            confirmation = item.direct_deposit_payment_confirmation
+            json[:payment_confirmation] = confirmation && {
+              settled_on: confirmation.settled_on.iso8601,
+              bank_reference: confirmation.bank_reference,
+              confirmed_at: confirmation.created_at.iso8601
+            }
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             # Include full YTD breakdown
             json[:ytd] = {
@@ -417,6 +440,9 @@ module Api
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          unless employee.hourly_pay_basis? || payroll_item.timekeeping_source == "correction_reference"
+            raise ArgumentError, "This employee now uses salary or flat-fee pay. Reload the worksheet and review the current pay setup before calculating; hourly rate entries were not applied."
+          end
           payroll_item.wage_rate_hours = PayrollWageRateInput.normalize(payroll_item: payroll_item, entries: wage_rate_hours)
           entries = payroll_item.wage_rate_hours
           payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
@@ -425,13 +451,16 @@ module Api
           payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
-          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          unless payroll_item.timekeeping_source == "correction_reference"
+            payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+          end
         end
 
         def sync_pay_rate_from_employee(payroll_item, employee)
-          return if payroll_item.wage_rate_hours.present?
+          return if payroll_item.timekeeping_source == "correction_reference"
+          return if employee.hourly_pay_basis? && payroll_item.wage_rate_hours.present?
 
-          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          payroll_item.pay_rate = employee.default_payroll_rate
         end
       end
     end

@@ -25,6 +25,7 @@ Rails.application.routes.draw do
       end
 
       namespace :integrations do
+        post "time_payroll/events", to: "aire/events#create"
         namespace :aire do
           post :events, to: "events#create"
         end
@@ -112,7 +113,7 @@ Rails.application.routes.draw do
         match "companies/alignment_test_pdf", to: "checks#alignment_test_pdf", via: [ :get, :post ]
 
         # Printer Profiles (saved check alignment presets per printer)
-        resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
+        resources :printer_profiles, only: [ :index, :show, :create, :update, :destroy ] do
           collection do
             post :clear_active
           end
@@ -125,7 +126,7 @@ Rails.application.routes.draw do
         put "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#update"
         delete "printer_profile_selections/:check_stock_type", to: "printer_profile_selections#destroy"
 
-        resources :companies, only: [:index, :show, :create, :update] do
+        resources :companies, only: [ :index, :show, :create, :update ] do
           member do
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal
@@ -152,7 +153,7 @@ Rails.application.routes.draw do
             post "admin_users", to: "organizations#create_admin_user"
           end
         end
-        resources :company_assignments, only: [:index, :create, :destroy] do
+        resources :company_assignments, only: [ :index, :create, :update, :destroy ] do
           collection do
             put :bulk_update
           end
@@ -171,6 +172,17 @@ Rails.application.routes.draw do
         end
         resources :annual_retirement_limits, only: [ :index, :create, :update ]
         get "record_activities/:record_type/:record_id", to: "record_activities#index"
+        resources :prior_provider_histories, only: %i[index create] do
+          post :preview, on: :collection
+          put :draft, on: :collection, action: :save_draft
+          post "draft/confirm_registers", on: :collection, action: :confirm_registers
+          delete :draft, on: :collection, action: :discard_draft
+          member do
+            post :activate
+            post :reverse
+            get "source_files/:source_file_id", action: :source_file
+          end
+        end
         resources :historical_imports, only: %i[index show] do
           collection do
             post :preview
@@ -241,6 +253,7 @@ Rails.application.routes.draw do
             post :transition_tax_classification
             post :resolve_configuration_review_item
           end
+          resource :hours_evidence, only: :show, controller: :employee_hours_evidence
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :retirement_year_inputs, only: [ :index, :create ], controller: :employee_retirement_year_inputs
@@ -265,11 +278,20 @@ Rails.application.routes.draw do
         post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
         resources :departments, only: [ :index, :create, :update ]
 
-        resources :time_tracking_sources, except: [:new, :edit] do
+        get "time_tracking_sources/:source_id/health", to: "time_tracking_source_health#show"
+        resources :time_tracking_sources, except: [ :new, :edit ] do
+          resource :history_approval, only: [], controller: :aire_history_approvals do
+            post :preview
+            post :approve
+            get "operations/:operation_id", action: :operation
+          end
           member do
             post :test_connection
             put :delegation, action: :save_delegation
             delete :delegation, action: :destroy_delegation
+            get :account_link, action: :show_aire_account_link
+            post :account_link, action: :create_aire_account_link
+            delete :account_link, action: :destroy_aire_account_link
             get :aire_account_link, action: :show_aire_account_link
             post :aire_account_link, action: :create_aire_account_link
             delete :aire_account_link, action: :destroy_aire_account_link
@@ -280,12 +302,53 @@ Rails.application.routes.draw do
           resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
             post :retry_delivery
+            post :refresh
+          end
+          resource :time_tracking_calendar, only: [ :show ], controller: :aire_payroll_calendars do
+            post :publish
+            post :retry_delivery
+            post :refresh
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :manual_review
+            get :payment_evidence
+            post :payment_attestations, action: :create_payment_attestation
+            post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
+            post :manual_allocations, action: :create_manual_allocation
+            post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
             get :time_entries
             get :exceptions
+            get :late_hours
+            post :late_hours, action: :pay_late_hours
+            post "late_hours/:late_hours_run_id/retry", action: :retry_late_hours
+            post "late_hours/:late_hours_run_id/cancel", action: :cancel_late_hours
             get :settlement_cases
+            post :employee_mapping, action: :confirm_employee_mapping
+            post :finalize
+            post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
+            post "time_entries/:time_entry_id/overtime_approval", action: :approve_time_entry_overtime, as: :time_entry_overtime_approval
+            post "time_entries/:time_entry_id/correction", action: :correct_time_entry, as: :time_entry_correction
+            post "settlement_cases/:settlement_case_id/route", action: :route_settlement_case, as: :settlement_case_route
+          end
+          resource :time_tracking_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
+            get :manual_review
+            get :payment_evidence
+            post :payment_attestations, action: :create_payment_attestation
+            post "payment_attestations/:payment_attestation_id/retract", action: :retract_payment_attestation
+            post "payment_attestations/:payment_attestation_id/resolve", action: :resolve_payment_attestation
+            post "payment_resolutions/:manual_allocation_id/retry", action: :retry_payment_resolution
+            post :manual_allocations, action: :create_manual_allocation
+            post "manual_allocations/:manual_allocation_id/retry", action: :retry_manual_allocation, as: :retry_manual_allocation
+            get :time_entries
+            get :exceptions
+            get :late_hours
+            post :late_hours, action: :pay_late_hours
+            post "late_hours/:late_hours_run_id/retry", action: :retry_late_hours
+            post "late_hours/:late_hours_run_id/cancel", action: :cancel_late_hours
+            get :settlement_cases
+            post :employee_mapping, action: :confirm_employee_mapping
             post :finalize
             post "time_entries/:time_entry_id/approval", action: :approve_time_entry, as: :time_entry_approval
             post "time_entries/:time_entry_id/overtime_approval", action: :approve_time_entry_overtime, as: :time_entry_overtime_approval
@@ -315,6 +378,8 @@ Rails.application.routes.draw do
             post :void
             post :create_correction_run
             get  :correction_history
+            get :corrected_hours
+            post :connect_corrected_hours
             # Per-employee corrective paycheck (off-cycle supplemental period)
             post :corrective_paycheck_preview
             post :corrective_paychecks
@@ -328,6 +393,10 @@ Rails.application.routes.draw do
             post :preview_timecard_import, to: "timecard_imports#preview"
             post :apply_timecard_import, to: "timecard_imports#apply"
             post :preview_time_tracking_import, to: "time_tracking_imports#preview"
+            post :preview_time_tracking_correction, to: "time_tracking_imports#correction_preview"
+            post :confirm_time_tracking_correction, to: "time_tracking_imports#correction_confirm"
+            get :time_tracking_correction_delivery, to: "time_tracking_imports#correction_delivery"
+            post :retry_time_tracking_correction_delivery, to: "time_tracking_imports#correction_delivery_retry"
             post :apply_time_tracking_import, to: "time_tracking_imports#apply"
             post :reconcile_time_tracking_import, to: "time_tracking_imports#reconcile"
           end
@@ -382,6 +451,8 @@ Rails.application.routes.draw do
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
         post "payroll_items/:payroll_item_id/check/mark_delivered", to: "checks#mark_delivered", as: :payroll_item_check_mark_delivered
         patch "payroll_items/:payroll_item_id/check_number",      to: "checks#update_check_number", as: :payroll_item_check_number
+        post "payroll_items/:payroll_item_id/direct_deposit/confirm_payment", to: "checks#confirm_direct_deposit_payment"
+        post "payroll_items/:payroll_item_id/reverse_paycheck", to: "checks#reverse_paycheck"
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
         # Replace (uncashed) — void + cut a corrected check on the same item.
@@ -462,9 +533,9 @@ Rails.application.routes.draw do
         get "reports/installment_loans_pdf", to: "reports#installment_loans_pdf"
         get "reports/installment_loans_xlsx", to: "reports#installment_loans_xlsx"
         get "reports/transmittal_preview", to: "reports#transmittal_preview"
-        match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
-        match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
-        match "reports/check_signoff_sheet", to: "reports#check_signoff_sheet", via: [:get, :post]
+        match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [ :get, :post ]
+        match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [ :get, :post ]
+        match "reports/check_signoff_sheet", to: "reports#check_signoff_sheet", via: [ :get, :post ]
         post "reports/check_signoff_pdf", to: "reports#check_signoff_pdf"
         get "reports/check_signoff_preview", to: "reports#check_signoff_preview"
 
@@ -496,6 +567,8 @@ Rails.application.routes.draw do
             post :mark_printed
             post :mark_paid
             post :void_check
+            get :payroll_matches
+            post :supersede_with_payroll_item
             get :check_pdf
             get :voucher_pdf
             get :history
@@ -506,7 +579,7 @@ Rails.application.routes.draw do
         end
 
         # General Transmittals (standalone, non-pay-period delivery packets)
-        resources :general_transmittals, except: [:new, :edit] do
+        resources :general_transmittals, except: [ :new, :edit ] do
           collection do
             post :from_pay_period
           end
@@ -519,19 +592,19 @@ Rails.application.routes.draw do
         end
 
         # Invoice Center and bounded accounts receivable
-        resources :finance_books, only: [:index, :create, :update]
-        resources :finance_api_tokens, only: [:index, :create, :destroy]
-        resource :finance_overview, only: [:show]
-        resources :invoice_billing_profiles, except: [:new, :edit] do
+        resources :finance_books, only: [ :index, :create, :update ]
+        resources :finance_api_tokens, only: [ :index, :create, :destroy ]
+        resource :finance_overview, only: [ :show ]
+        resources :invoice_billing_profiles, except: [ :new, :edit ] do
           member do
             post :logo, action: :upload_logo
             delete :logo, action: :remove_logo
           end
         end
-        resources :invoice_recipients, except: [:new, :edit]
-        resources :invoice_recurrences, only: [:index, :create, :update]
-        resources :invoice_send_schedules, only: [:index, :create, :update]
-        resources :invoices, except: [:new, :edit] do
+        resources :invoice_recipients, except: [ :new, :edit ]
+        resources :invoice_recurrences, only: [ :index, :create, :update ]
+        resources :invoice_send_schedules, only: [ :index, :create, :update ]
+        resources :invoices, except: [ :new, :edit ] do
           collection do
             post :import
           end
@@ -544,31 +617,31 @@ Rails.application.routes.draw do
             post :record_delivery
             patch "deliveries/:delivery_id", action: :correct_delivery, as: :correct_delivery
           end
-          resources :payments, controller: :invoice_payments, only: [:create] do
+          resources :payments, controller: :invoice_payments, only: [ :create ] do
             post :reverse, on: :member
           end
-          resources :credit_notes, controller: :invoice_credit_notes, only: [:create] do
+          resources :credit_notes, controller: :invoice_credit_notes, only: [ :create ] do
             post :void, on: :member
           end
         end
-        resource :invoice_receivables, only: [:show] do
+        resource :invoice_receivables, only: [ :show ] do
           get :statement
         end
 
         # Organization-owned expense and vendor ledger
-        resources :expense_vendors, only: [:index, :create, :update]
-        resources :expenses, only: [:index, :show, :create, :update] do
+        resources :expense_vendors, only: [ :index, :create, :update ]
+        resources :expenses, only: [ :index, :show, :create, :update ] do
           collection { get :export }
           member do
             post :void
             post :upload_artifact
             get "artifacts/:artifact_id", action: :download_artifact, as: :artifact
           end
-          resources :payments, controller: :expense_payments, only: [:create] do
+          resources :payments, controller: :expense_payments, only: [ :create ] do
             post :reverse, on: :member
           end
         end
-        resources :invoice_chat_sessions, except: [:new, :edit] do
+        resources :invoice_chat_sessions, except: [ :new, :edit ] do
           member do
             post :message
             post :confirm
@@ -578,17 +651,17 @@ Rails.application.routes.draw do
         end
 
         # Timecard OCR
-        resources :timecards, only: [:index, :show, :create, :update, :destroy] do
+        resources :timecards, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             patch :review
             patch :reprocess
             post :apply_to_payroll
           end
         end
-        resources :punch_entries, only: [:create, :update]
+        resources :punch_entries, only: [ :create, :update ]
 
         # Employee Wage Rates
-        resources :employee_wage_rates, only: [:index, :create, :update, :destroy]
+        resources :employee_wage_rates, only: [ :index, :create, :update, :destroy ]
 
         # Pay Stubs
         get "pay_stubs/:id", to: "pay_stubs#show"
@@ -600,9 +673,12 @@ Rails.application.routes.draw do
         get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
 
         # Tax Configuration Management
+        get "tax_year_readiness", to: "tax_year_readiness#show"
         resources :tax_configs, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :activate
+            post :verify
+            post :replace_withholding
             get :audit_logs
           end
           collection do

@@ -12,39 +12,48 @@ module PayrollReview
     def issue!
       review_package = nil
 
-      pay_period.with_lock do
-        pay_period.reload
-        raise Error, "Calculate payroll before preparing client review" unless pay_period.calculated?
-        next unless pay_period.payroll_items.exists?
+      company = Company.find(pay_period.company_id)
+      company.with_lock do
+        # Every issuing caller takes Company before PayPeriod. with_lock reloads
+        # the setting so publication and setting changes serialize.
+        pay_period.with_lock do
+          pay_period.reload
+          raise Error, "Calculate payroll before preparing client review" unless pay_period.calculated?
+          next unless pay_period.payroll_items.exists?
 
-        evidence = CalculationSnapshot.new(pay_period: pay_period).call
-        current = pay_period.payroll_review_packages.current.order(revision: :desc).first
-        if current&.calculation_checksum == evidence.fetch(:checksum)
-          review_package = current
-          next
+          evidence = CalculationSnapshot.new(pay_period: pay_period).call
+          current = pay_period.payroll_review_packages.current.order(revision: :desc).first
+          if current&.calculation_checksum == evidence.fetch(:checksum)
+            review_package = current
+            next
+          end
+
+          now = Time.current
+          current&.update!(
+            status: "superseded",
+            superseded_at: now,
+            supersession_reason: "Payroll inputs or calculation changed; a new review revision was generated."
+          )
+
+          review_package = pay_period.payroll_review_packages.create!(
+            company: pay_period.company,
+            revision: pay_period.payroll_review_packages.maximum(:revision).to_i + 1,
+            schema_version: CalculationSnapshot::SCHEMA_VERSION,
+            calculation_checksum: evidence.fetch(:checksum),
+            source_manifest: evidence.fetch(:source_manifest),
+            calculation_snapshot: evidence.fetch(:snapshot),
+            status: "pending",
+            generated_by: actor,
+            generated_at: now,
+            sent_for_client_approval_at: company.client_payroll_approval_required? ? now : nil,
+            client_review_history_unknown: false
+          )
         end
-
-        now = Time.current
-        current&.update!(
-          status: "superseded",
-          superseded_at: now,
-          supersession_reason: "Payroll inputs or calculation changed; a new review revision was generated."
-        )
-
-        review_package = pay_period.payroll_review_packages.create!(
-          company: pay_period.company,
-          revision: pay_period.payroll_review_packages.maximum(:revision).to_i + 1,
-          schema_version: CalculationSnapshot::SCHEMA_VERSION,
-          calculation_checksum: evidence.fetch(:checksum),
-          source_manifest: evidence.fetch(:source_manifest),
-          calculation_snapshot: evidence.fetch(:snapshot),
-          status: "pending",
-          generated_by: actor,
-          generated_at: now
-        )
       end
 
       review_package
+    rescue EmployeeYearFicaContext::UnreconciledLedgerError
+      raise Error, EmployeeYearFicaContext::STALE_MESSAGE
     end
 
     def approve!(approver:, recorded_by:, method:, acknowledgement:, notes: nil, evidence_reference: nil)
@@ -95,6 +104,8 @@ module PayrollReview
       return true if ActiveSupport::SecurityUtils.secure_compare(review_package.calculation_checksum, current_checksum)
 
       raise Error, "Payroll changed after client review revision #{review_package.revision}. Recalculate and request approval for the new revision."
+    rescue EmployeeYearFicaContext::UnreconciledLedgerError
+      raise Error, EmployeeYearFicaContext::STALE_MESSAGE
     end
 
     private

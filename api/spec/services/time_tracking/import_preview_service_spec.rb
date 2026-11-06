@@ -3,6 +3,15 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::ImportPreviewService do
+  def confirm_mapping!(company:, source:, employee:, source_user_id: "aire-1")
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: source_user_id
+    )
+  end
+
   def confirm_workweek!(company, starts_on_weekday: 1, starts_at_minutes: 0, confirmed: true)
     CompanyWorkweek.create!(
       company: company,
@@ -51,6 +60,75 @@ RSpec.describe TimeTracking::ImportPreviewService do
       expect(described_class.new(pay_period: pay_period, source: source).call).to eq(:finalized_preview)
     end
 
+    it "does not route unverified stored batch capabilities into finalized import" do
+      company = create(:company)
+      source = create(:time_tracking_source, company: company, source_capabilities: [ "finalized_batch_v2" ])
+      period = create(:pay_period, company: company)
+      expect(TimeTracking::BatchImportPreviewService).not_to receive(:new)
+      expect { described_class.new(pay_period: period, source: source).call }
+        .to raise_error(ArgumentError, /Confirm the legal overtime workweek/)
+      expect(TimeTrackingImport.count).to eq(0)
+    end
+
+    [ nil, 0 ].each do |amount|
+      [ true, false ].each do |sole_rate|
+        it "distinguishes #{amount.inspect} from zero through live preview and apply (sole rate: #{sole_rate})" do
+          company = create(:company)
+          confirm_workweek!(company)
+          employee = create(:employee, company: company, department: create(:department, company: company))
+          rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: amount, is_primary: true)
+          create(:employee_wage_rate, employee: employee, label: "Other", rate: 15) unless sole_rate
+          period = create(:pay_period, company: company, start_date: Date.new(2026, 5, 18),
+            end_date: Date.new(2026, 5, 31), pay_date: Date.new(2026, 6, 5))
+          source = create(:time_tracking_source, company: company, source_type: "custom")
+          confirm_mapping!(company: company, source: source, employee: employee)
+          payload = {
+            "source" => "aire_services", "employees" => [
+              { "source_user_id" => "aire-1", "email" => employee.email, "display_name" => employee.full_name,
+                "days" => complete_export_days([
+                  { "work_date" => "2026-05-18", "hours" => 5, "categories" => [
+                    { "source_category_id" => "flight", "key" => "flight_hours", "name" => "Flight Hours",
+                      "regular_hours" => 5, "overtime_hours" => 0 }
+                  ] }
+                ]), "issues" => {} }
+            ]
+          }
+          allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(payload)
+          import = described_class.new(pay_period: period, source: source).call
+          row = import.processed_payload.fetch("rows").first
+          if amount.nil?
+            expect(row.fetch("categories").first["employee_wage_rate_id"]).to be_nil
+            expect(row.fetch("warnings")).to include(include("code" => "unmapped_wage_rate"))
+          end
+
+          result = TimeTracking::ApplyImportService.new(import: import, mappings: [],
+            applied_by: create(:user, company: company)).call
+
+          if amount.nil?
+            expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+            expect(import.reload.status).to eq("previewed")
+            expect(period.payroll_items.reload).to be_empty
+            # A caller cannot bypass preview's warning with an explicit unset ID.
+            result = TimeTracking::ApplyImportService.new(import: import,
+              mappings: [ { source_user_id: "aire-1", employee_id: employee.id, wage_rate_mappings: [
+                { source_category_id: "flight", employee_wage_rate_id: rate.id }
+              ] } ], applied_by: create(:user, company: company)).call
+            expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+            expect(period.payroll_items.reload).to be_empty
+          else
+            expect(result[:errors]).to be_empty
+            expect(import.reload.status).to eq("applied")
+            item = period.payroll_items.find_by!(employee: employee)
+            expect(item.hours_worked).to eq(5)
+            expect(item.pay_rate).to eq(0)
+            unless sole_rate
+              expect(item.wage_rate_hours).to include(include("employee_wage_rate_id" => rate.id, "rate" => 0.0, "regular_hours" => 5.0))
+            end
+          end
+        end
+      end
+    end
+
     it "surfaces category buckets and warns when a multi-rate employee needs earning-type mapping" do
       company = create(:company)
       confirm_workweek!(company)
@@ -66,6 +144,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -115,6 +194,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -162,6 +242,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -209,6 +290,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      confirm_mapping!(company: company, source: source, employee: employee)
       raw_payload = {
         "source" => "aire_services",
         "employees" => [

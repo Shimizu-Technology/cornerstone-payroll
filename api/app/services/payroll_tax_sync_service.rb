@@ -10,7 +10,7 @@ class PayrollTaxSyncService
   TIMEOUT_SECONDS = 30
 
   def self.configured?
-    ENV["CST_INGEST_URL"].present?
+    !StagingOutboundPolicy.staging? && ENV["CST_INGEST_URL"].present?
   end
 
   def initialize(pay_period)
@@ -18,6 +18,7 @@ class PayrollTaxSyncService
   end
 
   def sync!
+    StagingOutboundPolicy.block!("Tax ingest")
     validate_configuration!
     payload = @pay_period.with_lock do
       @sync_idempotency_key = @pay_period.tax_sync_idempotency_key
@@ -31,6 +32,8 @@ class PayrollTaxSyncService
     response = post_to_cst(payload)
 
     handle_response(response)
+  rescue StagingOutboundPolicy::Blocked
+    raise
   rescue ConfigurationError
     @pay_period.update!(@pay_period.tax_sync_disabled_attributes)
     raise
@@ -58,7 +61,7 @@ class PayrollTaxSyncService
 
   def validate_pay_period!
     raise SyncError, "Pay period is not committed" unless @pay_period.committed?
-    raise SyncError, "Pay period has no reportable payroll items" unless PayrollTaxSyncPayloadBuilder.reportable_items(@pay_period).exists?
+    raise SyncError, "Pay period has no reportable payroll items" unless PayrollTaxSyncPayloadBuilder.reportable_items(@pay_period).exists? || @pay_period.payroll_items.reportable.where.not(payroll_reversed_at: nil).exists?
   end
 
   def post_to_cst(payload)

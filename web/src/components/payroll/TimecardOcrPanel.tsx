@@ -99,7 +99,7 @@ function calculateEntryHours(entry: PunchEntryData): number | null {
 }
 
 function confidenceColor(c: number | null): string {
-  if (c === null) return 'bg-gray-100 text-gray-600';
+  if (c === null) return 'bg-neutral-100 text-neutral-600';
   if (c >= 0.9) return 'bg-green-100 text-green-800';
   if (c >= 0.7) return 'bg-yellow-100 text-yellow-800';
   return 'bg-red-100 text-red-800';
@@ -107,13 +107,13 @@ function confidenceColor(c: number | null): string {
 
 function statusBadge(status: string) {
   const colors: Record<string, string> = {
-    pending: 'bg-gray-200 text-gray-700',
+    pending: 'bg-neutral-200 text-neutral-700',
     processing: 'bg-blue-100 text-blue-700',
     complete: 'bg-yellow-100 text-yellow-800',
     failed: 'bg-red-100 text-red-800',
     reviewed: 'bg-green-100 text-green-800',
   };
-  return <Badge className={colors[status] || 'bg-gray-100'}>{status}</Badge>;
+  return <Badge className={colors[status] || 'bg-neutral-100'}>{status}</Badge>;
 }
 
 const toNumber = (value: unknown): number => {
@@ -158,7 +158,7 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
   return (
     <div
       className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-        dragOver ? 'border-indigo-400 bg-indigo-50' : 'border-gray-300 hover:border-gray-400'
+        dragOver ? 'border-indigo-400 bg-indigo-50' : 'border-neutral-300 hover:border-neutral-400'
       }`}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
@@ -168,11 +168,11 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
         <div className="flex flex-col items-center gap-3 py-4">
           <Spinner size="lg" />
           <p className="font-medium text-indigo-900">Uploading &amp; segmenting...</p>
-          <p className="text-xs text-gray-500">This should only take a few seconds.</p>
+          <p className="text-xs text-neutral-600">This should only take a few seconds.</p>
         </div>
       ) : (
         <>
-          <p className="text-sm text-gray-600 mb-3">
+          <p className="text-sm text-neutral-600 mb-3">
             Drag & drop timecard images or PDFs here, or click to browse
           </p>
           <input
@@ -348,7 +348,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
           </div>
           <div className="flex-1">
             <span className="font-medium text-sm">Processing with GPT...</span>
-            <p className="text-xs text-gray-500 mt-0.5">OCR is running in the background. This takes 60-90 seconds per card.</p>
+            <p className="text-xs text-neutral-600 mt-0.5">OCR is running in the background. This takes 60-90 seconds per card.</p>
           </div>
           <Button size="sm" variant="outline" className="text-red-600 shrink-0" onClick={onDelete} disabled={isDeleting}>
             {isDeleting ? 'Deleting...' : 'Delete'}
@@ -366,11 +366,11 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
       tc.ocr_status === 'failed' ? 'border-red-200 bg-red-50/30' : ''
     }`}>
       {/* Main summary row — always visible */}
-      <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50/50 rounded-t-lg" onClick={onSelect}>
+      <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-neutral-50/50 rounded-t-lg" onClick={onSelect}>
         {tc.image_url ? (
           <img src={tc.image_url} alt="Timecard" className="w-20 h-28 object-cover rounded border shrink-0" />
         ) : (
-          <div className="w-20 h-28 rounded border bg-gray-100 shrink-0" />
+          <div className="w-20 h-28 rounded border bg-neutral-100 shrink-0" />
         )}
 
         <div className="flex-1 min-w-0">
@@ -385,7 +385,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+          <div className="flex items-center gap-3 text-xs text-neutral-600 mt-0.5">
             {tc.period_start && tc.period_end ? (
               <span>{tc.period_start} – {tc.period_end}</span>
             ) : (
@@ -402,7 +402,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
         {/* Total hours — prominent */}
         <div className="text-right shrink-0 mr-2">
           <p className="text-lg font-bold tabular-nums">{totalHours.toFixed(2)}</p>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wide">hours</p>
+          <p className="text-xs text-neutral-600">hours</p>
         </div>
 
         <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -417,13 +417,13 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
 
       {/* Inline action row — for complete/reviewed cards with a pay period */}
       {(isComplete || isReviewed) && payPeriodId && (
-        <div className="px-3 pb-3 pt-1 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+        <div className="px-3 pb-3 pt-1 border-t border-neutral-100" onClick={(e) => e.stopPropagation()}>
           {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
           <div className="flex items-center gap-3 flex-wrap">
             {/* Employee assignment dropdown */}
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-600">Assign to:</span>
+              <span className="text-xs font-medium text-neutral-600">Assign to:</span>
               <Select
                 className="max-w-[220px] py-1.5"
                 value={selectedEmployeeId}
@@ -443,7 +443,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
             </div>
             {needsWageRateChoice && (
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-600">Apply hours to:</span>
+                <span className="text-xs font-medium text-neutral-600">Apply hours to:</span>
                 <Select
                   className="max-w-[220px] py-1.5"
                   value={selectedWageRateId}
@@ -496,9 +496,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
 
       {/* For standalone (no pay period) or failed, just show a view details link */}
       {(isComplete || isReviewed) && !payPeriodId && (
-        <div className="px-3 pb-3 pt-1 border-t border-gray-100">
+        <div className="px-3 pb-3 pt-1 border-t border-neutral-100">
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-neutral-600">
               {isReviewed ? 'Reviewed' : 'Ready for review'} — {punchesWithData.length} entries, {totalHours.toFixed(2)} total hours
             </span>
             <div className="flex-1" />
@@ -513,12 +513,14 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
 }
 
 // ──── Inline-editable time input ───────────────────────
-function TimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function TimeInput({ value, onChange, label, disabled }: { value: string; onChange: (v: string) => void; label: string; disabled?: boolean }) {
   return (
     <input
-      className="w-[5.5rem] text-xs border border-gray-200 rounded px-1.5 py-1 font-mono focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+      className="w-[5.5rem] text-xs border border-neutral-200 rounded px-1.5 py-1 font-mono focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      disabled={disabled}
       placeholder="—"
     />
   );
@@ -590,13 +592,13 @@ function ZoomableImage({
 
   const handleMouseUp = () => setDragging(false);
 
-  if (!src) return <div className="bg-gray-100 rounded border h-96 flex items-center justify-center text-gray-400">No image</div>;
+  if (!src) return <div className="bg-neutral-100 rounded border h-96 flex items-center justify-center text-neutral-600">No image</div>;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1 flex-wrap">
         <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={zoom <= 1} className="px-2 py-1 text-xs">−</Button>
-        <span className="text-xs text-gray-500 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
+        <span className="text-xs text-neutral-600 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
         <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM} className="px-2 py-1 text-xs">+</Button>
         <Button size="sm" variant="outline" onClick={rotateLeft} className="px-2 py-1 text-xs" title="Rotate left">
           <RotateCcw className="h-3.5 w-3.5" />
@@ -611,13 +613,13 @@ function ZoomableImage({
       {hasBothImages && (
         <div className="flex gap-1">
           <button
-            className={`text-xs px-2 py-1 rounded border transition-colors ${showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            className={`text-xs px-2 py-1 rounded border transition-colors ${showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50'}`}
             onClick={() => setShowOriginal(true)}
           >
             Original
           </button>
           <button
-            className={`text-xs px-2 py-1 rounded border transition-colors ${!showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            className={`text-xs px-2 py-1 rounded border transition-colors ${!showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-neutral-200 text-neutral-500 hover:bg-neutral-50'}`}
             onClick={() => setShowOriginal(false)}
           >
             Enhanced (B&W)
@@ -626,7 +628,7 @@ function ZoomableImage({
       )}
       <div
         ref={containerRef}
-        className="overflow-hidden rounded border bg-gray-900 select-none"
+        className="overflow-hidden rounded border bg-neutral-900 select-none"
         style={{ cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in', maxHeight: '70vh' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -646,18 +648,19 @@ function ZoomableImage({
           }}
         />
       </div>
-      {zoom === 1 && <p className="text-[10px] text-gray-400 text-center">Click image or scroll to zoom, then drag to pan</p>}
+      {zoom === 1 && <p className="text-xs text-neutral-600 text-center">Click image or scroll to zoom, then drag to pan</p>}
     </div>
   );
 }
 
 // ──── Employee Selector ─────────────────────────────────
-function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName }: {
+function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName, disabled = false }: {
   currentName: string;
   employees: Employee[];
   selectedEmployeeId: number | '';
   onSelectEmployee: (id: number | '') => void;
   onSaveName: (name: string) => Promise<void>;
+  disabled?: boolean;
 }) {
   const [mode, setMode] = useState<'dropdown' | 'custom'>(employees.length > 0 ? 'dropdown' : 'custom');
   const [customName, setCustomName] = useState(currentName);
@@ -672,27 +675,29 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
 
   if (mode === 'custom') {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <input
-          className="border rounded px-2 py-1.5 text-sm w-64 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+          className="min-w-0 max-w-full border rounded px-2 py-1.5 text-sm w-64 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+          disabled={disabled || savingCustom}
           value={customName}
           onChange={(e) => setCustomName(e.target.value)}
           placeholder="Enter employee name..."
         />
-        <Button size="sm" onClick={handleSaveCustom} disabled={savingCustom || !customName.trim()}>
+        <Button size="sm" onClick={handleSaveCustom} disabled={disabled || savingCustom || !customName.trim()}>
           {savingCustom ? <><Spinner size="sm" /> Saving...</> : 'Save'}
         </Button>
         {employees.length > 0 && (
-          <Button size="sm" variant="outline" onClick={() => setMode('dropdown')}>Use Dropdown</Button>
+          <Button size="sm" variant="outline" disabled={disabled || savingCustom} onClick={() => setMode('dropdown')}>Use Dropdown</Button>
         )}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <Select
-        className="max-w-xs py-1.5"
+        className="min-w-0 max-w-full sm:max-w-xs py-1.5"
+        disabled={disabled}
         value={selectedEmployeeId}
         onChange={(e) => onSelectEmployee(e.target.value ? Number(e.target.value) : '')}
       >
@@ -705,6 +710,7 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
       </Select>
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+        disabled={disabled}
         onClick={() => setMode('custom')}
       >
         Edit name
@@ -863,6 +869,8 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [selectedWageRateId, setSelectedWageRateId] = useState<number | ''>('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState('');
   const [imageCollapsed, setImageCollapsed] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const busy = saving || reprocessing || reviewing || applying || savingName;
   const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
   const wageRateChoices = activeHourlyWageRates(selectedEmployee);
   const needsWageRateChoice = employeeNeedsWageRateChoice(selectedEmployee);
@@ -905,6 +913,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveAll = async () => {
+    if (busy) return;
     setSaving(true);
     setError('');
     try {
@@ -958,6 +967,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleApproveAll = async () => {
+    if (busy || dirty) return;
     setSaving(true);
     try {
       const needsApproval = tc.punch_entries.filter(
@@ -976,6 +986,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleReprocess = async () => {
+    if (busy || dirty) return;
     setReprocessing(true);
     setError('');
     try {
@@ -991,6 +1002,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleReview = async () => {
+    if (busy || dirty) return;
     setReviewing(true);
     setError('');
     try {
@@ -1004,7 +1016,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleApplyToPayroll = async () => {
-    if (!payPeriodId || !onApplied) return;
+    if (busy || dirty || !payPeriodId || !onApplied) return;
     setApplying(true);
     setError('');
     try {
@@ -1026,17 +1038,19 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveName = async (name: string) => {
+    if (busy) return;
+    setSavingName(true);
     try {
       const updated = await timecardsApi.update(tc.id, { employee_name: name });
       setTc(updated);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally { setSavingName(false); }
   };
 
   return (
     <div className="space-y-4">
       {/* Header with back, status, and confidence */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
+        <Button variant="outline" size="sm" onClick={onBack} disabled={busy}>Back</Button>
         <div className="flex-1" />
         {statusBadge(tc.ocr_status)}
         {tc.overall_confidence !== null && (
@@ -1047,8 +1061,8 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       </div>
 
       {/* Employee assignment section */}
-      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
-        <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Employee:</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-3 p-3 bg-neutral-50 rounded-lg border">
+        <span className="text-sm font-medium text-neutral-700 whitespace-nowrap">Employee:</span>
         {payPeriodId ? (
           <EmployeeSelector
             currentName={tc.employee_name || ''}
@@ -1058,43 +1072,39 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               setSelectedEmployeeId(employeeId);
               setSelectedWageRateId('');
             }}
+            disabled={busy}
             onSaveName={handleSaveName}
           />
         ) : (
           <span className="text-sm font-semibold">{tc.employee_name || 'Unknown Employee'}</span>
         )}
-        <span className="text-xs text-gray-400 ml-auto">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</span>
+        <span className="text-xs text-neutral-600 ml-auto">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</span>
       </div>
 
       {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
-      {/* Image + Table side by side */}
-      <div className="flex gap-4">
-        {/* Image panel — collapsible */}
-        <div className={`shrink-0 transition-all duration-200 ${imageCollapsed ? 'w-0 overflow-hidden' : 'w-80'}`}>
-          {!imageCollapsed && (
-            <ZoomableImage
-              originalSrc={tc.image_url}
-              enhancedSrc={tc.preprocessed_image_url}
-              alt="Timecard"
-            />
-          )}
-        </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-h-11"
+        onClick={() => setImageCollapsed(!imageCollapsed)}
+        aria-expanded={!imageCollapsed}
+      >
+        {imageCollapsed ? 'Show image' : 'Hide image'}
+      </Button>
 
-        {/* Collapse/expand toggle */}
-        <button
-          className="self-start px-1 py-2 text-gray-400 hover:text-gray-700 transition-colors"
-          onClick={() => setImageCollapsed(!imageCollapsed)}
-          title={imageCollapsed ? 'Show image' : 'Hide image'}
-        >
-          {imageCollapsed ? '▶' : '◀'}
-        </button>
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row">
+        {!imageCollapsed && (
+          <div className="w-full shrink-0 lg:w-80">
+            <ZoomableImage originalSrc={tc.image_url} enhancedSrc={tc.preprocessed_image_url} alt="Timecard" />
+          </div>
+        )}
 
-        {/* Punch table */}
-        <div className="flex-1 overflow-x-auto">
+        <div className="min-w-0 flex-1">
+          <div role="region" aria-label="Punch times" tabIndex={0} className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="text-xs text-gray-500 border-b">
+              <tr className="text-xs text-neutral-600 border-b">
                 <th className="px-1 py-1 w-8">Day</th>
                 <th className="px-1 py-1 w-24">Date</th>
                 <th className="px-1 py-1 w-8">DOW</th>
@@ -1117,8 +1127,8 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 const dow = entry._dow || original?.day_of_week || '';
                 const rowHours = calculateEditableHours(entry);
 
-                const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
-                const blankTone = index % 2 === 0 ? 'bg-gray-50/50' : 'bg-gray-100';
+                const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-neutral-100';
+                const blankTone = index % 2 === 0 ? 'bg-neutral-50/50' : 'bg-neutral-100';
                 const approvedTone = index % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/70';
                 const attentionTone = index % 2 === 0 ? 'bg-orange-50' : 'bg-orange-100/70';
                 const rowBg = original?.needs_attention
@@ -1126,36 +1136,38 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                   : isBlank ? blankTone : rowTone;
 
                 return (
-                  <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-gray-400' : ''}`}>
-                    <td className="px-1 py-1 font-mono text-xs text-gray-500">{entry.card_day}</td>
+                  <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-neutral-600' : ''}`}>
+                    <td className="px-1 py-1 font-mono text-xs text-neutral-600">{entry.card_day}</td>
                     <td className="px-1 py-1">
                       <input
+                        disabled={busy}
                         type="date"
-                        className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[7rem] focus:border-indigo-400 outline-none"
+                        aria-label={`Work date for day ${entry.card_day}`}
+                        className="text-xs border border-neutral-200 rounded px-1 py-0.5 w-[7rem] focus:border-indigo-400 outline-none"
                         value={entry.date}
                         onChange={(e) => updateField(rowKey, 'date', e.target.value)}
                       />
                     </td>
-                    <td className="px-1 py-1 text-xs text-gray-500">{dow}</td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_in} onChange={(v) => updateField(rowKey, 'clock_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_out} onChange={(v) => updateField(rowKey, 'lunch_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_in} onChange={(v) => updateField(rowKey, 'lunch_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_out} onChange={(v) => updateField(rowKey, 'clock_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
+                    <td className="px-1 py-1 text-xs text-neutral-600">{dow}</td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock in on ${entry.date || `day ${entry.card_day}`}`} value={entry.clock_in} onChange={(v) => updateField(rowKey, 'clock_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock out before lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.lunch_out} onChange={(v) => updateField(rowKey, 'lunch_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock in after lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.lunch_in} onChange={(v) => updateField(rowKey, 'lunch_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Clock out after lunch on ${entry.date || `day ${entry.card_day}`}`} value={entry.clock_out} onChange={(v) => updateField(rowKey, 'clock_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Third clock in on ${entry.date || `day ${entry.card_day}`}`} value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput disabled={busy} label={`Third clock out on ${entry.date || `day ${entry.card_day}`}`} value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
                     <td className="px-1 py-1 text-xs text-right font-mono">
                       {rowHours != null ? rowHours.toFixed(2) : isBlank ? '—' : '-'}
                     </td>
                     <td className="px-1 py-1">
                       {original ? (
-                        <Badge className={`text-[10px] ${confidenceColor(original.confidence)}`}>
+                        <Badge className={`text-xs ${confidenceColor(original.confidence)}`}>
                           {original.confidence !== null ? `${(original.confidence * 100).toFixed(0)}%` : '-'}
                         </Badge>
                       ) : (
-                        <span className="text-[10px] text-gray-300">—</span>
+                        <span className="text-xs text-neutral-600">—</span>
                       )}
                     </td>
-                    <td className="px-1 py-1 text-[10px] text-gray-500 max-w-28 truncate" title={original?.notes || ''}>
+                    <td className="px-1 py-1 text-xs text-neutral-600 max-w-28 truncate" title={original?.notes || ''}>
                       {original?.needs_attention && original.review_state === 'unresolved' && (
                         <span className="text-orange-600 font-medium">⚠ </span>
                       )}
@@ -1175,12 +1187,13 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               </tr>
             </tfoot>
           </table>
+          </div>
 
-          {/* Save bar */}
+          {/* Save bar stays outside the horizontally scrolling punch table. */}
           {dirty && (
-            <div className="flex items-center gap-2 mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+            <div className="mt-3 flex flex-col gap-3 rounded border border-yellow-200 bg-yellow-50 p-3 sm:flex-row sm:items-center">
               <span className="text-sm text-yellow-800 flex-1">You have unsaved changes</span>
-              <Button size="sm" onClick={handleSaveAll} disabled={saving}>
+              <Button size="sm" className="min-h-11 w-full sm:w-auto" onClick={handleSaveAll} disabled={busy}>
                 {saving ? <><Spinner size="sm" /> Saving...</> : 'Save All Changes'}
               </Button>
             </div>
@@ -1191,7 +1204,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
         {(tc.ocr_status === 'complete' || tc.ocr_status === 'failed') && (
-          <Button variant="outline" onClick={handleReprocess} disabled={reprocessing}>
+          <Button variant="outline" onClick={handleReprocess} disabled={busy || dirty}>
             {reprocessing ? <><Spinner size="sm" /> Re-running OCR...</> : 'Re-run OCR'}
           </Button>
         )}
@@ -1201,28 +1214,28 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
             <p className="text-sm text-orange-600">
               {tc.review_summary.attention_count} punch entries need attention
             </p>
-            <Button size="sm" variant="outline" onClick={handleApproveAll} disabled={saving}>
+            <Button size="sm" variant="outline" onClick={handleApproveAll} disabled={busy || dirty}>
               Approve All Flagged
             </Button>
           </>
         )}
 
         {tc.ocr_status === 'complete' && tc.review_summary.attention_count === 0 && (
-          <Button onClick={handleReview} disabled={reviewing}>
+          <Button onClick={handleReview} disabled={busy || dirty}>
             {reviewing ? <><Spinner size="sm" /> Marking...</> : 'Mark Reviewed'}
           </Button>
         )}
 
         {tc.ocr_status === 'reviewed' && payPeriodId && (
-          <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
+          <div className="flex w-full flex-wrap items-center gap-2 border-t pt-3 mt-1">
             {needsWageRateChoice && (
               <>
-                <span className="text-xs font-medium text-gray-600">Apply hours to:</span>
+                <span className="text-xs font-medium text-neutral-600">Apply hours to:</span>
                 <Select
                   className="max-w-[240px] py-1.5"
                   value={selectedWageRateId}
                   onChange={(e) => setSelectedWageRateId(e.target.value ? Number(e.target.value) : '')}
-                  disabled={applying}
+                  disabled={busy}
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
@@ -1232,7 +1245,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 </Select>
               </>
             )}
-            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying || (needsWageRateChoice && !selectedWageRateId)}>
+            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={busy || dirty || (needsWageRateChoice && !selectedWageRateId)}>
               {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply Hours to Payroll'}
             </Button>
             {tc.applied_to_payroll_at && (
@@ -1240,7 +1253,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 Applied{tc.applied_employee_name ? ` to ${tc.applied_employee_name}` : ''}
               </Badge>
             )}
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-neutral-600">
               {selectedEmployeeId
                 ? `Assigning to: ${employees.find(e => e.id === selectedEmployeeId)?.first_name} ${employees.find(e => e.id === selectedEmployeeId)?.last_name}`
                 : `Will auto-match by name: "${tc.employee_name}"`}
@@ -1248,9 +1261,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           </div>
         )}
         {tc.ocr_status === 'reviewed' && !payPeriodId && (
-          <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
+          <div className="flex w-full flex-wrap items-center gap-2 border-t pt-3 mt-1">
             <Badge className="bg-green-100 text-green-800">Reviewed</Badge>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-neutral-600">
               Total hours: <strong className="font-mono">{editableTotalHours.toFixed(2)}</strong>
               — Open this timecard from a pay period to apply hours to payroll.
             </span>
@@ -1268,10 +1281,10 @@ function Pagination({ page, totalPages, totalCount, onPageChange }: {
   if (totalPages <= 1) return null;
   return (
     <div className="flex items-center justify-between pt-3 border-t">
-      <span className="text-xs text-gray-500">{totalCount} total timecard{totalCount !== 1 ? 's' : ''}</span>
+      <span className="text-xs text-neutral-600">{totalCount} total timecard{totalCount !== 1 ? 's' : ''}</span>
       <div className="flex items-center gap-1">
         <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>Previous</Button>
-        <span className="text-xs text-gray-600 px-2">Page {page} of {totalPages}</span>
+        <span className="text-xs text-neutral-600 px-2">Page {page} of {totalPages}</span>
         <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</Button>
       </div>
     </div>
@@ -1506,8 +1519,9 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <Button size="sm" variant="outline" onClick={handleSearch}>Search</Button>
+            <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" onClick={handleSearch}>Search</Button>
             <Select
+              aria-label="Timecard status"
               className="w-36 py-1.5"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
@@ -1520,7 +1534,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               <option value="failed">Failed</option>
             </Select>
             {(activeSearch || statusFilter) && (
-              <Button size="sm" variant="outline" className="text-gray-500" onClick={() => { setSearchQuery(''); setActiveSearch(''); setStatusFilter(''); setPage(1); }}>
+              <Button size="sm" variant="outline" className="text-neutral-500" onClick={() => { setSearchQuery(''); setActiveSearch(''); setStatusFilter(''); setPage(1); }}>
                 Clear filters
               </Button>
             )}
@@ -1542,18 +1556,18 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
+          <div className="flex items-center gap-2 text-sm text-neutral-500">
             <Spinner size="sm" /> Loading timecards...
           </div>
         ) : timecards.length === 0 ? (
-          <p className="text-sm text-gray-400 italic">
+          <p className="text-sm text-neutral-600 italic">
             {(activeSearch || statusFilter)
               ? 'No timecards match your filters.'
               : 'No timecards uploaded yet.'}
           </p>
         ) : (
           <div className="space-y-2">
-            <h4 className="text-sm font-medium text-gray-700">
+            <h4 className="text-sm font-medium text-neutral-700">
               {isStandalone ? `${totalCount} Timecard${totalCount !== 1 ? 's' : ''}` : `${timecards.length} Timecard${timecards.length !== 1 ? 's' : ''}`}
             </h4>
             {timecards.map((tc) => (

@@ -385,23 +385,15 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
-    expect(response).to have_http_status(:ok)
-    json = JSON.parse(response.body)
-    expect(json.fetch("data").pluck("id")).to include(selected_log.id)
-    expect(json.fetch("data").pluck("company_id")).to all(eq(company.id))
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+    expect(response.parsed_body).not_to have_key("data")
 
     get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
-    expect(response).to have_http_status(:ok)
-    fallback_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
-    expect(fallback_exported_subjects).to include("Selected client employee")
-    expect(fallback_exported_subjects).not_to include(
-      "Other client employee",
-      "Second actor employee",
-      "Unassigned client employee",
-      "Organization user",
-      "Foreign user"
-    )
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("company_context_unavailable")
+    expect(response.body).not_to include("Selected client employee")
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 
@@ -535,5 +527,22 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response.body.index("users#updated")).to be < response.body.index("users#created")
     expect(response.body).to include("'=HYPERLINK")
     expect(response.body).not_to include(",=HYPERLINK")
+  end
+  it "marks the staging streamed export and filename while retaining lazy batches" do
+    old = ENV["DEPLOYMENT_ENV"]
+    ENV["DEPLOYMENT_ENV"] = "staging"
+    get "/api/v1/admin/audit_logs/export"
+    expect(response).to have_http_status(:ok)
+    expect(response.body.lines.first.chomp.b).to eq(StagingOutboundPolicy::LABEL.b)
+    expect(response.body.lines.second).to start_with("Time,Person,Activity")
+    expect(response.headers["Content-Disposition"]).to include("STAGING_audit-history-")
+
+    controller = Api::V1::Admin::AuditLogsController.new
+    expect(controller).not_to receive(:export_batch)
+    stream = controller.send(:audit_csv_stream, AuditLog.none)
+    expect(stream).to be_a(Enumerator)
+    expect(stream.next.chomp).to eq(StagingOutboundPolicy::LABEL)
+  ensure
+    old ? ENV["DEPLOYMENT_ENV"] = old : ENV.delete("DEPLOYMENT_ENV")
   end
 end

@@ -12,7 +12,7 @@ module TimeTracking
     end
 
     def call
-      if source.source_type == "aire_services"
+      if source.source_type == "aire_services" || source.supports?(:finalized_batch_v2)
         return BatchImportPreviewService.new(
           pay_period: pay_period,
           source: source,
@@ -84,11 +84,14 @@ module TimeTracking
     end
 
     def save_preview_import!(lookup_attrs:, import_attrs:)
-      import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
-      persist_preview_import!(import, import_attrs)
-    rescue ActiveRecord::RecordNotUnique
-      import = TimeTrackingImport.find_by!(lookup_attrs)
-      persist_preview_import!(import, import_attrs)
+      source.with_lock do
+        begin
+          import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
+          TimeTrackingImport.transaction(requires_new: true) { persist_preview_import!(import, import_attrs) }
+        rescue ActiveRecord::RecordNotUnique
+          persist_preview_import!(TimeTrackingImport.find_by!(lookup_attrs), import_attrs)
+        end
+      end
     end
 
     def persist_preview_import!(import, import_attrs)
@@ -141,6 +144,9 @@ module TimeTracking
           employee_name: match[:employee_name],
           match_method: match[:match_method],
           match_score: match[:match_score],
+          suggested_employee_id: match[:suggested_employee_id],
+          suggested_employee_name: match[:suggested_employee_name],
+          suggestion_method: match[:suggestion_method],
           regular_hours: split[:regular_hours],
           overtime_hours: split[:overtime_hours],
           total_hours: split[:total_hours],
@@ -220,8 +226,9 @@ module TimeTracking
       return match unless employee&.hourly? || employee&.contractor_hourly?
 
       active_rates = employee.active_wage_rates.to_a
-      return match if active_rates.length <= 1
+      return match if active_rates.length <= 1 && active_rates.none? { |rate| rate.rate.nil? }
 
+      active_rates = active_rates.reject { |rate| rate.rate.nil? }
       match[:multi_rate_employee] = true
       match[:categories] = categories.map do |category|
         wage_rate_match = find_wage_rate_for_category(category, active_rates)

@@ -4,6 +4,14 @@
 # There are typically 7 brackets per filing status (10%, 12%, 22%, 24%, 32%, 35%, 37%).
 class TaxBracket < ApplicationRecord
   belongs_to :filing_status_config
+  after_save :invalidate_annual_verification, if: :saved_changes?
+  after_destroy :invalidate_annual_verification
+
+  def invalidate_annual_verification
+    config = filing_status_config.annual_tax_config
+    config.with_lock { config.invalidate_verification! } unless config.destroyed?
+  end
+
 
   validates :bracket_order, presence: true,
             numericality: { only_integer: true, greater_than: 0 }

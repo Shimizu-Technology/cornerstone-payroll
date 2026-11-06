@@ -5,7 +5,7 @@ module HistoricalPayrollImports
     DEFAULT_SOURCE_SYSTEM = "quickbooks_online"
 
     def self.default
-      @default ||= new(adapters: [ QuickbooksOnlineAdapter.new ])
+      @default ||= new(adapters: [ QuickbooksOnlineAdapter.new, PriorProviderAdapter.new ])
     end
 
     def initialize(adapters:)

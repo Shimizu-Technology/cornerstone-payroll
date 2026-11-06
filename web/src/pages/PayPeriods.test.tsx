@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 
+import { ActionFeedback, FeedbackProvider } from '@/components/ui/action-feedback';
 import { PayPeriods } from './PayPeriods';
 import type { PayrollHistoryRecord } from '@/services/api';
 
@@ -16,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   payPeriodUpdate: vi.fn(),
   payPeriodDelete: vi.fn(),
   runPayroll: vi.fn(),
+  payPeriodGet: vi.fn(),
   approve: vi.fn(),
   commit: vi.fn(),
 }));
@@ -29,6 +31,7 @@ vi.mock('@/contexts/CompanyContext', () => ({
 
 vi.mock('@/services/api', () => ({
   ApiError: class ApiError extends Error {},
+  taxYearReadinessApi: { get: () => Promise.resolve({ verified_years: [2026], warnings: [] }) },
   companiesApi: { get: apiMocks.companyGet },
   payrollHistoryApi: { list: apiMocks.payrollHistoryList },
   payScheduleSettingsApi: { get: apiMocks.payScheduleGet },
@@ -37,6 +40,7 @@ vi.mock('@/services/api', () => ({
     update: apiMocks.payPeriodUpdate,
     delete: apiMocks.payPeriodDelete,
     runPayroll: apiMocks.runPayroll,
+    get: apiMocks.payPeriodGet,
     approve: apiMocks.approve,
     commit: apiMocks.commit,
   },
@@ -145,6 +149,38 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'Commit' })).toBeNull();
   });
 
+  it('says where recorded history went until YTD is on, using the API count, and does not offer a new pay period', async () => {
+    apiMocks.activeCompany = { id: 11 };
+    const empty = historyResponse([]);
+    apiMocks.payrollHistoryList.mockResolvedValue({ ...empty, meta: { ...empty.meta, prior_provider_history_available: true, prior_provider_history_recorded: { period_count: 20 } } });
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('20 pay runs are recorded as previous-provider history. Turn on YTD to finish.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Turn on YTD' }).getAttribute('href')).toBe('/companies/11/prior-provider-history');
+    expect(await screen.findByText('Recorded previous-provider pay runs appear here after year-to-date is turned on.')).toBeTruthy();
+    expect(screen.queryByText(/Create your first pay period/)).toBeNull();
+    expect(screen.queryByText(/Were these already paid/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
+  });
+
+  it.each(['year=2025', 'status=committed', 'source=cornerstone'])('keeps the recorded-history notice but not its list text when filtered by %s', async (filter) => {
+    apiMocks.activeCompany = { id: 11 };
+    const empty = historyResponse([]);
+    apiMocks.payrollHistoryList.mockResolvedValue({ ...empty, meta: { ...empty.meta, prior_provider_history_recorded: { period_count: 20 } } });
+    render(<MemoryRouter initialEntries={[`/companies/11/pay-runs?${filter}`]}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('No pay periods match the current filters.')).toBeTruthy();
+    expect(screen.getByText(/^20 pay runs are recorded/)).toBeTruthy();
+    expect(screen.queryByText(/appear here after year-to-date/)).toBeNull();
+  });
+
+  it('keeps the normal empty state when no history is waiting for YTD', async () => {
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    expect(await screen.findByText('No pay periods found. Create your first pay period to get started.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New Pay Period' })).toBeTruthy();
+    expect(screen.queryByText(/recorded as previous-provider history/)).toBeNull();
+  });
+
   it('suppresses every mutation action in both read-only row layouts', async () => {
     apiMocks.activeCompany = {
       id: 11,
@@ -161,5 +197,183 @@ describe('PayPeriods test workspaces', () => {
       expect(screen.queryByRole('button', { name: action })).toBeNull();
     }
     expect(screen.queryByText('Payroll Workflow')).toBeNull();
+  });
+
+  it.each([
+    { test_workspace: true, workspace_can_write: false },
+    { test_workspace: true, workspace_can_write: true, test_workspace_expired: true },
+    { test_workspace: true, workspace_can_write: true, test_workspace_archived_at: '2026-10-14T00:00:00Z' },
+  ])('keeps both payroll-list layouts read-only for effective access %j', async (access) => {
+    apiMocks.activeCompany = { id: 11, test_workspace_purpose: 'sandbox', ...access };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod]));
+    render(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    expect(await screen.findAllByRole('button', { name: 'View' })).toHaveLength(2);
+    for (const action of ['New Pay Period', 'Edit', 'Delete', 'Recalculate', 'Approve', 'Commit']) {
+      expect(screen.queryByRole('button', { name: action })).toBeNull();
+    }
+    expect(apiMocks.payPeriodCreate).not.toHaveBeenCalled();
+    expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+    expect(apiMocks.approve).not.toHaveBeenCalled();
+  });
+
+  it('retains an opened payroll draft through access loss without offering a submission', async () => {
+    apiMocks.activeCompany = { id: 11, test_workspace: true, workspace_can_write: true };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.companyGet.mockResolvedValue({ company: { next_check_number: 1001 } });
+    apiMocks.payScheduleGet.mockResolvedValue({ pay_schedule_settings: { pay_schedule: { confirmation_status: 'pending' } } });
+    const view = render(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    fireEvent.change(await screen.findByLabelText('Notes (optional)'), { target: { value: 'Retained operator draft' } });
+    apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: false };
+    view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMocks.payPeriodCreate).not.toHaveBeenCalled();
+    apiMocks.activeCompany = { ...apiMocks.activeCompany, workspace_can_write: true };
+    view.rerender(<MemoryRouter><PayPeriods /></MemoryRouter>);
+    expect((await screen.findByLabelText('Notes (optional)') as HTMLTextAreaElement).value).toBe('Retained operator draft');
+  });
+});
+
+describe('fixed semimonthly paydays', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ['2026-02-05', '2026-02-01', '2026-02-15', '2026-02-28'],
+    ['2028-02-05', '2028-02-01', '2028-02-15', '2028-02-29'],
+    ['2026-02-20', '2026-02-16', '2026-02-28', '2026-03-15'],
+    ['2026-12-20', '2026-12-16', '2026-12-31', '2027-01-15'],
+    ['2026-02-16T00:30:00+10:00', '2026-02-16', '2026-02-28', '2026-03-15'],
+    ['2027-01-01T00:30:00+10:00', '2027-01-01', '2027-01-15', '2027-01-31'],
+  ])('suggests the scheduled payday for %s without shifting weekends', async (today, start, end, payday) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(today.includes('T') ? today : `${today}T12:00:00+10:00`));
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.companyGet.mockResolvedValue({ company: { next_check_number: 1001 } });
+    apiMocks.payScheduleGet.mockResolvedValue({ pay_schedule_settings: { pay_schedule: {
+      confirmation_status: 'confirmed', frequency: 'semimonthly', period_rule: 'semimonthly',
+      pay_date_rule: 'semimonthly_15th_and_month_end',
+    } } });
+
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    await waitFor(() => expect((screen.getByLabelText('Pay Date') as HTMLInputElement).value).toBe(payday));
+    expect((screen.getByLabelText('Start Date') as HTMLInputElement).value).toBe(start);
+    expect((screen.getByLabelText('End Date') as HTMLInputElement).value).toBe(end);
+    expect(screen.getByText(/including weekends and holidays/)).toBeTruthy();
+  });
+});
+
+it.each(['desktop', 'phone'])('opens the source acknowledgement worksheet instead of quick-calculating missing coverage on %s', async layout => {
+  vi.clearAllMocks();
+  apiMocks.activeCompany = { id: 11 };
+  apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([{ ...editablePeriod, test_workspace_role: undefined, parallel_run: false }]));
+  apiMocks.payPeriodGet.mockResolvedValue({ pay_period: { ...editablePeriod, time_tracking: { aire_calendar: { enabled: true, cutoff_at: '2026-10-22T07:00:00Z' }, linked_aire_records: [] } } });
+  render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><Routes>
+    <Route path="/companies/11/pay-runs" element={<PayPeriods />} />
+    <Route path="/companies/11/pay-runs/12/work" element={<p>Review hours and acknowledge source coverage</p>} />
+  </Routes></MemoryRouter>);
+  const container = await screen.findByRole(layout === 'desktop' ? 'row' : 'group', { name: layout === 'desktop' ? /Aug 24 - Sep 6, 2026/ : 'Pay period Aug 24 - Sep 6, 2026' });
+  fireEvent.click(within(container).getByRole('button', { name: /Recalculate/ }));
+  expect(await screen.findByText('Review hours and acknowledge source coverage')).toBeTruthy();
+  expect(apiMocks.runPayroll).not.toHaveBeenCalled();
+});
+
+
+describe('PayPeriods delete confirmation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.activeCompany = { id: 11, name: 'Local Payroll QA' };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod]));
+    apiMocks.payPeriodDelete.mockResolvedValue(undefined);
+  });
+
+  const openDelete = async (employeeCount = 2, hours = 0) => {
+    apiMocks.payPeriodGet.mockResolvedValue({ pay_period: {
+      ...editablePeriod, employee_count: employeeCount,
+      payroll_items: [{ id: 1, hours_worked: hours }],
+    } });
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    return screen.findByRole('dialog', { name: 'Delete unfinished pay run?' });
+  };
+
+  it.each([[10, 0], [2, 0.25]])('requires acknowledgement for %s employees and %s hours, then names the deleted run', async (count, hours) => {
+    const dialog = await openDelete(count, hours);
+    expect(dialog.textContent).toContain('Local Payroll QA');
+    expect(dialog.textContent).toContain('Aug 24 - Sep 6, 2026');
+    expect(dialog.textContent).toContain('Sep 10, 2026');
+    expect(dialog.textContent).toContain('Calculated');
+    expect(dialog.textContent).toContain('$3,086.25');
+    expect(dialog.textContent).toContain('permanently deletes this unfinished run and its entered hours');
+    const submit = within(dialog).getByRole('button', { name: 'Delete pay run' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'I understand this deletes the entered hours' }));
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    fireEvent.click(submit);
+    await waitFor(() => expect(apiMocks.payPeriodDelete).toHaveBeenCalledExactlyOnceWith(12));
+    expect(await screen.findByText(/Deleted Local Payroll QA — Aug 24 - Sep 6, 2026/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
+  it('allows a small run without hours, but Cancel leaves it untouched', async () => {
+    const dialog = await openDelete(9, 0);
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: 'Delete pay run' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+  });
+
+  it('resets the checkbox on cancel and preserves the run after a server refusal', async () => {
+    let dialog = await openDelete(66, 2898.16);
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    apiMocks.payPeriodDelete.mockRejectedValue(new Error('This run was approved before. Keep it and correct it instead.'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    expect(await screen.findByText(/This run was approved before/)).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByText(/Deleted Local Payroll QA/)).toBeNull();
+  });
+
+  it('dismisses the published success notice before a later refused deletion', async () => {
+    const secondPeriod = { ...editablePeriod, id: 13, key: 'native:13' };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod, secondPeriod]));
+    apiMocks.payPeriodGet.mockImplementation((id: number) => Promise.resolve({ pay_period: {
+      ...(id === 12 ? editablePeriod : secondPeriod), payroll_items: [{ id, hours_worked: 0 }],
+    } }));
+    render(<FeedbackProvider><ActionFeedback tone="success" message="Employee saved." /><MemoryRouter><PayPeriods /></MemoryRouter></FeedbackProvider>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    let dialog = await screen.findByRole('dialog');
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([secondPeriod]));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    const success = await screen.findByText(/Deleted Local Payroll QA/);
+    fireEvent.mouseEnter(success.closest('[data-feedback-tone]')!);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    dialog = await screen.findByRole('dialog');
+    apiMocks.payPeriodDelete.mockRejectedValue(new Error('This run was approved before. Keep it and correct it instead.'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete pay run' }));
+    expect(await screen.findByText(/This run was approved before/)).toBeTruthy();
+    expect(screen.queryByText(/Deleted Local Payroll QA/)).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(apiMocks.payPeriodDelete.mock.calls).toEqual([[12], [13]]);
+    expect(screen.getByText('Employee saved.')).toBeTruthy();
+  });
+
+  it('fails closed when current run details cannot load', async () => {
+    apiMocks.payPeriodGet.mockRejectedValue(new Error('Could not load the run'));
+    render(<MemoryRouter initialEntries={['/companies/11/pay-runs']}><PayPeriods /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[0]);
+    expect(await screen.findByText('Could not load the run')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
   });
 });

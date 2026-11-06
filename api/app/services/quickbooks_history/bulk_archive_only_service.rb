@@ -18,6 +18,7 @@ module QuickbooksHistory
 
       HistoricalImportBatch.transaction do
         batch.lock!
+        ensure_authorized_actor!(lock: true)
         raise ArgumentError, "Unlinked workers can only be bulk-reviewed while the batch is a preview" unless batch.previewed?
 
         workers = batch.historical_workers.where(mapping_status: "needs_review")
@@ -48,10 +49,14 @@ module QuickbooksHistory
 
     attr_reader :batch, :actor
 
-    def ensure_authorized_actor!
+    def ensure_authorized_actor!(lock: false)
+      if lock
+        @actor = User.lock.find_by(id: actor&.id)
+        batch.company.company_assignments.where(user_id: actor&.id).lock.load
+      end
       authorized = actor.present? &&
         actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
       return if authorized
 
       raise ArgumentError, "An attributed manager or administrator with company access is required"

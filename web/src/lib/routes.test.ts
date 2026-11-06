@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aireAccountConnectionPath,
   correctionRunPath,
   employeeEditPath,
   retirementSetupPath,
@@ -15,6 +16,16 @@ import {
 } from './routes';
 
 describe('canonical payroll routes', (): void => {
+  it('preserves personal connection context and rejects external return routes', (): void => {
+    expect(aireAccountConnectionPath(4, '/companies/7/pay-runs/67/work'))
+      .toBe('/app/aire-account-connection?source_id=4&return_to=%2Fcompanies%2F7%2Fpay-runs%2F67%2Fwork');
+    expect(aireAccountConnectionPath(4, 'https://evil.example/'))
+      .toBe('/app/aire-account-connection?source_id=4&return_to=%2Fapp');
+    expect(aireAccountConnectionPath(-1)).toBe('/app/aire-account-connection');
+    expect(aireAccountConnectionPath(4, '/companies/7/?q=' + '&'.repeat(1200)))
+      .toBe('/app/aire-account-connection?source_id=4');
+  });
+
   it('opens the correct retirement year and section with a bounded return link', () => {
     expect(retirementSetupPath(7, 30, 2027, 'retirement-year-evidence', { returnTo: '/companies/7/pay-runs/12/work' }))
       .toBe('/companies/7/employees/30/pay-setup?return_to=%2Fcompanies%2F7%2Fpay-runs%2F12%2Fwork&retirement_year=2027#retirement-year-evidence');

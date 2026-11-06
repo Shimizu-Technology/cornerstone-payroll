@@ -180,7 +180,7 @@ module Api
               if item.new_record?
                 item.company_id = current_company_id
                 item.employment_type = employee.employment_type
-                item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+                item.pay_rate = employee.default_payroll_rate
               end
 
               multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)
@@ -359,6 +359,7 @@ module Api
             employee_name: timecard.employee_name,
             period_start: timecard.period_start,
             period_end: timecard.period_end,
+            **(StagingOutboundPolicy.staging? ? { staging_artifact_blocked: true } : {}),
             image_url: TimecardOcr::StorageService.presigned_url(timecard.image_url),
             preprocessed_image_url: TimecardOcr::StorageService.presigned_url(timecard.preprocessed_image_url),
             ocr_status: timecard.ocr_status,

@@ -4,8 +4,12 @@ module Api
   module V1
     module Admin
       class AirePayrollCockpitsController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!
         before_action :set_pay_period_and_source
         before_action :disable_http_caching
+        before_action :require_payment_evidence_access!, only: %i[payment_evidence create_payment_attestation retract_payment_attestation resolve_payment_attestation retry_payment_resolution]
+        before_action :require_manual_reconciliation_access!, only: %i[create_manual_allocation retry_manual_allocation]
 
         def show
           presenter = cockpit_presenter
@@ -30,15 +34,98 @@ module Api
           render_source_error(e)
         end
 
-        def manual_review
-          require_aire_source!
-          payload = TimeTracking::Client.new(@source, delegation: nil).payroll_cockpit_manual_review(
-            start_date: @pay_period.start_date.iso8601,
-            end_date: @pay_period.end_date.iso8601
+        def payment_evidence
+          review = payment_evidence_service.review
+          review[:payment_attestations] = review[:payment_attestations].map do |hold|
+            hold.merge("payment_options" => payment_resolution_service.payment_options(hold.fetch("source_user_uuid")))
+          end
+          render json: review.merge(
+            resolution_access: @source.supports?(:payment_attestation_resolution_v1) && manual_reconciliation_allowed?,
+            payment_resolutions: payment_resolution_service.history
           )
-          render json: cockpit_presenter.manual_review(payload)
+        rescue TimeTracking::Client::Error => e
+          render json: { candidates: [], payment_attestations: [], resolution_access: false,
+            payment_resolutions: payment_resolution_service.history, source_available: false, source_error: e.message }
+        end
+
+        def create_payment_attestation
+          permitted = params.permit(:source_time_entry_id, :source_user_uuid, :command_id, :expected_version, :reason)
+          result = payment_evidence_service.create!(**permitted.to_h.symbolize_keys)
+          audit_payment_evidence!("payment_hold_recorded", permitted[:source_time_entry_id], permitted, result)
+          render json: result, status: :created
+        rescue ArgumentError, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
+        end
+
+        def retract_payment_attestation
+          permitted = params.permit(:source_user_uuid, :command_id, :expected_version, :reason)
+          result = payment_evidence_service.retract!(attestation_id: params[:payment_attestation_id], **permitted.to_h.symbolize_keys)
+          audit_payment_evidence!("payment_hold_retracted", params[:payment_attestation_id], permitted, result)
+          render json: result
+        rescue ArgumentError, ActionController::ParameterMissing => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def resolve_payment_attestation
+          permitted = params.permit(:source_user_uuid, :payroll_item_id, :expected_version, :reason)
+          allocation = payment_resolution_service.create!(attestation_id: params[:payment_attestation_id], **permitted.to_h.symbolize_keys)
+          record_command_audit!(action: "aire_payroll_cockpit#payment_report_match_saved",
+            record_type: "TimeTrackingManualAllocation", record_id: allocation.id,
+            command_id: allocation.payment_resolution_intent.fetch("command_id"), reason: allocation.reconciliation_note, result: {})
+          render json: { payment_resolution: payment_resolution_service.present(allocation) }, status: :created
+        rescue TimeTracking::PaymentAttestationResolutionService::Error, ArgumentError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_payment_resolution
+          return render json: { error: "Not found" }, status: :not_found unless @source
+
+          allocation = TimeTrackingManualAllocation.resolution_history_for_period(@pay_period).find_by!(id: params[:manual_allocation_id],
+            company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
+          payment_resolution_service.sync!(allocation)
+          render json: { payment_resolution: payment_resolution_service.present(allocation.reload) }
+        rescue TimeTracking::PaymentAttestationResolutionService::Error, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Not found" }, status: :not_found
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def manual_review
+          require_aire_source!
+          payload = cockpit_client(with_delegation: true).payroll_cockpit_manual_review(
+            start_date: @pay_period.start_date.iso8601,
+            end_date: @pay_period.end_date.iso8601,
+            external_pay_period_id: @pay_period.id
+          )
+          receipts = TimeTracking::ManualAllocationReceiptPresenter.new(source: @source, payload: payload)
+          render json: cockpit_presenter.manual_review(payload).merge(
+            "source_available" => true,
+            "command_access" => command_access_payload,
+            "cornerstone_manual_allocations" => @pay_period.time_tracking_manual_allocations
+              .includes(:employee, payroll_item: :check_events)
+              .order(:id)
+              .map { |allocation| manual_allocation_json(allocation, payment_evidence: receipts.call(allocation)) },
+            "historical_classification_reviews" => @pay_period.time_tracking_classification_reconciliations
+              .includes(:employee)
+              .order(:id)
+              .map { |review| historical_classification_json(review) }
+          )
+        rescue TimeTracking::Client::Error => e
+          if @source&.active? && @source.company_id == @pay_period.company_id &&
+             StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company) &&
+             (e.response_status.nil? || e.response_status >= 500)
+            render_saved_manual_review(e)
+          else
+            render_source_error(e)
+          end
         end
 
         def time_entries
@@ -67,6 +154,42 @@ module Api
           render_source_error(e)
         end
 
+        def late_hours
+          render json: late_hours_service.review
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def pay_late_hours
+          permitted = params.permit(:command_id, :pay_date, :expected_version, cases: [ :id, :version ])
+          run = late_hours_service.create!(**permitted.to_h.symbolize_keys)
+          render json: { late_hours_run: late_hours_service.present(run) }, status: :created
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid, PayrollGoLiveGate::BlockedError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_late_hours
+          run = late_hours_service.retry!(params[:late_hours_run_id])
+          render json: { late_hours_run: late_hours_service.present(run) }
+        rescue TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid, PayrollGoLiveGate::BlockedError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def cancel_late_hours
+          run = late_hours_service.cancel!(params[:late_hours_run_id], reason: params.require(:reason))
+          render json: { late_hours_run: late_hours_service.present(run) }
+        rescue ActionController::ParameterMissing, TimeTracking::LateHoursRunService::Error, ArgumentError, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         def settlement_cases
           payload = cockpit_client.payroll_cockpit_settlement_cases(
             external_pay_period_id: external_pay_period_id,
@@ -75,6 +198,44 @@ module Api
             status: params[:status]
           )
           render json: cockpit_presenter.settlement_cases(payload)
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def confirm_employee_mapping
+          permitted = employee_mapping_params
+          source_employee = cockpit_client.payroll_cockpit_employee(
+            employee_id: permitted.fetch(:source_user_id)
+          ).fetch("employee")
+          requested_uuid = TimeTrackingEmployeeMapping.normalize_uuid(permitted.fetch(:source_user_uuid))
+          returned_uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_employee["payroll_integration_id"])
+          unless source_employee.fetch("id").to_s == permitted.fetch(:source_user_id).to_s && returned_uuid == requested_uuid
+            return render json: {
+              error: "AIRE employee identity changed. Refresh the team list before linking."
+            }, status: :conflict
+          end
+
+          employee = Employee.active.find_by!(id: permitted.fetch(:employee_id), company_id: current_company_id)
+          mapping = TimeTracking::EmployeeMappingService.new(
+            company: @pay_period.company,
+            source: @source,
+            employee: employee,
+            source_employee: source_employee,
+            actor: current_user
+          ).confirm!
+
+          render json: {
+            employee_mapping: {
+              source_user_id: mapping.source_user_id,
+              source_user_uuid: mapping.source_user_uuid,
+              employee_id: mapping.employee_id,
+              employee_name: mapping.employee.full_name,
+              status: "mapped"
+            }
+          }
+        rescue ActionController::ParameterMissing, KeyError, ArgumentError,
+               ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue TimeTracking::Client::Error => e
           render_source_error(e)
         end
@@ -224,7 +385,137 @@ module Api
           render_source_error(e)
         end
 
+        def create_manual_allocation
+          allocation = manual_allocation_service.create!(**manual_allocation_params.to_h.symbolize_keys)
+          record_command_audit!(action: "aire_payroll_cockpit#manual_allocation_created",
+            record_type: "TimeTrackingManualAllocation", record_id: allocation.id,
+            command_id: allocation.commit_command_id, reason: allocation.reconciliation_note, result: {})
+          render json: { manual_allocation: manual_allocation_json(allocation) }, status: :created
+        rescue ActionController::ParameterMissing, ArgumentError,
+               TimeTracking::ManualAllocationService::Error, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
+        def retry_manual_allocation
+          allocation = @pay_period.time_tracking_manual_allocations.find(params[:manual_allocation_id])
+          unless @source&.active? && @source.company_id == @pay_period.company_id &&
+                 allocation.time_tracking_source_id == @source.id && allocation.company_id == @pay_period.company_id
+            raise TimeTracking::ManualAllocationService::Error,
+              "This allocation belongs to an inactive or different AIRE source. Review its original source before retrying."
+          end
+          manual_allocation_service.sync!(allocation)
+          render json: { manual_allocation: manual_allocation_json(allocation.reload) }
+        rescue TimeTracking::ManualAllocationService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue TimeTracking::Client::Error => e
+          render_source_error(e)
+        end
+
         private
+
+        def late_hours_service
+          @late_hours_service ||= TimeTracking::LateHoursRunService.new(pay_period: @pay_period, source: @source, actor: current_user)
+        end
+
+        def payment_resolution_service
+          @payment_resolution_service ||= TimeTracking::PaymentAttestationResolutionService.new(
+            pay_period: @pay_period, source: @source, actor: current_user)
+        end
+
+        def require_manual_reconciliation_access!
+          return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)
+
+          render json: { error: "You do not have permission to reconcile manual AIRE hours for this company" }, status: :forbidden
+        end
+
+        def manual_reconciliation_allowed?
+          @source&.active? && @source.company_id == @pay_period.company_id &&
+            StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @pay_period.company,
+              request_method: "POST", capability: :manage_historical_time_reconciliation)
+        end
+
+        def manual_allocation_params
+          %i[payroll_item_id source_time_entry_id source_time_entry_version source_user_uuid
+             regular_hours overtime_hours original_work_date note].each { |key| params.require(key) }
+          params.permit(:payroll_item_id, :source_time_entry_id, :source_time_entry_version,
+                        :source_user_uuid, :regular_hours, :overtime_hours,
+                        :original_work_date, :note)
+        end
+
+        def manual_allocation_service
+          @manual_allocation_service ||= TimeTracking::ManualAllocationService.new(
+            pay_period: @pay_period, source: @source, actor: current_user
+          )
+        end
+
+        def manual_allocation_json(allocation, payment_evidence: nil)
+          {
+            id: allocation.id,
+            pay_period_id: allocation.pay_period_id,
+            payroll_item_id: allocation.payroll_item_id,
+            employee_id: allocation.employee_id,
+            employee_name: allocation.employee.full_name,
+            source_user_uuid: allocation.source_user_uuid,
+            source_time_entry_id: allocation.source_time_entry_id,
+            source_time_entry_version: allocation.source_time_entry_version,
+            original_work_date: allocation.original_work_date.iso8601,
+            regular_hours: allocation.regular_hours.to_f,
+            overtime_hours: allocation.overtime_hours.to_f,
+            status: allocation.status,
+            payment_cancellation_pending: allocation.payment_cancellation_intent.present?,
+            payment_issue_pending: allocation.payment_issue_intent.present?,
+            payment_resolution_pending: allocation.payment_resolution_pending?,
+            source_payment_attestation_id: allocation.source_payment_attestation_id,
+            payroll_item_check_status: allocation.payroll_item.check_status,
+            payment_method: allocation.payroll_item.effective_payment_delivery_method,
+            remote_allocation_id: allocation.remote_allocation_id,
+            historical_classification_review_id: allocation.classification_reconciliation_id,
+            last_sync_error: allocation.last_sync_error,
+            last_synced_at: allocation.last_synced_at&.iso8601,
+            payment_evidence: payment_evidence
+          }.compact
+        end
+
+        def render_saved_manual_review(error)
+          render json: {
+            start_date: @pay_period.start_date.iso8601,
+            end_date: @pay_period.end_date.iso8601,
+            generated_at: Time.current.iso8601,
+            source_available: false,
+            source_error: error.message,
+            command_access: { can_manage_manual_allocations: false },
+            cornerstone_manual_allocations: @pay_period.time_tracking_manual_allocations
+              .where(company_id: @pay_period.company_id, time_tracking_source_id: @source.id)
+              .includes(:employee, payroll_item: :check_events).order(:id)
+              .map { |allocation| manual_allocation_json(allocation) },
+            employees: [],
+            exclusions: [],
+            issues: nil,
+            summary: nil
+          }
+        end
+
+        def historical_classification_json(review)
+          {
+            id: review.id,
+            employee_id: review.employee_id,
+            employee_name: review.employee.full_name,
+            payroll_item_id: review.payroll_item_id,
+            source_entry_count: review.source_entries.length,
+            source_regular_hours: review.source_regular_hours.to_f,
+            source_overtime_hours: review.source_overtime_hours.to_f,
+            payroll_regular_hours: review.payroll_regular_hours.to_f,
+            payroll_overtime_hours: review.payroll_overtime_hours.to_f,
+            gross_wage_difference: review.gross_wage_difference.to_f,
+            check_number: review.check_number,
+            payment_effective_on: review.payment_effective_on.iso8601,
+            status: review.status,
+            note: review.note
+          }
+        end
 
         def disable_http_caching
           response.headers["Cache-Control"] = "no-store"
@@ -234,14 +525,14 @@ module Api
         def set_pay_period_and_source
           @pay_period = PayPeriod.find_by!(id: params[:pay_period_id], company_id: current_company_id)
           @source = @pay_period.aire_payroll_calendar_period&.time_tracking_source ||
-            @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
+            @pay_period.company.time_tracking_sources.active.find { |candidate| candidate.supports?(:payroll_cockpit) }
         end
 
         def external_pay_period_id
           @pay_period.aire_payroll_calendar_period&.external_pay_period_id ||
             raise(
               TimeTracking::Client::Error.new(
-                "Publish this pay period to AIRE before opening its payroll cockpit",
+                "Publish this pay period to the time source before opening its payroll cockpit",
                 response_status: 422
               )
             )
@@ -253,8 +544,19 @@ module Api
 
         def cockpit_client(with_delegation: false)
           require_published_source!
+          capability = StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name)
+          if capability == :manage_client_configuration &&
+            !StaffRolePolicy.allowed?(current_user, capability, company: @pay_period.company)
+            raise CompanyWriteAccessChanged
+          end
           delegation = current_delegation if with_delegation
           actor = current_user if with_delegation && account_link_connected?
+          # Account-link resolution may wait on a remote status request. A grant
+          # revoked during that request must not authorize the ensuing command.
+          if capability == :manage_client_configuration &&
+            !StaffRolePolicy.allowed?(current_user, capability, company: @pay_period.company)
+            raise CompanyWriteAccessChanged
+          end
           options = { delegation: delegation }
           options[:actor] = actor if actor
           TimeTracking::Client.new(@source, **options)
@@ -264,7 +566,7 @@ module Api
           return if @source
 
           raise TimeTracking::Client::Error.new(
-            "Publish this pay period to AIRE before opening its payroll cockpit",
+            "Publish this pay period to the time source before opening its payroll cockpit",
             response_status: 422
           )
         end
@@ -273,7 +575,7 @@ module Api
           return if @source
 
           raise TimeTracking::Client::Error.new(
-            "Connect AIRE Services before reviewing manual payroll hours",
+            "Connect a compatible time source before reviewing manual payroll hours",
             response_status: 422
           )
         end
@@ -282,8 +584,11 @@ module Api
           delegation = current_delegation
           account_link_configured = account_link_connected?
           {
-            can_read: true,
-            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration) &&
+            can_read: @source.supports?(:payroll_cockpit),
+            can_manage_manual_allocations: @source.supports?(:manual_allocations) && manual_reconciliation_allowed? &&
+              (account_link_configured || delegation.present?),
+            can_manage_mappings: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: @pay_period.company),
+            can_command: StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: @pay_period.company) &&
               (account_link_configured || delegation.present?),
             delegation_configured: account_link_configured || delegation.present?,
             account_link_configured: account_link_configured,
@@ -308,6 +613,25 @@ module Api
 
         def current_delegation
           @current_delegation ||= @source.delegation_for(current_user)
+        end
+
+        def require_payment_evidence_access!
+          return if StaffRolePolicy.historical_reconciliation_allowed?(current_user, @pay_period.company)
+
+          render json: { error: "You do not have permission to manage payment evidence for this company" }, status: :forbidden
+        end
+
+        def payment_evidence_service
+          require_aire_source!
+          @payment_evidence_service ||= TimeTracking::PaymentEvidenceHolds.new(
+            pay_period: @pay_period, source: @source,
+            client: TimeTracking::Client.for_payroll_actor(@source, actor: current_user)
+          )
+        end
+
+        def audit_payment_evidence!(event, id, permitted, result)
+          record_command_audit!(action: "aire_payroll_cockpit##{event}", record_type: "AirePaymentEvidence",
+            record_id: id, command_id: permitted[:command_id], reason: permitted[:reason], result: result)
         end
 
         def command_params
@@ -337,6 +661,10 @@ module Api
             :target_external_pay_period_id,
             :action_due_on
           )
+        end
+
+        def employee_mapping_params
+          params.permit(:source_user_id, :source_user_uuid, :employee_id)
         end
 
         def routing_options_payload
