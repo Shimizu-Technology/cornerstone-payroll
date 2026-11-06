@@ -16,7 +16,9 @@ import { EmployeeClassificationTransitionDialog } from '@/components/employees/E
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
@@ -189,16 +191,22 @@ export function EmployeeForm() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
-  const { user, isClient, isSuperAdmin, isManager } = useAuth();
-  const { activeCompanyId, activeCompany } = useCompany();
+  const { user, isClient, isSuperAdmin } = useAuth();
+  const { activeCompanyId, activeCompany, refreshCompanies } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const intake = useEmployeeIntakeSettings(companyId, isClient);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
+  const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
+  const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
+  const aireSourceUserUuid = searchParams.get('aire_source_user_uuid') || '';
+  const aireFirstName = searchParams.get('first_name') || '';
+  const aireLastName = searchParams.get('last_name') || '';
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
+  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [initialSsn, setInitialSsn] = useState('');
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
@@ -236,6 +244,7 @@ export function EmployeeForm() {
   const quickPayrollFieldRef = useRef<HTMLDivElement>(null);
   const submissionGenerationRef = useRef(0);
   const companyIdRef = useRef<number | null>(companyId);
+  const payFrequencyTouchedRef = useRef(false);
 
   useLayoutEffect((): (() => void) => {
     companyIdRef.current = companyId;
@@ -282,7 +291,7 @@ export function EmployeeForm() {
       if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
-      
+
       const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
         first_name: employee.first_name,
@@ -339,21 +348,17 @@ export function EmployeeForm() {
         w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
-      const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
-        ...rate,
-        temp_id: crypto.randomUUID(),
-      }));
-      if (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly')) {
-        replaceWageRates(
-          fetchedWageRates.length > 0
-            ? fetchedWageRates
-            : [{
-                ...defaultHourlyWageRate(),
-                label: 'Regular',
-                rate: employee.pay_rate,
-              }]
-        );
-      }
+      const fetchedWageRates = (employee.wage_rates || [])
+        .filter((rate) => rate.active !== false)
+        .map((rate) => ({ ...rate, temp_id: crypto.randomUUID() }));
+      const usesHourlyRates = employee.employment_type === 'hourly'
+        || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+      replaceWageRates(fetchedWageRates.length > 0 ? fetchedWageRates : [{
+        ...defaultHourlyWageRate(),
+        // Preserve the existing scalar fallback for an hourly profile with an
+        // empty response. Explicit retired rows and non-hourly money are not fallback rates.
+        rate: usesHourlyRates && !employee.wage_rates?.length ? employee.pay_rate : 0,
+      }]);
       setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
         temp_id: crypto.randomUUID(),
         label: adjustment.label,
@@ -367,7 +372,7 @@ export function EmployeeForm() {
         label: earning.label,
         amount: toNumberOrZero(earning.amount),
       })));
-      
+
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
     } catch (err) {
@@ -404,8 +409,12 @@ export function EmployeeForm() {
   }, [companyId, isClient, setGeneralError]);
 
   useEffect(() => {
+    payFrequencyTouchedRef.current = false;
     setLoadedEmployee(null);
-    setForm({ ...initialFormData });
+    setForm({
+      ...initialFormData,
+      ...(!isEditing ? { first_name: aireFirstName, last_name: aireLastName } : {}),
+    });
     setInitialSsn('');
     setStoredSsnLastFour(null);
     setInitialEmploymentType('hourly');
@@ -443,7 +452,14 @@ export function EmployeeForm() {
       departmentsRequestIdRef.current += 1;
       quickPayrollFieldRequestIdRef.current += 1;
     };
-  }, [fetchDepartments, fetchEmployee, isEditing, setGeneralError, setQuickPayrollFieldError]);
+  }, [aireFirstName, aireLastName, fetchDepartments, fetchEmployee, isEditing, setGeneralError, setQuickPayrollFieldError]);
+
+  useEffect(() => {
+    const companyFrequency = activeCompany?.pay_frequency;
+    if (isEditing || payFrequencyTouchedRef.current || activeCompany?.id !== companyId) return;
+    if (!companyFrequency || !['weekly', 'biweekly', 'semimonthly', 'monthly'].includes(companyFrequency)) return;
+    setForm((previous) => ({ ...previous, pay_frequency: companyFrequency as PayFrequency }));
+  }, [activeCompany?.id, activeCompany?.pay_frequency, companyId, isEditing]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -464,7 +480,8 @@ export function EmployeeForm() {
     return `${digits.slice(0, 2)}-${digits.slice(2)}`;
   };
 
-  const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean | null): void => {
+  const handleChange = (field: keyof typeof form, value: string | number | boolean | null): void => {
+    if (field === 'pay_frequency') payFrequencyTouchedRef.current = true;
     setForm((prev) => ({ ...prev, [field]: value }));
     const linkedSsnField = field === 'ssn' ? 'ssn_confirmation' : field === 'ssn_confirmation' ? 'ssn' : null;
     if (errors[field] || (linkedSsnField && errors[linkedSsnField])) {
@@ -496,12 +513,9 @@ export function EmployeeForm() {
       active: rate.active !== false,
     }));
 
+    // Hourly submission derives its scalar from these rows. Keep the separate
+    // salary/flat-fee draft intact when operators edit rates and switch back.
     setWageRates(normalized);
-
-    const primaryRate = normalized.find((rate) => rate.is_primary) || normalized[0];
-    if (primaryRate) {
-      setForm((prev) => ({ ...prev, pay_rate: roundCurrencyValue(Number(primaryRate.rate) || 0) }));
-    }
   };
 
   const updateWageRate = (tempId: string, patch: Partial<WageRateFormRow>) => {
@@ -657,7 +671,7 @@ export function EmployeeForm() {
     requestAnimationFrame(() => {
       const field = document.querySelector<HTMLElement>(`[name="${fieldName}"]`);
       field?.focus();
-      field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      field?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
     });
   };
 
@@ -668,30 +682,23 @@ export function EmployeeForm() {
       return;
     }
     if (!loadedEmployee) return;
-    const values = {
-      additional_withholding: toNumberOrZero(loadedEmployee.additional_withholding),
-      w4_dependent_credit: toNumberOrZero(loadedEmployee.w4_dependent_credit),
-      w4_step4a_other_income: toNumberOrZero(loadedEmployee.w4_step4a_other_income),
-      w4_step4b_deductions: toNumberOrZero(loadedEmployee.w4_step4b_deductions),
-    };
-    setForm((previous) => ({ ...previous, ...values,
-      filing_status: normalizeFilingStatus(loadedEmployee.filing_status),
-      allowances: toNumberOrZero(loadedEmployee.allowances),
-      w4_step2_multiple_jobs: toBoolean(loadedEmployee.w4_step2_multiple_jobs),
-      w4_form_version: loadedEmployee.w4_form_version,
+    setForm((previous) => ({ ...previous,
       w4_effective_on: loadedEmployee.w4_effective_on || '',
       w4_signed_on: loadedEmployee.w4_signed_on || null,
       w4_source_reference: loadedEmployee.w4_source_reference || '',
     }));
-    setW4CurrencyDrafts({ additional_withholding: toCurrencyDraft(values.additional_withholding),
-      w4_dependent_credit: toCurrencyDraft(values.w4_dependent_credit),
-      w4_step4a_other_income: toCurrencyDraft(values.w4_step4a_other_income),
-      w4_step4b_deductions: toCurrencyDraft(values.w4_step4b_deductions) });
-    setW4ChangeReason('');
   };
 
-  const allowsUnverifiedBlank = (field: string) => importedProfileAllowsBlank(loadedEmployee, field)
-    || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
+  const deferredEditFields = ['ssn', 'hire_date', 'address_line1', 'city', 'state', 'zip'];
+  const allowsUnverifiedBlank = (field: string) => {
+    if (isEditing && deferredEditFields.includes(field)) {
+      const storedValue = loadedEmployee?.[field as keyof Employee];
+      const hasStoredSsn = field === 'ssn' && Boolean(storedSsnLastFour);
+      return !hasStoredSsn && !String(storedValue ?? '').trim();
+    }
+    return importedProfileAllowsBlank(loadedEmployee, field)
+      || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
+  };
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -706,7 +713,7 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!isVariableSalary && form.pay_rate <= 0) {
+    if (!supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {
@@ -860,6 +867,7 @@ export function EmployeeForm() {
       let savedEmployeeId: number;
       let portalNotice: string | null = null;
       let portalChangeRequestId: number | null = null;
+      let aireMappingNotice: string | null = null;
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
         // Recurring items save through their own endpoints. A stale profile must
@@ -890,6 +898,11 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          if (isCurrentSubmission()) {
+            // The employee is already saved. Summary recovery must not block
+            // navigation or turn a successful create into a duplicate retry.
+            void refreshCompanies().catch(() => {});
+          }
         }
       }
       if (!isCurrentSubmission()) return;
@@ -898,6 +911,11 @@ export function EmployeeForm() {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
+        const displayedSavedRateIds = new Set(
+          (loadedEmployee?.wage_rates || [])
+            .filter((rate) => rate.active !== false && rate.id)
+            .map((rate) => rate.id as number)
+        );
         const normalizedById = new Map(
           normalizedWageRates
             .filter((rate) => rate.id)
@@ -906,7 +924,8 @@ export function EmployeeForm() {
 
         await Promise.all(
           existingRates
-            .filter((rate) => !normalizedById.has(rate.id as number))
+            // Removing a displayed row must not delete hidden or newly added definitions.
+            .filter((rate) => rate.active !== false && displayedSavedRateIds.has(rate.id as number) && !normalizedById.has(rate.id as number))
             .map((rate) => employeeWageRatesApi.delete(rate.id as number, requestedCompanyId))
         );
         if (!isCurrentSubmission()) return;
@@ -931,23 +950,51 @@ export function EmployeeForm() {
         }
       }
 
+      if (!isClient && !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid) {
+        const parsedPayPeriodId = Number(airePayPeriodId);
+        if (!Number.isInteger(parsedPayPeriodId) || parsedPayPeriodId <= 0) {
+          aireMappingNotice = 'The payroll profile was created, but the AIRE link expired. Link the new employee from the payroll team list.';
+        } else {
+          try {
+            await payPeriodsApi.confirmAireEmployeeMapping(parsedPayPeriodId, {
+              source_user_id: aireSourceUserId,
+              source_user_uuid: aireSourceUserUuid,
+              employee_id: savedEmployeeId,
+            });
+          } catch {
+            aireMappingNotice = 'The payroll profile was created, but AIRE could not be linked. Link the new employee from the payroll team list.';
+          }
+          if (!isCurrentSubmission()) return;
+        }
+      }
+
       if (!isCurrentSubmission()) return;
       notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
       const saveDestination = isClient && portalChangeRequestId
         ? '/change-requests'
+        : !isEditing && airePayPeriodId && aireSourceUserId && aireSourceUserUuid
+          ? returnTo
         : isEditing
           ? returnTo
           : isClient
             ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
             : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
       navigate(saveDestination, {
-        state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
+        state: portalNotice
+          ? { portalNotice, selectedRequestId: portalChangeRequestId }
+          : aireMappingNotice
+            ? { aireMappingNotice }
+            : null,
       });
     } catch (err) {
       if (!isCurrentSubmission()) return;
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
         setErrors(err.fieldErrors);
-        setGeneralError(`Employee could not be saved. ${Object.values(err.fieldErrors).flat().join(' ')}`);
+        const fieldMessages = Object.entries(err.fieldErrors).map(([field, messages]) =>
+          `${field.replaceAll('_', ' ')}: ${messages.join(' ')}`
+        ).join('; ');
+        setGeneralError(`${err.message}. ${fieldMessages}`);
+        if ((err.data as { code?: string } | undefined)?.code === 'employee_intake_expired') void intake.reload();
         focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
@@ -971,6 +1018,15 @@ export function EmployeeForm() {
   const ssnComparisonReady = ssnDigits.length === 9 && ssnConfirmationDigits.length === 9;
   const ssnsMatch = ssnComparisonReady && ssnDigits === ssnConfirmationDigits;
 
+  if (!canWriteCompany(activeCompany)) {
+    return <section className="space-y-4 rounded-xl border border-neutral-200 bg-white p-6" aria-label="Read-only employee access">
+      <h1 className="text-xl font-semibold text-neutral-900">Employee details are read-only</h1>
+      <p className="text-sm leading-6 text-neutral-700">{companyReadOnlyMessage(activeCompany)}</p>
+      <p className="text-sm text-neutral-600">Any current draft is retained here while access is unavailable.</p>
+      <Link className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline" to={returnTo}>Back to employee records</Link>
+    </section>;
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -993,6 +1049,9 @@ export function EmployeeForm() {
       />
 
       {(intake.settings?.enabled && !isEditing) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Incomplete employee entry is enabled for this client.</p><p>Enter the name and valid pay setup. Unknown personal details may stay blank and will remain on a follow-up checklist. Payroll setup and documents need separate review.</p></div>}
+      {isEditing && deferredEditFields.some((field) => field === 'ssn'
+        ? taxIdUsesSsn && !form.ssn && !storedSsnLastFour
+        : !form[field as keyof typeof form]) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">You can save this employee with missing personal details.</p><p>Add the missing SSN, hire date and mailing address when available. Review missing details before Q4 SW-2 and January W-2 preparation.</p></div>}
       {loadedEmployee?.intake_readiness?.profile_incomplete && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Complete this profile as information arrives</p><p>Still missing: {loadedEmployee.intake_readiness.missing_fields.map((field) => intakeFieldLabels[field] || field).join(', ')}. You can save the approved missing fields incrementally.</p></div>}
       {intake.error && <div className="mx-4 mt-4 sm:mx-6 lg:mx-8"><ActionFeedback tone="error" message="Employee entry settings could not be loaded. Full details are required for new entries." /><Button variant="outline" onClick={() => void intake.reload()}>Retry entry settings</Button></div>}
 
@@ -1022,7 +1081,7 @@ export function EmployeeForm() {
               )}
             </div>
           </div>
-          {isManager && <Button
+          {canManageClientConfiguration && <Button
             type="button"
             variant="outline"
             onClick={() => setStatusTransitionMode('reactivate')}
@@ -1065,10 +1124,10 @@ export function EmployeeForm() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-1">
                   First Name <span className="text-danger-600">*</span>
                 </label>
-                <Input
+                <Input id="employee-field-1"
                   name="first_name"
                   required
                   value={form.first_name}
@@ -1077,19 +1136,19 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-2">
                   Middle Name
                 </label>
-                <Input
+                <Input id="employee-field-2"
                   value={form.middle_name}
                   onChange={(e) => handleChange('middle_name', e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-3">
                   Last Name <span className="text-danger-600">*</span>
                 </label>
-                <Input
+                <Input id="employee-field-3"
                   name="last_name"
                   required
                   value={form.last_name}
@@ -1103,10 +1162,10 @@ export function EmployeeForm() {
               {taxIdUsesSsn && (
                 <>
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                    <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="employee-field-4">
                       Social Security Number {!allowsUnverifiedBlank('ssn') && <span className="text-danger-600">*</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-4"
                       name="ssn"
                       required={!allowsUnverifiedBlank('ssn') && !(isClient && storedSsnLastFour && !form.ssn)}
                       placeholder={isClient && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
@@ -1123,11 +1182,11 @@ export function EmployeeForm() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                    <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="employee-field-5">
                       Re-enter Social Security Number
                       {ssnConfirmationRequired && <span className="text-danger-600"> *</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-5"
                       name="ssn_confirmation"
                       required={ssnConfirmationRequired}
                       placeholder="XXX-XX-XXXX"
@@ -1154,10 +1213,10 @@ export function EmployeeForm() {
                 </>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-6">
                   Date of Birth
                 </label>
-                <Input
+                <Input id="employee-field-6"
                   type="date"
                   value={form.date_of_birth || ''}
                   onChange={(e) => handleChange('date_of_birth', e.target.value)}
@@ -1183,10 +1242,10 @@ export function EmployeeForm() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-7">
                   Hire Date {!allowsUnverifiedBlank('hire_date') && <span className="text-danger-600">*</span>}
                 </label>
-                <Input
+                <Input id="employee-field-7"
                   name="hire_date"
                   required={!allowsUnverifiedBlank('hire_date')}
                   type="date"
@@ -1196,10 +1255,10 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-29">
                   Department
                 </label>
-                <Select
+                <Select id="employee-field-29"
                   value={form.department_id?.toString() || ''}
                   onChange={(e) => handleChange('department_id', e.target.value ? parseInt(e.target.value, 10) : '')}
                 >
@@ -1227,10 +1286,10 @@ export function EmployeeForm() {
 
             <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-4' : form.employment_type === 'salary' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mt-4`}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-30">
                   Employment Type <span className="text-danger-600">*</span>
                 </label>
-                <Select
+                <Select id="employee-field-30"
                   name="employment_type"
                   required
                   value={form.employment_type}
@@ -1250,10 +1309,10 @@ export function EmployeeForm() {
               </div>
               {form.employment_type === 'salary' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-31">
                     Salary Type <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-31"
                     name="salary_type"
                     required
                     value={form.salary_type || 'annual'}
@@ -1267,10 +1326,10 @@ export function EmployeeForm() {
               )}
               {form.employment_type === 'contractor' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-32">
                     Pay Structure <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-32"
                     name="contractor_pay_type"
                     required
                     value={form.contractor_pay_type || 'flat_fee'}
@@ -1283,12 +1342,12 @@ export function EmployeeForm() {
               )}
               {!supportsMultipleHourlyRates && !(form.employment_type === 'salary' && form.salary_type === 'variable') && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-8">
                     {form.employment_type === 'contractor'
                       ? (form.contractor_pay_type === 'hourly' ? 'Hourly Rate' : 'Flat Fee per Period')
                       : 'Pay Rate'} <span className="text-danger-600">*</span>
                   </label>
-                  <NumericInput
+                  <NumericInput id="employee-field-8"
                     name="pay_rate"
                     required
                     aria-invalid={Boolean(getFieldError('pay_rate'))}
@@ -1314,10 +1373,10 @@ export function EmployeeForm() {
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-33">
                   Pay Frequency <span className="text-danger-600">*</span>
                 </label>
-                <Select
+                <Select id="employee-field-33"
                   name="pay_frequency"
                   required
                   value={form.pay_frequency}
@@ -1428,10 +1487,10 @@ export function EmployeeForm() {
                   {wageRates.map((rate, index) => (
                     <div key={rate.temp_id} className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto_auto] gap-3 items-end rounded-lg border border-gray-200 p-3">
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor={`employee-field-9-${rate.temp_id}`}>
                           Rate Label <span className="text-danger-600">*</span>
                         </label>
-                        <Input
+                        <Input id={`employee-field-9-${rate.temp_id}`}
                           name="wage_rates"
                           required
                           value={rate.label}
@@ -1440,10 +1499,10 @@ export function EmployeeForm() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                        <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor={`employee-field-10-${rate.temp_id}`}>
                           Hourly Rate <span className="text-danger-600">*</span>
                         </label>
-                        <NumericInput
+                        <NumericInput id={`employee-field-10-${rate.temp_id}`}
                           required
                           value={rate.rate}
                           onValueChange={(value) => updateWageRate(rate.temp_id, { rate: value ?? 0 })}
@@ -1465,6 +1524,7 @@ export function EmployeeForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => removeWageRate(rate.temp_id)}
+                        aria-label={`Remove hourly rate ${rate.label.trim() || index + 1}`}
                         disabled={wageRates.length === 1}
                       >
                         <X className="w-4 h-4" />
@@ -1480,7 +1540,7 @@ export function EmployeeForm() {
         {isEditing && form.employment_type === 'salary' && loadedEmployee && !isClient && (
           <EmployeeWorkProfilePanel
             employee={loadedEmployee}
-            canManage={isManager}
+            canManage={canManageClientConfiguration}
             onUpdated={(profile) => setLoadedEmployee((current) => current ? { ...current, current_work_profile: profile } : current)}
           />
         )}
@@ -1551,20 +1611,20 @@ export function EmployeeForm() {
                   </div>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                     <div className="md:col-span-2 xl:col-span-1">
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Field name</label>
-                      <Input value={quickPayrollField.name} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, name: event.target.value }))} placeholder="Auto loan, 401(k), phone allowance" />
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-11">Field name</label>
+                      <Input id="employee-field-11" value={quickPayrollField.name} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, name: event.target.value }))} placeholder="Auto loan, 401(k), phone allowance" />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Type</label>
-                      <Select value={quickPayrollField.kind} disabled={Boolean(legacyPayItemSource)} onChange={(event) => updateQuickPayrollFieldKind(event.target.value as PayrollFieldKind)}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-34">Type</label>
+                      <Select id="employee-field-34" value={quickPayrollField.kind} disabled={Boolean(legacyPayItemSource)} onChange={(event) => updateQuickPayrollFieldKind(event.target.value as PayrollFieldKind)}>
                         <option value="addition">Addition</option>
                         <option value="deduction">Deduction</option>
                         <option value="employer_contribution">Employer contribution</option>
                       </Select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Treatment</label>
-                      <Select value={quickPayrollField.tax_treatment} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, tax_treatment: event.target.value as PayrollFieldTaxTreatment }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-35">Treatment</label>
+                      <Select id="employee-field-35" value={quickPayrollField.tax_treatment} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, tax_treatment: event.target.value as PayrollFieldTaxTreatment }))}>
                         {quickPayrollField.kind === 'addition' && <>
                           <option value="taxable_addition">Taxable addition</option>
                           <option value="non_taxable_addition">Non-taxable addition</option>
@@ -1577,8 +1637,8 @@ export function EmployeeForm() {
                       </Select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Category</label>
-                      <Select value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory, reporting_group: null }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-36">Category</label>
+                      <Select id="employee-field-36" value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory, reporting_group: null }))}>
                         {legacyPayItemSource && <option value="">Choose a category</option>}
                         {['loan', 'retirement', 'insurance', 'rent', 'allotment', 'reimbursement', 'garnishment', 'child_support', 'phone', 'benefit', 'other'].map((category) => (
                           <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>
@@ -1586,8 +1646,8 @@ export function EmployeeForm() {
                       </Select>
                     </div>
                     {quickPayrollField.category === 'retirement' && <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Report group</label>
-                      <Select value={quickPayrollField.reporting_group || ''} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, reporting_group: event.target.value ? event.target.value as PayrollFieldReportingGroup : null }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-37">Report group</label>
+                      <Select id="employee-field-37" value={quickPayrollField.reporting_group || ''} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, reporting_group: event.target.value ? event.target.value as PayrollFieldReportingGroup : null }))}>
                         {reportingGroupOptions.map((option) => (
                           <option key={option.value || 'none'} value={option.value}>{option.label}</option>
                         ))}
@@ -1595,8 +1655,8 @@ export function EmployeeForm() {
                       <p className="mt-3 rounded-xl bg-primary-50 p-3 text-sm leading-6 text-primary-900">Enable catch-up in Pay setup → Retirement plan. Adding a field creates another contribution; it does not split or replace an existing deduction. Confirm existing manual paycheck entries before adding a replacement.</p>
                     </div>}
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Default</label>
-                      <Select value={quickPayrollField.amount_type} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, amount_type: event.target.value as PayrollFieldAmountType }))}>
+                      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-38">Default</label>
+                      <Select id="employee-field-38" value={quickPayrollField.amount_type} disabled={Boolean(legacyPayItemSource)} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, amount_type: event.target.value as PayrollFieldAmountType }))}>
                         <option value="fixed">Fixed amount</option>
                         <option value="percentage">Percentage</option>
                         <option value="manual">Set during payroll</option>
@@ -1604,13 +1664,13 @@ export function EmployeeForm() {
                     </div>
                     {quickPayrollField.amount_type === 'percentage' ? (
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Default %</label>
-                        <NumericInput value={quickPayrollField.default_percentage} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_percentage: value ?? 0 }))} min={0} />
+                        <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-12">Default %</label>
+                        <NumericInput id="employee-field-12" value={quickPayrollField.default_percentage} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_percentage: value ?? 0 }))} min={0} />
                       </div>
                     ) : quickPayrollField.amount_type === 'fixed' ? (
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Default amount</label>
-                        <NumericInput value={quickPayrollField.default_amount} disabled={Boolean(legacyPayItemSource)} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_amount: value ?? 0 }))} min={0} fixedDecimalsOnBlur={2} />
+                        <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="employee-field-13">Default amount</label>
+                        <NumericInput id="employee-field-13" value={quickPayrollField.default_amount} disabled={Boolean(legacyPayItemSource)} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_amount: value ?? 0 }))} min={0} fixedDecimalsOnBlur={2} />
                       </div>
                     ) : (
                       <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -1664,10 +1724,10 @@ export function EmployeeForm() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-39">
                     Contractor Type <span className="text-danger-600">*</span>
                   </label>
-                  <Select
+                  <Select id="employee-field-39"
                     name="contractor_type"
                     required
                     value={form.contractor_type || 'individual'}
@@ -1693,10 +1753,10 @@ export function EmployeeForm() {
               {form.contractor_type === 'business' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-14">
                       Legal Business Name <span className="text-danger-600">*</span>
                     </label>
-                    <Input
+                    <Input id="employee-field-14"
                       name="business_name"
                       required
                       value={form.business_name || ''}
@@ -1706,10 +1766,10 @@ export function EmployeeForm() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-15">
                       EIN (Employer Identification Number) {!allowsUnverifiedBlank('contractor_ein') && <span className="text-danger-600">*</span>}
                     </label>
-                    <Input
+                    <Input id="employee-field-15"
                       name="contractor_ein"
                       required={!allowsUnverifiedBlank('contractor_ein')}
                       value={form.contractor_ein || ''}
@@ -1766,10 +1826,10 @@ export function EmployeeForm() {
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 1: Filing Status</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-40">
                       Filing Status <span className="text-danger-600">*</span>
                     </label>
-                    <Select
+                    <Select id="employee-field-40"
                       required
                       value={form.filing_status}
                       onChange={(e) => handleChange('filing_status', e.target.value as FilingStatus)}
@@ -1780,10 +1840,10 @@ export function EmployeeForm() {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-16">
                       Form revision year
                     </label>
-                    <Input
+                    <Input id="employee-field-16"
                       type="number"
                       min="1987"
                       max={new Date().getFullYear() + 1}
@@ -1793,10 +1853,10 @@ export function EmployeeForm() {
                     <p className="mt-1 text-xs text-gray-500">Pre-2020 forms are recorded but blocked from the 2020+ calculation engine.</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-17">
                       Effective date
                     </label>
-                    <Input
+                    <Input id="employee-field-17"
                       name="w4_effective_on"
                       type="date"
                       value={form.w4_effective_on || ''}
@@ -1843,10 +1903,10 @@ export function EmployeeForm() {
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 3: Dependent and Other Credits</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-18">
                       Total Annual Step 3 Credit ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-18"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_dependent_credit}
@@ -1865,10 +1925,10 @@ export function EmployeeForm() {
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 4: Other Adjustments (optional)</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-19">
                       4(a) Other Income ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-19"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_step4a_other_income}
@@ -1880,10 +1940,10 @@ export function EmployeeForm() {
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-20">
                       4(b) Deductions ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-20"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.w4_step4b_deductions}
@@ -1895,10 +1955,10 @@ export function EmployeeForm() {
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-21">
                       4(c) Extra Withholding ($)
                     </label>
-                    <Input
+                    <Input id="employee-field-21"
                       type="text"
                       inputMode="decimal"
                       value={w4CurrencyDrafts.additional_withholding}
@@ -1963,10 +2023,10 @@ export function EmployeeForm() {
                 <p className="mb-3 text-xs leading-5 text-gray-500">Basic percentage setup for a new employee. After saving, use Pay setup for fixed amounts, catch-up rules, caps, and employer match formulas.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-22">
                       Pre-Tax 401(k) (%)
                     </label>
-                    <NumericInput
+                    <NumericInput id="employee-field-22"
                       value={form.retirement_rate * 100}
                       onValueChange={(value) => handleChange('retirement_rate', (value ?? 0) / 100)}
                       min={0}
@@ -1975,10 +2035,10 @@ export function EmployeeForm() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-23">
                       Roth 401(k) (%)
                     </label>
-                    <NumericInput
+                    <NumericInput id="employee-field-23"
                       value={form.roth_retirement_rate * 100}
                       onValueChange={(value) => handleChange('roth_retirement_rate', (value ?? 0) / 100)}
                       min={0}
@@ -2040,10 +2100,10 @@ export function EmployeeForm() {
           <CardContent>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-24">
                   Address Line 1 {!allowsUnverifiedBlank('address_line1') && <span className="text-danger-600">*</span>}
                 </label>
-                <Input
+                <Input id="employee-field-24"
                   name="address_line1"
                   required={!allowsUnverifiedBlank('address_line1')}
                   value={form.address_line1 || ''}
@@ -2053,10 +2113,10 @@ export function EmployeeForm() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-25">
                   Address Line 2
                 </label>
-                <Input
+                <Input id="employee-field-25"
                   value={form.address_line2 || ''}
                   onChange={(e) => handleChange('address_line2', e.target.value)}
                   placeholder="Apt, suite, etc."
@@ -2064,10 +2124,10 @@ export function EmployeeForm() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-26">
                     City {!allowsUnverifiedBlank('city') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-26"
                     name="city"
                     required={!allowsUnverifiedBlank('city')}
                     value={form.city || ''}
@@ -2076,10 +2136,10 @@ export function EmployeeForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-27">
                     State {!allowsUnverifiedBlank('state') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-27"
                     name="state"
                     required={!allowsUnverifiedBlank('state')}
                     value={form.state || ''}
@@ -2090,10 +2150,10 @@ export function EmployeeForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-28">
                     ZIP Code {!allowsUnverifiedBlank('zip') && <span className="text-danger-600">*</span>}
                   </label>
-                  <Input
+                  <Input id="employee-field-28"
                     name="zip"
                     required={!allowsUnverifiedBlank('zip')}
                     value={form.zip || ''}
@@ -2108,7 +2168,7 @@ export function EmployeeForm() {
           </CardContent>
         </Card>
 
-        {isEditing && employeeStatus !== 'terminated' && !isClient && isManager && (
+        {isEditing && employeeStatus !== 'terminated' && !isClient && canManageClientConfiguration && (
           <div className="flex justify-start">
             <Button
               type="button"

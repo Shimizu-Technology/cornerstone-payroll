@@ -14,6 +14,7 @@ interface FeedbackContextValue {
   notify: (input: FeedbackInput, owner?: string) => void;
   publish: (input: FeedbackInput, owner: string, content: () => ReactNode) => void;
   release: (owner: string) => void;
+  dismissNotice: (input: FeedbackInput) => void;
 }
 const FeedbackContext = createContext<FeedbackContextValue | null>(null);
 const tones = {
@@ -60,17 +61,25 @@ export function FeedbackProvider({ children, scopeKey = 'default' }: { children:
   const dismiss = useCallback((id: string) => {
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.closest('[data-feedback-portal]')) {
-      document.querySelector<HTMLElement>('[data-dialog-portal]:not([inert]) [role="dialog"]')?.focus();
+      // Managed dialogs keep priority over the layout's mobile navigation.
+      const dialog = document.querySelector<HTMLElement>('[data-dialog-portal]:not([inert]) [role="dialog"]')
+        ?? Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"][tabindex]'))
+          .find((candidate) => !candidate.closest('[inert]'));
+      dialog?.focus();
     }
     setEntries((current) => current.filter((entry) => entry.id !== id));
   }, []);
-  const value = useMemo(() => ({ notify, publish, release }), [notify, publish, release]);
+  const dismissNotice = useCallback((input: FeedbackInput) => {
+    setEntries((current) => current.filter((entry) => entry.scope !== scopeKey
+      || entry.tone !== input.tone || entry.message !== input.message));
+  }, [scopeKey]);
+  const value = useMemo(() => ({ notify, publish, release, dismissNotice }), [notify, publish, release, dismissNotice]);
   useEffect(() => { setEntries((current) => current.filter((entry) => entry.scope === scopeKey)); }, [scopeKey]);
   const visible = entries.filter((entry) => entry.scope === scopeKey);
   return <FeedbackContext.Provider value={value}>
     {children}
     {typeof document !== 'undefined' && createPortal(
-      <div data-feedback-portal aria-label="Action notifications" className={`pointer-events-none fixed inset-x-0 top-[max(1rem,env(safe-area-inset-top))] ${ACTION_OVERLAY_LAYERS.feedback} mx-auto flex max-h-[min(60dvh,36rem)] w-[min(36rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-1`}>
+      <div data-feedback-portal role="region" aria-label="Notifications" className={`pointer-events-none fixed inset-x-0 top-[calc(4rem+env(safe-area-inset-top))] lg:top-[max(1rem,env(safe-area-inset-top))] ${ACTION_OVERLAY_LAYERS.feedback} mx-auto flex max-h-[min(60dvh,36rem)] w-[min(36rem,calc(100vw-2rem))] flex-col gap-3 overflow-y-auto overscroll-contain p-1`}>
         {visible.map((entry) => <FeedbackToast key={entry.id} entry={entry} dismiss={dismiss} />)}
       </div>, document.body)}
   </FeedbackContext.Provider>;
@@ -117,14 +126,16 @@ export function ActionFeedback({ tone, message, children, retryKey }: FeedbackIn
   return <div role={tone === 'error' ? 'alert' : 'status'}>{children || message}</div>;
 }
 
-export function useFeedback(): { notify: (input: FeedbackInput) => void } {
+export function useFeedback(): { notify: (input: FeedbackInput) => void; dismiss: (input: FeedbackInput) => void } {
   const feedback = useContext(FeedbackContext);
   const owner = useId();
   const publish = feedback?.notify;
   const release = feedback?.release;
   useEffect(() => () => release?.(owner), [owner, release]);
   const notify = useCallback((input: FeedbackInput) => publish?.(input, owner), [owner, publish]);
-  return useMemo(() => ({ notify }), [notify]);
+  const dismissNotice = feedback?.dismissNotice;
+  const dismiss = useCallback((input: FeedbackInput) => dismissNotice?.(input), [dismissNotice]);
+  return useMemo(() => ({ notify, dismiss }), [notify, dismiss]);
 }
 
 

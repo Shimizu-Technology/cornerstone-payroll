@@ -1,13 +1,38 @@
 name: Quality
+run-name: ${{ inputs.payroll_sha && format('Connected payroll {0} + {1}', inputs.payroll_sha, inputs.aire_sha) || format('Quality {0}', github.ref_name) }}
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, staging-v2]
+  workflow_dispatch:
+    inputs:
+      payroll_sha:
+        description: Optional full Payroll SHA for exact-pair certification (supply both SHAs)
+        required: false
+        type: string
+      aire_sha:
+        description: Optional full AIRE SHA for exact-pair certification (supply both SHAs)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
+  connected-payroll:
+    name: Connected payroll exact-pair certification
+    if: github.event_name == 'workflow_dispatch' && (inputs.payroll_sha != '' || inputs.aire_sha != '')
+    needs: [backend, frontend, browser, staging-v2-configuration]
+    uses: ./.github/workflows/connected-payroll.yml
+    with:
+      payroll_sha: ${{ inputs.payroll_sha }}
+      aire_sha: ${{ inputs.aire_sha }}
+
   backend:
-    runs-on: ubuntu-latest
+    # Ruby3.3.7 is available on24.04, but not the newer ubuntu-latest image.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -39,12 +64,41 @@ jobs:
       # Schema-only setup keeps deterministic test fixtures separate from
       # operational tax-rule seeds loaded by db:prepare on a new database.
       - run: bundle exec rails db:schema:load
+      - run: bundle exec rails db:integrity
+      - run: bundle exec rubocop
       - run: bundle exec rspec
+      # Hosted databases are reached through PgBouncer in transaction mode,
+      # where consecutive statements can run on different server backends.
+      - name: Payment transition lock through a transaction-mode pooler
+        env:
+          POOLER_DIR: ${{ runner.temp }}/pgbouncer
+        run: |
+          sudo apt-get update && sudo apt-get install -y pgbouncer
+          mkdir -p "$POOLER_DIR"
+          cat > "$POOLER_DIR/pgbouncer.ini" <<EOF
+          [databases]
+          cornerstone_payroll_test = host=127.0.0.1 port=5432 dbname=cornerstone_payroll_test user=postgres password=postgres
+          [pgbouncer]
+          listen_addr = 127.0.0.1
+          listen_port = 6439
+          auth_type = any
+          pool_mode = transaction
+          default_pool_size = 4
+          unix_socket_dir =
+          logfile = $POOLER_DIR/pgbouncer.log
+          pidfile = $POOLER_DIR/pgbouncer.pid
+          EOF
+          /usr/sbin/pgbouncer -d "$POOLER_DIR/pgbouncer.ini"
+          export TEST_DATABASE_URL=postgres://postgres@127.0.0.1:6439/cornerstone_payroll_test
+          export TRANSACTION_POOLER_URL=$TEST_DATABASE_URL
+          export TRANSACTION_POOLER_DIRECT_URL=postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_test
+          export DB_PREPARED_STATEMENTS=false
+          bundle exec rspec spec/services/payment_transition_lock_transaction_pooler_spec.rb spec/services/payment_transition_lock_spec.rb
       - run: bundle exec brakeman -q
       - run: bundle exec bundler-audit check --update
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
@@ -58,6 +112,9 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=moderate
       - run: npm run gate
+        env:
+          DEPLOYMENT_ENV: production
+          VITE_DEPLOYMENT_ENV: production
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:public
         env:
@@ -65,7 +122,7 @@ jobs:
           VITE_CLERK_PUBLISHABLE_KEY: ""
 
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -164,3 +221,197 @@ jobs:
             web/.e2e-fixtures/pay-items.json
           if-no-files-found: warn
           retention-days: 14
+
+  staging-v2-configuration:
+    name: Staging v2 configuration
+    if: github.event_name == 'push' || github.base_ref == 'staging-v2' || (github.event_name == 'workflow_dispatch' && (inputs.payroll_sha != '' || inputs.aire_sha != ''))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Compose configuration
+        env:
+          AIRE_POSTGRES_PASSWORD: validation-only
+          PAYROLL_POSTGRES_PASSWORD: validation-only
+          AIRE_SECRET_KEY_BASE: validation-only
+          PAYROLL_SECRET_KEY_BASE: validation-only
+          AIRE_ENCRYPTION_PRIMARY_KEY: validation-only
+          AIRE_ENCRYPTION_DETERMINISTIC_KEY: validation-only
+          AIRE_ENCRYPTION_KEY_DERIVATION_SALT: validation-only
+          PAYROLL_ENCRYPTION_PRIMARY_KEY: validation-only
+          PAYROLL_ENCRYPTION_DETERMINISTIC_KEY: validation-only
+          PAYROLL_ENCRYPTION_KEY_DERIVATION_SALT: validation-only
+          AIRE_CLERK_SECRET_KEY: sk_test_validation
+          PAYROLL_CLERK_SECRET_KEY: sk_test_validation
+          PAYROLL_CLERK_PUBLISHABLE_KEY: pk_test_validation
+          PAYROLL_SHARED_SECRET: validation-only
+          AIRE_IMAGE_TAG: validation
+          PAYROLL_IMAGE_TAG: validation
+          AIRE_PUBLIC_URL: https://aire-staging-v2.example.test
+          AIRE_PUBLIC_HOST: aire-staging-v2.example.test
+          PAYROLL_PUBLIC_URL: https://payroll-staging-v2.example.test
+          AIRE_CLERK_JWKS_URL: https://clerk.example.test/.well-known/jwks.json
+          AIRE_CLERK_ISSUER: https://clerk.example.test
+          AIRE_STAGING_ADMIN_CLERK_ID: user_validation
+          PAYROLL_STAGING_ADMIN_CLERK_ID: user_validation
+          STAGING_ADMIN_EMAIL: staging@example.test
+        run: docker compose -f ops/staging-v2/compose.yml config --quiet
+      - name: Check staging v2 isolation boundaries
+        env:
+          AIRE_POSTGRES_PASSWORD: validation-only
+          PAYROLL_POSTGRES_PASSWORD: validation-only
+          AIRE_SECRET_KEY_BASE: validation-only
+          PAYROLL_SECRET_KEY_BASE: validation-only
+          AIRE_ENCRYPTION_PRIMARY_KEY: validation-only
+          AIRE_ENCRYPTION_DETERMINISTIC_KEY: validation-only
+          AIRE_ENCRYPTION_KEY_DERIVATION_SALT: validation-only
+          PAYROLL_ENCRYPTION_PRIMARY_KEY: validation-only
+          PAYROLL_ENCRYPTION_DETERMINISTIC_KEY: validation-only
+          PAYROLL_ENCRYPTION_KEY_DERIVATION_SALT: validation-only
+          AIRE_CLERK_SECRET_KEY: sk_test_validation
+          PAYROLL_CLERK_SECRET_KEY: sk_test_validation
+          PAYROLL_CLERK_PUBLISHABLE_KEY: pk_test_validation
+          PAYROLL_SHARED_SECRET: validation-only
+          AIRE_IMAGE_TAG: validation
+          PAYROLL_IMAGE_TAG: validation
+          AIRE_PUBLIC_URL: https://aire-staging-v2.example.test
+          AIRE_PUBLIC_HOST: aire-staging-v2.example.test
+          PAYROLL_PUBLIC_URL: https://payroll-staging-v2.example.test
+          AIRE_CLERK_JWKS_URL: https://clerk.example.test/.well-known/jwks.json
+          AIRE_CLERK_ISSUER: https://clerk.example.test
+          AIRE_STAGING_ADMIN_CLERK_ID: user_validation
+          PAYROLL_STAGING_ADMIN_CLERK_ID: user_validation
+          STAGING_ADMIN_EMAIL: staging@example.test
+        run: |
+          docker compose -f ops/staging-v2/compose.yml config --format json | jq -e '
+            (.name == "aire-payroll-staging-v2") and
+            (.networks.backend.internal == true) and
+            (.networks.integration.internal == true) and
+            (.networks.egress.internal != true) and
+            ((.services."aire-db".ports // []) | length == 0) and
+            ((.services."payroll-db".ports // []) | length == 0) and
+            ((.services."aire-api".ports // []) | length == 0) and
+            ((.services."payroll-api".ports // []) | length == 0) and
+            (.services."aire-web".ports[0].host_ip == "127.0.0.1") and
+            (.services."aire-web".ports[0].published == "8889") and
+            (.services."payroll-web".ports[0].host_ip == "127.0.0.1") and
+            (.services."payroll-web".ports[0].published == "8890") and
+            (.services."aire-api".environment.DEPLOYMENT_ENV == "staging") and
+            (.services."payroll-api".environment.DEPLOYMENT_ENV == "staging") and
+            (.services."payroll-api".environment.R2_STORAGE_BACKEND == "local") and
+            (.services."payroll-worker".environment.R2_STORAGE_BACKEND == "local")
+          '
+      - name: Check deployment scripts
+        run: bash -n ops/staging-v2/*.sh
+      - name: Test connected deployment gates
+        working-directory: ops/staging-v2
+        run: python3 -m unittest discover -p "test_*.py"
+      - name: Validate staging v2 LaunchAgent
+        run: python3 -c 'import plistlib; plistlib.load(open("ops/staging-v2/launchd/com.shimizutechnology.aire-payroll-staging-v2.plist", "rb"))'
+      - name: Build staging API image
+        run: docker build --file api/Dockerfile --tag cornerstone-payroll-api:ci api
+      - name: Build staging web image
+        env:
+          STAGING_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
+        run: >-
+          docker build --file web/Dockerfile --tag cornerstone-payroll-web:ci
+          --build-arg DEPLOYMENT_ENV=staging
+          --build-arg VITE_DEPLOYMENT_ENV=staging
+          --build-arg VITE_STAGING_SNAPSHOT_AT=1970-01-01T00:00:00Z
+          --build-arg VITE_STAGING_CODE_SHA="${{ github.sha }}"
+          --build-arg VITE_STAGING_AIRE_FRONTEND_ORIGIN=https://aire-staging.example.test
+          --build-arg VITE_API_URL=https://payroll-api-staging.example.test/api/v1
+          --build-arg VITE_AUTH_ENABLED=true
+          --build-arg VITE_CLERK_PUBLISHABLE_KEY="${STAGING_CLERK_PUBLISHABLE_KEY}"
+          web
+      - name: Validate staging Caddyfile
+        run: >-
+          docker run --rm --entrypoint caddy cornerstone-payroll-web:ci
+          validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  publish-staging-v2-images:
+    name: Publish staging v2 images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging-v2'
+    needs:
+      - backend
+      - frontend
+      - browser
+      - staging-v2-configuration
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image: cornerstone-payroll-api
+            context: api
+            file: api/Dockerfile
+          - image: cornerstone-payroll-web
+            context: web
+            file: web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish API image
+        if: matrix.image == 'cornerstone-payroll-api'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          platforms: linux/arm64
+          tags: |
+            ghcr.io/shimizu-technology/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/shimizu-technology/${{ matrix.image }}:staging-v2
+      # A contained staging web build needs its exact origins, snapshot time and
+      # publishable key. Until all exist, skip only the web image instead of
+      # failing the run; the API image still publishes. Secrets cannot be read
+      # in `if:`, so a preflight step reports whether everything is configured.
+      - name: Check staging web configuration
+        id: staging_web
+        if: matrix.image == 'cornerstone-payroll-web'
+        env:
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_SNAPSHOT_AT: ${{ vars.STAGING_SNAPSHOT_AT }}
+          STAGING_AIRE_FRONTEND_ORIGIN: ${{ vars.STAGING_AIRE_FRONTEND_ORIGIN }}
+          STAGING_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          missing=""
+          for name in STAGING_API_URL STAGING_SNAPSHOT_AT STAGING_AIRE_FRONTEND_ORIGIN STAGING_CLERK_PUBLISHABLE_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Staging web image skipped::Missing:$missing. Set these repository variables/secret to publish a contained staging web image."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and publish web image
+        if: matrix.image == 'cornerstone-payroll-web' && steps.staging_web.outputs.configured == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          platforms: linux/arm64
+          tags: |
+            ghcr.io/shimizu-technology/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/shimizu-technology/${{ matrix.image }}:staging-v2
+          build-args: |
+            DEPLOYMENT_ENV=staging
+            VITE_DEPLOYMENT_ENV=staging
+            VITE_STAGING_SNAPSHOT_AT=${{ vars.STAGING_SNAPSHOT_AT }}
+            VITE_STAGING_CODE_SHA=${{ github.sha }}
+            VITE_STAGING_AIRE_FRONTEND_ORIGIN=${{ vars.STAGING_AIRE_FRONTEND_ORIGIN }}
+            VITE_API_URL=${{ vars.STAGING_API_URL }}
+            VITE_AUTH_ENABLED=true
+            VITE_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}

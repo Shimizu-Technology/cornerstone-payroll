@@ -13,9 +13,9 @@ module AirePayrollCalendar
 
     def call
       calendar_period = @pay_period.aire_payroll_calendar_period
-      source = calendar_period&.time_tracking_source ||
-               @pay_period.company.time_tracking_sources.active.find_by(source_type: "aire_services")
-      return nil unless source
+      @source = calendar_period&.time_tracking_source ||
+               @pay_period.company.time_tracking_sources.active.find { |candidate| candidate.supports?(:payroll_calendar_v2) }
+      return nil unless @source
 
       publication = calendar_period&.latest_publication
       event = calendar_period&.payroll_events&.order(occurred_at: :desc, id: :desc)&.first
@@ -23,21 +23,29 @@ module AirePayrollCalendar
       needs_revision = publication.present? && desired.present? &&
                        publication.payload.slice(*desired.keys) != desired
       cutoff_at = desired&.fetch("cutoff_at", nil) || publication&.payload&.fetch("cutoff_at", nil)
-      missed_unpublished_cutoff = publication.nil? && cutoff_at.present? && Time.iso8601(cutoff_at) <= @now
+      @lock_mode = publication&.payload&.fetch("lock_mode", nil) || desired&.fetch("lock_mode", nil) || "scheduled"
+      missed_unpublished_cutoff = @lock_mode != "manual" && publication.nil? && cutoff_at.present? && Time.iso8601(cutoff_at) <= @now
 
       {
+        connected_payroll: ConnectedPayrollMode.capability,
         enabled: true,
-        source_id: source.id,
-        source_name: source.name,
+        source_id: @source.id,
+        source_name: @source.name,
+        source_capabilities: @source.connector.capabilities,
         eligible: desired.present? && !missed_unpublished_cutoff,
         eligibility_error: eligibility_error(missed_unpublished_cutoff),
         eligibility_code: eligibility_code(missed_unpublished_cutoff),
         external_pay_period_id: calendar_period&.external_pay_period_id,
         cutoff_at: cutoff_at,
+        lock_mode: @lock_mode,
+        cutoff_enforcement_starts_on: @source.cutoff_enforcement_starts_on&.iso8601,
+        next_scheduled_cutoff_at: current_source_state["next_scheduled_cutoff_at"],
+        next_scheduled_cutoff_status: current_source_state.fetch("status", "unavailable"),
+        next_scheduled_cutoff_refreshed_at: current_source_state["refreshed_at"],
         cutoff_state: cutoff_state(publication, event, cutoff_at, needs_revision),
         needs_revision: needs_revision,
-        can_publish: desired.present? && !missed_unpublished_cutoff && can_publish?(publication, cutoff_at),
-        can_retry: publication.present? && publication.delivery_status == "failed",
+        can_publish: ConnectedPayrollMode.enabled? && desired.present? && !missed_unpublished_cutoff && can_publish?(publication, cutoff_at),
+        can_retry: ConnectedPayrollMode.enabled? && publication.present? && publication.delivery_status == "failed",
         publication: serialize_publication(publication),
         finalized_batch: serialize_event(event)
       }
@@ -48,10 +56,14 @@ module AirePayrollCalendar
     def desired_contract
       return @desired_contract if defined?(@desired_contract)
 
-      @desired_contract = Contract.new(@pay_period).payload
+      @desired_contract = @source.connector.calendar_contract(@pay_period).payload
     rescue Contract::Error => e
       @eligibility_error = e.message
       @eligibility_code = e.code
+      @desired_contract = nil
+    rescue ArgumentError => e
+      @eligibility_error = e.message
+      @eligibility_code = "source_capability_unavailable"
       @desired_contract = nil
     end
 
@@ -64,7 +76,7 @@ module AirePayrollCalendar
     end
 
     def cutoff_state(publication, event, cutoff_at, needs_revision)
-      return cutoff_at && Time.iso8601(cutoff_at) <= @now ? "cutoff_due" : "unpublished" unless publication
+      return @lock_mode != "manual" && cutoff_at && Time.iso8601(cutoff_at) <= @now ? "cutoff_due" : "unpublished" unless publication
       return "publication_failed" if publication.delivery_status == "failed"
       return "publishing" unless publication.delivered?
       return "schedule_changed" if needs_revision
@@ -74,17 +86,25 @@ module AirePayrollCalendar
       return "batch_verifying" if event
 
       source_state = publication.source_state
-      return source_state["cutoff_state"] if source_state["cutoff_state"].present?
-      return "cutoff_due" if cutoff_at && Time.iso8601(cutoff_at) <= @now
+      captured_state = source_state["cutoff_state"]
+      if @lock_mode != "manual" && (captured_state.blank? || %w[upcoming scheduled].include?(captured_state)) && cutoff_at && Time.iso8601(cutoff_at) <= @now
+        return "cutoff_due"
+      end
+      return "manual" if @lock_mode == "manual" && captured_state != "finalized"
+      return captured_state if captured_state.present?
 
       "scheduled"
+    end
+
+    def current_source_state
+      @current_source_state ||= @source.reload.payroll_calendar_source_state
     end
 
     def eligibility_error(missed_unpublished_cutoff)
       return @eligibility_error if @eligibility_error
       return unless missed_unpublished_cutoff
 
-      "This period's seven-day cutoff passed before it was published. Create a correction or supplemental run instead."
+      "This period's time-tracking cutoff passed before it was published. Create a correction or supplemental run instead."
     end
 
     def eligibility_code(missed_unpublished_cutoff)

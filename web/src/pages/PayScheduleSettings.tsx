@@ -10,6 +10,10 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { payScheduleSettingsApi, type PayScheduleSettingsResponse } from '@/services/api';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -19,9 +23,11 @@ type FormState = {
   period_rule: 'manual' | 'weekly' | 'biweekly' | 'semimonthly';
   period_start_weekday: number;
   period_anchor_date: string;
-  pay_date_rule: 'manual' | 'days_after_period_end';
+  pay_date_rule: 'manual' | 'days_after_period_end' | 'semimonthly_15th_and_month_end';
   pay_date_offset_days: number;
   payroll_cutoff_days_before: number;
+  time_tracking_cutoff_rule: 'before_pay_date' | 'after_previous_regular_payday';
+  time_tracking_cutoff_days: number;
   payroll_cutoff_time: string;
   workweek_start_weekday: number;
   workweek_start_time: string;
@@ -57,6 +63,8 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
     pay_date_rule: schedule.pay_date_rule,
     pay_date_offset_days: schedule.pay_date_offset_days ?? 0,
     payroll_cutoff_days_before: schedule.payroll_cutoff_days_before ?? 7,
+    time_tracking_cutoff_rule: schedule.time_tracking_cutoff_rule ?? 'before_pay_date',
+    time_tracking_cutoff_days: schedule.time_tracking_cutoff_days ?? 7,
     payroll_cutoff_time: minutesToTime(schedule.payroll_cutoff_at_minutes ?? 1020),
     workweek_start_weekday: workweek.starts_on_weekday,
     workweek_start_time: minutesToTime(workweek.starts_at_minutes),
@@ -65,6 +73,17 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
 }
 
 export function PayScheduleSettings() {
+  const { isLoading: authLoading } = useAuth();
+  const { activeCompany, activeCompanyId, loading: companyLoading } = useCompany();
+  const companyReady = !authLoading && !companyLoading && activeCompany != null && activeCompanyId != null && activeCompany.id === activeCompanyId;
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
+  const canConfigure = companyReady && hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
+  const readOnlyReason = !companyReady
+    ? 'Access to the selected company is still being checked. You can review the schedule; your entries are preserved.'
+    : !hasConfigurationAccess
+      ? 'You can review this schedule. Ask an administrator for permission to change client configuration.'
+      : companyReadOnlyMessage(activeCompany);
   const [response, setResponse] = useState<PayScheduleSettingsResponse | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +122,7 @@ export function PayScheduleSettings() {
   };
 
   const save = async () => {
-    if (!form) return;
+    if (!form || saving || !canConfigure) return;
     const cutoffMinutes = timeToMinutes(form.payroll_cutoff_time);
     if (form.notes.trim().length < 5) {
       setError('Add a short confirmation note identifying who confirmed the schedule or what source was used.');
@@ -129,6 +148,10 @@ export function PayScheduleSettings() {
       setError('Payroll cutoff must be seven calendar days before the pay date.');
       return;
     }
+    if (!Number.isInteger(form.time_tracking_cutoff_days) || form.time_tracking_cutoff_days < 0 || form.time_tracking_cutoff_days > 31) {
+      setError('Choose a time-tracking cutoff between zero and 31 calendar days.');
+      return;
+    }
     try {
       setSaving(true);
       setError(null);
@@ -143,6 +166,8 @@ export function PayScheduleSettings() {
           pay_date_rule: form.pay_date_rule,
           pay_date_offset_days: form.pay_date_rule === 'days_after_period_end' ? form.pay_date_offset_days : null,
           payroll_cutoff_days_before: form.payroll_cutoff_days_before,
+          time_tracking_cutoff_rule: form.time_tracking_cutoff_rule,
+          time_tracking_cutoff_days: form.time_tracking_cutoff_days,
           payroll_cutoff_at_minutes: cutoffMinutes,
           timezone: 'Pacific/Guam',
           notes: form.notes,
@@ -191,7 +216,9 @@ export function PayScheduleSettings() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-6 xl:grid-cols-2">
+        {!canConfigure && <p id="pay-schedule-read-only" role="status" className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-700"><strong>Read-only schedule.</strong> {readOnlyReason}</p>}
+
+        <fieldset className="grid min-w-0 gap-6 border-0 p-0 xl:grid-cols-2" disabled={saving || !canConfigure} aria-label="Pay schedule and legal workweek configuration" aria-describedby={!canConfigure ? 'pay-schedule-read-only' : undefined}>
           <Card>
             <CardHeader>
               <div className="flex items-center gap-3"><CalendarClock className="h-5 w-5 text-primary-700" /><CardTitle>Payroll cadence</CardTitle></div>
@@ -203,10 +230,11 @@ export function PayScheduleSettings() {
               <div className="space-y-2"><Label htmlFor="period-rule">Period boundary rule</Label><Select id="period-rule" value={form.period_rule} onChange={(event) => setForm({ ...form, period_rule: event.target.value as FormState['period_rule'] })}><option value="manual">Manual dates</option><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="semimonthly">1st–15th / 16th–month end</option></Select></div>
               {(form.period_rule === 'weekly' || form.period_rule === 'biweekly') && <div className="space-y-2"><Label htmlFor="period-weekday">Period starts on</Label><Select id="period-weekday" value={form.period_start_weekday} onChange={(event) => setForm({ ...form, period_start_weekday: Number(event.target.value) })}>{WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}</Select></div>}
               {form.period_rule === 'biweekly' && <div className="space-y-2 sm:col-span-2"><Label htmlFor="period-anchor">Known period start date</Label><Input id="period-anchor" type="date" required value={form.period_anchor_date} onChange={(event) => setForm({ ...form, period_anchor_date: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">Use the first day of any confirmed two-week pay period. This anchors which alternating week begins each cycle.</p></div>}
-              <div className="space-y-2"><Label htmlFor="pay-date-rule">Pay-date rule</Label><Select id="pay-date-rule" value={form.pay_date_rule} onChange={(event) => setForm({ ...form, pay_date_rule: event.target.value as FormState['pay_date_rule'] })}><option value="manual">Manual pay date</option><option value="days_after_period_end">Days after period ends</option></Select></div>
+              <div className="space-y-2"><Label htmlFor="pay-date-rule">Pay-date rule</Label><Select id="pay-date-rule" value={form.pay_date_rule} onChange={(event) => setForm({ ...form, pay_date_rule: event.target.value as FormState['pay_date_rule'] })}><option value="manual">Manual pay date</option><option value="days_after_period_end">Days after period ends</option><option value="semimonthly_15th_and_month_end" disabled={form.frequency !== 'semimonthly' || form.period_rule !== 'semimonthly'}>15th and month end (fixed scheduled dates)</option></Select></div>
               {form.pay_date_rule === 'days_after_period_end' && <div className="space-y-2"><Label htmlFor="pay-date-offset">Days after period end</Label><Input id="pay-date-offset" type="number" min={0} max={31} value={form.pay_date_offset_days} onChange={(event) => setForm({ ...form, pay_date_offset_days: Number(event.target.value) })} /></div>}
-              <div className="space-y-2"><Label htmlFor="cutoff-days">Payroll cutoff</Label><div className="flex items-center gap-2"><Input id="cutoff-days" className="w-24" type="number" min={7} max={7} value={form.payroll_cutoff_days_before} readOnly /><span className="text-sm text-neutral-600">days before pay date</span></div><p className="text-xs leading-5 text-neutral-500">The payroll policy fixes this at one week so Cornerstone and AIRE always use the same boundary.</p></div>
-              <div className="space-y-2"><Label htmlFor="cutoff-time">Cutoff time (Guam)</Label><Input id="cutoff-time" type="time" value={form.payroll_cutoff_time} onChange={(event) => setForm({ ...form, payroll_cutoff_time: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">AIRE currently requires seven calendar days. Its automated lock uses this exact local time.</p></div>
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="time-cutoff-rule">Time-tracking lock</Label><Select id="time-cutoff-rule" value={form.time_tracking_cutoff_rule} onChange={(event) => setForm({ ...form, time_tracking_cutoff_rule: event.target.value as FormState['time_tracking_cutoff_rule'] })}><option value="before_pay_date">Before this payroll's pay date</option><option value="after_previous_regular_payday">After the previous regular payday</option></Select><p className="text-xs leading-5 text-neutral-500">The lock determines which submitted hours can enter this payroll. Adjustment runs and check delivery dates do not move it.</p></div>
+              <div className="space-y-2"><Label htmlFor="time-cutoff-days">Calendar days {form.time_tracking_cutoff_rule === 'before_pay_date' ? 'before' : 'after'}</Label><Input id="time-cutoff-days" type="number" min={0} max={31} value={form.time_tracking_cutoff_days} onChange={(event) => setForm({ ...form, time_tracking_cutoff_days: Number(event.target.value) })} /></div>
+              <div className="space-y-2"><Label htmlFor="cutoff-time">Lock time (Guam)</Label><Input id="cutoff-time" type="time" value={form.payroll_cutoff_time} onChange={(event) => setForm({ ...form, payroll_cutoff_time: event.target.value })} /><p className="text-xs leading-5 text-neutral-500">Cornerstone publishes this exact rule and local time to the connected time-tracking system.</p></div>
             </CardContent>
           </Card>
 
@@ -229,7 +257,7 @@ export function PayScheduleSettings() {
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="schedule-notes">Confirmation source / notes</Label><Textarea id="schedule-notes" required value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Who confirmed this schedule, and what source was used?" /></div>
             </CardContent>
           </Card>
-        </div>
+        </fieldset>
 
         <Card className="border-primary-100 bg-primary-50/30">
           <CardContent className="flex items-start gap-3 py-5"><History className="mt-0.5 h-5 w-5 shrink-0 text-primary-700" /><div><p className="font-semibold text-neutral-950">Saving creates a new effective-dated record</p><p className="mt-1 text-sm leading-6 text-neutral-600">Prior settings and completed payroll remain intact. This confirmation does not recalculate payroll, change historical dates, or add employee hours.</p></div></CardContent>
@@ -237,7 +265,7 @@ export function PayScheduleSettings() {
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-16px_40px_-28px_rgba(15,23,42,0.6)] backdrop-blur sm:left-[var(--sidebar-width,0px)] sm:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto grid w-full grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button className="min-w-0" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3"><p className="hidden text-sm text-neutral-500 sm:block">Existing payroll runs will not be recalculated.</p><div className="ml-auto grid w-full grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" onClick={reset} disabled={saving}>Cancel</Button><Button className="min-w-0" type="button" onClick={() => void save()} disabled={saving || !canConfigure}>{saving ? 'Saving…' : 'Confirm & save schedule'}</Button></div></div>
       </div>
     </div>
   );

@@ -101,12 +101,14 @@ module PayrollImport
     # @param tips_paid_out_from_tips [Boolean] when true, imported tips were already paid daily and should offset the check
     # @return [Hash] results with success/error counts
     def apply!(matched:, force_overwrite: false, tips_paid_out_from_tips: false)
-      pay_period.with_lock do
-        apply_locked!(
-          matched: matched,
-          force_overwrite: force_overwrite,
-          tips_paid_out_from_tips: tips_paid_out_from_tips
-        )
+      Company.find(company_id).with_lock do
+        pay_period.with_lock do
+          apply_locked!(
+            matched: matched,
+            force_overwrite: force_overwrite,
+            tips_paid_out_from_tips: tips_paid_out_from_tips
+          )
+        end
       end
     end
 
@@ -224,6 +226,9 @@ module PayrollImport
           intake_stale_session: nil
         )
         PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).issue!
+      elsif results[:errors].any?
+        pay_period.association(:payroll_items).reset
+        pay_period.invalidate_calculation!(reason: "Payroll import calculation returned employee errors. Resolve them and calculate again before approval.")
       end
 
       results

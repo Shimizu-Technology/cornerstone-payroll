@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class TaxTable < ApplicationRecord
+  validates :verification_status, inclusion: { in: %w[draft verified] }
+  before_update do
+    self.verification_status = "draft" if (changes.keys - %w[verification_status updated_at]).any?
+  end
   validates :tax_year, presence: true
   validates :filing_status, presence: true, inclusion: { in: %w[single married head_of_household] }
   validates :pay_frequency, presence: true, inclusion: { in: %w[biweekly weekly semimonthly monthly] }

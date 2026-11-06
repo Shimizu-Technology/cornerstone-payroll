@@ -1,0 +1,128 @@
+# Review historical coverage before Stage 2 publication
+
+The Stage 1 operational state keeps connected payroll paused without running rollout configure tasks. The November 4 release may bundle the held Stage 2 implementation once reviewed and certified; activation remains a later operation after accounting decisions. Its Payroll migration still installs the immutable Oct 16 boundary; AIRE has no rollout singleton or calendars. Accounting continues entering hours manually. These steps belong to Stage 2, held until Leon approves a later first connected period and Claude releases the reviewed implementation. Nothing here authorizes deployment or production data changes.
+
+## Meaning of each reviewed disposition
+
+Every record binds the installation UUID, permanent person UUID, entry ID/current version, current payable-content checksum, hours, category, work date, approval state and authenticated provenance. It also carries `actor_id`, a 10–2000 character `reason` and a 10–2000 character `evidence` reference to the private accounting review.
+
+| Disposition | Required source evidence | Accounting meaning |
+|---|---|---|
+| `historical_baseline` | Complete unchanged immutable manual batch lines, checksum-verified authenticated batch export, committed external run belonging to this company | Already represented in manual payroll; no check-delivery assertion |
+| `historical_baseline_pending_overtime` | Unchanged complete source, exact checksum-verified regular baseline plus exactly one matching frozen pending-OT exclusion; regular plus held OT equals source hours; no active case/allocation/payment hold | Regular hours represented; overtime approval and payment remain pending |
+| `legacy_frozen_batch_baseline` | Checksum-verified frozen payload and retained snapshot, no source/revision/audit edit after finalization, numeric owner resolved to confirmed permanent mapping, employee REG/OT balance against the actually linked committed run, with any nonzero rounding difference separately acknowledged below | Lower-strength historical representation; missing original UUID/version/checksum remain explicit; approval and delivery unchanged |
+| `pending_overtime` | Whole source held by exactly one authenticated checksum-bound frozen pending-OT exclusion, unchanged content/version/owner, no baseline/allocation/payment or active case | Preserve unpaid, unapproved overtime; no debt or payment assertion |
+| `pending_review` | Pending or NULL approval, no active allocation/hold; any existing baseline must independently verify | Keep approval and payment undetermined; retain represented and unrepresented pending work separately |
+| `owed` | Approved completed positive hours, no representation/allocation/hold, exactly one matching active explicit-routing case | Reviewer has established debt; retain its existing case for a single explicit future route |
+| `payment_evidence_pending` | Whole-source current attestation, unchanged source, no allocation or baseline | Reported payment remains held pending exact evidence |
+| `not_payable` | Denied source with no representation/allocation/hold | Preserve the existing denial |
+| `no_payable_hours` | Zero source hours with no representation/allocation/hold | No payable hours in this row |
+
+Baseline verification fetches the immutable batch through AIRE and verifies its canonical payload checksum, employee, exact line key, category, work date and REG/OT/total hours. The authenticated history export supplies the immutable snapshot digest/content comparison and actual manual-processing event. It also supplies `payable_segments`: the source's current payable dates and totals, split at Guam midnight with the batch builder's rounding. Overnight and split shifts are therefore represented by one line per segment, and a later segment carries the next day's date. Each line must match exactly one current segment date and its total hours. A segment cannot appear twice, including across batches. Current work must fall inside its batch dates, and carried work cannot postdate its batch. Within these rules, each line still reconciles against its own batch and committed run. A line at the nominal work date whose hours differ from that date's segment stays blocked. In `historical_baseline_pending_overtime`, a represented line may be smaller than its segment, but never larger; the represented lines plus the exact frozen overtime hold must equal the source hours. A manifest label or a pay-run ID alone is insufficient. A partial line set, overlapping claims, another company's run, changed source, missing chronology or conflicting processing remains blocked. The separately typed `historical_baseline_pending_overtime` requires complete accounting for a mixed row: represented regular hours plus its exact frozen pending-overtime exclusion. It refuses missing, duplicate, conflicting or changed holds, approved/denied overtime, or a nonzero regular hold. It never treats the held overtime as paid or approved.
+
+Legacy batches can lack captured UUIDs, versions or payable-content checksums. Export their actual missing fields without inventing them. A reviewed legacy-owner binding uses the frozen numeric owner and the authenticated current permanent owner; it never matches names. Chronology observations can detect subsequent edits but cannot reconstruct missing original chronology. Retain that limitation in the accounting evidence. Unknown comparisons cannot pass as unchanged baselines. The separately reviewed `legacy_frozen_batch_baseline` class may instead use a retained snapshot plus an independently unchanged source: every retained payable field must match, source creation/update and break timestamps must precede finalization, and later revision observations and successful edit audits must show no later edit. A migration backfill observation is not an original version; it is checked only for consistency with that unchanged source. Missing original fields remain missing. Any source edit, snapshot mismatch, missing source, conflicting link or unreviewed committed-run balance mismatch blocks the row. Never add an unlinked supplemental run or alter source/run hours to obtain coverage.
+
+An ownerless row without a permanent source UUID remains blocked; do not invent an identity to complete coverage. Each baseline reconciles the mapped employee’s complete frozen batch REG/OT balance against that employee’s local committed-run hours. Individual source lines are not matched to whole payroll items. An exact match needs no rounding acknowledgement; nonzero differences require the separate reviewed layer below. The new dispositions are read-only accounting coverage. Applying them writes the existing approval receipt and any separately reviewed identity links. It creates no wages, allocations, payment-issued event, time approval or check handout. Existing delivered-check paths retain their separate exact evidence requirements. Identity/version-only unpaid or hold arrays are no longer sufficient.
+
+## Separate accountant review of historical rounding
+
+Leon's November 3 decision permits neutral historical rounding of at most **0.05 hours in either direction per employee, run, REG/OT category and earning component where present**, without back-pay. This is an accounting acknowledgement layered on a verified historical baseline, including `historical_baseline_pending_overtime` or `legacy_frozen_batch_baseline`; it does not replace any identity, checksum, chronology, frozen-line or committed-run check. Delivered-check allocation evidence keeps its existing exact rules.
+
+The signed difference is **paid hours minus source hours**. Examples: 20.57 source OT versus 20.60 paid OT is `+0.03`; 75.03 source REG versus 75.00 paid REG is `-0.03`. Both require individual review. A difference of 0.06, an absent acknowledgement or an acknowledgement with the wrong sign/value blocks coverage. Never net differences across employees, runs, REG/OT categories or earning components.
+
+Export and preview print a plain table: employee, run, earning component, REG/OT, source total, paid total, signed difference and reviewed status. `rounding_variances` contains the fresh computed rows; copying that list into a packet does not approve it. For each permitted nonzero row, copy **every binding field** from the fresh variance into `rounding_variance_acknowledgements`, omit display-only `within_limit`/`acknowledged`, and add:
+
+```json
+{
+  "type": "accountant_reviewed_rounding_variance",
+  "reviewer_id": "<numeric approving actor ID>",
+  "reason": "<10–2000 characters explaining this rounding review>",
+  "evidence": "<10–2000 character private register/source evidence reference>"
+}
+```
+
+Use an integer for `reviewer_id`, equal to the packet's approving actor. The copied binding fields include installation, immutable batch ID/checksum, run ID/fingerprint, confirmed employee mapping ID/fingerprint, source numeric/permanent identity, current source-inventory fingerprint, source category, earning component, REG/OT category and the three exact decimal totals. Payroll recomputes these from authenticated AIRE evidence and local committed Payroll data. Any source inventory, mapping, run/item/earning or acknowledgement drift requires fresh review. Duplicate, unused or conflicting acknowledgements cannot complete coverage. A replayed old receipt cannot override a fresh mismatch.
+
+A single source category and a single paid component per REG/OT dimension can reconcile as one aggregate. Multiple categories/components require explicit one-to-one `historical_earning_component_bindings`; Payroll never guesses from labels. Each binding copies the identity/fingerprint fields and `category`/`source_category` from the preview's binding-required blocker, selects an actual `earning_component` (`earning:<retained label>` or `wage_rate:<retained ID>`), and adds type `historical_earning_component_binding`, numeric `reviewer_id`, reason and evidence. Re-preview with those reviewed bindings to enumerate all component variances, then review each permitted variance. Missing, collapsed or ambiguous historical component evidence stays blocking. A component cannot cover two source categories in the same REG/OT dimension.
+
+Keep the complete fresh variance table privately for Chels's sign-off, including above-limit rows and component blockers. Export starts with empty acknowledgement/binding arrays and every source disposition unapproved. Rounding approval changes no source or paid hours, creates no allocation/payment event or time approval, and asserts no check handout. Pending and owed dispositions retain their existing meaning. Unresolved earning treatment remains an activation gate.
+
+## Ordered maintenance procedure
+
+1. Confirm Stage 1's manual payroll is complete. Take fresh paired backups and freeze historical edits while collecting/reviewing the packet. Select a future period with Chels. Configure matching immutable rollout boundaries and the approved schedule while both fleets are paused. Payroll retains its original immutable migration-default column. Before any explicit gate/calendar/publication/history receipt/connected import, its configure command may append one strictly later initial selection; that selection cannot be updated, deleted or truncated. A previously gated source requires a separately reviewed migration, not another selection. Review overdue cutoff, calendar and outbox inventories; never delete evidence to pass.
+   Existing preactivation imports require a separate read-only review before the first later selection. Run `SOURCE_ID=1 bin/rails aire_lock_rollout:preview_historical_imports`, retain its exact inventory and digest privately, and supply `HISTORICAL_IMPORTS_SHA256` to `aire_lock_rollout:configure`. This is not historical coverage or payment approval. The exception requires the retained import and its same-company committed run to predate the original boundary, matching dates, no connected calendar/allocation-policy markers, and either an old unfrozen preview or a complete checksum-verified committed frozen import. The database binds every import and run fingerprint to the immutable attributed selection and rechecks its narrow eligibility. Any later, connected, incomplete, changed or unreviewed import refuses selection. Calendars, publications, history receipts and prior explicit gates still prohibit moving it. No evidence is deleted or rewritten.
+
+2. Reconcile all preceding manual runs and run AIRE's paid-history preview/apply/replay while paused. Include any additional manually processed period using its real snapshot/commit evidence. Preserve genuinely owed 1804 and existing evidence holds. The release-day runner retains its original four known runs and accepts contiguous additional complete manual periods up to an explicit `rollout_starts_on`. Each added period requires a unique external run ID, real snapshot/commit timestamps and a `manual_run_evidence` reference of at least 20 characters. Separately list any `pending_overtime_entry_ids` with a reviewed `pending_overtime_note`; the runner requires exact frozen regular-plus-pending-OT accounting and leaves the general unpaid-hours guard intact. Review whole pending-OT rows as `pending_overtime`, and mixed represented-REG/pending-OT rows as `historical_baseline_pending_overtime`. Neither classification approves or pays overtime. It refuses gaps, duplicate runs or an uncovered interval before the rollout.
+3. Enable and restart both fleets in an **unpublished maintenance phase**. Verify both enabled statuses and exact builds, with no connected calendar published. Keep Payroll operators frozen during maintenance. Paused APIs cannot perform the required remote pin/link/map/history reads.
+4. Pin the correct AIRE installation, link the authorized reviewer account and verify person mappings and run the audited `aire_rollout:configure_categories` setup described below. Leon’s November4 decision configures Solo as Flight Hours; missing employee rates still block import.
+5. Capture an unapproved packet from Payroll `api/` into a private directory:
+
+   ```sh
+   umask 077
+   SOURCE_ID=1 ACTOR_ID='<reviewer>' HISTORY_THROUGH_WORK_DATE='<latest committed regular end>' \
+     AIRE_ROLLOUT_EXPORT_PATH='/private/path/history.DRAFT.json' bin/rails aire_rollout:export
+   ```
+
+   The export refuses overwrite and creates mode 0600. All rows start `review_required`, with empty reason/evidence; export is never approval. Leon/Chels assign each truthful type, reason and evidence, including the pending legacy rows. Add separately reviewed identity links or existing exact delivered-check evidence only when actually established. For entries covered by verified delivered-check evidence in `issued_entries`, `classification_cases.source_entries` or `finalized_batch_entries`, remove their generated `reviewed_dispositions` row after checking the exact permanent UUID, source entry ID and captured version against that paid evidence. Every source tuple must use exactly one path: paid evidence or a typed disposition. Keeping both blocks coverage; removing a row without complete verified paid evidence also blocks it. Export deliberately leaves these choices unapproved. Keep source evidence unchanged. Store no private packet in Git or CI artifacts.
+6. Hash the reviewed bytes, then preview. `AIRE_HISTORY_PAGE_SIZE` defaults to 50 (range 1–250); `AIRE_HISTORY_READ_TIMEOUT_SECONDS` defaults to 60 seconds per page (range 1–120). The whole page response shares that budget, response size remains bounded and other request budgets stay unchanged.
+
+   ```sh
+   export AIRE_ROLLOUT_MANIFEST_PATH='/private/path/history.reviewed.json'
+   export AIRE_ROLLOUT_MANIFEST_SHA256='<SHA-256 of exact reviewed bytes>'
+   bin/rails aire_rollout:preview
+   ```
+
+   Retain the digest and `disposition_counts`. Require **`history_coverage_verified: true`**; exit zero alone is insufficient. Unknown rows remain an explicit stop. Source changes require a fresh capture and review.
+7. Leon authorizes that exact digest/owner through the existing `aire_rollout:apply` approval environment. Production additionally requires `AIRE_ROLLOUT_PRODUCTION_APPROVED=yes`, `AIRE_ROLLOUT_RELEASE_ID`, `AIRE_ROLLOUT_RELEASE_OWNER` and matching `AIRE_ROLLOUT_ACCEPTED_MANIFEST_SHA256`. A nonproduction apply requires `AIRE_ROLLOUT_LOCAL_TEST=1` and an actual database name containing `_rollout_rehearsal_`; do not spoof it. Run `bin/rails aire_rollout:ensure_complete` immediately afterwards. It re-exports source coverage and refuses stale receipts if fresh coverage is false.
+8. Only now publish the first connected calendar. Verify its adjacent committed regular run/payday and future cutoff; do not publish any backfilled manual period. For Nov 1–15, an actual committed Oct 16–31 manual run with Nov 15 payday anchors **Nov 22 at 17:00 Pacific/Guam**. Oct 31 belongs to the earlier Oct 1–15 run and is not this anchor.
+9. Explicitly route 1804's owed case once after delivery of the eligible calendar. Observe the real controlled-cutoff frozen batch/import/calculation in the disposable rehearsal. Reconcile per employee/category against the approved ledger; pending time stays excluded, OT holds remain visible and post-lock approval opens a late-hours case. Do not invent a Solo earning rate to complete acceptance.
+
+Production requires its own fresh packet, accountant decisions and exact-pair acceptance. Clone evidence and synthetic regression tests never authorize production approval.
+
+
+### Historical daily plus weekly overtime evidence
+
+For previously processed periods from April1 through October15,2026, authenticated AIRE batch exports can provide `paid_under_prior_daily_weekly_ot_policy` evidence. AIRE preserves the actual production allocator from commit`6f72a984` in a historical-only class: daily8 plus weekly40, nominal work dates and Sunday–Saturday Guam weeks. The current weekly-only allocator is unchanged. October16–31 and later periods cannot use this path.
+
+Evidence covers all effective frozen current lines in the relevant workweeks through the batch end, including preceding-period frozen context. Every input binds frozen rows, source identity/version/content and ordering from unchanged source. Missing/changed/partial/conflicting context or unsupported corrections block this path. Unfrozen owed or pending sources are not declared represented by this evidence.
+
+The retained settings and available setting-audit digest are recorded. With no versioned threshold history, the approved8/40 policy is explicitly recorded as the owner-reviewed fallback; contrary historical settings or retained threshold audits require individual review. Payroll verifies the authenticated evidence, original immutable payload/lines, permanent employee mapping and the company-owned committed run. It retains both frozen and recomputed splits. Employee total hours must tie exactly; REG and OT are compared separately, with each nonzero difference within±0.05 requiring its own signed acknowledgement. No netting between employees, categories or earning components is permitted. Genuine component/quantity differences remain blocked.
+
+This is accounting coverage only. It creates no payment event, allocation, time approval or delivery assertion and performs no publication or activation.
+
+### November 4 reviewed category decisions
+
+Company 2 activation uses an explicit, audited category configuration. Before
+history review or publication, run `aire_rollout:configure_categories` with
+`SOURCE_ID`, `ACTOR_ID`, `REASON`, `EVIDENCE`, and the reviewed
+`MAINTENANCE_HISTORY_EMPLOYEE_ID`, `OTHER_HISTORY_EMPLOYEE_ID`,
+`OTHER_UNCATEGORIZED_RUN_ID`. Resolve and confirm the client employee IDs
+against the actual Payroll directory for the approved historical owners; the
+run must be committed and company-owned. The actor must have the same
+client payroll-operations access as history approval. Record Leon's November 4
+approval in the evidence; the task refuses published or history-approved sources.
+Other companies receive no defaults.
+
+The setup maps Solo to each employee's active **Flight Hours** rate. An absent,
+inactive or ambiguous Flight Hours rate blocks import with a specific message;
+no substitute rate is chosen. Aircraft Maintenance uses the employee’s active Maintenance component when present,
+otherwise the existing Regular component. Both labels are stored explicitly in
+company2 configuration. Missing or ambiguous required rates block import; no
+other company receives this fallback. The selected component and rate are shown
+in the import review and the history summary’s configuration section.
+
+For retained manual history only, `accountant_attributed_paid_category` records
+source category, source hours, actual committed paid component and attributed
+hours. The explicit configuration limits Anthony's Aircraft Maintenance and
+uncategorized history, Isiah's Other history and his specifically approved run61 uncategorized2.50h (retaining NULL), pilots' uncategorized history and
+the approved Solo mapping. Every employee/run total must tie within 0.05 h;
+all paid components must exist and reconcile to the committed company-owned run.
+Known categories consume their named components; reviewed uncategorized hours
+are displayed against the remaining committed components. Every bounded rounding
+amount is visible. No cross-person/run netting, source reassignment, time approval,
+allocation, payment event or check-delivery assertion occurs.
+
+The one-summary page groups these rows under **Historical categories as paid**.
+The single attestation records the accountant's identity, approval time, evidence
+and digest. Source, register or configuration drift refuses the entire approval.
+The connection remains unpublished until the separate operator publication step.

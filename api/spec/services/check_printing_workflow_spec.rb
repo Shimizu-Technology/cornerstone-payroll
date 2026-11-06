@@ -52,6 +52,13 @@ RSpec.describe "Unified check printing workflow" do
     expect(result.dig(:meta, :printer_profile, :id)).to eq(printer_profile.id)
   end
 
+  it "uses one Source readiness proof for each check's eligibility and reason" do
+    expect(TimeTracking::FinancialCorrectionService).to receive(:payment_blocker).once.with(have_attributes(id: employee_check.id)).and_return("Source confirmation pending")
+    result = CheckPrintQueueService.new(pay_period: pay_period).call
+    check = result.fetch(:items).find { |row| row[:source_id] == employee_check.id && row[:source_type] == "payroll_item" }
+    expect(check).to include(eligible: false, disabled_reason: "Source confirmation pending")
+  end
+
   it "keeps an older unnumbered non-employee check visible but ineligible" do
     pending_check = create(:non_employee_check,
       company: company,

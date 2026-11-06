@@ -12,25 +12,37 @@ class EmployeeRetirementElectionChangeService
   end
 
   def call!
-    raise Error, "Retirement elections are only available for W-2 employees" if employee.contractor?
+    raise Error, "Client configuration access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: employee.company)
 
-    values = normalized_values
-    prior = employee.employee_retirement_elections.recent_first.first
-    return prior unless changed_from?(prior, values)
+    EmployeeRetirementElection.transaction(requires_new: true) do
+      Company.lock.find(employee.company_id)
+      employee.lock!
+      raise Error, "Retirement elections are only available for W-2 employees" if employee.contractor?
+      @actor = User.lock.find_by(id: actor&.id)
+      employee.company.company_assignments.where(user_id: actor&.id).lock.load
+      unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: employee.company) &&
+        actor.payroll_access_allowed? && actor.can_access_company?(employee.company_id)
+        raise Error, "Client configuration access required"
+      end
 
-    raise Error, "Choose the first pay date for this retirement election" if values[:effective_on].blank?
-    raise Error, "Explain why the retirement election is changing" if prior.present? && reason.blank?
+      values = normalized_values
+      prior = employee.employee_retirement_elections.recent_first.first
+      return prior unless changed_from?(prior, values)
 
-    election = employee.employee_retirement_elections.create!(
-      values.merge(
-        company: employee.company,
-        created_by: actor,
-        source: source,
-        reason: reason.presence || "Initial retirement election"
+      raise Error, "Choose the first pay date for this retirement election" if values[:effective_on].blank?
+      raise Error, "Explain why the retirement election is changing" if prior.present? && reason.blank?
+
+      election = employee.employee_retirement_elections.create!(
+        values.merge(
+          company: employee.company,
+          created_by: actor,
+          source: source,
+          reason: reason.presence || "Initial retirement election"
+        )
       )
-    )
-    sync_legacy_rates!(election) if election.effective_on <= Date.current
-    election
+      sync_legacy_rates!(election) if election.effective_on <= Date.current
+      election
+    end
   end
 
   private

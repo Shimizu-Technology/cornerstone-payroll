@@ -445,6 +445,7 @@ async function mockApplicationShell(page: Page, role: 'admin' | 'accountant' = '
       total_employees: 1,
       pay_frequency: 'biweekly',
       historical_payroll_enabled: true,
+      client_capabilities: role === 'admin' ? ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'] : [],
     }],
     can_manage_clients: role === 'admin',
     can_view_client_management: role === 'admin',
@@ -1151,16 +1152,19 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   };
   let pollingEnabled = false;
   let heldRefresh = false;
-  let fulfilledListResponseCount = 0;
+  let fulfilledInitialDetailResponseCount = 0;
   let releasePoll: (() => void) | undefined;
   let markPollStarted: (() => void) | undefined;
+  let markHeldRefreshCompleted: (() => void) | undefined;
   const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
   const pollStarted = new Promise<void>((resolve) => { markPollStarted = resolve; });
+  const heldRefreshCompleted = new Promise<void>((resolve) => { markHeldRefreshCompleted = resolve; });
 
   await page.route('**/api/v1/admin/historical_imports?**', async (route) => {
     // Gate the actual verification refresh after initial loading, rather than
     // assuming its ordinal among StrictMode/startup requests.
-    if (pollingEnabled && !heldRefresh) {
+    const shouldHold = pollingEnabled && !heldRefresh;
+    if (shouldHold) {
       heldRefresh = true;
       markPollStarted?.();
       await pollGate;
@@ -1169,19 +1173,26 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
       data: [withoutCutoverEvidence(heldRefresh ? verifiedBatch : pendingBatch), withoutDetailCollections(otherBatch)],
       meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, archive },
     });
-    fulfilledListResponseCount += 1;
+    if (shouldHold) markHeldRefreshCompleted?.();
   });
   await page.route('**/api/v1/admin/historical_imports/*?**', async (route) => {
     const id = Number(new URL(route.request().url()).pathname.split('/').pop());
+    const isInitialPendingDetail = id === 1 && !pollingEnabled;
     await fulfillJson(route, {
       data: id === 1 ? (pollingEnabled ? verifiedBatch : pendingBatch) : otherBatch,
       meta: { current_page: 1, total_pages: 0, total_count: 0, per_page: 50 },
     });
+    if (isInitialPendingDetail) fulfilledInitialDetailResponseCount += 1;
   });
 
   await page.goto('/historical-payroll');
   const batchSelector = page.locator('#historical-batch');
   await expect(batchSelector).toHaveValue('1');
+  // Selection comes from the list before the detail request settles. Wait for
+  // the pending detail before enabling the verified polling response so that
+  // an initial request cannot consume it and prevent the poll from starting.
+  await expect(page.getByText('Comparing the retained source with the archive', { exact: true })).toBeVisible();
+  await expect.poll(() => fulfilledInitialDetailResponseCount).toBeGreaterThanOrEqual(1);
   pollingEnabled = true;
   await pollStarted;
 
@@ -1189,7 +1200,7 @@ test('never lets a cancelled verification poll restore the previous batch', asyn
   await expect(page.getByRole('heading', { name: 'Batch 2' })).toBeVisible();
   releasePoll?.();
 
-  await expect.poll(() => fulfilledListResponseCount).toBeGreaterThanOrEqual(2);
+  await heldRefreshCompleted;
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
@@ -1328,7 +1339,7 @@ test('keeps checking verification status after a temporary refresh failure', asy
   await expect(page.getByRole('alert')).toContainText('Temporary status refresh failed. Retrying automatically.');
 
   await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(detailRequestCount).toBeGreaterThanOrEqual(3);
 });
@@ -1370,7 +1381,7 @@ test('shows a completed verification even when the batch-list refresh fails', as
 
   await page.goto('/historical-payroll');
   await expect(page.getByText('Checklist needed')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   expect(listRequestCount).toBeGreaterThanOrEqual(2);
 });
 
@@ -1445,6 +1456,7 @@ test('previews and creates a clean current-payroll roster after history is appli
         total_employees: rosterApplied ? 114 : 0,
         pay_frequency: 'biweekly',
         historical_payroll_enabled: true,
+        client_capabilities: ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'],
       },
       {
         id: 2,
@@ -1456,6 +1468,7 @@ test('previews and creates a clean current-payroll roster after history is appli
         total_employees: 1,
         pay_frequency: 'biweekly',
         historical_payroll_enabled: false,
+        client_capabilities: ['manage_client_configuration', 'manage_client_check_settings', 'manage_client_administration'],
       },
     ],
     can_manage_clients: true,
@@ -1927,7 +1940,7 @@ test('guides an administrator through the final no-QuickBooks cutover gate', asy
   await page.getByRole('button', { name: 'Run final verification' }).click();
   await expect(page.getByText('Final verification started. This page will update automatically')).toBeVisible();
   await expect(page.getByText('Comparing the retained source with the archive')).toBeVisible();
-  await expect(page.getByText('2/2')).toBeVisible();
+  await expect(page.getByText('2/2', { exact: true })).toBeVisible();
   await expect(page.getByText('Checklist needed')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve cutover' })).toBeDisabled();
 

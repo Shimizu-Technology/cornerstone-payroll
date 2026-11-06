@@ -1,0 +1,365 @@
+[
+  {
+    "file": "final/adjustment-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/adjustment-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/connected-committed-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/connected-committed-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/connected-draft-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      },
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/connected-draft-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/dashboard-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/filters-390-axe.json",
+    "required": [],
+    "other": []
+  },
+  {
+    "file": "final/fresh-approved-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/fresh-approved-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/fresh-calculated-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/fresh-calculated-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/fresh-draft-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      },
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/fresh-draft-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "nested-interactive",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/manual-committed-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/manual-committed-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "final/tax-1280-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "final/tax-390-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-backup_snapshot-1280-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-backup_snapshot-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-backup_snapshot-390-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-backup_snapshot-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-training_baseline-1280-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-training_baseline-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-training_baseline-390-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-training_baseline-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-workspace_access-1280-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-workspace_access-1280-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 5
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-workspace_access-390-reports-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "after/readonly-workspace_access-390-work-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1
+      },
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  },
+  {
+    "file": "review-1/worst-flags-1280-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 4
+      }
+    ]
+  },
+  {
+    "file": "review-1/worst-flags-390-axe.json",
+    "required": [],
+    "other": [
+      {
+        "id": "region",
+        "nodes": 1
+      }
+    ]
+  }
+]

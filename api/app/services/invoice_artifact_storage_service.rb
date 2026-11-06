@@ -155,7 +155,7 @@ class InvoiceArtifactStorageService
 
   def storage_key(invoice:, filename:)
     extension = File.extname(filename).downcase.presence || ".bin"
-    "invoice-center/organization-#{invoice.organization_id}/invoice-#{invoice.id}/#{SecureRandom.uuid}#{extension}"
+    StagingStoragePolicy.new_key("invoice-center/organization-#{invoice.organization_id}/invoice-#{invoice.id}/#{SecureRandom.uuid}#{extension}")
   end
 
   def sanitized_filename(filename, content_type)

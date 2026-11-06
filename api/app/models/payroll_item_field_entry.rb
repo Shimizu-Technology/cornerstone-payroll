@@ -13,7 +13,8 @@ class PayrollItemFieldEntry < ApplicationRecord
   validates :tax_treatment, inclusion: { in: PayrollFieldDefinition::TAX_TREATMENTS }
   validates :category, inclusion: { in: PayrollFieldDefinition::CATEGORIES }
   validates :source, inclusion: { in: SOURCES }
-  validates :amount, numericality: { greater_than_or_equal_to: 0 }
+  validates :amount, numericality: true
+  validates :amount, numericality: { greater_than_or_equal_to: 0 }, unless: -> { payroll_item&.signed_correction_components? }
   validates :reporting_group, inclusion: { in: REPORTING_GROUPS }, allow_nil: true
   validates :payroll_field_definition_id, uniqueness: { scope: :payroll_item_id }, allow_nil: true
   validate :kind_matches_tax_treatment

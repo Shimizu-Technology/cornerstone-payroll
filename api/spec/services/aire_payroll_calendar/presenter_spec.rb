@@ -3,15 +3,26 @@
 require "rails_helper"
 
 RSpec.describe AirePayrollCalendar::Presenter do
+  include ActiveSupport::Testing::TimeHelpers
+
+  # These fixtures describe publication before the October 22 cutoff.
+  # Model validations use Time.current as well as the presenter's explicit clock.
+  before { travel_to(Time.find_zone!("Pacific/Guam").local(2026, 10, 17, 9)) }
+  after { travel_back }
+
   let(:company) { create(:company, pay_frequency: "semimonthly") }
   let(:actor) { create(:user, company: company) }
-  let!(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+  let(:activation_date) { Date.new(2026, 10, 1) }
+  let!(:source) { create(:time_tracking_source, company: company, source_type: "aire_services", cutoff_enforcement_starts_on: activation_date) }
   let!(:schedule) do
     CompanyPaySchedule.create!(
       company: company,
       frequency: "semimonthly",
       period_rule: "semimonthly",
-      pay_date_rule: "manual",
+      pay_date_rule: "semimonthly_15th_and_month_end",
+      time_tracking_cutoff_rule: "after_previous_regular_payday",
+      time_tracking_cutoff_days: 7,
+      payroll_cutoff_at_minutes: 1020,
       timezone: "Pacific/Guam",
       source: "operator_confirmed",
       confirmation_status: "confirmed",
@@ -35,6 +46,11 @@ RSpec.describe AirePayrollCalendar::Presenter do
       notes: "Confirmed Sunday workweek"
     )
   end
+  let!(:previous_regular) do
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 9, 16), end_date: Date.new(2026, 9, 30), pay_date: Date.new(2026, 10, 15))
+  end
+
   let(:pay_period) do
     create(
       :pay_period,
@@ -43,23 +59,49 @@ RSpec.describe AirePayrollCalendar::Presenter do
       company_workweek: workweek,
       start_date: Date.new(2026, 10, 1),
       end_date: Date.new(2026, 10, 15),
-      pay_date: Date.new(2026, 10, 25)
+      pay_date: Date.new(2026, 10, 31)
     )
   end
 
-  it "shows a missed unpublished cutoff as unavailable instead of offering a broken publish action" do
-    state = described_class.call(
-      pay_period,
-      now: Time.find_zone!("Pacific/Guam").local(2026, 10, 18, 17)
-    )
+  it "uses the capability-selected source for both metadata and its contract" do
+    unsupported = create(:time_tracking_source, company: company, name: "Legacy summary", active: false)
+    allow(company.time_tracking_sources).to receive(:active).and_return([ unsupported, source ])
+    pay_period.company = company
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+    expect(state).to include(source_id: source.id, eligible: true, can_publish: true)
+    expect(state.fetch(:source_capabilities)).to include("payroll_cockpit")
+    expect(state[:cutoff_at]).to eq("2026-10-22T17:00:00+10:00")
+  end
 
-    expect(state).to include(
-      eligible: false,
-      can_publish: false,
-      cutoff_state: "cutoff_due"
-    )
-    expect(state.fetch(:eligibility_error)).to include("passed before it was published")
-    expect(state.fetch(:eligibility_code)).to eq("cutoff_passed")
+  it "retains the linked source's batch capabilities instead of the current active source's workspace features" do
+    capabilities = %w[time_summary_v1 payroll_calendar_v2 finalized_batch_v2 exact_line_receipts_v2]
+    limited_source = create(:time_tracking_source, company: company, name: "Independent batches", active: false,
+      source_type: "custom", expected_source_instance_id: SecureRandom.uuid,
+      remote_source_identifier: "independent_batches", source_protocol: "shimizu_time_payroll",
+      source_protocol_version: "1.0", identity_verified_at: Time.current,
+      source_capabilities: capabilities,
+      source_policy_constraints: { "time_zones" => [ "Pacific/Guam" ], "workweek_starts" => [ "sunday" ],
+        "cutoff_rules" => [ "after_previous_regular_payday" ], "frequencies" => [ "semimonthly" ] })
+    create(:aire_payroll_calendar_period, company: company, pay_period: pay_period, time_tracking_source: limited_source)
+
+    state = described_class.call(pay_period, now: Time.find_zone!("Pacific/Guam").local(2026, 10, 1, 9))
+
+    expect(state).to include(source_id: limited_source.id, source_capabilities: capabilities)
+    expect(state.fetch(:source_capabilities)).not_to include("payroll_cockpit")
+    expect(source.connector.capabilities).to include("payroll_cockpit")
+  end
+
+  context "with the October 16 rollout boundary" do
+    let(:activation_date) { Date.new(2026, 10, 16) }
+
+    it "keeps the manual period publishable before, at, and after its nominal cutoff" do
+      cutoff = Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17)
+      [ cutoff - 1.second, cutoff, cutoff + 2.days ].each do |now|
+        expect(described_class.call(pay_period, now: now)).to include(
+          eligible: true, can_publish: true, cutoff_state: "unpublished", lock_mode: "manual",
+          cutoff_enforcement_starts_on: "2026-10-16", next_scheduled_cutoff_at: nil)
+      end
+    end
   end
 
   it "explains when confirmed AIRE setup starts after an older pay period" do
@@ -118,7 +160,9 @@ RSpec.describe AirePayrollCalendar::Presenter do
       delivery_status: "delivered",
       delivered_at: Time.find_zone!("Pacific/Guam").local(2026, 10, 17, 17)
     )
-    pay_period.update!(pay_date: Date.new(2026, 11, 5))
+    create(:pay_period, company: company, company_pay_schedule: schedule, company_workweek: workweek,
+      start_date: Date.new(2026, 10, 16), end_date: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 15))
+    pay_period.update!(start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 30))
 
     state = described_class.call(
       pay_period,
@@ -147,5 +191,69 @@ RSpec.describe AirePayrollCalendar::Presenter do
 
     expect(state).to include(source_id: source.id, source_name: source.name)
     expect(state.fetch(:source_id)).not_to eq(replacement.id)
+  end
+
+  describe "delivered calendar cutoff progression" do
+    let(:cutoff) { Time.find_zone!("Pacific/Guam").local(2026, 10, 22, 17) }
+    let!(:calendar_period) { create(:aire_payroll_calendar_period, company: company, time_tracking_source: source, pay_period: pay_period) }
+    let(:cached_state) { "upcoming" }
+    let!(:publication) do
+      create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+        payload: source.connector.calendar_contract(pay_period).payload, delivery_status: "delivered", delivered_at: cutoff - 1.day,
+        source_state: { "cutoff_state" => cached_state })
+    end
+
+    [ nil, "", "upcoming", "scheduled" ].each do |captured|
+      context "with captured #{captured.inspect} state" do
+        let(:cached_state) { captured }
+
+        it "stays upcoming before the exact cutoff" do
+          expected = captured.presence || "scheduled"
+          expect(described_class.call(pay_period, now: cutoff - 1.second)[:cutoff_state]).to eq(expected)
+        end
+
+        [ 0, 1 ].each do |offset|
+          it "is due #{offset.zero? ? 'at' : 'after'} cutoff without changing the delivery snapshot" do
+            original = publication.source_state.deep_dup
+            expect(described_class.call(pay_period, now: cutoff + offset)[:cutoff_state]).to eq("cutoff_due")
+            expect(publication.reload.source_state).to eq(original)
+          end
+        end
+      end
+    end
+
+    %w[finalized attention_required due cutoff_due].each do |captured|
+      context "with captured #{captured} state" do
+        let(:cached_state) { captured }
+
+        it "preserves the source state at and after cutoff" do
+          [ cutoff, cutoff + 1.second ].each do |now|
+            expect(described_class.call(pay_period, now: now)[:cutoff_state]).to eq(captured)
+          end
+        end
+      end
+    end
+
+    %w[failed pending].each do |delivery_status|
+      it "preserves #{delivery_status} publication precedence after cutoff" do
+        other = create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period,
+          schedule_version: 2, delivery_status: delivery_status, source_state: { "cutoff_state" => "upcoming" },
+          payload: source.connector.calendar_contract(pay_period).payload)
+        expected = delivery_status == "failed" ? "publication_failed" : "publishing"
+        expect(described_class.call(pay_period.reload, now: cutoff + 1.second)[:cutoff_state]).to eq(expected)
+        expect(other.reload.delivery_status).to eq(delivery_status)
+      end
+    end
+
+    { "verified" => "batch_verified", "rejected" => "batch_rejected", "failed" => "batch_verification_failed", "pending" => "batch_verifying" }.each do |verification, expected|
+      it "keeps #{verification} event precedence over the elapsed calendar" do
+        AirePayrollEvent.create!(aire_payroll_calendar_period: calendar_period, aire_payroll_calendar_publication: publication,
+          time_tracking_source: source, event_id: SecureRandom.uuid, event_type: AirePayrollEvent::EVENT_TYPE,
+          occurred_at: cutoff, payroll_batch_id: SecureRandom.uuid, payroll_batch_checksum: "a" * 64,
+          payload_checksum: "b" * 64, verification_status: verification,
+          payload: { "payroll_batch" => { "summary" => {}, "issues" => {} } })
+        expect(described_class.call(pay_period, now: cutoff + 1.second)[:cutoff_state]).to eq(expected)
+      end
+    end
   end
 end

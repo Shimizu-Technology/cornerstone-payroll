@@ -45,17 +45,17 @@ class CheckSignoffSheetGenerator
     )
     @header_style = workbook.styles.add_style(
       b: true, sz: 11,
-      border: { style: :thin, color: "000000", edges: [:bottom] },
+      border: { style: :thin, color: "000000", edges: [ :bottom ] },
       alignment: { horizontal: :center }
     )
     @cell_style = workbook.styles.add_style(
       sz: 11,
-      border: { style: :thin, color: "D0D0D0", edges: [:bottom] },
+      border: { style: :thin, color: "D0D0D0", edges: [ :bottom ] },
       alignment: { vertical: :center }
     )
     @cell_center_style = workbook.styles.add_style(
       sz: 11,
-      border: { style: :thin, color: "D0D0D0", edges: [:bottom] },
+      border: { style: :thin, color: "D0D0D0", edges: [ :bottom ] },
       alignment: { horizontal: :center, vertical: :center }
     )
     @note_style = workbook.styles.add_style(
@@ -65,9 +65,9 @@ class CheckSignoffSheetGenerator
   end
 
   def build_header(sheet)
-    sheet.add_row [company.name], style: @title_style
+    sheet.add_row [ company.name ], style: @title_style
     period_desc = format_period_description
-    sheet.add_row ["Pay Period: #{period_desc}"], style: @subtitle_style
+    sheet.add_row [ "Pay Period: #{period_desc}" ], style: @subtitle_style
     sheet.add_row []
     sheet.add_row(
       %w[EMPLOYEE CHECK\ NO PRINT SIGN DATE],
@@ -79,8 +79,8 @@ class CheckSignoffSheetGenerator
     rows = employee_check_rows
     rows.each do |row|
       sheet.add_row(
-        [row[:name], row[:check_number], "", "", ""],
-        style: [@cell_style, @cell_center_style, @cell_style, @cell_style, @cell_style]
+        [ row[:name], row[:check_number], "", "", "" ],
+        style: [ @cell_style, @cell_center_style, @cell_style, @cell_style, @cell_style ]
       )
     end
   end
@@ -92,7 +92,7 @@ class CheckSignoffSheetGenerator
     sheet.add_row []
     sheet.add_row []
     merged_text = notes.join("\n")
-    row = sheet.add_row [merged_text], style: @note_style
+    row = sheet.add_row [ merged_text ], style: @note_style
     sheet.merge_cells("A#{row.row_index + 1}:E#{row.row_index + 1}")
   end
 
@@ -140,7 +140,7 @@ class CheckSignoffSheetGenerator
     return custom if custom.present?
 
     default_notes = options[:default_notes]
-    return [default_notes] if default_notes.present?
+    return [ default_notes ] if default_notes.present?
 
     []
   end

@@ -11,6 +11,16 @@ RSpec.describe AirePayrollCalendarPeriod do
     end.to raise_error(ActiveRecord::RecordInvalid, /identity is immutable/)
   end
 
+  it "retains existing calendar metadata after publication support is revoked" do
+    calendar_period = create(:aire_payroll_calendar_period)
+    calendar_period.time_tracking_source.update!(source_capabilities: [ "time_summary_v1" ])
+    expect(calendar_period.update(updated_at: 1.minute.from_now)).to be(true)
+    replacement = build(:aire_payroll_calendar_period, company: calendar_period.company,
+      time_tracking_source: calendar_period.time_tracking_source)
+    expect(replacement).not_to be_valid
+    expect(replacement.errors[:time_tracking_source]).to include("must support payroll calendar publication")
+  end
+
   it "enforces the source tenant even when validations are bypassed" do
     calendar_period = create(:aire_payroll_calendar_period)
     other_source = create(:time_tracking_source, source_type: "aire_services")

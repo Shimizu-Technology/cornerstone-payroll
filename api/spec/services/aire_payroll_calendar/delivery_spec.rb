@@ -5,15 +5,53 @@ require "rails_helper"
 RSpec.describe AirePayrollCalendar::Delivery do
   let(:now) { Time.find_zone!("Pacific/Guam").local(2026, 10, 10, 9) }
   let(:calendar_period) { create(:aire_payroll_calendar_period) }
-  let(:publication) { create(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now) }
+  let(:publication) do
+    record = build(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now)
+    record.payload = record.payload.merge("overtime_policy" => AirePayrollCalendar::Contract::OVERTIME_POLICY)
+    record.payload_checksum = TimeTracking::CanonicalPayload.checksum(record.payload)
+    record.save!
+    record
+  end
   let(:source_state) do
-    publication.payload.slice("start_date", "end_date", "pay_date", "cutoff_at").merge(
+    publication.payload.slice("start_date", "end_date", "pay_date", "cutoff_at", "overtime_policy").merge(
       "external_pay_period_id" => calendar_period.external_pay_period_id,
       "schedule_version" => publication.schedule_version,
       "publication_id" => publication.publication_id,
       "status" => "scheduled",
       "cutoff_state" => "upcoming"
     )
+  end
+
+  it "holds pending delivery without claiming attempts, then delivers once after resuming" do
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => source_state)
+    original = publication.attributes
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(false)
+    expect(described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call[:status]).to eq("paused")
+    expect(publication.reload.attributes).to eq(original)
+    expect(client).not_to have_received(:publish_payroll_calendar_period)
+    allow(ConnectedPayrollMode).to receive(:enabled?).and_return(true)
+    2.times { described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call }
+    expect(client).to have_received(:publish_payroll_calendar_period).once
+    expect(publication.reload.delivery_status).to eq("delivered")
+  end
+
+  it "holds an already queued calendar before its PUT until historical approval is complete" do
+    source = calendar_period.time_tracking_source
+    source.update!(historical_reconciliation_required: true)
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => source_state)
+
+    result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+    expect(result[:status]).to eq("held")
+    expect(client).not_to have_received(:publish_payroll_calendar_period)
+    expect(publication.reload).to have_attributes(delivery_status: "pending", delivery_attempts: 0,
+      next_delivery_attempt_at: now + 5.minutes, delivery_enqueued_until: nil)
+
+    allow_any_instance_of(TimeTrackingSource).to receive(:historical_reconciliation_complete?).and_return(true)
+    result = described_class.new(publication_id: publication.id, now: now + 5.minutes, client_factory: ->(*) { client }).call
+    expect(result[:status]).to eq("delivered")
+    expect(client).to have_received(:publish_payroll_calendar_period).once
   end
 
   it "delivers the exact version and retains AIRE's returned state" do
@@ -61,6 +99,20 @@ RSpec.describe AirePayrollCalendar::Delivery do
       delivery_status: "delivered",
       source_state: utc_source_state
     )
+  end
+
+  it "rejects a successful response that did not adopt the published weekly policy" do
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return(
+      "payroll_calendar_period" => source_state.merge("overtime_policy" => {
+        "daily_threshold_hours" => 8.0, "weekly_threshold_hours" => 40.0
+      })
+    )
+
+    result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+
+    expect(result[:status]).to eq("failed")
+    expect(publication.reload.last_error).to include("does not match")
   end
 
   it "keeps network failures visible and schedules a bounded retry" do
@@ -150,5 +202,42 @@ RSpec.describe AirePayrollCalendar::Delivery do
 
     expect(result[:status]).to eq("delivered")
     expect(client).not_to have_received(:publish_payroll_calendar_period)
+  end
+  context "with a published manual lock period" do
+    let(:now) { Time.find_zone!("Pacific/Guam").local(2026, 10, 24, 9) }
+    let(:publication) do
+      record = build(:aire_payroll_calendar_publication, aire_payroll_calendar_period: calendar_period, next_delivery_attempt_at: now)
+      record.payload = record.payload.merge("lock_mode" => "manual", "cutoff_enforcement_starts_on" => "2026-10-16")
+      record.payload_checksum = TimeTracking::CanonicalPayload.checksum(record.payload)
+      record.save!
+      record
+    end
+
+    it "keeps retrying a manual publication after its nominal cutoff" do
+      client = instance_double(TimeTracking::Client)
+      allow(client).to receive(:publish_payroll_calendar_period).and_raise(TimeTracking::Client::Error, "Connection unavailable")
+      result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+      expect(result[:status]).to eq("failed")
+      expect(publication.reload.next_delivery_attempt_at).to eq(now + 1.minute)
+    end
+
+    it "rejects a producer that silently adopted a scheduled lock instead" do
+      client = instance_double(TimeTracking::Client)
+      allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => source_state.merge(
+        "lock_mode" => "scheduled", "cutoff_enforcement_starts_on" => "2026-10-16"))
+      result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+      expect(result[:status]).to eq("failed")
+      expect(publication.reload.last_error).to include("does not match")
+    end
+  end
+  it "refreshes source-wide next-cutoff state from the authenticated publication response" do
+    state = source_state.merge("next_scheduled_cutoff_at" => "2026-11-07T17:00:00+10:00")
+    client = instance_double(TimeTracking::Client)
+    allow(client).to receive(:publish_payroll_calendar_period).and_return("payroll_calendar_period" => state)
+    result = described_class.new(publication_id: publication.id, now: now, client_factory: ->(*) { client }).call
+    expect(result[:status]).to eq("delivered")
+    expect(calendar_period.time_tracking_source.reload.payroll_calendar_source_state).to include(
+      "status" => "available", "next_scheduled_cutoff_at" => "2026-11-07T17:00:00+10:00")
+    expect(publication.reload.source_state).to eq(state)
   end
 end

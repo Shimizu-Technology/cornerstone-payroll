@@ -15,7 +15,7 @@ class CreateLoanTransactions < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :loan_transactions, [:employee_loan_id, :pay_period_id],
+    add_index :loan_transactions, [ :employee_loan_id, :pay_period_id ],
               name: "idx_loan_txns_on_loan_and_pp"
     add_index :loan_transactions, :transaction_type
   end

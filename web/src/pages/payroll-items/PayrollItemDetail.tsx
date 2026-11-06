@@ -1,3 +1,4 @@
+import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ArrowLeft,
@@ -14,6 +15,8 @@ import {
   UserRound,
 } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { Header } from '@/components/layout/Header';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
@@ -32,17 +35,25 @@ import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
+import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
-export function PayrollItemDetail(): ReactElement {
+interface PayrollItemDetailProps {
+  record?: { companyId: number; payRunId: number; payrollItemId: number };
+  embedded?: boolean;
+}
+
+export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetailProps = {}): ReactElement {
+  const { activeCompany } = useCompany();
+  const readOnly = !canWriteCompany(activeCompany);
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
     companyId: string;
     id: string;
     payrollItemId: string;
   }>();
-  const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
-  const payRunId = parsePositiveRouteId(payRunIdParam) ?? 0;
-  const payrollItemId = parsePositiveRouteId(payrollItemIdParam) ?? 0;
+  const companyId = record?.companyId ?? parsePositiveRouteId(companyIdParam) ?? 0;
+  const payRunId = record?.payRunId ?? parsePositiveRouteId(payRunIdParam) ?? 0;
+  const payrollItemId = record?.payrollItemId ?? parsePositiveRouteId(payrollItemIdParam) ?? 0;
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [payRun, setPayRun] = useState<PayPeriod | null>(null);
@@ -142,37 +153,49 @@ export function PayrollItemDetail(): ReactElement {
     : (payrollItem.import_source || payrollItem.timekeeping_source || 'manual').replaceAll('_', ' ');
   const importedComponents = (payrollItem.payroll_field_entries || []).filter((entry) => entry.source === 'import' && entry.active !== false);
   const isDirectDeposit = payrollItem.effective_payment_delivery_method === 'direct_deposit';
+  const bankConfirmation = payrollItem.payment_confirmation;
+  const bankPaymentDescription = payrollItem.voided ? 'Voided payroll item' : bankConfirmation
+    ? `Bank paid ${formatDate(bankConfirmation.settled_on)} · ${bankConfirmation.bank_reference}`
+    : 'Direct-deposit stub; transfer not confirmed';
+  const paymentDisplay = payRunPaymentDisplay(payrollItem, { committed: payRun.status === 'committed', rehearsal: false, canPreview: false });
+  const hasSavedCheckEvidence = Boolean(payrollItem.check_number || payrollItem.check_prepared_at || payrollItem.check_printed_at
+    || ['prepared', 'printed', 'delivered', 'voided'].includes(payrollItem.check_status || ''));
+  const statementOnly = ['calculated', 'approved', 'committed'].includes(payRun.status)
+    && payrollItem.earnings_statement_eligible === true && !payrollItem.voided
+    && !hasSavedCheckEvidence && Number(payrollItem.net_pay || 0) <= 0;
 
   return (
     <div>
-      <Header
+      {readOnly && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 lg:px-8">{companyReadOnlyMessage(activeCompany)}</p>}
+      {!embedded && <Header
         title={`${employeeName} · ${formatDate(payRun.pay_date)}`}
         description={`${formatDateRange(payRun.start_date, payRun.end_date)} · Payroll item #${payrollItem.id}`}
         actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link><Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={employeePath(companyId, employee.id, 'pay-history', { returnTo: currentPath })}><UserRound className="h-4 w-4" />Employee workspace</Link></div>}
-      />
+      />}
 
       <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-4 sm:px-6 lg:px-8" aria-label="Payroll item identity">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={payrollItem.voided ? 'danger' : payRun.status === 'committed' ? 'success' : 'default'}>{payrollItem.voided ? 'Voided' : payRun.status === 'committed' ? 'Finalized' : 'In progress'}</Badge>
           <Badge variant="default">{payrollItem.employment_type}</Badge>
           {payrollItem.check_number && <Badge variant={payrollItem.check_prepared_at || payrollItem.check_printed_at ? 'success' : 'info'}>Check #{payrollItem.check_number}</Badge>}
-          {isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
+          {statementOnly ? <Badge variant="default">Earnings statement only</Badge> : isDirectDeposit && <Badge variant="info">Direct deposit · earnings stub</Badge>}
         </div>
       </section>
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
-        <nav aria-label="Payroll item relationships" className="grid gap-4 sm:grid-cols-2">
+      <div className={embedded ? "space-y-5 pt-4" : "space-y-6 p-4 sm:p-6 lg:p-8"}>
+        {!embedded && <nav aria-label="Payroll item relationships" className="grid gap-4 sm:grid-cols-2">
           <RelationshipLink icon={UserRound} eyebrow="Employee" title={employeeName} detail="Open pay setup, history, and activity" href={employeePath(companyId, employee.id, 'overview', { returnTo: currentPath })} />
           <RelationshipLink icon={CalendarDays} eyebrow="Source pay run" title={formatDateRange(payRun.start_date, payRun.end_date)} detail={`Pay date ${formatDate(payRun.pay_date)} · ${payRun.status}`} href={payRunPath(companyId, payRun.id, 'overview', { returnTo: currentPath })} />
-        </nav>
+        </nav>}
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
           <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
           <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
-          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={isDirectDeposit ? 'Direct-deposit stub; transfer not confirmed' : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
+          <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? bankPaymentDescription : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>
 
+        <details open={!embedded}><summary className="mb-4 cursor-pointer py-2 font-semibold text-primary-800">Source and payment details</summary>
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader><CardTitle>Input and calculation context</CardTitle><p className="mt-2 text-sm text-neutral-500">The source signals behind this exact payroll result.</p></CardHeader>
@@ -189,11 +212,21 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">Payment method for this run; finalized when payroll is committed.</p></CardHeader>
+            <CardHeader><CardTitle>Payment context</CardTitle><p className="mt-2 text-sm text-neutral-500">{statementOnly ? 'An earnings statement records this payroll activity; no payment is issued.' : 'Payment method for this run; finalized when payroll is committed.'}</p></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <ContextRow icon={Banknote} label="Method" value={isDirectDeposit ? 'Direct deposit (stub only)' : 'Paper check'} />
-              {isDirectDeposit ? (
-                <ContextRow icon={ReceiptText} label="Stub status" value="Available to print; bank transfer not confirmed" />
+              <ContextRow icon={Banknote} label="Method" value={statementOnly ? paymentDisplay.method : isDirectDeposit ? bankConfirmation ? 'Direct deposit' : 'Direct deposit (stub only)' : 'Paper check'} />
+              {statementOnly ? (
+                <ContextRow icon={ReceiptText} label="Payment status" value={paymentDisplay.status} />
+              ) : isDirectDeposit ? (
+                <>
+                  <ContextRow icon={ReceiptText} label="Stub status" value={payrollItem.voided ? 'Retained document; payroll item is voided' : bankConfirmation ? 'Available to print; not payment evidence' : 'Available to print; bank transfer not confirmed'} />
+                  {bankConfirmation && <>
+                    <ContextRow icon={CheckCircle2} label="Payment status" value={payrollItem.voided ? 'Voided' : 'Bank payment confirmed'} />
+                    <ContextRow icon={CalendarDays} label={payrollItem.voided ? 'Retained bank settlement' : 'Bank settled on'} value={formatDate(bankConfirmation.settled_on)} />
+                    <ContextRow icon={ReceiptText} label="Bank reference" value={bankConfirmation.bank_reference} verbatim />
+                    <ContextRow icon={Clock3} label="Confirmation recorded" value={formatGuamDateTime(bankConfirmation.confirmed_at)} />
+                  </>}
+                </>
               ) : (
                 <>
                   <ContextRow icon={Printer} label="Check number" value={payrollItem.check_number || 'Not assigned'} />
@@ -207,6 +240,8 @@ export function PayrollItemDetail(): ReactElement {
             </CardContent>
           </Card>
         </div>
+
+        </details>
 
         {importedComponents.length > 0 && (
           <Card>
@@ -230,12 +265,15 @@ export function PayrollItemDetail(): ReactElement {
           </Card>
         )}
 
+        <PayrollReportReviewWarnings warnings={disclosure?.review_warnings} />
         {disclosure && <PayrollResultBreakdown disclosure={disclosure} />}
-        {payrollItem.employment_type !== 'contractor' && <PaycheckWithholdingContext item={payrollItem} />}
-        {payrollItem.employment_type !== 'contractor' && <PaycheckRetirementContext item={payrollItem} />}
+        {payrollItem.employment_type !== 'contractor' && <details open={!embedded}>
+          <summary className="cursor-pointer py-2 font-semibold text-primary-800">Withholding and retirement setup</summary>
+          <div className="mt-4 space-y-4"><PaycheckWithholdingContext item={payrollItem} provenance={disclosure?.w4_provenance} /><PaycheckRetirementContext item={payrollItem} /></div>
+        </details>}
 
         <p className="text-xs leading-5 text-neutral-400">Canonical record: {payrollItemPath(companyId, payRun.id, payrollItem.id)}</p>
-      </main>
+      </div>
     </div>
   );
 }
@@ -260,15 +298,16 @@ interface MetricProps {
 }
 
 function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
-  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
+  return <Card><CardContent className="p-4"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-2 text-sm text-neutral-500" style={{ overflowWrap: 'anywhere' }}>{detail}</p></CardContent></Card>;
 }
 
 interface ContextRowProps {
   icon: typeof Banknote;
   label: string;
   value: string;
+  verbatim?: boolean;
 }
 
-function ContextRow({ icon: Icon, label, value }: ContextRowProps): ReactElement {
-  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800">{value}</p></div></div>;
+function ContextRow({ icon: Icon, label, value, verbatim = false }: ContextRowProps): ReactElement {
+  return <div className="flex items-start gap-4"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-2 text-sm font-semibold capitalize text-neutral-800" style={verbatim ? { textTransform: 'none', overflowWrap: 'anywhere' } : undefined}>{value}</p></div></div>;
 }

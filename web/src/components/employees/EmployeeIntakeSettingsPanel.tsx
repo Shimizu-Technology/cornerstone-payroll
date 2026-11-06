@@ -1,4 +1,7 @@
 import { useRef, useState } from 'react';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -8,6 +11,9 @@ import { employeeIntakeApi } from '@/services/employee-intake-api';
 import { formatGuamDateTime } from '@/lib/utils';
 
 export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = false }: { companyId: number; isClient: boolean; readOnly?: boolean }) {
+  const { activeCompany } = useCompany();
+  const canAdministerClient = useSelectedCompanyCapability('manage_client_administration', companyId);
+  const effectiveReadOnly = readOnly || !canAdministerClient || !canWriteCompany(activeCompany, 'manage_client_administration');
   const { settings, loading, error, reload } = useEmployeeIntakeSettings(companyId, isClient);
   const [reason, setReason] = useState('');
   const [hours, setHours] = useState('1');
@@ -19,13 +25,14 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
   const saving = savingScope === companyId;
 
   const save = async (enabled: boolean) => {
+    if (effectiveReadOnly || !settings?.can_manage) return;
     const requestedCompany = companyId;
     setSavingScope(requestedCompany);
     setFeedback(null);
     try {
       await employeeIntakeApi.updateSettings(requestedCompany, {
         enabled,
-        ...(enabled ? { reason: reason.trim(), expires_at: new Date(Date.now() + Number(hours) * 3_600_000).toISOString() } : {}),
+        ...(enabled ? { reason: reason.trim(), duration_hours: Number(hours) } : {}),
       });
       if (companyRef.current !== requestedCompany) return;
       setReason('');
@@ -47,10 +54,10 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
     <section className="mb-6 rounded-xl border border-neutral-200 bg-white p-4" aria-label="Employee entry requirements">
       <p className="font-semibold text-neutral-900">{settings.enabled ? 'Incomplete employee entry is temporarily enabled' : 'Full employee details required'}</p>
       <p className="mt-1 text-sm leading-6 text-neutral-600">{settings.enabled
-        ? `Enabled by ${settings.enabled_by_name || 'an administrator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
-        : 'An administrator can temporarily allow missing personal details for this client.'}</p>
+        ? `Enabled by ${settings.enabled_by_name || 'an authorized operator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
+        : 'An administrator or an accountant with Client management can temporarily allow missing personal details for this client.'}</p>
       {settings.enabled && <p className="mt-2 text-sm text-warning-800">Missing information stays on the employee checklist. Payroll documents and filing requirements still apply.</p>}
-      {settings.can_manage && !readOnly && (
+      {settings.can_manage && !effectiveReadOnly && (
         settings.enabled ? <Button className="mt-3" variant="outline" disabled={saving} onClick={() => void save(false)}>Require full details again</Button>
           : <div className="mt-3">
             <Button variant="outline" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>Allow incomplete entry temporarily</Button>

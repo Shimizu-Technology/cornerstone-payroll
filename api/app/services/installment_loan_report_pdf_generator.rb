@@ -25,7 +25,7 @@ class InstallmentLoanReportPdfGenerator
 
   def generate
     loans = InstallmentLoanReportBuilder.new(company, as_of_date: as_of_date).loans
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 36, 50, 36])
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 36, 50, 36 ])
     render_document(pdf, loans)
   end
 
@@ -40,7 +40,6 @@ class InstallmentLoanReportPdfGenerator
 
     if loans.empty?
       pdf.text "No employee loans found.", style: :italic, color: TEXT_MUTED
-      return
     end
 
     loans.group_by { |snapshot| snapshot[:employee] }.each do |employee, emp_loans|
@@ -94,7 +93,7 @@ class InstallmentLoanReportPdfGenerator
       return
     end
 
-    header = ["Date", "Beginning Balance", "Additions", "Payments", "Ending Balance"].map do |label|
+    header = [ "Date", "Beginning Balance", "Additions", "Payments", "Ending Balance" ].map do |label|
       { content: label, background_color: HEADER_BG, text_color: "FFFFFF",
         font_style: :bold, align: label == "Date" ? :left : :right }
     end
@@ -112,9 +111,9 @@ class InstallmentLoanReportPdfGenerator
       ]
     end
 
-    pdf.table([header] + rows,
+    pdf.table([ header ] + rows,
       width: pdf.bounds.width * 0.85,
-      cell_style: { size: 7, padding: [3, 5], border_color: BORDER_GRAY }
+      cell_style: { size: 7, padding: [ 3, 5 ], border_color: BORDER_GRAY }
     )
     pdf.move_down 6
   end

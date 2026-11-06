@@ -27,6 +27,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
@@ -81,7 +82,8 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isManager, isAccountant, isClient, hasCapability } = useAuth();
+  const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
+  const { isAdmin, isSuperAdmin, isAccountant, isClient, hasCapability } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const activeCompanyId = activeCompany?.id;
   const [query, setQuery] = useState('');
@@ -246,7 +248,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         });
       }
 
-      if (isManager) {
+      if (canManageClientConfiguration) {
         add({
           id: 'pay-schedule-settings',
           label: 'Pay Schedule',
@@ -268,7 +270,9 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
           kind: 'navigation',
           href: '/payroll-reminders',
         });
+      }
 
+      if (hasCapability('manage_payroll_fields')) {
         add({
           id: 'payroll-fields',
           label: 'Payroll Fields',
@@ -442,7 +446,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, canManageClientConfiguration, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,
@@ -494,8 +498,8 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       if (command.companyId === activeCompanyId) return;
 
       const redirect = getCompanySwitchRedirect(location.pathname, command.companyId, location.search);
+      if (switchCompany(command.companyId) === false) return;
       analytics.companySwitch(command.companyId);
-      switchCompany(command.companyId);
 
       if (redirect) {
         navigate(redirect.to, {
@@ -565,7 +569,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
                 placeholder={isCompanyMode ? 'Search clients...' : 'Search sidebar pages, reports, actions, or clients...'}
                 className="h-10 flex-1 bg-transparent text-base font-medium text-neutral-950 outline-none placeholder:text-neutral-400"
               />
-              <div className="hidden items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 sm:flex">
+              <div className="hidden items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs font-semibold text-neutral-600 sm:flex">
                 {platformShortcut(isCompanyMode ? 'Option K' : 'K')}
               </div>
               <button
@@ -610,11 +614,11 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
                         <span className="truncate text-sm font-semibold">{command.label}</span>
-                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-neutral-400 ring-1 ring-neutral-200/80">
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold text-neutral-600 ring-1 ring-neutral-200/80">
                           {command.group}
                         </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-xs text-neutral-500">{command.description}</span>
+                      <span className="mt-0.5 block truncate text-xs text-neutral-600">{command.description}</span>
                     </span>
                   </button>
                 ))}

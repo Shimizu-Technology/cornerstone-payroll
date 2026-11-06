@@ -141,7 +141,7 @@ class PayPeriodComparisonBuilder
     end
 
     items = period.payroll_items.reportable
-    items = items.not_voided unless period.voided? && @pay_period.source_pay_period_id == period.id
+    items = items.financially_reportable unless period.voided? && @pay_period.source_pay_period_id == period.id
     items.includes(employee: :department).to_a
   end
 

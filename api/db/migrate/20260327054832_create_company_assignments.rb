@@ -7,6 +7,6 @@ class CreateCompanyAssignments < ActiveRecord::Migration[8.1]
       t.timestamps
     end
 
-    add_index :company_assignments, [:user_id, :company_id], unique: true
+    add_index :company_assignments, [ :user_id, :company_id ], unique: true
   end
 end

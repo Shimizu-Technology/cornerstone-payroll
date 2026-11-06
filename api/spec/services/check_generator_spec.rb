@@ -73,6 +73,15 @@ RSpec.describe CheckGenerator do
     expect(generator.render_input_payload.dig("summary", "ytd_gross")).to eq("2,919.20")
   end
 
+  it "reconciles non-taxable pay in both copies of the check summary" do
+    payroll_item.update!(gross_pay: 100, non_taxable_pay: 20, withholding_tax: 5, social_security_tax: 6.20, medicare_tax: 1.45,
+      total_deductions: 12.65, net_pay: 107.35)
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+    expect(text.scan(/SUMMARY[\s\S]*?Non-Taxable Pay/).size).to eq(2)
+    expect(text).to include("100.00", "20.00", "12.65", "107.35")
+    expect(text).not_to include("[SUMMARY]")
+  end
+
   it "includes both a direct loan and a separate loan field in check deductions" do
     field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
@@ -235,7 +244,7 @@ RSpec.describe CheckGenerator do
 
       summary_boxes = []
       allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
-        summary_boxes << { x: point.first, y: point.last, height: height } if height == 48.0
+        summary_boxes << { x: point.first, y: point.last, height: height } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
         method.call(point, width, height)
       end
 
@@ -249,12 +258,95 @@ RSpec.describe CheckGenerator do
       end
     end
 
-    [12.0, 1_000.0].each do |offset|
+    it "fits a 95-to-108-point deductions table above the expanded summary" do
+      rows = (1..9).map { |n| [ "Deduction #{n}", "10.00", "100.00" ] }
+      rows << [ { content: "TOTAL", font_style: :bold }, "90.00", "900.00" ]
+      allow(generator).to receive(:deduction_rows).and_return(rows)
+      sections = []
+      boxes = []
+      allow(generator).to receive(:draw_section_table).and_wrap_original do |method, pdf, **args|
+        height = method.call(pdf, **args)
+        sections << { top: args[:y], bottom: args[:y] - height } if args[:title] == "DEDUCTIONS"
+        height
+      end
+      allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
+        boxes << { top: point.last, bottom: point.last - height } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
+        method.call(point, width, height)
+      end
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.first.text
+      expect(boxes.size).to eq(2)
+      sections.zip(boxes).each do |deductions, summary|
+        expect(summary[:top]).to be <= deductions[:bottom] - 5
+      end
+      expect(sections.first[:top] - sections.first[:bottom]).to be_between(95, 108)
+      expect(text.scan("Deduction 9").size).to eq(2)
+      expect(text).not_to include("[SUMMARY]", "[TABLE]")
+    end
+
+    it "keeps every deduction readable in the compact fallback without inserting check-stock pages" do
+      company.update!(check_layout_config: { stub: { table_padding_y: 2 } })
+      payroll_item.update!(custom_deductions: (1..10).map { |n| { "label" => "Deduction #{n}", "amount" => 1 } })
+      expect(generator).to receive(:draw_readable_deductions).twice.and_call_original
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      expect(reader.page_count).to eq(1)
+      page = reader.pages.first
+      (1..10).each { |n| expect(page.text.scan(/Deduction #{n}\b/).size).to eq(2) }
+      expect(page.text).not_to include("[TABLE]", "[SUMMARY]", "See attached")
+      deduction_runs = page.runs.select { |run| run.text.match?(/Deduction \d+/) }
+      expect(deduction_runs.size).to eq(20)
+      expect(deduction_runs.map(&:font_size).min).to be >= 6.5
+      expect_net_pay_inside_stubs(page)
+    end
+
+    it "refuses generation with guidance when even the readable list cannot fit" do
+      payroll_item.update!(custom_deductions: (1..50).map { |n| { "label" => "Deduction #{n}", "amount" => 1 } })
+      expect { generator.generate }.to raise_error(ArgumentError, /cannot fit readably.*No deductions were omitted/)
+    end
+
+    it "fits an empty deductions header in less than ten points without refusing the check" do
+      company.update!(check_layout_config: { stub: { row1_y: 160.4, row2_y: 112, row3_y: 68 } })
+      expect(generator.send(:deduction_rows)).to be_empty
+      spaces = []
+      allow(generator).to receive(:draw_section_table).and_wrap_original do |method, pdf, **args|
+        spaces << args.fetch(:max_height) if args[:title] == "DEDUCTIONS"
+        method.call(pdf, **args)
+      end
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      expect(spaces.size).to eq(2)
+      expect(spaces).to all(be_between(9, 10))
+      expect(reader.page_count).to eq(1)
+      expect(reader.pages.first.text.scan("DEDUCTIONS").size).to eq(2)
+      expect_net_pay_inside_stubs(reader.pages.first)
+    end
+
+    it "measures a wrapped summary in a narrow saved printer profile and reserves its entire height" do
+      company.update!(check_layout_config: { stub: { left_ratio: 0.75, summary_padding_y: 2.5, summary_padding_x: 4 } })
+      payroll_item.update!(custom_deductions: (1..5).map { |n| { "label" => "Deduction #{n}", "amount" => 1 } })
+      summaries = []
+      expect(generator).to receive(:draw_summary_box).twice.and_wrap_original do |method, pdf, **args|
+        summaries << args
+        method.call(pdf, **args)
+      end
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+      expect(reader.page_count).to eq(1)
+      expect(summaries.size).to eq(2)
+      summaries.each do |summary|
+        table = summary.fetch(:table)
+        config = summary.fetch(:stub_cfg)
+        height = generator.send(:summary_box_height, config, rendered_height: table.height)
+        expect(height).to be >= table.height + 6
+        expect(table.cells[2, 0].height).to be > table.cells[3, 0].height
+      end
+      expect(reader.pages.first.text).not_to include("[SUMMARY]", "[TABLE]")
+      expect_net_pay_inside_stubs(reader.pages.first)
+    end
+
+    [ 12.0, 1_000.0 ].each do |offset|
       it "keeps the summary readable and within the right column with a #{offset} point offset" do
         company.update!(check_layout_config: { stub: { summary_x_offset: offset } })
         summary_boxes = []
         allow_any_instance_of(Prawn::Document).to receive(:stroke_rectangle).and_wrap_original do |method, point, width, height|
-          summary_boxes << { x: point.first, width: width } if height == 48.0
+          summary_boxes << { x: point.first, width: width } if height == generator.send(:summary_box_height, CheckGenerator.resolved_layout_for(company)["stub"])
           method.call(point, width, height)
         end
 
@@ -616,6 +708,15 @@ RSpec.describe CheckGenerator do
       method.call(text, options)
     end
     void_draws
+  end
+
+  def expect_net_pay_inside_stubs(page)
+    bottoms = CheckGenerator.page_layout_metadata(company).values_at(:stub1_section_bottom, :stub2_section_bottom)
+    bottoms.each do |bottom|
+      run = page.runs.find { |text| text.text == "NET PAY:" && text.y.between?(bottom, bottom + CheckGenerator::SECTION_HEIGHT) }
+      expect(run).to be_present
+      expect(run.y).to be >= bottom + 8
+    end
   end
 
   def create_statement_field_entry(label:, amount:, treatment:, category:)

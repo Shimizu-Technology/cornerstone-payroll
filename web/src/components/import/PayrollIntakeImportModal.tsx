@@ -668,7 +668,7 @@ export function PayrollIntakeImportModal({
                     <label className="col-span-2 text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
                   </div>
                   <p className="text-xs text-neutral-500">{toNumber(row.regular_hours).toFixed(2)} regular · {toNumber(row.overtime_hours).toFixed(2)} OT</p>
-                  {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} className="mr-1 whitespace-normal text-left">{warning.message}</Badge>)}
+                  {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} wrap className="mr-1 text-left">{warning.message}</Badge>)}
                 </section>
               ))}
             </div>
@@ -757,7 +757,7 @@ export function PayrollIntakeImportModal({
                             </div>
                           )}
                           {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => (
-                            <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} className="mr-1 whitespace-normal text-left">
+                            <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} wrap className="mr-1 text-left">
                               {warning.message}
                             </Badge>
                           ))}

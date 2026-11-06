@@ -252,10 +252,10 @@ export function CheckLayoutEditor({
   return (
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="rounded-xl border border-neutral-200 bg-gradient-to-b from-slate-50 to-slate-100 p-4 shadow-inner">
+        <div className="rounded-xl border border-neutral-200 bg-gradient-to-b from-neutral-50 to-neutral-100 p-4 shadow-inner">
           <div
             ref={previewRef}
-            className="relative mx-auto w-full max-w-[640px] overflow-hidden rounded-lg border border-slate-300 bg-white shadow-md"
+            className="relative mx-auto w-full max-w-[640px] overflow-hidden rounded-lg border border-neutral-300 bg-white shadow-md"
             style={{ aspectRatio: `${pageWidth} / ${pageHeight}` }}
           >
             {stockType === 'first_hawaiian_4up' ? (
@@ -268,7 +268,7 @@ export function CheckLayoutEditor({
                     height: '25%',
                   }}
                 >
-                  <span className="absolute left-2 top-2 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500">
+                  <span className="absolute left-2 top-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-semibold text-neutral-600">
                     Check {index + 1}
                   </span>
                 </div>
@@ -303,7 +303,7 @@ export function CheckLayoutEditor({
                     'hover:border-primary-500 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300',
                     isSelected
                       ? 'border-primary-600 bg-white shadow-lg shadow-primary-950/10 ring-2 ring-primary-200'
-                      : 'border-slate-300 bg-white/90 shadow-[0_1px_4px_rgba(15,23,42,0.12)]',
+                      : 'border-neutral-300 bg-white/90 shadow-[0_1px_4px_rgba(15,23,42,0.12)]',
                     !disabled && 'cursor-grab',
                     isDragging && 'scale-[1.01] cursor-grabbing shadow-xl shadow-primary-950/15',
                     disabled && 'cursor-not-allowed opacity-60'
@@ -319,7 +319,7 @@ export function CheckLayoutEditor({
                   }}
                   aria-label={`Select ${field.label} field`}
                 >
-                  <span className="block truncate text-[9px] font-semibold uppercase tracking-wide text-primary-700">{field.label}</span>
+                  <span className="block truncate text-[9px] font-semibold text-primary-700">{field.label}</span>
                   <span className="block overflow-hidden whitespace-pre-line text-neutral-800">{field.sample}</span>
                 </button>
               );
@@ -329,10 +329,10 @@ export function CheckLayoutEditor({
 
         <div className="space-y-3">
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <Label className="text-xs uppercase text-neutral-500">Selected Field</Label>
+            <Label className="text-xs text-neutral-600">Selected Field</Label>
             <p className="mt-1 text-sm font-semibold text-neutral-900">{selectedField?.label ?? 'None'}</p>
             {selectedField && (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-500">
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-600">
                 <span>X {selectedField.x.toFixed(1)}</span>
                 <span>Y {selectedField.y.toFixed(1)}</span>
                 <span>Width {selectedField.width.toFixed(1)}</span>
@@ -342,7 +342,7 @@ export function CheckLayoutEditor({
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <Label className="text-xs uppercase text-neutral-500">Nudge Field</Label>
+            <Label className="text-xs text-neutral-600">Nudge Field</Label>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <span />
               <Button type="button" variant="outline" size="sm" onClick={() => nudgeSelected(0, 1)} disabled={disabled || !selectedField} aria-label="Move field up">
@@ -370,7 +370,7 @@ export function CheckLayoutEditor({
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <Label className="flex items-center gap-1 text-xs uppercase text-neutral-500">
+            <Label className="flex items-center gap-1 text-xs text-neutral-600">
               <Move className="h-3.5 w-3.5" />
               Move Whole Layout
             </Label>
@@ -390,7 +390,7 @@ export function CheckLayoutEditor({
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="mt-2 text-xs text-neutral-600">
               X {Number(offsetX || 0).toFixed(3)} in, Y {Number(offsetY || 0).toFixed(3)} in
             </p>
           </div>

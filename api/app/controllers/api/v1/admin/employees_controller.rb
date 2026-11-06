@@ -12,6 +12,7 @@ module Api
           :resolve_configuration_review_item, :review_intake_exception
         ]
         before_action :validate_department_scope!, only: [ :create, :update ]
+        before_action :validate_employee_company_context!, only: [ :create, :update ]
         before_action :require_super_admin!, only: :transition_tax_classification
         before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
         around_action :with_recurring_pay_item_setup_invalidation, only: :update
@@ -57,11 +58,13 @@ module Api
         def create
           attributes, w4_attributes, w4_reason, election_received = split_w4_attributes(employee_params)
           validate_legacy_recurring_components!(nil, attributes)
+          attributes[:pay_frequency] = current_company.pay_frequency unless attributes.key?(:pay_frequency)
           @employee = Employee.new(attributes.merge(w4_attributes).merge(company_id: current_company_id))
           require_ssn_confirmation!(@employee)
 
           Employee.transaction do
             current_company.lock!
+            revalidate_current_company_write_access!
             EmployeeIntakePolicy.prepare!(@employee, actor: current_user)
             @employee.save!
             EmployeeW4ElectionChangeService.new(
@@ -82,8 +85,11 @@ module Api
             )
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
+          expired_incomplete_entry = @employee&.new_record? && EmployeeIntakePolicy.expired?(current_company) &&
+            EmployeeIntakePolicy.missing_fields(@employee).any?
           render json: {
-            error: "Validation failed",
+            error: expired_incomplete_entry ? "Incomplete employee entry has expired. Complete the required fields or ask an organization administrator to renew access. Your entered information has not been saved." : "Validation failed",
+            code: expired_incomplete_entry ? "employee_intake_expired" : nil,
             details: e.record.errors.messages
           }, status: :unprocessable_entity
         rescue EmployeeW4ElectionChangeService::Error => e
@@ -100,6 +106,7 @@ module Api
 
           Employee.transaction do
             current_company.lock!
+            revalidate_current_company_write_access!
             @employee.lock!
             if attributes.key?(:payment_delivery_method)
               @payment_default_service = EmployeePaymentDefaultService.new(
@@ -266,6 +273,16 @@ module Api
             error: "Validation failed",
             details: { department_id: [ "does not belong to this company" ] }
           }, status: :unprocessable_entity
+        end
+
+        def validate_employee_company_context!
+          requested_ids = [ params[:company_id], params.dig(:employee, :company_id) ].compact
+          return if requested_ids.all? { |id| id.to_s.match?(/\A[1-9]\d*\z/) && id.to_i == current_company_id }
+
+          render json: {
+            error: "The employee form belongs to a different client. Your changes were not saved. Reopen the form for the intended client.",
+            code: "company_context_mismatch"
+          }, status: :conflict
         end
 
         def employee_params
@@ -447,6 +464,12 @@ module Api
           }
         end
 
+        def can_review_employee_intake?
+          return @can_review_employee_intake if defined?(@can_review_employee_intake)
+
+          @can_review_employee_intake = StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company)
+        end
+
         def serialize_employee(
           employee,
           include_department: false,
@@ -461,7 +484,7 @@ module Api
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
-          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: StaffRolePolicy.allowed?(current_user, :manage_client_configuration))
+          data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["tax_classification"] = employee.tax_classification

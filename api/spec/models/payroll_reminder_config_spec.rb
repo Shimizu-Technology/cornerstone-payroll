@@ -29,13 +29,13 @@ RSpec.describe PayrollReminderConfig, type: :model do
     end
 
     it "validates email format in recipients" do
-      config = described_class.new(company: company, recipients: ["not-an-email"])
+      config = described_class.new(company: company, recipients: [ "not-an-email" ])
       expect(config).not_to be_valid
       expect(config.errors[:recipients].first).to include("invalid email")
     end
 
     it "accepts valid recipients" do
-      config = described_class.new(company: company, enabled: true, recipients: ["test@example.com"])
+      config = described_class.new(company: company, enabled: true, recipients: [ "test@example.com" ])
       expect(config).to be_valid
     end
 

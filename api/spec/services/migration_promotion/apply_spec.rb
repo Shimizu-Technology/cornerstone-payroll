@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe MigrationPromotion::Apply do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let(:organization) { create(:organization) }
   let(:target_company) { create(:company, organization: organization, name: "MoSa's Hotbox — Clean Migration") }
   let(:actor) { create(:user, company: target_company, organization: organization, role: "admin") }

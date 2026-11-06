@@ -6,6 +6,7 @@ require "tempfile"
 module QuickbooksHistory
   class CutoverVerificationService
     class StaleVerificationAttempt < StandardError; end
+    class UnauthorizedVerificationAttempt < ArgumentError; end
 
     SUPPORTED_RECORDED_IMPORTER_VERSIONS = HistoricalPayrollImports::QuickbooksOnlineAdapter::SUPPORTED_VERIFICATION_VERSIONS
     TAX_WAGE_IMPORTER_VERSIONS = HistoricalPayrollImports::QuickbooksOnlineAdapter::TAX_WAGE_VERSIONS
@@ -28,6 +29,17 @@ module QuickbooksHistory
       raise ArgumentError,
             "Importer version #{version.inspect} is unsupported for #{adapter.label}. " \
             "Preserve this batch and use an explicitly reviewed source migration."
+    end
+
+    def self.ensure_authorized!(batch:, actor:, lock: false)
+      if lock
+        actor = User.lock.find_by(id: actor&.id)
+        CompanyAssignment.where(company_id: batch.company_id, user_id: actor&.id).lock.load
+      end
+      return actor if actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
+
+      raise UnauthorizedVerificationAttempt, "A manager or administrator with company access is required"
     end
 
     def initialize(
@@ -61,9 +73,7 @@ module QuickbooksHistory
     attr_reader :batch, :actor, :storage, :tempfiles, :expected_verification_started_at, :adapter
 
     def ensure_eligible!
-      authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
-      raise ArgumentError, "A manager or administrator with company access is required" unless authorized
+      @actor = self.class.ensure_authorized!(batch: batch, actor: actor)
 
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
       self.class.ensure_supported_importer_version!(
@@ -203,6 +213,9 @@ module QuickbooksHistory
       batch.with_lock do
         batch.reload
         review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
+        # Checklist and failure writers lock review before actor/assignment.
+        review.lock! if review.persisted?
+        @actor = self.class.ensure_authorized!(batch: batch, actor: actor, lock: true)
         raise ArgumentError, "The approved cutover review is sealed" if review.approved?
         ensure_current_attempt!(review) if expected_verification_started_at
 

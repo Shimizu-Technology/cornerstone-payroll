@@ -17,6 +17,17 @@ FactoryBot.define do
     withholding_tax { 0 }
     social_security_tax { 0 }
     medicare_tax { 0 }
+    # A calculated/approved fixture represents a reviewed calculation against
+    # the ledger at creation time. Tests can explicitly remove this evidence
+    # to exercise the fail-closed legacy path.
+    tax_rule_snapshot do
+      if pay_period.calculated? || pay_period.approved?
+        { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+          year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot }
+      else
+        {}
+      end
+    end
 
     trait :with_overtime do
       overtime_hours { 10 }

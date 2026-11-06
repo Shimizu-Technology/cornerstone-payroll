@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollLiabilityPosting < ApplicationRecord
-  POSTING_TYPES = %w[commit historical_backfill replacement reversal].freeze
+  POSTING_TYPES = %w[commit historical_backfill replacement reversal paycheck_reversal].freeze
 
   belongs_to :company
   belongs_to :pay_period

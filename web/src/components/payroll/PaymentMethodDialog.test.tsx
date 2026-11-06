@@ -59,6 +59,12 @@ describe('scoped payment method changes', () => {
     await user.click(button);
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(12, 31, 'direct_deposit', expect.objectContaining({ confirm_not_paid: true, retire_existing_check: true, confirm_check_cancelled: true }), 6));
   });
+  it.each(['prepared', 'printed', 'delivered'] as const)('describes fresh %s evidence while retaining cancellation guards', async check_status => {
+    setup({ ...item, check_status, payment_method_change: { ...item.payment_method_change!, mode: 'retire_check', requires_check_cancellation: true } });
+    await screen.findByText(new RegExp(`is recorded as ${check_status === 'delivered' ? 'issued' : check_status}`));
+    expect((screen.getByRole('button', { name: 'Record cancellation and save' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
   it('requires explicit cancelled-check evidence for a prepared check replacement', async () => {
     const record = { ...item, payment_method_change: { ...item.payment_method_change!, mode: 'retire_check' as const, requires_check_cancellation: true } };
     const { user } = setup(record);

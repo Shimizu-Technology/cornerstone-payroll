@@ -8,9 +8,9 @@ class UserInvitationMailer < ApplicationMailer
     @invite_url = invite_url
 
     from_email = ENV.fetch("MAILER_FROM_EMAIL", "no-reply@cornerstone-payroll.com")
-    return unless ENV["RESEND_API_KEY"].present?
+    return unless StagingOutboundPolicy.staging? || ENV["RESEND_API_KEY"].present?
 
-    Resend::Emails.send(
+    StagingMailTransport.deliver(
       from: from_email,
       to: invitation.email,
       subject: "You're invited to Cornerstone Payroll",

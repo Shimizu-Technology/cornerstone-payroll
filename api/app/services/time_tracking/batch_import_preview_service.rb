@@ -6,7 +6,8 @@ module TimeTracking
 
     attr_reader :pay_period, :source, :start_date, :end_date
 
-    def initialize(pay_period:, source:, start_date: nil, end_date: nil)
+    def initialize(pay_period:, source:, start_date: nil, end_date: nil, supplemental_payload: nil)
+      @supplemental_payload = supplemental_payload
       @pay_period = pay_period
       @source = source
       @start_date = parse_date(start_date.presence || pay_period.start_date, "start_date")
@@ -17,15 +18,17 @@ module TimeTracking
       validate_request!
       workweek = legal_workweek!
       client = Client.new(source)
-      batch_summary = discover_batch!(client)
-      raw = client.payroll_batch(batch_id: batch_summary.fetch("id"))
+      batch_summary = discover_batch!(client) unless @supplemental_payload
+      raw = @supplemental_payload || client.payroll_batch(batch_id: batch_summary.fetch("id"))
+      validate_supplemental_target!(raw) if @supplemental_payload
       PayrollBatchPayloadValidator.new(
         payload: raw,
+        expected_source: source.connector.source_identifier,
         start_date: start_date,
         end_date: end_date,
         allow_legacy_uncategorized: pay_period.committed?
       ).validate!
-      validate_summary_identity!(batch_summary, raw)
+      validate_summary_identity!(batch_summary, raw) if batch_summary
       validate_source_workweeks!(raw, workweek)
 
       processed = process(raw, workweek: workweek)
@@ -41,13 +44,24 @@ module TimeTracking
 
     private
 
+    def validate_supplemental_target!(raw)
+      unless pay_period.run_purpose == "adjustment" && pay_period.late_hours_run &&
+          raw["purpose"] == "supplemental" && raw["target_external_pay_period_id"] == pay_period.id.to_s
+        raise ArgumentError, "The supplemental batch does not name this late-hours adjustment"
+      end
+    end
+
     def validate_request!
-      raise ArgumentError, "Finalized batch import is only available for AIRE Services" unless source.source_type == "aire_services"
+      source.connector.require!(:finalized_batch_v2)
+      source.connector.require!(:exact_line_receipts_v2)
       raise ArgumentError, "Time tracking source is inactive" unless source.active?
       raise ArgumentError, "Source does not belong to this company" unless source.company_id == pay_period.company_id
+      unless pay_period.committed? || source.historical_reconciliation_complete?
+        raise ArgumentError, "Approve complete historical payroll reconciliation before importing new payroll time"
+      end
       raise ArgumentError, "end_date must be on or after start_date" if end_date < start_date
       unless start_date == pay_period.start_date && end_date == pay_period.end_date
-        raise ArgumentError, "AIRE finalized batches must exactly match the selected pay period dates"
+        raise ArgumentError, "Finalized source batches must exactly match the selected pay period dates"
       end
     end
 
@@ -56,7 +70,7 @@ module TimeTracking
       raise ArgumentError, "Confirm the legal overtime workweek before importing time" unless workweek&.confirmed?
       if workweek.starts_at_minutes.to_i != 0
         raise ArgumentError,
-              "AIRE payroll batches currently require a legal workweek that starts at midnight; " \
+              "Source payroll batches currently require a legal workweek that starts at midnight; " \
               "timestamp-based boundaries are not supported yet"
       end
 
@@ -68,8 +82,8 @@ module TimeTracking
       matches = response.fetch("payroll_batches").select do |batch|
         batch.is_a?(Hash) && batch["start_date"] == start_date.iso8601 && batch["end_date"] == end_date.iso8601
       end
-      raise ArgumentError, "AIRE has not finalized a payroll batch for these exact dates" if matches.empty?
-      raise ArgumentError, "AIRE returned more than one finalized payroll batch for these dates" if matches.many?
+      raise ArgumentError, "The source has not finalized a payroll batch for these exact dates" if matches.empty?
+      raise ArgumentError, "The source returned more than one finalized payroll batch for these dates" if matches.many?
 
       matches.first
     end
@@ -77,7 +91,7 @@ module TimeTracking
     def validate_summary_identity!(summary, raw)
       unless summary["id"] == raw["batch_id"] && summary["checksum"] == raw.dig("export", "checksum") &&
              summary["cutoff_at"] == raw["cutoff_at"]
-        raise ArgumentError, "AIRE payroll batch list and detail metadata do not match"
+        raise ArgumentError, "Source payroll batch list and detail metadata do not match"
       end
     end
 
@@ -88,7 +102,7 @@ module TimeTracking
       return unless mismatched
 
       raise ArgumentError,
-            "AIRE's source workweek does not match this company's confirmed legal workweek; " \
+            "The source workweek does not match this company's confirmed legal workweek; " \
             "review the workweek settings before importing"
     end
 
@@ -155,6 +169,9 @@ module TimeTracking
         employee_name: match[:employee_name],
         match_method: match[:match_method],
         match_score: match[:match_score],
+        suggested_employee_id: match[:suggested_employee_id],
+        suggested_employee_name: match[:suggested_employee_name],
+        suggestion_method: match[:suggestion_method],
         regular_hours: number(regular_hours),
         overtime_hours: number(overtime_hours),
         total_hours: number(total_hours),
@@ -170,52 +187,7 @@ module TimeTracking
     end
 
     def category_buckets(adjustments)
-      buckets = {}
-      Array(adjustments).each do |adjustment|
-        category = adjustment["category"] || {}
-        key = category_bucket_key(adjustment)
-        bucket = buckets[key] ||= {
-          source_category_id: adjustment["source_category_id"].to_s.presence,
-          key: category["key"].to_s.presence,
-          name: category["name"].presence || "Uncategorized",
-          total_hours: 0.to_d,
-          regular_hours: 0.to_d,
-          overtime_hours: 0.to_d,
-          source_kinds: Set.new,
-          source_time_entry_ids: Set.new,
-          original_work_dates: Set.new
-        }
-        bucket[:total_hours] += decimal(adjustment.fetch("total_hours"))
-        bucket[:regular_hours] += decimal(adjustment.fetch("regular_hours"))
-        bucket[:overtime_hours] += decimal(adjustment.fetch("overtime_hours"))
-        bucket[:source_kinds] << adjustment.fetch("source_kind")
-        bucket[:source_time_entry_ids] << adjustment.fetch("source_time_entry_id")
-        bucket[:original_work_dates] << adjustment.fetch("original_work_date")
-      end
-
-      buckets.values.map do |bucket|
-        bucket.merge(
-          total_hours: number(bucket[:total_hours]),
-          hours: number(bucket[:total_hours]),
-          regular_hours: number(bucket[:regular_hours]),
-          overtime_hours: number(bucket[:overtime_hours]),
-          source_kinds: bucket[:source_kinds].to_a.sort,
-          source_time_entry_ids: bucket[:source_time_entry_ids].to_a.sort,
-          original_work_dates: bucket[:original_work_dates].to_a.sort
-        )
-      end.sort_by do |bucket|
-        [ bucket[:name].to_s, bucket[:key].to_s, bucket[:source_category_id].to_s, bucket[:source_kinds].join(",") ]
-      end
-    end
-
-    def category_bucket_key(adjustment)
-      category = adjustment["category"] || {}
-      [
-        adjustment["source_category_id"],
-        category["key"],
-        category["name"],
-        adjustment["source_kind"]
-      ].map(&:to_s).map(&:strip).join("|")
+      SourceCategoryBuckets.call(adjustments)
     end
 
     def match_wage_rate_buckets(categories, employee_id)
@@ -225,21 +197,33 @@ module TimeTracking
       employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
       return result unless employee&.hourly? || employee&.contractor_hourly?
 
-      active_rates = employee.active_wage_rates.to_a
+      active_rates = (pay_period.late_hours_run&.wage_rates_for(employee) || employee.active_wage_rates).reject { |rate| rate.rate.nil? }
       result[:requires_category_mapping] = categories.any?(&:present?)
       result[:categories] = categories.map do |category|
-        rate, method = find_wage_rate(category, active_rates)
+        rate, method, mapping_error = find_wage_rate(category, active_rates, employee_id: employee_id)
         category.merge(
           employee_wage_rate_id: rate&.id,
           wage_rate_label: rate&.label,
           wage_rate_match_method: method,
+          wage_rate_mapping_error: mapping_error,
           payroll_rate_cents: wage_rate_cents(rate)
         )
       end
       result
     end
 
-    def find_wage_rate(category, rates)
+    def find_wage_rate(category, rates, employee_id: nil)
+      policy = source.source_type == "aire_services" && TimeTrackingCategoryMapping.find_by(time_tracking_source: source,
+        source_category_key: TimeTrackingCategoryMapping.category_key(category), import_enabled: true)
+      if policy
+        rate = policy.matching_rate(rates)
+        return [ rate, "company_category_mapping", rate ? nil : "#{category[:name]} requires this employee's active #{policy.required_rate_description} rate; configure that rate before importing" ]
+      end
+      if source.source_type == "aire_services" && TimeTrackingEarningChoice.solo_category?(category)
+        choice = TimeTrackingEarningChoice.find_by(time_tracking_source: source, employee_id: employee_id, source_category_key: "solo")
+        rate = choice&.current_rate
+        return rate && rates.any? { |candidate| candidate.id == rate.id } ? [ rate, "accountant_choice" ] : [ nil, nil ]
+      end
       label_matches = rates.select do |rate|
         candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize_match_key(value) }
         candidates.include?(normalize_match_key(rate.label))
@@ -252,7 +236,7 @@ module TimeTracking
     def warnings_for(source_employee, match, categories, requires_category_mapping, total_hours:, regular_hours:, overtime_hours:, estimated_gross_delta_cents:)
       warnings = []
       if match[:employee_id].blank? && (total_hours.nonzero? || categories.any?)
-        warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this AIRE user'} to a payroll employee before importing")
+        warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this source employee'} to a payroll employee before importing")
       end
       if total_hours.negative? || regular_hours.negative? || overtime_hours.negative?
         warnings << warning(
@@ -273,7 +257,7 @@ module TimeTracking
 
           warnings << warning(
             "unmapped_wage_rate",
-            "Map #{category[:name]} to one of this employee's Cornerstone earning types before importing",
+            category[:wage_rate_mapping_error] || "Map #{category[:name]} to one of this employee's Cornerstone earning types before importing",
             source_category_id: category[:source_category_id],
             source_category_key: category[:key],
             source_category_name: category[:name]
@@ -286,6 +270,7 @@ module TimeTracking
     def persist_preview!(raw, processed, warnings)
       batch_id = raw.fetch("batch_id")
       checksum = raw.dig("export", "checksum")
+      processed = processed.merge(category_configuration_checksum: CanonicalPayload.checksum(TimeTrackingCategoryMapping.where(time_tracking_source: source).order(:id).map(&:attributes))) if source.source_type == "aire_services"
       attrs = {
         pay_period: pay_period,
         time_tracking_source: source,
@@ -305,6 +290,8 @@ module TimeTracking
       }
 
       TimeTrackingImport.transaction do
+        # Match rollout/source writers: source row before import table/row locks.
+        source.lock!
         existing = TimeTrackingImport.lock.find_by(time_tracking_source: source, external_batch_id: batch_id)
         return validate_existing_import!(existing, checksum) if existing
 
@@ -319,10 +306,10 @@ module TimeTracking
 
     def validate_existing_import!(import, checksum)
       unless ActiveSupport::SecurityUtils.secure_compare(import.external_batch_checksum, checksum)
-        raise ArgumentError, "AIRE returned a different checksum for an existing payroll batch ID"
+        raise ArgumentError, "The source returned a different checksum for an existing payroll batch ID"
       end
       if import.pay_period_id != pay_period.id || import.start_date != start_date || import.end_date != end_date
-        raise ArgumentError, "This AIRE payroll batch is already linked to a different pay period"
+        raise ArgumentError, "This time tracking payroll batch is already linked to a different pay period"
       end
 
       import

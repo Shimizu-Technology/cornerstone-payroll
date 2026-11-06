@@ -34,6 +34,104 @@ RSpec.describe TimeTracking::Client do
     end
     let(:external_id) { SecureRandom.uuid }
 
+    it "treats a lost late-hours POST response as an ambiguous source error without replaying the claim" do
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      request = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}/late_hours")
+        .to_raise(EOFError.new("end of file reached after remote acceptance"))
+      expect { client_for(source, actor: actor).create_payroll_late_hours(external_pay_period_id: external_id, command_id: SecureRandom.uuid) }
+        .to raise_error(TimeTracking::Client::Error, /Could not securely reach/)
+      expect(request).to have_been_requested.once
+    end
+
+    it "reads all employee holds for one verified period while requiring the exact installation descriptor" do
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      instance_id = SecureRandom.uuid
+      capabilities = TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ]
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current, source_capabilities: capabilities)
+      payload = { integration: { protocol: "shimizu_time_payroll", protocol_version: "1.0", source_instance_id: instance_id,
+        source_type: "aire_services", capabilities: capabilities }, payment_attestations: [], pagination: { total_pages: 1 } }
+      url = "https://time.example.com/client-a/api/v1/payroll/cockpit/payment_attestations"
+      request = stub_request(:get, url).with(query: { page: "1", per_page: "250", start_date: "2026-10-01", end_date: "2026-10-15" },
+        headers: { "X-Payroll-Source-Instance-Id" => instance_id, "X-Cornerstone-Actor-Id" => actor.id.to_s })
+        .to_return(status: 200, body: payload.to_json, headers: { "Content-Type" => "application/json" })
+      client = client_for(source, actor: actor)
+      expect(client.payroll_payment_attestations(start_date: "2026-10-01", end_date: "2026-10-15")["payment_attestations"]).to eq([])
+      expect(request).to have_been_requested.once
+      request.to_return(status: 200, body: payload.merge(integration: payload[:integration].merge(source_instance_id: SecureRandom.uuid)).to_json,
+        headers: { "Content-Type" => "application/json" })
+      expect { client.payroll_payment_attestations(start_date: "2026-10-01", end_date: "2026-10-15") }.to raise_error(TimeTracking::Client::Error, /installation identity changed/)
+      request.to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      expect { client.payroll_payment_attestations(start_date: "2026-10-01", end_date: "2026-10-15") }.to raise_error(TimeTracking::Client::Error, /pinned installation identity|Verify this source installation/)
+      expect { client.payroll_payment_attestations }.to raise_error(TimeTracking::Client::Error, /scoped employee or both work-period dates/)
+    end
+
+    it "requires the same pinned descriptor on every modern dated employee page" do
+      instance_id = SecureRandom.uuid
+      capabilities = TimeTracking::Connector::AIRE_CAPABILITIES + [ "payment_attestation_resolution_v1" ]
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0", identity_verified_at: Time.current, source_capabilities: capabilities)
+      uuid = SecureRandom.uuid
+      integration = { protocol: "shimizu_time_payroll", protocol_version: "1.0", source_instance_id: instance_id,
+        source_type: "aire_services", capabilities: capabilities }
+      request = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/payment_attestations")
+        .with(query: { source_user_uuid: uuid, page: "2", per_page: "250", start_date: "2026-10-01", end_date: "2026-10-15" })
+        .to_return(status: 200, body: { integration: integration, payment_attestations: [], pagination: { total_pages: 2 } }.to_json,
+          headers: { "Content-Type" => "application/json" })
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      client = client_for(source, actor: actor)
+      query = { source_user_uuid: uuid, page: 2, start_date: "2026-10-01", end_date: "2026-10-15" }
+      expect(client.payroll_payment_attestations(**query)["payment_attestations"]).to eq([])
+      [ {}, { integration: integration.merge(capabilities: capabilities - [ "payment_attestation_resolution_v1" ]) },
+        { integration: integration.merge(source_instance_id: SecureRandom.uuid) },
+        { integration: integration.merge(policy_constraints: { time_zones: [ "UTC" ] }) } ].each do |payload|
+        request.to_return(status: 200, body: payload.to_json, headers: { "Content-Type" => "application/json" })
+        expect { client.payroll_payment_attestations(**query) }.to raise_error(TimeTracking::Client::Error, /identity|contract changed/)
+      end
+    end
+
+    it "binds both read and mutation requests to the pinned source installation" do
+      instance_id = SecureRandom.uuid
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "aire_payroll", source_protocol_version: "2.0", identity_verified_at: Time.current)
+      reader = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
+        .with(headers: { "X-Payroll-Source-Instance-Id" => instance_id })
+        .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      writer = stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_allocations/51/issue")
+        .with(headers: { "X-Payroll-Source-Instance-Id" => instance_id, "X-Cornerstone-Actor-Id" => actor.id.to_s })
+        .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      client_for(source).payroll_cockpit_period(external_pay_period_id: external_id)
+      client_for(source, actor: actor).issue_payroll_manual_allocation(allocation_id: 51,
+        command_id: SecureRandom.uuid, expected_version: 0, payment_method: "paper_check",
+        payment_reference: "1001", payment_effective_on: "2026-09-01",
+        occurred_at: "2026-09-01T00:00:00.123456Z", reason: "Documented historical handoff")
+      expect(reader).to have_been_requested.once
+      expect(writer).to have_been_requested.once
+    end
+
+    it "delegates hold reads/create/retract with the pinned installation and linked actor" do
+      actor = create(:user, company: source.company, organization: source.company.organization)
+      instance_id = SecureRandom.uuid
+      source.update!(expected_source_instance_id: instance_id, source_protocol: "aire_payroll", source_protocol_version: "2.0", identity_verified_at: Time.current)
+      headers = { "X-Payroll-Source-Instance-Id" => instance_id, "X-Cornerstone-Actor-Id" => actor.id.to_s, "X-Payroll-Shared-Secret" => "secret" }
+      uuid = SecureRandom.uuid
+      read = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/payment_attestations")
+        .with(query: { source_user_uuid: uuid, page: "2", per_page: "250" }, headers: headers)
+        .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      writes = [ "payment_attestations", "payment_attestations/501/retract" ].map do |path|
+        stub_request(:post, "https://time.example.com/client-a/api/v1/payroll/cockpit/#{path}").with(headers: headers)
+          .to_return(status: 200, body: {}.to_json, headers: { "Content-Type" => "application/json" })
+      end
+      client = client_for(source, actor: actor)
+      client.payroll_payment_attestations(source_user_uuid: uuid, page: 2)
+      client.create_payroll_payment_attestation(source_time_entry_id: "41", source_user_uuid: uuid,
+        command_id: SecureRandom.uuid, expected_version: 2, reason: "Owner report pending check evidence")
+      client.retract_payroll_payment_attestation(attestation_id: "501", command_id: SecureRandom.uuid,
+        expected_version: 0, reason: "Owner withdrew payment report with explanation")
+      expect(read).to have_been_requested.once
+      writes.each { |request| expect(request).to have_been_requested.once }
+    end
+
     it "reads a manual payroll review by date range without requiring a published calendar ID" do
       review_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/manual_review")
         .with(
@@ -68,6 +166,23 @@ RSpec.describe TimeTracking::Client do
       expect(request).not_to have_been_requested
     end
 
+    it "rejects the legacy private HTTP staging destination before resolving it" do
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "production",
+        env: {
+          "DEPLOYMENT_ENV" => "staging", "CONNECTED_PAYROLL_MODE" => "enabled",
+          "ALLOW_PRIVATE_INTEGRATION_HTTP" => "true",
+          "TIME_TRACKING_ALLOWED_HOSTS" => "aire-api"
+        },
+        resolver: ->(_host) { [ "172.24.0.8" ] }
+      )
+      client = client_for(source, policy: policy)
+      private_uri = URI.parse("http://aire-api:3000/api/v1/payroll/cockpit/manual_review")
+
+      expect { client.send(:require_secure_payroll_transport!, private_uri) }.not_to raise_error
+      expect { policy.resolve_public_addresses!(private_uri) }.to raise_error(StagingOutboundPolicy::Blocked)
+    end
+
     it "reads a period and literal time entries with bounded query parameters" do
       period_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/periods/#{external_id}")
         .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
@@ -96,6 +211,19 @@ RSpec.describe TimeTracking::Client do
       )).to eq("time_entries" => [])
       expect(period_stub).to have_been_requested.once
       expect(entries_stub).to have_been_requested.once
+    end
+
+    it "reads one AIRE employee identity for an explicit payroll link" do
+      employee_stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/cockpit/employees/91")
+        .with(headers: { "X-Payroll-Shared-Secret" => "secret" })
+        .to_return(
+          status: 200,
+          body: { employee: { id: "91", payroll_integration_id: SecureRandom.uuid } }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      expect(client_for(source).payroll_cockpit_employee(employee_id: 91)).to include("employee")
+      expect(employee_stub).to have_been_requested.once
     end
 
     it "clamps cockpit pagination at the supported boundaries" do
@@ -447,7 +575,7 @@ RSpec.describe TimeTracking::Client do
           expected_version: 1,
           reason: "Cutoff review complete"
         )
-      end.to raise_error(TimeTracking::Client::Error, /Connect your AIRE administrator account/)
+      end.to raise_error(TimeTracking::Client::Error, /Connect your payroll-capable time tracking account/)
     end
 
     it "surfaces only bounded JSON operator errors from cockpit endpoints" do
@@ -479,12 +607,15 @@ RSpec.describe TimeTracking::Client do
       }
     end
 
-    it "rejects unsafe period, time entry, and settlement identifiers before a request" do
+    it "rejects unsafe period, employee, time entry, and settlement identifiers before a request" do
       request = stub_request(:any, %r{time\.example\.com})
 
       expect do
         client_for(source).payroll_cockpit_period(external_pay_period_id: "../period")
       end.to raise_error(TimeTracking::Client::Error, /Invalid payroll calendar period ID/)
+      expect do
+        client_for(source).payroll_cockpit_employee(employee_id: "../91")
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source employee ID/)
       expect do
         client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
           .approve_payroll_time_entry(
@@ -494,7 +625,7 @@ RSpec.describe TimeTracking::Client do
             decision: "approve",
             reason: "Verified"
           )
-      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE time entry ID/)
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source time entry ID/)
       expect do
         client_for(source, delegation: instance_double(TimeTrackingDelegation, token: "grant"))
           .route_payroll_settlement_case(
@@ -504,7 +635,7 @@ RSpec.describe TimeTracking::Client do
             reason: "Invalid identifier",
             destination_kind: "not_payable"
           )
-      end.to raise_error(TimeTracking::Client::Error, /Invalid AIRE settlement case ID/)
+      end.to raise_error(TimeTracking::Client::Error, /Invalid source settlement case ID/)
       expect(request).not_to have_been_requested
     end
 
@@ -529,6 +660,36 @@ RSpec.describe TimeTracking::Client do
         expect(error.message).to eq("#{source.name} returned HTTP 502")
         expect(error.message).not_to include("private upstream detail")
       }
+    end
+  end
+
+  describe "bounded history reads" do
+    let(:history_source) { create(:time_tracking_source, source_type: "aire_services", base_url: "https://time.example.com", shared_secret: "secret") }
+    let(:delegation) { instance_double(TimeTrackingDelegation, token: "grant") }
+
+    it "uses a 50-row default and configurable 60-second per-page budget without changing ordinary requests" do
+      response = instance_double(Net::HTTPOK)
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(response).to receive(:[]).with("Content-Type").and_return("application/json")
+      allow(response).to receive(:[]).with("Content-Length").and_return(nil)
+      allow(response).to receive(:read_body).and_yield({ time_entries: [] }.to_json)
+      http = instance_double(Net::HTTP)
+      configure_http_double(http, pinned_ip: "8.8.8.8", response: response)
+      factory = ->(_host, _port) { http }
+      client = client_for(history_source, delegation: delegation, http_factory: factory)
+      expect(http).to receive(:request).with(have_attributes(path: "/api/v1/payroll/cockpit/history_entries?through_work_date=2026-09-15&page=1&per_page=50")).and_yield(response)
+      expect(http).to receive(:read_timeout=).with(60)
+      expect(client.payroll_cockpit_history_entries(through_work_date: "2026-09-15")).to eq("time_entries" => [])
+      expect(http).to receive(:read_timeout=).with(90)
+      client.payroll_cockpit_history_entries(through_work_date: "2026-09-15", per_page: 25, read_timeout: 90)
+    end
+
+    [ { per_page: 0 }, { per_page: 251 }, { per_page: "1.5" }, { read_timeout: 121 }, { read_timeout: "NaN" } ].each do |options|
+      it "rejects unsafe history options #{options.inspect} before connecting" do
+        expect do
+          client_for(history_source, delegation: delegation).payroll_cockpit_history_entries(through_work_date: "2026-09-15", **options)
+        end.to raise_error(TimeTracking::Client::Error, /History/)
+      end
     end
   end
 
@@ -966,6 +1127,41 @@ RSpec.describe TimeTracking::Client do
 
       expect(result["batch_id"]).to eq("AIRE-PAY-001")
       expect(stub).to have_been_requested.once
+    end
+
+    it "requires a finalized batch to match the pinned source installation" do
+      instance_id = SecureRandom.uuid
+      source.update!(
+        expected_source_instance_id: instance_id,
+        source_protocol: "shimizu_time_payroll",
+        source_protocol_version: "1.0",
+        source_capabilities: [ "finalized_batch_v2" ],
+        identity_verified_at: Time.current
+      )
+      integration = {
+        protocol: "shimizu_time_payroll",
+        protocol_version: "1.0",
+        source_instance_id: instance_id,
+        capabilities: [ "finalized_batch_v2" ]
+      }
+      stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/batches/AIRE-PAY-001")
+        .to_return(
+          { status: 200, body: { source: "aire_services", export: { integration: integration } }.to_json,
+            headers: { "Content-Type" => "application/json" } },
+          { status: 200, body: { source: "aire_services", export: { integration: integration.merge(source_instance_id: SecureRandom.uuid) } }.to_json,
+            headers: { "Content-Type" => "application/json" } },
+          { status: 200, body: { source: "aire_services", export: {} }.to_json,
+            headers: { "Content-Type" => "application/json" } }
+        )
+
+      expect(client_for(source).payroll_batch(batch_id: "AIRE-PAY-001").dig("export", "integration", "source_instance_id"))
+        .to eq(instance_id)
+      expect do
+        client_for(source).payroll_batch(batch_id: "AIRE-PAY-001")
+      end.to raise_error(TimeTracking::Client::Error, /installation identity changed/i)
+      expect do
+        client_for(source).payroll_batch(batch_id: "AIRE-PAY-001")
+      end.to raise_error(TimeTracking::Client::Error, /omitted its pinned installation identity/i)
     end
 
     it "rejects unsafe batch identifiers before making a request" do

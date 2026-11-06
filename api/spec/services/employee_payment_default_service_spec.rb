@@ -3,6 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe EmployeePaymentDefaultService do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let(:company) { create(:company) }
   let(:employee) { create(:employee, company: company, payment_delivery_method: 'paper_check') }
   let(:actor) { create(:user, company: company, organization: company.organization) }

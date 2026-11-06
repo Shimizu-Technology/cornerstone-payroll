@@ -45,8 +45,8 @@ class ContractorPayrollCalculator < PayrollCalculator
         calculate_multi_rate_gross_pay
       else
         rate = BigDecimal(payroll_item.pay_rate.to_s)
-        @base_pay = (BigDecimal(payroll_item.hours_worked.to_s) * rate).to_f
-        @overtime_pay = (BigDecimal(payroll_item.overtime_hours.to_s) * rate * BigDecimal("1.5")).to_f
+        @base_pay = wage_earning_amount(BigDecimal(payroll_item.hours_worked.to_s) * rate).to_f
+        @overtime_pay = wage_earning_amount(BigDecimal(payroll_item.overtime_hours.to_s) * rate * BigDecimal("1.5")).to_f
         @holiday_pay = 0.0
         @pto_pay = 0.0
         @multi_rate_entries = nil
@@ -161,14 +161,15 @@ class ContractorPayrollCalculator < PayrollCalculator
       label: label,
       hours: hours,
       rate: rate,
-      amount: amount.to_f.round(2)
+      amount: saved_earning_amount(amount)
     )
   end
 
   def build_multi_rate_earning(category, label, hours, rate, amount)
-    return if amount.zero?
+    raw_amount = BigDecimal(hours.to_s) * BigDecimal(rate.to_s)
+    return if raw_amount.zero?
 
-    if amount.positive?
+    if raw_amount.positive?
       build_earning(category, label, hours, rate, amount)
     else
       build_earning("other", "#{label} correction reversal", nil, nil, amount)
@@ -190,10 +191,10 @@ class ContractorPayrollCalculator < PayrollCalculator
         overtime_hours: overtime_hours.to_f,
         holiday_hours: holiday_hours.to_f,
         pto_hours: pto_hours.to_f,
-        regular_pay: regular_hours * rate,
-        overtime_pay: overtime_hours * rate * BigDecimal("1.5"),
-        holiday_pay: holiday_hours * rate,
-        pto_pay: pto_hours * rate
+        regular_pay: wage_earning_amount(regular_hours * rate),
+        overtime_pay: wage_earning_amount(overtime_hours * rate * BigDecimal("1.5")),
+        holiday_pay: wage_earning_amount(holiday_hours * rate),
+        pto_pay: wage_earning_amount(pto_hours * rate)
       }
     end
 

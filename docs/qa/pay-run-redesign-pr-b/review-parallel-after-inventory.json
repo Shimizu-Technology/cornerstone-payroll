@@ -1,0 +1,1014 @@
+[
+  {
+    "state": "parallel-approved",
+    "width": 1280,
+    "actions": [
+      {
+        "tag": "A",
+        "label": "Activity",
+        "href": "/companies/4/pay-runs/10/activity?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Back",
+        "href": "/companies/4/pay-runs",
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Check Settings ›",
+        "href": "/check-settings",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Checks & payments 1",
+        "href": "/companies/4/pay-runs/10/checks?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Parallel comparison · cannot commit",
+        "href": "/companies/4/pay-runs/10/activity?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Payroll",
+        "href": "/companies/4/pay-runs/10/work?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Reports",
+        "href": "/companies/4/pay-runs/10/reports?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Reports",
+        "href": "/companies/4/pay-runs/10/reports?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Review settings",
+        "href": "/pay-schedule-settings",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "About parallel comparison",
+        "href": null,
+        "disabled": false,
+        "location": "Header → status",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Change payment method for Report Fixture",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Commit",
+        "href": null,
+        "disabled": true,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Download",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export PDF document (.pdf)",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export PDF document (.pdf)",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Load older activity",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open payroll item",
+        "href": null,
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open record",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Refresh current setup",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Roll Back Approval",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View details",
+        "href": null,
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "3 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "3 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "More payroll actions",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Run notes and processing history",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Run notes and processing history"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      }
+    ]
+  },
+  {
+    "state": "parallel-approved",
+    "width": 390,
+    "actions": [
+      {
+        "tag": "A",
+        "label": "Activity",
+        "href": "/companies/4/pay-runs/10/activity?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Back",
+        "href": "/companies/4/pay-runs",
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Check Settings ›",
+        "href": "/check-settings",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Checks & payments 1",
+        "href": "/companies/4/pay-runs/10/checks?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Parallel comparison · cannot commit",
+        "href": "/companies/4/pay-runs/10/activity?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Payroll",
+        "href": "/companies/4/pay-runs/10/work?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Report Fixture",
+        "href": "/companies/4/employees/10/overview?return_to=%2Fcompanies%2F4%2Fpay-runs%2F10%2Factivity",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Reports",
+        "href": "/companies/4/pay-runs/10/reports?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Pay-run workspace sections",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Reports",
+        "href": "/companies/4/pay-runs/10/reports?return_to=%2Fcompanies%2F4%2Fpay-runs",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "A",
+        "label": "Review settings",
+        "href": "/pay-schedule-settings",
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "About parallel comparison",
+        "href": null,
+        "disabled": false,
+        "location": "Header → status",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Change payment method for Report Fixture",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Commit",
+        "href": null,
+        "disabled": true,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Download",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export PDF document (.pdf)",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export PDF document (.pdf)",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Export",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Load older activity",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open payroll item",
+        "href": null,
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open record",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Open",
+        "href": null,
+        "disabled": false,
+        "location": "Checks and payments workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Refresh current setup",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Roll Back Approval",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View details",
+        "href": null,
+        "disabled": false,
+        "location": "Payroll workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "View",
+        "href": null,
+        "disabled": false,
+        "location": "Reports workspace",
+        "disclosure": null
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "2 access records",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "2 access records"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "More payroll actions",
+        "href": null,
+        "disabled": false,
+        "location": "Header / shared dialog",
+        "disclosure": null
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Run notes and processing history",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Run notes and processing history"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      },
+      {
+        "tag": "SUMMARY",
+        "label": "Technical evidence",
+        "href": null,
+        "disabled": false,
+        "location": "Activity workspace",
+        "disclosure": "Technical evidence"
+      }
+    ]
+  }
+]

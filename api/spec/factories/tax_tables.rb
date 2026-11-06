@@ -2,6 +2,7 @@
 
 FactoryBot.define do
   factory :tax_table do
+    verification_status { "verified" }
     tax_year { 2024 }
     filing_status { "single" }
     pay_frequency { "biweekly" }

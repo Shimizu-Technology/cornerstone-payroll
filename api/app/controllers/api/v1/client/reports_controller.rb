@@ -40,9 +40,9 @@ module Api
             period_description: pp.period_description,
             pay_date: pp.pay_date,
             status: pp.status,
-            employee_count: pp.payroll_items.not_voided.reportable.count,
-            total_gross: pp.payroll_items.not_voided.reportable.sum(:gross_pay),
-            total_net: pp.payroll_items.not_voided.reportable.sum(:net_pay)
+            employee_count: pp.payroll_items.financially_reportable.reportable.count,
+            total_gross: pp.payroll_items.financially_reportable.reportable.sum(:gross_pay),
+            total_net: pp.payroll_items.financially_reportable.reportable.sum(:net_pay)
           }
         end
 
@@ -57,8 +57,8 @@ module Api
               id: pp.id,
               period_description: pp.period_description,
               pay_date: pp.pay_date,
-              employee_count: pp.payroll_items.reportable.reject(&:voided?).size,
-              total_net: pp.payroll_items.reportable.reject(&:voided?).sum(&:net_pay)
+              employee_count: pp.payroll_items.reportable.select(&:payroll_included?).size,
+              total_net: pp.payroll_items.reportable.select(&:payroll_included?).sum(&:net_pay)
             }
           end
         end
@@ -91,11 +91,11 @@ module Api
         end
 
         def payroll_register_report_data(pay_period)
-          items = pay_period.payroll_items.reportable.reject(&:voided?)
+          items = pay_period.payroll_items.reportable.select(&:payroll_included?)
           w2_items = items.reject { |item| item.employment_type == "contractor" }
           contractor_items = items.select { |item| item.employment_type == "contractor" }
 
-          {
+          report = {
             type: "payroll_register",
             meta: { generated_at: Time.current.iso8601 },
             pay_period: {
@@ -113,7 +113,10 @@ module Api
               total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
-              total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_traditional_retirement: payroll_summary_retirement_totals(w2_items)[:retirement],
+              total_roth_retirement: payroll_summary_retirement_totals(w2_items)[:roth_retirement],
+              total_retirement: payroll_summary_retirement_totals(w2_items).values.sum,
+              total_non_taxable_additions: w2_items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
               total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
@@ -129,6 +132,8 @@ module Api
             employees: w2_items.map { |item| client_payroll_item_detail(item) },
             contractors: contractor_items.map { |item| client_payroll_item_detail(item) }
           }
+          report[:register_review] = PayrollRegisterReconciliation.review_rows(report)
+          report
         end
 
         def client_payroll_item_detail(item)

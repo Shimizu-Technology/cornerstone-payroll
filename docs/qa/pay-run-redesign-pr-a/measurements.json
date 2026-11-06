@@ -1,0 +1,337 @@
+{
+  "before_after_exact_match": true,
+  "current": [
+    {
+      "state": "connected-committed-1280",
+      "before": {
+        "height": 7115,
+        "screens": 8.89,
+        "totalsY": 275,
+        "resultsY": 1358,
+        "cards": 20,
+        "buttons": 123,
+        "callouts": 7
+      },
+      "after": "identical"
+    },
+    {
+      "state": "connected-draft-1280",
+      "before": {
+        "height": 4396,
+        "screens": 5.5,
+        "totalsY": null,
+        "resultsY": null,
+        "cards": 9,
+        "buttons": 17,
+        "callouts": 5
+      },
+      "after": "identical"
+    },
+    {
+      "state": "adjustment-1280",
+      "before": {
+        "height": 5777,
+        "screens": 7.22,
+        "totalsY": 275,
+        "resultsY": 1257,
+        "cards": 19,
+        "buttons": 48,
+        "callouts": 5
+      },
+      "after": "identical"
+    },
+    {
+      "state": "manual-committed-1280",
+      "before": {
+        "height": 4674,
+        "screens": 5.84,
+        "totalsY": 275,
+        "resultsY": 843,
+        "cards": 17,
+        "buttons": 64,
+        "callouts": 7
+      },
+      "after": "identical"
+    },
+    {
+      "state": "fresh-draft-1280",
+      "before": {
+        "height": 1293,
+        "screens": 1.62,
+        "totalsY": null,
+        "resultsY": null,
+        "cards": 3,
+        "buttons": 6,
+        "callouts": 0
+      },
+      "after": "identical"
+    },
+    {
+      "state": "fresh-calculated-1280",
+      "before": {
+        "height": 3171,
+        "screens": 3.96,
+        "totalsY": 275,
+        "resultsY": 765,
+        "cards": 12,
+        "buttons": 28,
+        "callouts": 2
+      },
+      "after": "identical"
+    },
+    {
+      "state": "fresh-approved-1280",
+      "before": {
+        "height": 2719,
+        "screens": 3.4,
+        "totalsY": 275,
+        "resultsY": 765,
+        "cards": 11,
+        "buttons": 24,
+        "callouts": 2
+      },
+      "after": "identical"
+    }
+  ],
+  "prior_audit": [
+    {
+      "state": "dashboard",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 1849,
+      "screens": 2.31,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 11,
+      "buttons": 6,
+      "callouts": 0
+    },
+    {
+      "state": "pay-periods",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 971,
+      "screens": 1.21,
+      "totalsY": null,
+      "resultsY": 348,
+      "cards": 2,
+      "buttons": 22,
+      "callouts": 0
+    },
+    {
+      "state": "run2-committed-connected",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 7063,
+      "screens": 8.83,
+      "totalsY": 275,
+      "resultsY": 1358,
+      "cards": 22,
+      "buttons": 123,
+      "callouts": 7
+    },
+    {
+      "state": "run3-connected-draft",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 6406,
+      "screens": 8.01,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 9,
+      "buttons": 38,
+      "callouts": 7
+    },
+    {
+      "state": "run4-eli-adjustment",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 5785,
+      "screens": 7.23,
+      "totalsY": 275,
+      "resultsY": 1258,
+      "cards": 19,
+      "buttons": 48,
+      "callouts": 5
+    },
+    {
+      "state": "run5-harbor-manual",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 4636,
+      "screens": 5.79,
+      "totalsY": 275,
+      "resultsY": 843,
+      "cards": 17,
+      "buttons": 64,
+      "callouts": 7
+    },
+    {
+      "state": "employees",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 1188,
+      "screens": 1.49,
+      "totalsY": null,
+      "resultsY": 454,
+      "cards": 2,
+      "buttons": 26,
+      "callouts": 0
+    },
+    {
+      "state": "employee-edit",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 4172,
+      "screens": 5.21,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 6,
+      "buttons": 11,
+      "callouts": 1
+    },
+    {
+      "state": "run2-dark-preference",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 7063,
+      "screens": 8.83,
+      "totalsY": null,
+      "resultsY": 1358,
+      "cards": 22,
+      "buttons": 123,
+      "callouts": 7
+    },
+    {
+      "state": "run2-expanded-cutoff",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 7291,
+      "screens": 9.11,
+      "totalsY": 275,
+      "resultsY": 1586,
+      "cards": 22,
+      "buttons": 123,
+      "callouts": 7
+    },
+    {
+      "state": "run2-tab-overview",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 1091,
+      "screens": 1.36,
+      "totalsY": 0,
+      "resultsY": null,
+      "cards": 7,
+      "buttons": 4,
+      "callouts": 0
+    },
+    {
+      "state": "run2-tab-checks",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 2385,
+      "screens": 2.98,
+      "totalsY": 0,
+      "resultsY": null,
+      "cards": 2,
+      "buttons": 60,
+      "callouts": 3
+    },
+    {
+      "state": "run2-tab-activity",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 1876,
+      "screens": 2.35,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 3,
+      "buttons": 5,
+      "callouts": 0
+    },
+    {
+      "state": "fresh-manual-hours-entered",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 4031,
+      "screens": 5.04,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 8,
+      "buttons": 14,
+      "callouts": 4
+    },
+    {
+      "state": "fresh-calculated",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 6095,
+      "screens": 7.62,
+      "totalsY": 275,
+      "resultsY": 3530,
+      "cards": 17,
+      "buttons": 42,
+      "callouts": 6
+    },
+    {
+      "state": "run3-readiness-collapsed",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 5946,
+      "screens": 7.43,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 9,
+      "buttons": 38,
+      "callouts": 7
+    },
+    {
+      "state": "fresh-run7",
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "height": 4031,
+      "screens": 5.04,
+      "totalsY": null,
+      "resultsY": null,
+      "cards": 8,
+      "buttons": 14,
+      "callouts": 4
+    }
+  ],
+  "source": "c-design-capture/measurements.json; full current before/after raw measurements retained in the task output directory."
+}

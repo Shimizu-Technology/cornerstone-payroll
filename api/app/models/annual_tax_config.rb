@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 # Stores tax configuration for a specific tax year.
 # Each year has one config with SS wage base, rates, and filing status configs.
 class AnnualTaxConfig < ApplicationRecord
@@ -84,17 +86,108 @@ class AnnualTaxConfig < ApplicationRecord
   validates :additional_medicare_rate, presence: true, numericality: { greater_than_or_equal_to: 0, less_than: 1 }
   validates :additional_medicare_threshold, presence: true, numericality: { greater_than: 0 }
 
+  RULE_ATTRIBUTES = %w[tax_year ss_wage_base ss_rate medicare_rate additional_medicare_rate additional_medicare_threshold].freeze
+  validates :verification_status, inclusion: { in: %w[draft verified] }
+  before_update :invalidate_changed_rules
+
+  def verified?
+    verification_status == "verified"
+  end
+
+  def self.unverified_message(year)
+    "#{year} tax tables have not been verified. An administrator must verify them before #{year} payroll can be calculated."
+  end
+
+  def self.verified_for_year?(year, lock: false)
+    config = for_year(year, lock: lock)
+    return config.verified? if config
+
+    # Only grandfathered legacy years can use the legacy calculation path.
+    return false if year.to_i > 2026
+
+    legacy = TaxTable.where(tax_year: year, verification_status: "verified")
+    lock ? legacy.lock("FOR SHARE").first.present? : legacy.exists?
+  end
+
+  def self.require_verified!(year, lock: false)
+    raise ArgumentError, unverified_message(year) unless verified_for_year?(year, lock: lock)
+  end
+
+  def invalidate_verification!
+    update_columns(verification_status: "draft", verified_by: nil, verified_at: nil) if persisted? && verified?
+  end
+
+  class StaleReviewError < ArgumentError; end
+
+  def review_digest
+    Digest::SHA256.hexdigest([ id, rules_digest, *FilingStatusConfig::FILING_STATUSES.map { |status| rules_digest(status) } ].to_json)
+  end
+
+  def verify!(actor:, source_note:, reviewed_digest: nil)
+    raise ArgumentError, "Admin access required" unless actor&.organization_admin?
+    raise ArgumentError, "A source note is required to verify tax tables" if source_note.to_s.strip.blank?
+
+    with_lock do
+      unless FilingStatusConfig::FILING_STATUSES.all? { |status| complete_withholding?(config_for(status)) }
+        raise ArgumentError, "Complete withholding tables for every filing status before verification"
+      end
+      unless reviewed_digest.present? && reviewed_digest == review_digest
+        raise StaleReviewError, "These tax tables changed after you opened the review. Reload them and review the current values before verifying."
+      end
+      update!(verification_status: "verified", verified_by: actor.id.to_s,
+              verified_at: Time.current, source_references: source_note.strip)
+    end
+  end
+
+  def complete_withholding?(filing)
+    return false unless filing
+
+    brackets = filing.tax_brackets.order(:bracket_order).to_a
+    return false if brackets.empty? || brackets.first.min_income != 0 || brackets.last.max_income.present?
+
+    return false unless brackets.all? { |bracket| bracket.max_income.nil? || bracket.max_income > bracket.min_income }
+
+    brackets.each_cons(2).all? { |left, right| left.max_income == right.min_income }
+  end
+
+  # Include rule contents as well as the verification time: a frozen or adjusted
+  # clock must not allow old calculated amounts to pass a later verification.
+  def rules_digest(filing_status = nil)
+    values = RULE_ATTRIBUTES.map do |attribute|
+      attribute == "tax_year" ? tax_year : public_send(attribute).to_d.to_s("F")
+    end
+    if filing_status
+      filing = config_for(filing_status)
+      return nil unless filing
+
+      values << filing.filing_status << filing.standard_deduction.to_d.to_s("F")
+      values << filing.tax_brackets.order(:bracket_order).map do |bracket|
+        [ bracket.min_income.to_d.to_s("F"), bracket.max_income&.to_d&.to_s("F"), bracket.rate.to_d.to_s("F") ]
+      end
+    end
+    Digest::SHA256.hexdigest(values.to_json)
+  end
+
+  def invalidate_changed_rules
+    return unless RULE_ATTRIBUTES.any? { |attribute| will_save_change_to_attribute?(attribute) }
+
+    self.verification_status = "draft"
+    self.verified_by = nil
+    self.verified_at = nil
+  end
+
   scope :active, -> { where(is_active: true) }
 
   # Get config for a specific year (returns single record or nil)
-  def self.for_year(year)
-    find_by(tax_year: year)
+  # Financial callers hold a shared rules lock for their payroll transaction.
+  def self.for_year(year, lock: false)
+    lock ? where(tax_year: year).lock("FOR SHARE").first : find_by(tax_year: year)
   end
 
   # Select rules strictly by the requested tax year. `is_active` controls the
   # admin UI/default setup flow; it must never override a pay date's year.
-  def self.current(year = Date.current.year)
-    for_year(year)
+  def self.current(year = Date.current.year, lock: false)
+    for_year(year, lock: lock)&.then { |config| config if config.verified? }
   end
 
   # The importer must reproduce retained history before a client's tax setup
@@ -144,7 +237,9 @@ class AnnualTaxConfig < ApplicationRecord
         medicare_rate: source.medicare_rate,
         additional_medicare_rate: source.additional_medicare_rate,
         additional_medicare_threshold: source.additional_medicare_threshold,
-        is_active: false
+        is_active: false,
+        verification_status: "draft",
+        source_references: "Copied from #{source_year}. All copied values require independent review for #{new_year}."
       )
 
       source.filing_status_configs.each do |fsc|

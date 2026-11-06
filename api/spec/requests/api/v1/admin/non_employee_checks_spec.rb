@@ -21,6 +21,24 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
     allow_any_instance_of(Api::V1::Admin::NonEmployeeChecksController).to receive(:current_user).and_return(admin_user)
   end
 
+  it "returns a useful verification error for a supersession trigger rejection" do
+    check = create(:non_employee_check, company: company)
+    pg_error = PG::RaiseException.new("database evidence mismatch")
+    error = ActiveRecord::StatementInvalid.new("database evidence mismatch")
+    allow_any_instance_of(NonEmployeeCheckSupersessionService).to receive(:supersede!) do
+      begin
+        raise pg_error
+      rescue PG::RaiseException
+        raise error
+      end
+    end
+    post "/api/v1/admin/non_employee_checks/#{check.id}/supersede_with_payroll_item", params: {
+      payroll_item_id: 1, reason: "Match the same physical check to payroll", recipient_verified: true
+    }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("failed database verification")
+  end
+
   describe "POST /api/v1/admin/non_employee_checks" do
     let(:valid_params) do
       {

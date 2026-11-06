@@ -1,0 +1,54 @@
+[
+  {
+    "case": "final-dialog-motion",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "case": "final-dialog-motion",
+    "width": 1280,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "case": "final-dialog-motion",
+    "width": 390,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "case": "final-dialog-motion",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "case": "final-totals-motion-save-reload",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "hours": 40,
+    "gross": 3000
+  },
+  {
+    "case": "final-totals-motion-save-reload",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "hours": 41,
+    "gross": 3025
+  }
+]

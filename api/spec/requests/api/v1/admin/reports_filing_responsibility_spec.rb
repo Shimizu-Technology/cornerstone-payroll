@@ -90,6 +90,12 @@ RSpec.describe "Payroll report filing responsibility gates", type: :request do
     )
 
     post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+    expect(response).to have_http_status(:conflict), response.body
+    expect(response.parsed_body.dig("filing", "status")).to eq("stale")
+    post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+    expect(response).to have_http_status(:ok), response.body
+
+    post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("filing", "status")).to eq("filing_ready")
   end

@@ -193,12 +193,12 @@ export function PayrollGoLive(): ReactElement {
 
   return (
     <div className="space-y-6 pb-12">
-      <header className="overflow-hidden rounded-[1.75rem] border border-slate-800 bg-slate-950 px-6 py-7 text-white shadow-xl shadow-slate-950/10 sm:px-8">
+      <header className="overflow-hidden rounded-[1.75rem] border border-neutral-800 bg-neutral-950 px-6 py-7 text-white shadow-xl shadow-neutral-950/10 sm:px-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-sky-300"><Route className="h-4 w-4" /> Controlled payroll launch</div>
+            <div className="flex items-center gap-2 text-xs font-bold text-sky-300"><Route className="h-4 w-4" /> Controlled payroll launch</div>
             <h1 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">Payroll go-live</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Copy reviewed live setup into {activeCompany?.name || 'the successor client'}, prove two parallel payrolls against QuickBooks, and preserve an attributed approval record.</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-300">Copy reviewed live setup into {activeCompany?.name || 'the successor client'}, prove two parallel payrolls against QuickBooks, and preserve an attributed approval record.</p>
           </div>
           <Badge className="w-fit border border-white/15 bg-white/10 px-3 py-1.5 text-white">
             {review ? review.status.replace('_', ' ') : 'Not started'}
@@ -246,16 +246,16 @@ export function PayrollGoLive(): ReactElement {
                         <Badge variant={proposal.decision === 'missing_in_both' ? 'warning' : proposal.requires_review ? 'default' : 'success'}>{proposalDecisionLabels[proposal.decision]}</Badge>
                       </div>
                       <dl className="space-y-2 text-sm">
-                        <div><dt className="text-xs font-medium text-neutral-500">Predecessor reference</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.source_value)}</dd></div>
-                        <div><dt className="text-xs font-medium text-neutral-500">Current successor</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.current_value)}</dd></div>
-                        <div><dt className="text-xs font-medium text-neutral-500">Will use</dt><dd className="break-words font-semibold text-neutral-900">{proposalValue(proposal.proposed_value)}</dd></div>
+                        <div><dt className="text-xs font-medium text-neutral-600">Predecessor reference</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.source_value)}</dd></div>
+                        <div><dt className="text-xs font-medium text-neutral-600">Current successor</dt><dd className="break-words text-neutral-700">{proposalValue(proposal.current_value)}</dd></div>
+                        <div><dt className="text-xs font-medium text-neutral-600">Will use</dt><dd className="break-words font-semibold text-neutral-900">{proposalValue(proposal.proposed_value)}</dd></div>
                       </dl>
                     </section>
                   ))}
                 </div>
                 <div className="hidden overflow-x-auto sm:block">
                   <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
-                    <thead className="bg-white text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                    <thead className="bg-white text-xs font-semibold text-neutral-600">
                       <tr><th className="px-5 py-3">Setting</th><th className="px-5 py-3">Predecessor reference</th><th className="px-5 py-3">Current successor</th><th className="px-5 py-3">Will use</th><th className="px-5 py-3">Decision</th></tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100 bg-white">
@@ -325,7 +325,7 @@ export function PayrollGoLive(): ReactElement {
               <Button type="submit" disabled={sealed || !payload.permissions.can_record_parallel || busy !== null}>{busy === 'parallel' ? 'Comparing…' : 'Save parallel comparison'}</Button>
             </form>
 
-            <div className="space-y-3"><h3 className="font-semibold text-neutral-950">Recorded comparisons</h3>{review.parallel_runs.length === 0 ? <p className="rounded-2xl border border-dashed border-neutral-300 px-5 py-8 text-center text-sm text-neutral-500">No parallel comparisons recorded yet.</p> : review.parallel_runs.map((run) => <div key={run.id} className="rounded-2xl border border-neutral-200 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-neutral-950">Pay date {formatDate(run.pay_date)}</p><p className="mt-1 text-xs text-neutral-500">Recorded {formatGuamDateTime(run.recorded_at)}{run.recorded_by_name ? ` by ${run.recorded_by_name}` : ''}</p></div><Badge variant={run.result === 'pass' ? 'success' : 'danger'}>{run.result === 'pass' ? 'Reconciled' : 'Needs review'}</Badge></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5"><Comparison label="Employees" source={run.source_employee_count} target={run.cornerstone_employee_count} /><Comparison label="Gross" source={money(run.source_gross_pay)} target={money(run.cornerstone_gross_pay)} /><Comparison label="Net" source={money(run.source_net_pay)} target={money(run.cornerstone_net_pay)} /><Comparison label="Taxes" source={money(run.source_taxes)} target={money(run.cornerstone_taxes)} /><Comparison label="Deductions" source={money(run.source_deductions)} target={money(run.cornerstone_deductions)} /></div><p className="mt-4 text-sm leading-6 text-neutral-600">{run.notes}</p></div>)}</div>
+            <div className="space-y-3"><h3 className="font-semibold text-neutral-950">Recorded comparisons</h3>{review.parallel_runs.length === 0 ? <p className="rounded-2xl border border-dashed border-neutral-300 px-5 py-8 text-center text-sm text-neutral-500">No parallel comparisons recorded yet.</p> : review.parallel_runs.map((run) => <div key={run.id} className="rounded-2xl border border-neutral-200 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-neutral-950">Pay date {formatDate(run.pay_date)}</p><p className="mt-1 text-xs text-neutral-600">Recorded {formatGuamDateTime(run.recorded_at)}{run.recorded_by_name ? ` by ${run.recorded_by_name}` : ''}</p></div><Badge variant={run.result === 'pass' ? 'success' : 'danger'}>{run.result === 'pass' ? 'Reconciled' : 'Needs review'}</Badge></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5"><Comparison label="Employees" source={run.source_employee_count} target={run.cornerstone_employee_count} /><Comparison label="Gross" source={money(run.source_gross_pay)} target={money(run.cornerstone_gross_pay)} /><Comparison label="Net" source={money(run.source_net_pay)} target={money(run.cornerstone_net_pay)} /><Comparison label="Taxes" source={money(run.source_taxes)} target={money(run.cornerstone_taxes)} /><Comparison label="Deductions" source={money(run.source_deductions)} target={money(run.cornerstone_deductions)} /></div><p className="mt-4 text-sm leading-6 text-neutral-600">{run.notes}</p></div>)}</div>
           </CardContent>
         </Card>
 
@@ -423,7 +423,7 @@ function Guardrail({ icon, title, text }: { icon: ReactElement; title: string; t
 }
 
 function Metric({ label, value }: { label: string; value: string }): ReactElement {
-  return <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{label}</p><p className="mt-1 text-lg font-bold text-neutral-950">{value}</p></div>;
+  return <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3"><p className="text-xs font-semibold text-neutral-600">{label}</p><p className="mt-1 text-lg font-bold text-neutral-950">{value}</p></div>;
 }
 
 function FieldSelect({ label, value, onChange, children, disabled, required }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode; disabled?: boolean; required?: boolean }): ReactElement {
@@ -444,7 +444,7 @@ function ReadinessFact({ label, value, passed }: { label: string; value: boolean
 }
 
 function Comparison({ label, source, target }: { label: string; source: string | number; target: string | number }): ReactElement {
-  return <div><p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-1 font-semibold text-neutral-900">QB {source}</p><p className="text-neutral-500">CP {target}</p></div>;
+  return <div><p className="text-xs font-semibold text-neutral-600">{label}</p><p className="mt-1 font-semibold text-neutral-900">QB {source}</p><p className="text-neutral-500">CP {target}</p></div>;
 }
 
 function Signoff({ title, signedAt, signedBy, acknowledgement, value, onChange, canSign, busy, onSign }: { title: string; signedAt?: string | null; signedBy?: string | null; acknowledgement: string; value: string; onChange: (value: string) => void; canSign: boolean; busy: boolean; onSign: () => void }): ReactElement {

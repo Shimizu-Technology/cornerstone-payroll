@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
-  def setup_records
+  def setup_records(source_type: "aire_services")
     company = create(:company)
     workweek = CompanyWorkweek.create!(
       company: company,
@@ -27,11 +27,18 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     )
     source = TimeTrackingSource.create!(
       company: company,
-      name: "AIRE",
-      source_type: "aire_services",
+      name: source_type == "aire_services" ? "AIRE" : "Neutral time",
+      source_type: source_type,
       base_url: "https://aire.example.com",
       shared_secret: "secret"
     )
+    if source_type == "custom"
+      TimeTracking::ConnectionIdentity.verify_and_pin!(source: source, payload: {
+        "source" => "neutral_time", "integration" => { "source_type" => "neutral_time", "protocol" => "shimizu_time_payroll",
+          "protocol_version" => "1.0", "source_instance_id" => SecureRandom.uuid,
+          "capabilities" => TimeTracking::Connector::AIRE_CAPABILITIES }
+      })
+    end
     [ company, pay_period, source ]
   end
 
@@ -112,6 +119,176 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     TimeTracking::BatchImportPreviewService.new(pay_period: pay_period, source: source).call
   end
 
+  def confirm_mapping!(company:, source:, employee:, source_user_uuid: nil)
+    TimeTrackingEmployeeMapping.create!(
+      company: company,
+      time_tracking_source: source,
+      employee: employee,
+      source_user_id: "aire-user-1",
+      source_user_uuid: source_user_uuid
+    )
+  end
+
+  describe "unset payroll wage rates" do
+    def wage_safety_preview(company, pay_period, source, employee)
+      confirm_mapping!(company: company, source: source, employee: employee)
+      adjustments = [
+        {
+          "source_time_entry_id" => "unset-rate-101", "line_key" => "flight",
+          "source_kind" => "current", "original_work_date" => "2026-08-20",
+          "original_week_start" => "2026-08-16", "source_category_id" => "flight",
+          "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+          "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0
+        }
+      ]
+      preview_import(pay_period: pay_period, source: source,
+        payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+    end
+
+    %w[label override saved_preview].each do |match_path|
+      it "rejects an unset #{match_path} rate without saving zero wages or import receipts" do
+        company, pay_period, source = setup_records
+        employee = create(:employee, company: company, department: create(:department, company: company))
+        rate = create(:employee_wage_rate, employee: employee, label: match_path == "override" ? "Unconfigured" : "Flight Hours",
+          rate: match_path == "saved_preview" ? 25 : nil, is_primary: true)
+        create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25) if match_path == "override"
+        import = wage_safety_preview(company, pay_period, source, employee)
+        category = import.processed_payload.fetch("rows").first.fetch("categories").first
+        if match_path == "saved_preview"
+          expect(category.fetch("employee_wage_rate_id")).to eq(rate.id)
+          rate.update!(rate: nil)
+        end
+        mappings = if match_path == "override"
+          [ { source_user_id: "aire-user-1", employee_id: employee.id, wage_rate_mappings: [
+            { source_category_id: "flight", source_category_key: "flight_hours", source_category_name: "Flight Hours",
+              source_kind: "current", employee_wage_rate_id: rate.id }
+          ] } ]
+        else
+          []
+        end
+        item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+          hours_worked: 2, holiday_hours: 8, pto_hours: 4)
+        before_attributes = item.attributes
+
+        result = described_class.new(import: import, mappings: mappings, applied_by: create(:user, company: company)).call
+
+        expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+        if match_path == "label"
+          expect(category["employee_wage_rate_id"]).to be_nil
+          expect(import.processed_payload.fetch("rows").first.fetch("warnings"))
+            .to include(include("code" => "unmapped_wage_rate"))
+        end
+        expect(import.reload.status).to eq("previewed")
+        expect(item.reload.attributes).to eq(before_attributes)
+        expect(TimeTrackingEntryAllocation.where(time_tracking_import: import)).to be_empty
+        expect(AirePayrollAcknowledgement.where(time_tracking_import: import)).to be_empty
+        expect(AirePayrollEntryAcknowledgement.where(time_tracking_import: import)).to be_empty
+      end
+    end
+
+    [ false, true ].each do |explicit_override|
+      it "retains an intentional zero rate as a valid saved wage (explicit override: #{explicit_override})" do
+        company, pay_period, source = setup_records
+        employee = create(:employee, company: company, department: create(:department, company: company))
+        rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 0, is_primary: true)
+        import = wage_safety_preview(company, pay_period, source, employee)
+        expect(import.processed_payload.fetch("rows").first.fetch("categories").first)
+          .to include("employee_wage_rate_id" => rate.id, "payroll_rate_cents" => 0)
+
+        mappings = explicit_override ? [ { source_user_id: "aire-user-1", employee_id: employee.id, wage_rate_mappings: [
+          { source_category_id: "flight", source_category_key: "flight_hours", source_category_name: "Flight Hours",
+            source_kind: "current", employee_wage_rate_id: rate.id }
+        ] } ] : []
+        result = described_class.new(import: import, mappings: mappings, applied_by: create(:user, company: company)).call
+
+        expect(result[:errors]).to be_empty
+        expect(import.reload.status).to eq("applied")
+        expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours)
+          .to contain_exactly(include("employee_wage_rate_id" => rate.id, "rate" => 0.0, "regular_hours" => 8.0))
+        expect(TimeTrackingEntryAllocation.where(time_tracking_import: import).count).to eq(1)
+      end
+    end
+
+    it "rejects unset rates for hourly contractors" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, :contractor, company: company, department: create(:department, company: company),
+        contractor_pay_type: "hourly")
+      create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: nil, is_primary: true)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to contain_exactly(include(error: /Map Flight Hours/))
+      expect(pay_period.payroll_items.reload).to be_empty
+      expect(import.reload.status).to eq("previewed")
+    end
+
+    it "retains the salary pay basis when an old hourly wage amount is unset" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, :salary, company: company, department: create(:department, company: company))
+      create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: nil, is_primary: true)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.employment_type).to eq("salary")
+      expect(item.pay_rate).to eq(52_000)
+      expect(item.hours_worked).to eq(8)
+      expect(item.wage_rate_hours).to be_empty
+    end
+
+    it "preserves manual holiday and PTO hours at a configured rate when the primary placeholder is unset" do
+      company, pay_period, source = setup_records
+      employee = create(:employee, company: company, department: create(:department, company: company))
+      create(:employee_wage_rate, employee: employee, label: "Unconfigured", rate: nil, is_primary: true)
+      rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25)
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        hours_worked: 0, holiday_hours: 8, pto_hours: 4)
+      import = wage_safety_preview(company, pay_period, source, employee)
+
+      result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(result[:errors]).to be_empty
+      expect(item.reload.wage_rate_hours).to contain_exactly(include("employee_wage_rate_id" => rate.id,
+        "rate" => 25.0, "regular_hours" => 8.0, "holiday_hours" => 8.0, "pto_hours" => 4.0))
+    end
+  end
+
+  it "rejects excluded payroll employees without claiming their finalized entries were imported" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    confirm_mapping!(company: company, source: source, employee: employee)
+    pay_period.pay_period_excluded_employees.create!(employee: employee)
+    adjustments = [
+      {
+        "source_time_entry_id" => "101",
+        "line_key" => "flight:2500",
+        "source_kind" => "current",
+        "original_work_date" => "2026-08-20",
+        "original_week_start" => "2026-08-16",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 8.0,
+        "regular_hours" => 8.0,
+        "overtime_hours" => 0.0
+      }
+    ]
+    import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+
+    result = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+    expect(result[:errors]).to contain_exactly(include(employee_id: employee.id, error: /excluded from this pay period/))
+    expect(result[:skipped]).to be_empty
+    expect(import.reload.status).to eq("previewed")
+    expect(TimeTrackingEntryAllocation.where(time_tracking_import: import)).to be_empty
+    expect(AirePayrollAcknowledgement.where(time_tracking_import: import)).to be_empty
+    expect(AirePayrollEntryAcknowledgement.where(time_tracking_import: import)).to be_empty
+    expect(pay_period.payroll_items.where(employee: employee)).to be_empty
+  end
+
   it "requires a written acknowledgement and calculates a correction with Cornerstone's wage rate" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
@@ -161,6 +338,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
               source_category_id: "flight",
               source_category_key: "flight_hours",
               source_category_name: "Flight Hours",
+              source_kind: "correction",
               employee_wage_rate_id: new_rate.id
             }
           ]
@@ -219,6 +397,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     source_user_uuid = SecureRandom.uuid
     payload.fetch("employees").first["source_user_uuid"] = source_user_uuid
     payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: source_user_uuid)
     import = preview_import(pay_period: pay_period, source: source, payload: payload)
 
     results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
@@ -239,6 +418,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "links an exact committed historical payroll without recalculating its amounts" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "historical@example.com")
     adjustments = [
@@ -288,6 +468,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "records a small legacy rounding exception without changing committed payroll amounts" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "rounding@example.com")
     adjustment = {
@@ -343,6 +524,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "accepts a legacy rounding exception exactly at the 0.05-hour boundary" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "boundary@example.com")
     adjustment = {
@@ -399,9 +581,10 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   {
     "printed" => [ "payment_prepared", "printed" ],
     "delivered" => [ "payment_issued", "delivered" ],
-    "voided" => [ "payment_voided", "voided" ]
+    "voided" => [ nil, "voided" ]
   }.each do |check_status, (payment_status, event_type)|
     it "reconciles #{check_status} payment state using the matching check event timestamp" do
+      ensure_verified_test_tax_years(2026)
       company, pay_period, source = setup_records
       employee = create(:employee, company: company, department: create(:department, company: company), email: "#{check_status}@example.com")
       adjustment = {
@@ -416,10 +599,13 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "regular_hours" => 8.0,
         "overtime_hours" => 0.0
       }
+      payload = payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-#{check_status.upcase}")
+      payload.fetch("employees").first["source_user_uuid"] = SecureRandom.uuid
+      payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
       import = preview_import(
         pay_period: pay_period,
         source: source,
-        payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-#{check_status.upcase}")
+        payload: payload
       )
       item = create(
         :payroll_item,
@@ -460,16 +646,31 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         reconciliation_note: "Matched against the signed historical payroll register."
       ).call
 
-      acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
-      expect(acknowledgement).to have_attributes(
-        payment_reference: "7001",
-        source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment"
-      )
-      expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
+      if payment_status
+        acknowledgement = import.aire_payroll_entry_acknowledgements.find_by!(status: payment_status)
+        expect(acknowledgement).to have_attributes(
+          payment_reference: "7001",
+          source_event_key: "reconciliation_payment_#{item.id}:#{import.id}:#{payment_status}:#{item.id}:historic-payment:flight-current"
+        )
+        expect(acknowledgement.occurred_at).to be_within(1.second).of(state_at)
+      else
+        # A legacy instrument void is not evidence of a wage/source reversal.
+        expect(item.reload.payroll_included?).to be(true)
+        expect(import.aire_payroll_entry_acknowledgements.pluck(:status)).to eq([ "committed" ])
+        expect(import.time_tracking_entry_allocations.pluck(:payroll_item_id, :total_hours)).to eq([ [ item.id, 8.to_d ] ])
+        actor = create(:user, company: company)
+        event = PayPeriodCorrectionService.void!(pay_period: pay_period, actor: actor, reason: "Reverse legacy retained payroll obligation")
+        acknowledgement = item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").sole
+        expect(acknowledgement.occurred_at).to be_within(1.second).of(event.created_at)
+        expect(acknowledgement.source_time_entry_id).to eq("historic-payment")
+        TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: pay_period.reload, void_event: event)
+        expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
+      end
     end
   end
 
   it "refuses to reconcile a voided historical pay period" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     pay_period.update!(status: "committed", correction_status: "voided", committed_at: Time.current)
     import = create(
@@ -490,6 +691,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   end
 
   it "refuses to link a historical payroll when employee hours exceed the legacy rounding tolerance" do
+    ensure_verified_test_tax_years(2026)
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "mismatch@example.com")
     adjustment = {
@@ -603,6 +805,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "overtime_hours" => 0.0
       }
     ]
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
     allow(AirePayrollStatusSyncJob).to receive(:perform_later).and_raise(StandardError, "queue unavailable")
 
@@ -644,7 +847,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       applied_by: create(:user, company: company)
     ).call
 
-    expect(results[:errors]).to contain_exactly(include(error: "Finalized AIRE batch rows cannot be skipped"))
+    expect(results[:errors]).to contain_exactly(include(error: "Finalized time tracking batch rows cannot be skipped"))
     expect(import.reload.status).to eq("previewed")
     expect(pay_period.payroll_items).to be_empty
   end
@@ -680,6 +883,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "regular_hours" => -2.0,
       "overtime_hours" => 0.0
     }
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ]))
 
     results = described_class.new(
@@ -722,6 +926,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "regular_hours" => 10.0
       )
     ]
+    confirm_mapping!(company: company, source: source, employee: employee)
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
     row = import.processed_payload.fetch("rows").first
 
@@ -758,5 +963,256 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
 
     expect(results[:errors]).to contain_exactly(include(error: /negative Cornerstone payroll gross adjustment/))
     expect(pay_period.payroll_items).to be_empty
+  end
+  it "previews and applies a neutral producer's exact lines using the same payroll calculation and receipt path" do
+    company, pay_period, source = setup_records(source_type: "custom")
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "neutral-worker@example.com")
+    rate = create(:employee_wage_rate, employee: employee, label: "Work", rate: 25, is_primary: true, active: true)
+    uuid = SecureRandom.uuid
+    adjustment = { "source_time_entry_id" => "101", "line_key" => "work:2500", "source_kind" => "current",
+      "original_work_date" => "2026-08-20", "original_week_start" => "2026-08-16", "source_category_id" => "work",
+      "category" => { "id" => "work", "key" => "work", "name" => "Work" },
+      "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0 }
+    payload = payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "NEUTRAL-101")
+    payload["source"] = "neutral_time"
+    # The real HTTP client requires the pinned descriptor. This test's client
+    # double must retain that same producer contract in the frozen batch.
+    payload["integration"] = { "source_type" => "neutral_time", "protocol" => source.source_protocol,
+      "protocol_version" => source.source_protocol_version, "source_instance_id" => source.expected_source_instance_id,
+      "capabilities" => source.source_capabilities, "policy_constraints" => source.source_policy_constraints }
+    payload["employees"].first["source_user_uuid"] = uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: uuid)
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+    expect(results[:errors]).to be_empty
+    item = pay_period.payroll_items.find_by!(employee: employee)
+    expect(item.wage_rate_hours).to contain_exactly(include("employee_wage_rate_id" => rate.id,
+      "regular_hours" => 8.0, "overtime_hours" => 2.0, "label" => /Neutral time current period/))
+    expect(import.reload).to have_attributes(status: "applied", external_batch_id: "NEUTRAL-101")
+    expect(import.time_tracking_entry_allocations).to contain_exactly(have_attributes(source_user_uuid: uuid,
+      source_time_entry_id: "101", line_key: "work:2500", regular_hours: 8, overtime_hours: 2))
+    expect(import.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id))
+      .to contain_exactly([ "imported", "101" ])
+  end
+  it "fails closed without payroll writes when a preview's required capability is revoked" do
+    company, pay_period, source = setup_records(source_type: "custom")
+    payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [])
+    payload["source"] = "neutral_time"
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    source.update!(source_capabilities: [ "time_summary_v1" ])
+    expect { described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call }
+      .to raise_error(ArgumentError, /does not support finalized batch/)
+    expect(import.reload.status).to eq("previewed")
+    expect(pay_period.payroll_items).to be_empty
+    expect(import.time_tracking_entry_allocations).to be_empty
+    expect(import.aire_payroll_acknowledgements).to be_empty
+  end
+
+  it "requires history approval for draft preview and apply while keeping committed historical review available" do
+    ensure_verified_test_tax_years(2026)
+    company, pay_period, source = setup_records(source_type: "custom")
+    payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [])
+    payload["source"] = "neutral_time"
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    source.update!(historical_reconciliation_required: true)
+    expect { TimeTracking::BatchImportPreviewService.new(pay_period: pay_period, source: source).call }
+      .to raise_error(ArgumentError, /historical payroll reconciliation/)
+    expect { described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call }
+      .to raise_error(ArgumentError, /historical payroll reconciliation/)
+    expect(import.reload.status).to eq("previewed")
+    expect(pay_period.payroll_items).to be_empty
+    expect(import.aire_payroll_acknowledgements).to be_empty
+    pay_period.update!(status: "committed", committed_at: Time.current)
+    expect(preview_import(pay_period: pay_period, source: source, payload: payload)).to eq(import)
+    result = TimeTracking::ReconcileCommittedImportService.new(import: import, mappings: [], reconciled_by: create(:user, company: company),
+      reconciliation_note: "Verified empty historical source batch").call
+    expect(result[:errors]).to be_empty
+    expect(import.reload.status).to eq("applied")
+    expect(pay_period.payroll_items).to be_empty
+  end
+
+  describe "regular salary roster after a connected import", type: :request do
+    def prepare_regular_roster(import_hours: true, **period_attributes)
+      company, period, source = setup_records
+      period.update!(period_attributes) if period_attributes.any?
+      actor = create(:user, company: company, role: "admin")
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
+      create(:tax_table, tax_year: 2026)
+      hourly = create(:employee, company: company, email: "hourly-roster@example.com", pay_rate: 25)
+      create(:employee_wage_rate, employee: hourly, label: "Flight Hours", rate: 25, is_primary: true)
+      salary = create(:employee, :salary, company: company, first_name: "Dana", last_name: "SyntheticSalary", pay_rate: 52_000)
+      import = nil
+      if import_hours
+        confirm_mapping!(company: company, source: source, employee: hourly)
+        adjustments = [ {
+          "source_time_entry_id" => "salary-roster-hours", "line_key" => "flight:2500",
+          "source_kind" => "current", "original_work_date" => "2026-08-20", "original_week_start" => "2026-08-16",
+          "source_category_id" => "flight", "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+          "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0
+        } ]
+        payload = payload_for(pay_period: period, employee: hourly, adjustments: adjustments)
+        import = preview_import(pay_period: period, source: source, payload: payload)
+        result = TimeTracking::ApplyImportService.new(import: import, mappings: [], applied_by: actor).call
+        expect(result[:errors]).to be_empty
+        expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      end
+      [ company, period, hourly, salary, import ]
+    end
+
+    def calculate_roster(period, **inputs)
+      post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", params: inputs, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+    end
+
+    it "exposes initial salary defaults after real finalized import application and calculates them once" do
+      company, period, hourly, salary, import = prepare_regular_roster
+      create(:employee, company: company) # An hourly employee absent from the import.
+      frozen_payload = import.reload.raw_payload.deep_dup
+      frozen_checksum = import.external_batch_checksum
+      frozen_allocations = import.time_tracking_entry_allocations.map(&:attributes)
+
+      get "/api/v1/admin/pay_periods/#{period.id}"
+      expect(response).to have_http_status(:ok)
+      ids = response.parsed_body.dig("pay_period", "default_employee_ids")
+      expect(ids).to contain_exactly(hourly.id, salary.id)
+      expect(period.payroll_items.count).to eq(1) # Reading defaults must not persist wages.
+      calculate_roster(period, employee_ids: ids)
+      expect(period.payroll_items.find_by!(employee: salary).gross_pay).to eq(2000.to_d)
+      expect(period.payroll_items.find_by!(employee: hourly).gross_pay).to eq(200.to_d)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to contain_exactly(hourly.id, salary.id)
+      expect(period.payroll_items.find_by!(employee: salary).gross_pay).to eq(2000.to_d)
+      expect(import.reload.raw_payload).to eq(frozen_payload)
+      expect(import.external_batch_checksum).to eq(frozen_checksum)
+      expect(import.time_tracking_entry_allocations.map(&:attributes)).to eq(frozen_allocations)
+    end
+
+    it "combines current categories that resolve to one rate into one earning line and calculates them" do
+      company, period, source = setup_records
+      actor = create(:user, company: company, role: "admin")
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(actor.id)
+      create(:tax_table, tax_year: 2026)
+      pilot = create(:employee, company: company, email: "solo-pilot@example.com", pay_rate: 30)
+      flight = create(:employee_wage_rate, employee: pilot, label: "Flight Hours", rate: 30, is_primary: true)
+      ground = create(:employee_wage_rate, employee: pilot, label: "Regular", rate: 15, is_primary: false)
+      TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "solo",
+        earning_label: "Flight Hours", import_enabled: true, reviewed_by: actor,
+        reason: "Solo hours are paid at the Flight Hours rate", evidence: "Leon decision November 4 2026")
+      line = lambda do |id, key, date, category, hours, kind: "current", week: "2026-08-16"|
+        { "source_time_entry_id" => id, "line_key" => key, "source_kind" => kind, "original_work_date" => date,
+          "original_week_start" => week, "source_category_id" => category["id"], "category" => category,
+          "total_hours" => hours, "regular_hours" => hours, "overtime_hours" => 0.0 }
+      end
+      flight_category = { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" }
+      solo_category = { "id" => "solo", "key" => "solo", "name" => "Solo" }
+      ground_category = { "id" => "ground", "key" => "regular", "name" => "Regular" }
+      adjustments = [
+        line.call("201", "flight:1", "2026-08-18", flight_category, 6.0),
+        line.call("202", "flight:2", "2026-08-27", flight_category, 2.0, week: "2026-08-23"),
+        line.call("203", "solo:1", "2026-08-21", solo_category, 3.5),
+        line.call("204", "ground:1", "2026-08-22", ground_category, 4.0),
+        line.call("188", "flight:0", "2026-08-12", flight_category, 1.5, kind: "carryover", week: "2026-08-09")
+      ]
+      confirm_mapping!(company: company, source: source, employee: pilot)
+      import = preview_import(pay_period: period, source: source, payload: payload_for(pay_period: period, employee: pilot, adjustments: adjustments))
+      result = TimeTracking::ApplyImportService.new(import: import, mappings: [
+        { source_user_id: "aire-user-1", employee_id: pilot.id, include: true, wage_rate_mappings: [
+          { source_category_id: "ground", source_category_key: "regular", source_category_name: "Regular", source_kind: "current", employee_wage_rate_id: ground.id }
+        ] }
+      ], applied_by: actor).call
+      expect(result[:errors]).to be_empty
+
+      entries = period.payroll_items.find_by!(employee: pilot).wage_rate_hours
+      expect(entries).to contain_exactly(
+        include("employee_wage_rate_id" => flight.id, "regular_hours" => 11.5, "label" => "Flight Hours · AIRE current period · $30.00/hr"),
+        include("employee_wage_rate_id" => flight.id, "regular_hours" => 1.5, "label" => /AIRE carryover from Aug 12, 2026/),
+        include("employee_wage_rate_id" => ground.id, "regular_hours" => 4.0, "label" => /Regular · AIRE current period/)
+      )
+      current_flight = entries.find { |entry| entry["label"].include?("Flight Hours · AIRE current period") }
+      expect(current_flight["source_lines"].map { |source_line| source_line["source_time_entry_id"] }).to contain_exactly("201", "202", "203")
+
+      post "/api/v1/admin/pay_periods/#{period.id}/run_payroll", params: { employee_ids: [ pilot.id ] }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      item = period.payroll_items.find_by!(employee: pilot)
+      expect(item.gross_pay).to eq(((11.5 + 1.5) * 30 + 4 * 15).to_d)
+      expect(item.payroll_item_earnings.where(category: "regular").pluck(:label, :amount)).to contain_exactly(
+        [ "Flight Hours · AIRE current period · $30.00/hr", 345.to_d ],
+        [ a_string_matching(/AIRE carryover from Aug 12, 2026/), 45.to_d ],
+        [ a_string_matching(/Regular · AIRE current period/), 60.to_d ]
+      )
+    end
+
+    it "uses the same salary amount in an ordinary manual run" do
+      _company, period, _hourly, salary = prepare_regular_roster(import_hours: false)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ salary.id ])
+      expect(period.payroll_items.first.gross_pay).to eq(2000.to_d)
+    end
+
+    it "keeps deliberate exclusions through repeated calculation and import retry" do
+      _company, period, hourly, salary, import = prepare_regular_roster
+      PayPeriodExcludedEmployee.create!(pay_period: period, employee: salary)
+      calculate_roster(period)
+      repeated_preview = preview_import(pay_period: period, source: import.time_tracking_source, payload: import.raw_payload)
+      expect(repeated_preview).to eq(import)
+      expect do
+        TimeTracking::ApplyImportService.new(import: repeated_preview, mappings: [], applied_by: import.applied_by).call
+      end.to raise_error(ArgumentError, "Only previewed time tracking imports can be applied")
+      calculate_roster(period, employee_ids: [ hourly.id, salary.id ])
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(response.parsed_body.dig("pay_period", "default_employee_ids")).to eq([ hourly.id ])
+    end
+
+    it "preserves explicit selection and does not expand it after calculation invalidation" do
+      company, period, hourly, salary = prepare_regular_roster
+      calculate_roster(period, employee_ids: [ hourly.id ])
+      create(:employee, :salary, company: company)
+      period.reload.invalidate_calculation!(reason: "Synthetic setup change")
+      expect(period.reload).to have_attributes(status: "draft", calculated_at: nil)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    it "does not default salary into a regular run with base salary disabled" do
+      _company, period, hourly, salary = prepare_regular_roster(includes_base_salary: false)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    it "keeps an adjustment run selected-only even when base salary is enabled" do
+      _company, period, hourly, salary = prepare_regular_roster(run_purpose: "adjustment", includes_base_salary: true)
+      calculate_roster(period)
+      expect(period.payroll_items.pluck(:employee_id)).to eq([ hourly.id ])
+      expect(period.payroll_items.where(employee: salary)).not_to exist
+    end
+
+    [ true, false ].each do |recurring|
+      it "preserves entered salary and recurring setup policy (#{recurring}) on repeat calculation" do
+        company, period, hourly, salary = prepare_regular_roster(includes_recurring_items: recurring)
+        field = create(:payroll_field_definition, company: company, name: "Synthetic rent", kind: "deduction",
+          tax_treatment: "post_tax_deduction", category: "rent", default_amount: 25)
+        EmployeePayrollField.create!(employee: salary, payroll_field_definition: field, active: true,
+          start_date: period.start_date)
+        calculate_roster(period, salary_overrides: { salary.id.to_s => 725 })
+        item = period.payroll_items.find_by!(employee: salary)
+        expect(item).to have_attributes(salary_override: 725.to_d, gross_pay: 725.to_d)
+        expect(item.payroll_item_field_entries.sum(:amount)).to eq(recurring ? 25.to_d : 0.to_d)
+        calculate_roster(period)
+        expect(item.reload).to have_attributes(salary_override: 725.to_d, gross_pay: 725.to_d)
+        expect(item.payroll_item_field_entries.sum(:amount)).to eq(recurring ? 25.to_d : 0.to_d)
+        expect(period.payroll_items.pluck(:employee_id)).to contain_exactly(hourly.id, salary.id)
+      end
+    end
   end
 end

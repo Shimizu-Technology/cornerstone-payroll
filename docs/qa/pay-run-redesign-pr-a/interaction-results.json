@@ -1,0 +1,86 @@
+[
+  {
+    "case": "dialog-context",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "scroll": 1147,
+    "focusContained": true,
+    "focusReturned": true,
+    "filtersPreserved": true
+  },
+  {
+    "case": "dialog-context",
+    "width": 1280,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "scroll": 1147,
+    "focusContained": true,
+    "focusReturned": true,
+    "filtersPreserved": true
+  },
+  {
+    "case": "dialog-context",
+    "width": 390,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "scroll": 2479,
+    "focusContained": true,
+    "focusReturned": true,
+    "filtersPreserved": true
+  },
+  {
+    "case": "dialog-context",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "scroll": 2479,
+    "focusContained": true,
+    "focusReturned": true,
+    "filtersPreserved": true
+  },
+  {
+    "case": "worksheet-calculate-reload",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "hours": 40,
+    "gross": 3000,
+    "items": [
+      {
+        "employee_id": 8,
+        "hours_worked": "40.0",
+        "gross_pay": "1000.0",
+        "net_pay": "890.58"
+      },
+      {
+        "employee_id": 9,
+        "hours_worked": "0.0",
+        "gross_pay": "2000.0",
+        "net_pay": "1697.83"
+      }
+    ]
+  },
+  {
+    "case": "worksheet-calculate-reload",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "hours": 41,
+    "gross": 3025,
+    "items": [
+      {
+        "employee_id": 8,
+        "hours_worked": "41.0",
+        "gross_pay": "1025.0",
+        "net_pay": "911.17"
+      },
+      {
+        "employee_id": 9,
+        "hours_worked": "0.0",
+        "gross_pay": "2000.0",
+        "net_pay": "1697.83"
+      }
+    ]
+  }
+]

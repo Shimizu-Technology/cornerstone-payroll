@@ -22,6 +22,10 @@ class PaycheckHistoryPdfGenerator
   def generate
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 36, 36, 46, 36 ])
     render_header(pdf)
+    data.review_warnings(include_voided: true).map { |warning| warning[:message] }.uniq.each do |message|
+      pdf.text "Review required: #{message}", size: 10
+      pdf.move_down 8
+    end
 
     rows = data.paycheck_history_rows(include_voided: true)
     if rows.empty?
@@ -49,7 +53,7 @@ class PaycheckHistoryPdfGenerator
     pdf.move_down 12
     pdf.font_size(20) { pdf.text "Paycheck history report", align: :center }
     pdf.move_down 12
-    pdf.font_size(14) { pdf.text "Paychecks #{data.qb_date_range_label.sub(/\AFrom/, 'from')}", align: :center }
+    pdf.font_size(14) { pdf.text "Pay date: #{data.pay_date_label} | Work period: #{data.pay_period_label}", align: :center }
     pdf.move_down 24
   end
 
@@ -77,15 +81,18 @@ class PaycheckHistoryPdfGenerator
   def render_detail_table(pdf, rows)
     start_new_page_if_needed(pdf, 150)
     pdf.font_size(12) { pdf.text "Payroll detail", style: :bold, color: TEXT }
+    pdf.move_down 4
+    pdf.font_size(8) { pdf.text "Taxes are included in total deductions. Gross pay plus other pay minus total deductions equals net pay.", color: MUTED }
     pdf.move_down 8
 
-    table_rows = [ [ "Employee", "Gross pay", "Taxes", "Deductions", "Net pay", "Employer cost" ] ]
+    table_rows = [ [ "Employee", "Gross pay", "Other pay", "Taxes (included)", "Total deductions (includes taxes)", "Net pay", "Employer cost" ] ]
     rows.each do |row|
-      table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
+      table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:total_pay].to_d - row[:gross_pay].to_d), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
     end
     table_rows << [
       "Total",
       money(rows.sum { |row| row[:gross_pay].to_f }),
+      money(rows.sum { |row| row[:total_pay].to_d - row[:gross_pay].to_d }),
       money(rows.sum { |row| row[:taxes].to_f }),
       money(rows.sum { |row| row[:deductions].to_f }),
       money(rows.sum { |row| row[:net_pay].to_f }),
@@ -99,7 +106,7 @@ class PaycheckHistoryPdfGenerator
       cells.size = 8
       row(0).background_color = QB_HEADER_BG
       row(-1).background_color = QB_TOTAL_BG
-      columns(1..5).align = :right
+      columns(1..6).align = :right
     end
   end
 
@@ -187,6 +194,6 @@ class PaycheckHistoryPdfGenerator
         pdf.font_size(8) { pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ] }
       end
     end
-    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, -12 ], size: 8, align: :right, color: MUTED
   end
 end

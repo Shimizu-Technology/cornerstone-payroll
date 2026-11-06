@@ -38,8 +38,18 @@ export function useEmployeeIntakeSettings(companyId: number, isClient: boolean, 
     if (!settings?.enabled || !settings.expires_at) return;
     const delay = new Date(settings.expires_at).getTime() - Date.now();
     if (!Number.isFinite(delay)) return;
+    const refreshExpiredPolicy = () => {
+      if (Date.now() >= new Date(settings.expires_at!).getTime()) void reload();
+    };
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshExpiredPolicy(); };
     const timer = window.setTimeout(() => { void reload(); }, Math.min(Math.max(delay, 0) + 100, 2_147_483_647));
-    return () => window.clearTimeout(timer);
+    window.addEventListener('focus', refreshExpiredPolicy);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('focus', refreshExpiredPolicy);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [settings, reload]);
 
   return { settings, loading, error, reload };

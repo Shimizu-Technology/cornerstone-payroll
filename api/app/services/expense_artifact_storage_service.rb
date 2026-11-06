@@ -26,7 +26,7 @@ class ExpenseArtifactStorageService
     extension = { "application/pdf" => ".pdf", "image/jpeg" => ".jpg", "image/png" => ".png",
                   "image/webp" => ".webp" }.fetch(content_type)
     filename = File.basename(file.original_filename.to_s).gsub(/[^a-zA-Z0-9._-]/, "_").presence || "receipt#{extension}"
-    key = "expense-ledger/organization-#{expense.organization_id}/expense-#{expense.id}/#{SecureRandom.uuid}#{extension}"
+    key = StagingStoragePolicy.new_key("expense-ledger/organization-#{expense.organization_id}/expense-#{expense.id}/#{SecureRandom.uuid}#{extension}")
     @storage.upload(key, StringIO.new(bytes), content_type: content_type)
 
     expense.expense_artifacts.create!(

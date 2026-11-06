@@ -1,0 +1,74 @@
+{
+  "status": "passed",
+  "positions": [
+    {
+      "label": "Employees",
+      "x": 16,
+      "valueX": 16,
+      "y": 360,
+      "width": 179
+    },
+    {
+      "label": "Gross pay",
+      "x": 195,
+      "valueX": 195,
+      "y": 360,
+      "width": 179
+    },
+    {
+      "label": "Total deductions",
+      "x": 16,
+      "valueX": 16,
+      "y": 424,
+      "width": 179
+    },
+    {
+      "label": "Net pay",
+      "x": 16,
+      "valueX": 16,
+      "y": 488,
+      "width": 358
+    },
+    {
+      "label": "DRT deposit",
+      "x": 195,
+      "valueX": 195,
+      "y": 424,
+      "width": 179
+    }
+  ],
+  "checks": [
+    {
+      "name": "left column label and figures align",
+      "passed": true
+    },
+    {
+      "name": "right column label and figures align",
+      "passed": true
+    },
+    {
+      "name": "Net is last and spans both columns",
+      "passed": true
+    },
+    {
+      "name": "all four phone tabs fit",
+      "passed": true
+    },
+    {
+      "name": "reports active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "activity active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "checks active tab visible on direct load",
+      "passed": true
+    },
+    {
+      "name": "no page horizontal overflow",
+      "passed": true
+    }
+  ]
+}

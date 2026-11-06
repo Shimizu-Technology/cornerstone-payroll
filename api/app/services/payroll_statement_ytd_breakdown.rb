@@ -36,6 +36,12 @@ class PayrollStatementYtdBreakdown
     rows_for(:employer_contribution)
   end
 
+  # Legacy cached PDFs may still show these accountant-only warnings.
+  # Downloads use this to regenerate affected employee statements.
+  def review_warnings
+    @review_warnings ||= PayrollReportComponentReview.for_items(ytd_source_items)
+  end
+
   private
 
   attr_reader :payroll_item, :employee, :pay_period, :company
@@ -83,7 +89,7 @@ class PayrollStatementYtdBreakdown
     components = case kind
     when :deduction
       report_data.deduction_contribution_entries_for_item(item).filter_map do |entry|
-        next unless entry.bucket.in?(%w[pre_tax post_tax]) && entry.employee_amount.to_d.positive?
+        next unless entry.bucket.in?(%w[pre_tax post_tax]) && entry.employee_amount.to_d.nonzero?
 
         Component.new(
           label: statement_label_for_entry(entry),
@@ -93,13 +99,13 @@ class PayrollStatementYtdBreakdown
       end
     when :other_pay
       report_data.other_pay_lines_for(item).filter_map do |line|
-        next unless line.amount.to_d.positive?
+        next unless line.amount.to_d.nonzero?
 
         Component.new(label: line.label, amount: line.amount.to_d, semantic: semantic_for_other_pay(line.label))
       end
     when :employer_contribution
       report_data.deduction_contribution_entries_for_item(item).filter_map do |entry|
-        next unless entry.company_amount.to_d.positive?
+        next unless entry.company_amount.to_d.nonzero?
 
         Component.new(
           label: statement_label_for_entry(entry),
@@ -181,12 +187,13 @@ class PayrollStatementYtdBreakdown
   end
 
   def historical_breakdown(field)
-    historical_balance.source_breakdown.to_h.fetch(field, {}).to_h
+    breakdown = historical_balance.source_breakdown.to_h[field]
+    breakdown.is_a?(Hash) ? breakdown : {}
   end
 
   def component(label, amount, semantic)
     value = BigDecimal(amount.to_s, exception: false)
-    return if label.to_s.blank? || value.nil? || value.zero?
+    return if label.to_s.blank? || value.nil? || !value.finite? || value.zero?
 
     Component.new(label: label.to_s, amount: value, semantic: semantic)
   end
@@ -360,7 +367,7 @@ class PayrollStatementYtdBreakdown
           period_id: pay_period.id
         )
       prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
-      items = employee.payroll_items.not_voided.reportable
+      items = employee.payroll_items.financially_reportable.reportable
         .where(company_id: company.id, pay_period_id: prior_periods.select(:id))
         .includes(
           :payroll_item_earnings,
@@ -370,7 +377,7 @@ class PayrollStatementYtdBreakdown
         )
         .to_a
 
-      if !payroll_item.voided? &&
+      if payroll_item.payroll_included? &&
           pay_period.correction_status.in?([ nil, "correction" ]) &&
           (historical_cutoff.nil? || pay_date > historical_cutoff)
         items << payroll_item

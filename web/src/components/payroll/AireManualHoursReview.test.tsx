@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { AireManualHoursReview } from './AireManualHoursReview';
 
 const apiMocks = vi.hoisted(() => ({ manualReview: vi.fn() }));
@@ -67,7 +68,28 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('AireManualHoursReview', () => {
-  it('shows exact AIRE regular, overtime, carryover, and the Payroll correction to make', async () => {
+  it.each(['rejected', 'saved-link fallback'])('explains an unconnected account for a %s response without showing the header error', async (mode) => {
+    const message = 'Missing X-Aire-Delegation-Token header';
+    if (mode === 'rejected') apiMocks.manualReview.mockRejectedValue(new Error(message));
+    else apiMocks.manualReview.mockResolvedValue({ source_available: false, source_error: message });
+    render(<MemoryRouter><AireManualHoursReview payPeriodId={17} payPeriodStatus="draft" payrollHours={{}} aireRecordLinked={false} /></MemoryRouter>);
+    expect(await screen.findByText('Connect your time tracking account to review AIRE hours for this payroll.')).toBeTruthy();
+    expect(screen.queryByText(/Missing X-Aire-Delegation-Token/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Settings → Time tracking account' }).getAttribute('href')).toBe('/app/aire-account-connection');
+  });
+
+  it('does not turn an offline saved-link response into zero payable hours or a successful readiness check', async () => {
+    apiMocks.manualReview.mockResolvedValue({ ...review, source_available: false, source_error: 'Time source unavailable',
+      employees: [], exclusions: [], issues: null, summary: null });
+    render(<AireManualHoursReview payPeriodId={67} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Time source unavailable'));
+    expect(screen.queryByText('Time tracking payable now')).toBeNull();
+    expect(screen.queryByText('Regular and OT totals match')).toBeNull();
+    expect(screen.queryByText(/Time tracking has no payable time/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh check' })).toBeTruthy();
+  });
+
+  it('shows exact time tracking regular, overtime, carryover, and the Payroll correction to make', async () => {
     render(
       <AireManualHoursReview
         payPeriodId={67}
@@ -77,11 +99,11 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('Manual AIRE hours check')).toBeTruthy();
+    expect(await screen.findByText('Hours ready for payroll')).toBeTruthy();
     expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
-    expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
+    expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
-    expect(screen.getByText(/there is no separate “mark paid” step in AIRE/i)).toBeTruthy();
+    expect(screen.getByText(/carries its exact entry links through calculation/i)).toBeTruthy();
   });
 
   it('updates the match result immediately as Payroll hours change', async () => {
@@ -119,7 +141,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Update needed')).toBeTruthy();
-    expect(screen.getByText('Enter 27.20 regular and 1.00 OT in the payroll table.')).toBeTruthy();
+    expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
   });
 
   it('counts negative corrections that need attention without double-counting exclusions', async () => {
@@ -143,7 +165,7 @@ describe('AireManualHoursReview', () => {
     expect(within(attentionCard as HTMLElement).getByText('1')).toBeTruthy();
   });
 
-  it('refreshes live AIRE totals and explains automatic paid-state sync for a linked run', async () => {
+  it('refreshes live time tracking totals and explains automatic paid-state sync for a linked run', async () => {
     const user = userEvent.setup();
     render(
       <AireManualHoursReview
@@ -153,14 +175,14 @@ describe('AireManualHoursReview', () => {
         aireRecordLinked
       />
     );
-    await screen.findByText(/Recording each check as issued automatically marks/i);
+    await screen.findByText(/reports check preparation and delivery back to time tracking/i);
 
     await user.click(screen.getByRole('button', { name: 'Refresh check' }));
     await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(2));
   });
 
-  it('keeps manual payroll available when AIRE cannot be reached', async () => {
-    apiMocks.manualReview.mockRejectedValue(new Error('AIRE is temporarily unavailable'));
+  it('keeps manual payroll available when time tracking cannot be reached', async () => {
+    apiMocks.manualReview.mockRejectedValue(new Error('time tracking is temporarily unavailable'));
     render(
       <AireManualHoursReview
         payPeriodId={67}
@@ -170,7 +192,82 @@ describe('AireManualHoursReview', () => {
       />
     );
 
-    expect(await screen.findByText('The manual check could not load.')).toBeTruthy();
-    expect(screen.getByText(/You can still process payroll manually/i)).toBeTruthy();
+    expect(await screen.findByText('The live time tracking preview could not load.')).toBeTruthy();
+    expect(screen.getByText(/Refresh before using time tracking hours for payroll/i)).toBeTruthy();
   });
+});
+
+it('shows historical evidence and wage differences without claiming another payment', async () => {
+  apiMocks.manualReview.mockResolvedValue({
+    ...review,
+    cornerstone_manual_allocations: [{ id: 1, employee_name: 'Example Worker', source_time_entry_id: '301',
+      original_work_date: '2026-08-20', regular_hours: 4, overtime_hours: 0, status: 'issued' }],
+    historical_classification_reviews: [{ id: 1, employee_name: 'Example Worker', check_number: '2001',
+      source_entry_count: 1, source_regular_hours: 3, source_overtime_hours: 1,
+      payroll_regular_hours: 4, payroll_overtime_hours: 0, gross_wage_difference: 5,
+      status: 'complete', note: 'Owner confirmed historical check; wage split still needs review' }],
+  });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  await screen.findByRole('region', { name: 'Historical payment reconciliation' });
+  expect(screen.getByText(/does not create another paycheck/)).toBeTruthy();
+  expect(screen.getByText(/Gross wage difference: \+\$5.00/)).toBeTruthy();
+  expect(screen.getByText(/wage split still needs review/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Historical classification reviews' }).closest('details')).toBeNull();
+});
+
+it('shows the direction when issued check wages exceed the source estimate', async () => {
+  apiMocks.manualReview.mockResolvedValue({ ...review, historical_classification_reviews: [{
+    id: 2, employee_name: 'Example Worker', check_number: '2002', source_entry_count: 1,
+    source_regular_hours: 4, source_overtime_hours: 0, payroll_regular_hours: 3, payroll_overtime_hours: 1,
+    gross_wage_difference: -5, status: 'complete', note: 'Retained for review',
+  }] });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  expect(await screen.findByText(/Gross wage difference: −\$5.00 \(issued check wages exceed time tracking estimate\)/)).toBeTruthy();
+});
+
+it('keeps owner-reported historical payments visibly held pending check evidence', async () => {
+  apiMocks.manualReview.mockResolvedValue({ ...review, payment_attestations: [{
+    id: 1, source_time_entry_id: '501', source_user_uuid: 'example', hours: 4,
+    original_work_date: '2026-08-20', status: 'pending_evidence', attested_at: '2026-09-01',
+    source_changed: true, evidence_needed: 'Supply the issued check and delivery record',
+  }] });
+  render(<AireManualHoursReview payPeriodId={9} payPeriodStatus="committed" payrollHours={{}} aireRecordLinked={false} />);
+  await screen.findByRole('region', { name: 'Payment evidence pending' });
+  expect(screen.getByText(/excluded from payable hours/)).toBeTruthy();
+  expect(screen.getByText(/Supply the issued check/)).toBeTruthy();
+  expect(screen.getByText(/source changed after/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Payment evidence pending' }).closest('details')).toBeNull();
+});
+
+
+it('retains the read-only snapshot and payroll values during same-period source refresh', async () => {
+  const props = { payPeriodId: 67, payPeriodStatus: 'draft' as const, payrollHours: { '7': { regular: 7.25, overtime: 1 } }, aireRecordLinked: false };
+  const view = render(<AireManualHoursReview {...props} />);
+  const retained = (await screen.findAllByText('Includes 6.10 carryover'))[0];
+  let resolveRefresh!: (value: typeof review) => void;
+  apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+  view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
+  expect(screen.getByRole('status').textContent).toContain('Refreshing hours ready for payroll');
+  expect(screen.queryByText(/Comparing time tracking with the hours entered/)).toBeNull();
+  expect(screen.getAllByText('Includes 6.10 carryover')[0]).toBe(retained);
+  expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
+  await act(async () => resolveRefresh({ ...review, summary: { ...review.summary, total_hours: 34.2, regular_hours: 33.2 } }));
+  expect(await screen.findByText('33.20 regular · 1.00 OT')).toBeTruthy();
+  expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('clears the retained snapshot on period change and ignores the old-period response', async () => {
+  const props = { payPeriodId: 67, payPeriodStatus: 'draft' as const, payrollHours: {}, aireRecordLinked: false };
+  const view = render(<AireManualHoursReview {...props} />);
+  await screen.findAllByText('Traven Cruz');
+  let resolveOld!: (value: typeof review) => void;
+  apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+  view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
+  apiMocks.manualReview.mockResolvedValue({ ...review, employees: [] });
+  view.rerender(<AireManualHoursReview {...props} payPeriodId={68} refreshToken={1} />);
+  expect(screen.queryAllByText('Traven Cruz')).toHaveLength(0);
+  await waitFor(() => expect(apiMocks.manualReview).toHaveBeenCalledTimes(3));
+  await act(async () => resolveOld(review));
+  expect(screen.queryAllByText('Traven Cruz')).toHaveLength(0);
 });

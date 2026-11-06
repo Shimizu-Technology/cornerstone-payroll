@@ -12,6 +12,7 @@ class ClerkInvitationService
   end
 
   def create_invitation(email:, redirect_url: nil, public_metadata: {}, ignore_existing: false)
+    StagingOutboundPolicy.clerk_target!(email: email)
     raise "CLERK_SECRET_KEY not configured" unless configured?
 
     body = {
@@ -41,6 +42,9 @@ class ClerkInvitationService
   end
 
   def revoke_invitation(invitation_id)
+    if StagingOutboundPolicy.staging?
+      StagingOutboundPolicy.clerk_target!(email: User.find_by(clerk_invitation_id: invitation_id)&.email)
+    end
     raise "CLERK_SECRET_KEY not configured" unless configured?
 
     response = post_json("/invitations/#{invitation_id}/revoke", {})

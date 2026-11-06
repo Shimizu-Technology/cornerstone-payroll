@@ -1,0 +1,24 @@
+[
+  {
+    "device": "desktop",
+    "width": 1440,
+    "height": 900,
+    "client_stay": "passed",
+    "org_stay": "passed",
+    "client_leave": "passed",
+    "prompts": 3,
+    "org_leave": "passed",
+    "source": "595c200605a44317a571053a8214b3ccdd5373ca"
+  },
+  {
+    "device": "phone",
+    "width": 390,
+    "height": 844,
+    "client_stay": "passed",
+    "org_stay": "passed",
+    "client_leave": "passed",
+    "prompts": 3,
+    "org_leave": "passed",
+    "source": "595c200605a44317a571053a8214b3ccdd5373ca"
+  }
+]

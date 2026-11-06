@@ -109,6 +109,9 @@ test('preview failure clears prior initialized notes and leaves no fallback inst
   failPreview();
   await openEditor(page, false);
   await expectNotes(page, []);
+  await expect(page.getByRole('alert')).toContainText('Saved cover details could not load');
+  await expect(page.getByRole('button', { name: 'Retry cover details', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate Full Print Package', exact: true })).toBeDisabled();
 });
 
 for (const width of [320, 390, 768]) {
@@ -135,7 +138,7 @@ test.describe('AIRE record timestamps', () => {
       type: 'module',
       content: `import { mountAireRecordsHarness } from '${modulePath}'; mountAireRecordsHarness();`,
     });
-    const dialog = page.getByRole('dialog', { name: 'Linked AIRE records' });
+    const dialog = page.getByRole('dialog', { name: 'Linked time tracking records' });
     const value = (label: string) => dialog.getByText(label, { exact: true }).locator('..').locator('dd');
     await expect(value('Source cutoff')).toHaveText(/May 1, 2026, 6:00:00 AM (GMT\+10|ChST)/);
     await expect(value('Imported')).toHaveText(/May 1, 2026, 6:30:00 AM (GMT\+10|ChST)/);

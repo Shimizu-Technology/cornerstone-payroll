@@ -75,14 +75,48 @@ RSpec.describe QuickbooksHistory::CutoverVerificationJob, type: :job do
     expect(AuditLog.where(action: "historical_imports#verify_cutover", record_id: review.id)).not_to exist
   end
 
-  it "fails safely if the initiating operator loses access before execution" do
+  it "preserves pending evidence if the initiating operator loses access before execution" do
     review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
     actor.update!(active: false)
 
     described_class.perform_now(batch.id, actor.id, review.verification_started_at.iso8601(6))
 
-    expect(review.reload.status).to eq("failed")
-    expect(review.verification_error).to eq("Cutover verification could not be completed. Review the source files and try again.")
+    expect(review.reload.status).to eq("pending")
+    expect(review.verification_error).to be_nil
     expect(AuditLog.where(action: "historical_imports#verify_cutover", record_id: review.id)).not_to exist
+    expect(AuditLog.where(action: "historical_imports#cutover_verification_failed", record_id: review.id)).not_to exist
+  end
+
+  it "does not persist a verification or failure when access is revoked during retained-source parsing" do
+    accountant = create(:user, company: company, role: "accountant")
+    assignment = create(:company_assignment, user: accountant, company: company, client_management: true, granted_by: actor)
+    review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: accountant).call.review
+    before_state = review.attributes
+    audits = AuditLog.where(company_id: company.id).count
+    allow_any_instance_of(QuickbooksHistory::CutoverVerificationService).to receive(:reparse_retained_sources!).and_wrap_original do |original|
+      result = original.call
+      assignment.update!(client_management: false)
+      result
+    end
+
+    described_class.perform_now(batch.id, accountant.id, review.verification_started_at.iso8601(6))
+
+    expect(review.reload.attributes).to eq(before_state)
+    expect(AuditLog.where(company_id: company.id).count).to eq(audits)
+  end
+
+  it "does not write failure bookkeeping when parsing fails after access is revoked" do
+    review = QuickbooksHistory::CutoverVerificationEnqueueService.new(batch: batch, actor: actor).call.review
+    before_state = review.attributes
+    audits = AuditLog.where(company_id: company.id).count
+    allow_any_instance_of(QuickbooksHistory::CutoverVerificationService).to receive(:reparse_retained_sources!) do
+      actor.update!(active: false)
+      raise "Synthetic parser failure"
+    end
+
+    described_class.perform_now(batch.id, actor.id, review.verification_started_at.iso8601(6))
+
+    expect(review.reload.attributes).to eq(before_state)
+    expect(AuditLog.where(company_id: company.id).count).to eq(audits)
   end
 end

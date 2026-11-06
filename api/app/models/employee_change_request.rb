@@ -85,6 +85,7 @@ class EmployeeChangeRequest < ApplicationRecord
       ensure_pending!
       employee.lock!
       verify_original_values!
+      actor = authorized_review_actor!(actor)
       apply_proposed_changes!(actor: actor)
       EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor) if request_kind == "create"
       update!(
@@ -99,6 +100,7 @@ class EmployeeChangeRequest < ApplicationRecord
   def reject!(actor:, review_notes:)
     with_lock do
       ensure_pending!
+      actor = authorized_review_actor!(actor)
       update!(
         status: :rejected,
         reviewed_by: actor,
@@ -109,6 +111,16 @@ class EmployeeChangeRequest < ApplicationRecord
   end
 
   private
+
+  def authorized_review_actor!(actor)
+    actor = User.lock.find_by(id: actor&.id)
+    company.company_assignments.where(user_id: actor&.id).lock.load
+    return actor if StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: company) &&
+      actor.payroll_access_allowed? && actor.can_access_company?(company_id)
+
+    errors.add(:base, "Client configuration access required")
+    raise ActiveRecord::RecordInvalid, self
+  end
 
   def ensure_pending!
     return if pending?

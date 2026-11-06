@@ -2,7 +2,10 @@
 
 module ApplicationCable
   class Connection < ActionCable::Connection::Base
-    identified_by :current_user, :current_company
+    # Revocation identity is stable when a user changes clients or loses access.
+    # Company scope remains separately authenticated by the one-time ticket.
+    identified_by :current_user
+    attr_accessor :current_company
 
     def connect
       self.current_user = find_verified_user
@@ -20,6 +23,7 @@ module ApplicationCable
       payload = cable_ticket_payload
       user = User.find_by(id: payload&.dig("user_id"))
       reject_unauthorized_connection unless user&.payroll_access_allowed?
+      reject_unauthorized_connection unless StagingOutboundPolicy.tester?(user_id: user.id, email: user.email, id: user.clerk_id)
 
       user
     end

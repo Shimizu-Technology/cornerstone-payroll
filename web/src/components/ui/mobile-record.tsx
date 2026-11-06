@@ -32,7 +32,7 @@ export function MobileRecordCard({ children, className, tone = 'default', onClic
 export function MobileField({ label, value, className }: { label: string; value: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">{label}</p>
+      <p className="text-xs font-semibold text-neutral-600">{label}</p>
       <div className="mt-1 text-sm font-medium text-neutral-900">{value}</div>
     </div>
   );

@@ -1,0 +1,50 @@
+[
+  {
+    "case": "tax preference, stable desktop frame, modal focus, phone filters",
+    "width": 1280,
+    "status": "passed"
+  },
+  {
+    "case": "overview query alias, permission guarded late-hours dialog, return link, malformed hash",
+    "width": 1280,
+    "status": "passed",
+    "actions": [
+      {
+        "label": "Pay late hours",
+        "location": "Payroll → Hours → Review timecards, held hours and team → Held time",
+        "accountant": "disabled",
+        "admin": "enabled dialog"
+      },
+      {
+        "label": "Return to original payroll",
+        "location": "Payroll → Hours → Late hours adjustment",
+        "href": "/companies/1/pay-runs/2/work"
+      }
+    ],
+    "financialLateHoursExecution": "not run"
+  },
+  {
+    "case": "tax preference, stable desktop frame, modal focus, phone filters",
+    "width": 390,
+    "status": "passed"
+  },
+  {
+    "case": "overview query alias, permission guarded late-hours dialog, return link, malformed hash",
+    "width": 390,
+    "status": "passed",
+    "actions": [
+      {
+        "label": "Pay late hours",
+        "location": "Payroll → Hours → Review timecards, held hours and team → Held time",
+        "accountant": "disabled",
+        "admin": "enabled dialog"
+      },
+      {
+        "label": "Return to original payroll",
+        "location": "Payroll → Hours → Late hours adjustment",
+        "href": "/companies/1/pay-runs/2/work"
+      }
+    ],
+    "financialLateHoursExecution": "not run"
+  }
+]

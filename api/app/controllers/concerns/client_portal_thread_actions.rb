@@ -2,6 +2,7 @@
 
 module ClientPortalThreadActions
   extend ActiveSupport::Concern
+  include ExplicitCompanyAccess
 
   included do
     before_action :set_portal_thread, only: [ :show, :update, :mark_read ]

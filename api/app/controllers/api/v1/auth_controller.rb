@@ -22,7 +22,10 @@ module Api
             company_name: current_company&.name,
             home_company_id: current_user.company_id,
             assigned_company_ids: current_user.accessible_company_ids,
-            capabilities: StaffRolePolicy.capabilities_for(current_user)
+            capabilities: StaffRolePolicy.capabilities_for(current_user),
+            company_capabilities: Company.where(id: current_user.accessible_company_ids).order(:id).to_h do |company|
+              [ company.id.to_s, StaffRolePolicy.capabilities_for(current_user, company: company) ]
+            end
           }
         }
       end

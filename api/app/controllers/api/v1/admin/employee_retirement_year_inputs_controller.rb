@@ -22,6 +22,9 @@ module Api
         def create
           input = nil
           EmployeeRetirementYearInput.transaction do
+            Company.lock.find(@employee.company_id)
+            @employee.lock!
+            revalidate_current_company_write_access!(company: @employee.company, capability: :manage_client_configuration)
             input = @employee.employee_retirement_year_inputs.create!(
               input_params.merge(company: @employee.company, created_by: current_user)
             )

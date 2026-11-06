@@ -1,0 +1,14 @@
+[
+  {
+    "device": "desktop",
+    "statement_preview": "passed",
+    "check_preview": "passed",
+    "source": "595c200605a44317a571053a8214b3ccdd5373ca"
+  },
+  {
+    "device": "phone",
+    "statement_preview": "passed",
+    "check_preview": "passed",
+    "source": "595c200605a44317a571053a8214b3ccdd5373ca"
+  }
+]

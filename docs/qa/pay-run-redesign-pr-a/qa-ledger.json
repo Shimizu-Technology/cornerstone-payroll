@@ -1,0 +1,101 @@
+{
+  "executor": "agent",
+  "baseline": "569f96d7",
+  "scope": "PR A comprehensive changed-pay-run characterization and affected flows",
+  "cases": [
+    {
+      "id": "A01",
+      "title": "Pixel and action parity across all requested states",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "1280x800",
+        "390x844"
+      ],
+      "evidence": "pixel-parity.json, before/after-deterministic, runtime/source action inventories"
+    },
+    {
+      "id": "A02",
+      "title": "Worksheet edits, calculate and persisted reload",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "1280x800",
+        "390x844"
+      ],
+      "evidence": "interaction-results.json; saved-calculation-1280.png and saved-calculation-390.png; manual DB/API amounts after reload"
+    },
+    {
+      "id": "A03",
+      "title": "Employee review dialog preserves filters, scroll and focus",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "1280x800",
+        "390x844"
+      ],
+      "evidence": "interaction-results.json; recordings/dialog-*.webm; route, scroll, filters and focus assertions"
+    },
+    {
+      "id": "A04",
+      "title": "Tabs, overview alias and read-only views",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "existing automated workspace tests; no new manual read-only fixture walkthrough"
+      ],
+      "evidence": "existing PayRunWorkspace tests for training baseline, snapshot, reviewer access and mounted views; workspace/client source unchanged"
+    },
+    {
+      "id": "A05",
+      "title": "Public browser lane",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "existing lane"
+      ],
+      "evidence": "e2e-public.log: 131 passed"
+    },
+    {
+      "id": "A06",
+      "title": "Release lifecycle browser lane",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "existing lane"
+      ],
+      "evidence": "e2e-release.log: 45 passed with CI test queue adapter"
+    },
+    {
+      "id": "A07",
+      "title": "Refresh browser lane",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "existing lane"
+      ],
+      "evidence": "e2e-refresh.log: 10 passed"
+    },
+    {
+      "id": "A08",
+      "title": "Pay-item browser lane",
+      "status": "passed",
+      "required": true,
+      "dimensions": [
+        "existing lane"
+      ],
+      "evidence": "e2e-pay-items.log: 24 passed"
+    }
+  ],
+  "summary": {
+    "passed": 8,
+    "failed": 0,
+    "blocked": 0,
+    "not_run": 0
+  },
+  "limits": [
+    "Native phone, physical printing and operator acceptance not run.",
+    "Copied October source import rejected by inherited synthetic grant; not a new extraction defect. Successful copied-source October import not established.",
+    "No new overview alias in PR A; that change belongs to PR B."
+  ]
+}

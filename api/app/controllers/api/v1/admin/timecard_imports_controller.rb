@@ -66,7 +66,7 @@ module Api
               if item.new_record?
                 item.company_id = current_company_id
                 item.employment_type = employee.employment_type
-                item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+                item.pay_rate = employee.default_payroll_rate
               end
 
               item.hours_worked = mapping[:regular_hours].to_f if mapping[:regular_hours].present?

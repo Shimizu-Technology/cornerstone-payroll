@@ -271,7 +271,7 @@ module PayrollIntake
     def uploaded_document_attributes(starting_position:)
       document_uuid = SecureRandom.uuid
       file_snapshots.map.with_index do |snapshot, index|
-        key = "payroll-intake/#{company.id}/#{pay_period.id}/#{document_uuid}/#{index}-#{snapshot[:filename]}"
+        key = StagingStoragePolicy.new_key("payroll-intake/#{company.id}/#{pay_period.id}/#{document_uuid}/#{index}-#{snapshot[:filename]}")
         @stored_references << key
         storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
         verify_retained_source!(key, snapshot)

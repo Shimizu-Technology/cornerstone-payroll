@@ -1,0 +1,123 @@
+{
+  "base": "34c99bb25bfffdde8e16d1a36927e23d9b60ecaa",
+  "tested_source_commit": "7999d583494148785f624e43918c26ed5e5f4a90",
+  "web_tree": "30e968523e92cb08d4d0dfb1bbf19790d44fe2c1",
+  "web_src_tree": "c3151124cc4ae6d94b312b7c9e28b844e5ca2d45",
+  "api_tree": "a66bfef045d5cae61cf27aec0c1660f73a5a6341",
+  "application_fix_commits": [
+    "0452f0357bf2c6b4825f34eb5547a11725c2f7e3",
+    "3e39438074e9e8e38f59b963fdfd177c8bd0c4fb"
+  ],
+  "final_browser_application_source": "3e394380; 7999d583 changes test readiness only",
+  "api_gate_reuse": {
+    "examples": 5090,
+    "api_tree": "a66bfef045d5cae61cf27aec0c1660f73a5a6341",
+    "reason": "API tree unchanged from full PR B gate"
+  },
+  "sources": [
+    {
+      "file": "web/e2e/connected-manual-payroll.spec.ts",
+      "sha256": "aeb46254008c76fe0f120263081811db4f0dfd72fbbc29b0128fe0344ceb3a0a"
+    },
+    {
+      "file": "web/e2e/gate0-payroll-release.spec.ts",
+      "sha256": "92723c7e61631de1bfe4cb9c9b14f0008de4fc944048a54d63ea26a52ff83747"
+    },
+    {
+      "file": "web/e2e/helpers/pay-run-actions.ts",
+      "sha256": "bcec63a41836fbcd472fbe412c10ed1f06e508a9990a7513495e5c8f1299ae07"
+    },
+    {
+      "file": "web/e2e/pay-item-workflow-release.spec.ts",
+      "sha256": "00213501c3262e1642f91610a91783e7875ae7e9ac8ebb6a013d388a6b2ec9b7"
+    },
+    {
+      "file": "web/e2e/payroll-refresh-release.spec.ts",
+      "sha256": "3cd95c4ed4ff59b4fc1b5cd773c122b252a0d472041709d63cb785d685e60c28"
+    },
+    {
+      "file": "web/e2e/public-time-tracking-settings.spec.ts",
+      "sha256": "55ad7237980e3e81e22ea7d3ef884cab1b13f32344420bcbdeec973d03841151"
+    },
+    {
+      "file": "web/src/components/layout/Layout.feedback-focus.test.tsx",
+      "sha256": "251ea206e6c5ff7a344b8faa59dc809eb6289c3b7876de7da5110c92123c0430"
+    },
+    {
+      "file": "web/src/components/payroll/PayrollCalculationIssues.tsx",
+      "sha256": "98eaa2200ac2f64bb511a05936e90a7d2799974bc641ad15186eec9778614147"
+    },
+    {
+      "file": "web/src/components/records/WorkspaceTabs.tsx",
+      "sha256": "fd29862095bfaa55fc0a55b23da30a595b886a05c903d306e9528f006f7374b2"
+    },
+    {
+      "file": "web/src/components/reports/ReportsDownloadPanel.tsx",
+      "sha256": "78adc54de17ac64ce5c762064e2e06fd1ff15064a9367336e777a884a3bc7d36"
+    },
+    {
+      "file": "web/src/components/ui/alert.tsx",
+      "sha256": "05617ac53b1ad66891fdbd21c3cf8208e43cc14b5d52e59c2d2e6d5fd01a7d54"
+    },
+    {
+      "file": "web/src/lib/routes.ts",
+      "sha256": "b57e6d7a1a199baf2adbec263de92185b6b3c34df750ab55d61c24ffd602ebf0"
+    },
+    {
+      "file": "web/src/pages/PayPeriodDetail.refresh.test.tsx",
+      "sha256": "a2acaf19828e5eaa973a76fe7f96e45c39a354ce810b6a207ab0a9d9748e6d2a"
+    },
+    {
+      "file": "web/src/pages/PayPeriodDetail.tsx",
+      "sha256": "ecb8b81dea1099e6b76178fabd7ac6a07ba5377d546df3734ff0b3ee28f0539a"
+    },
+    {
+      "file": "web/src/pages/pay-periods/PayRunWorkspace.test.tsx",
+      "sha256": "fbbd2ba78eb613176d50fbafa3012f078ba458943f21b67f5ed48aa474dbd47b"
+    },
+    {
+      "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+      "sha256": "c4051a80968b74c435060c5e4b7ffb482cbc8cdb1c7d20c6eb995c544de3bd51"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx",
+      "sha256": "b214afacb2277477ac812df4a2ee38d3f5d5f029935c1060f3a165ae0460f52c"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunFeedback.tsx",
+      "sha256": "0e8a0d1d09963a96305d48cb45c1ac662cd57f0827e8291ae1dd569e7712d452"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+      "sha256": "e178376d7c8ff6f2f555a174581e6c36b7076526d293e0394d7fc36e831f4e39"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunRecordHeader.test.tsx",
+      "sha256": "02572a24d7e842f4964414de1cb4c2b6c41c6c9d8151264a748518895737a8a0"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunRecordHeader.tsx",
+      "sha256": "f2ea6065e7865c1c5e78a08d5d9822284bbe7f31265bd7398e6fe2c7642329cc"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunReviewDialogs.tsx",
+      "sha256": "17966c5102ae9f777725332de463ac76af0013c2c15944abbfc05594d7f00a54"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunSavedRecords.tsx",
+      "sha256": "555fb5638a1faf1140278c145dc3fe74bf8a8482db9449615753c7ccf0f12e6c"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunSummary.tsx",
+      "sha256": "c7989e82c58fc34d572fab7e50e550666a15d4146f99dba2c8cd8e018f45bccb"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/PayRunSupportingDetails.tsx",
+      "sha256": "752444aa923dc60041b07e48edeb963ce5b6ca5b55fdcbfa658184aa4adaf522"
+    },
+    {
+      "file": "web/src/pages/pay-periods/pay-run/payRunSupport.ts",
+      "sha256": "e9903625ac8ee5f8fe5431d59272155038570db8c449669f8487e1d9f33ea0cd"
+    }
+  ]
+}

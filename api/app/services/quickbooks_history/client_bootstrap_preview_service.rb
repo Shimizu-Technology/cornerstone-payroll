@@ -14,6 +14,7 @@ module QuickbooksHistory
 
       HistoricalClientBootstrap.transaction do
         batch.lock!
+        ensure_authorized_actor!(lock: true)
         existing = batch.historical_client_bootstrap
         next existing if existing&.applied? || existing&.pending?
 
@@ -46,8 +47,8 @@ module QuickbooksHistory
 
     attr_reader :batch, :actor
 
-    def ensure_authorized_actor!
-      ClientBootstrapAuthorization.ensure_authorized!(actor: actor, company_id: batch.company_id)
+    def ensure_authorized_actor!(lock: false)
+      @actor = ClientBootstrapAuthorization.ensure_authorized!(actor: actor, lock: lock, company_id: batch.company_id)
     end
 
     def record_audit!(bootstrap, plan)

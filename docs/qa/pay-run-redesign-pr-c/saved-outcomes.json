@@ -1,0 +1,134 @@
+[
+  {
+    "step": "calculate",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "savedStatus": "calculated",
+    "current": "payroll-results",
+    "gross": 3000,
+    "net": 2588.41,
+    "periodId": 16,
+    "itemCount": 2
+  },
+  {
+    "step": "recalculate",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "savedStatus": "calculated",
+    "current": "payroll-results",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 16,
+    "itemCount": 2
+  },
+  {
+    "step": "approve",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "savedStatus": "approved",
+    "current": "payroll-commit",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 16,
+    "itemCount": 2
+  },
+  {
+    "step": "commit",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "savedStatus": "committed",
+    "current": "payroll-results",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 16,
+    "itemCount": 2
+  },
+  {
+    "step": "calculate",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "savedStatus": "calculated",
+    "current": "payroll-results",
+    "gross": 3000,
+    "net": 2588.41,
+    "periodId": 17,
+    "itemCount": 2
+  },
+  {
+    "step": "recalculate",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "savedStatus": "calculated",
+    "current": "payroll-results",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 17,
+    "itemCount": 2
+  },
+  {
+    "step": "approve",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "savedStatus": "approved",
+    "current": "payroll-commit",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 17,
+    "itemCount": 2
+  },
+  {
+    "step": "commit",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "savedStatus": "committed",
+    "current": "payroll-results",
+    "gross": 3025,
+    "net": 2609,
+    "periodId": 17,
+    "itemCount": 2
+  },
+  {
+    "step": "dialog-motion",
+    "width": 1280,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "step": "dialog-motion",
+    "width": 1280,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "step": "dialog-motion",
+    "width": 390,
+    "reducedMotion": "no-preference",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  },
+  {
+    "step": "dialog-motion",
+    "width": 390,
+    "reducedMotion": "reduce",
+    "status": "passed",
+    "focusContained": true,
+    "focusReturned": true,
+    "scrollPreserved": true
+  }
+]

@@ -22,6 +22,7 @@ class PayPeriod < ApplicationRecord
   PROMOTION_PAYMENT_DISPOSITIONS = %w[record_only process_in_cornerstone].freeze
 
   belongs_to :company
+  belongs_to :retired_to_historical_import_batch, class_name: "HistoricalImportBatch", optional: true
   belongs_to :company_pay_schedule, optional: true
   belongs_to :company_workweek, optional: true
   belongs_to :intake_stale_session, class_name: "PayrollIntakeSession", optional: true
@@ -47,12 +48,17 @@ class PayPeriod < ApplicationRecord
            inverse_of: :promotion_source_pay_period,
            dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
+  has_one :late_hours_run, class_name: "TimeTrackingLateHoursRun", foreign_key: :adjustment_pay_period_id, dependent: :restrict_with_error
+  has_many :origin_late_hours_runs, class_name: "TimeTrackingLateHoursRun", foreign_key: :origin_pay_period_id, dependent: :restrict_with_error
+  has_many :time_tracking_manual_allocations, dependent: :restrict_with_error
+  has_many :time_tracking_classification_reconciliations, dependent: :restrict_with_error
+  # Source rows reference payroll items; remove them first, newest revision first.
+  has_many :payroll_intake_sessions, -> { order(package_revision: :desc) }, dependent: :destroy
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
-  has_many :payroll_intake_sessions, dependent: :destroy
-  has_many :payroll_review_packages, dependent: :restrict_with_error
+  has_many :payroll_review_packages, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :check_print_runs, dependent: :restrict_with_error
   has_many :check_print_generations, dependent: :restrict_with_error
@@ -110,7 +116,7 @@ class PayPeriod < ApplicationRecord
   validates :start_date, presence: true
   validates :end_date, presence: true
   validates :pay_date, presence: true
-  validates :status, inclusion: { in: %w[draft calculated approved committed] }
+  validates :status, inclusion: { in: %w[draft calculated approved committed retired_history] }
   validates :tax_sync_status, inclusion: { in: TAX_SYNC_STATUSES }, allow_nil: true
   validates :correction_status,
             inclusion: { in: CORRECTION_STATUSES },
@@ -128,8 +134,54 @@ class PayPeriod < ApplicationRecord
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
+  validate :late_hours_import_complete
+  validate :verified_tax_year_for_finalization
+
+  def late_hours_import_complete
+    return unless will_save_change_to_status? && status.in?(%w[calculated approved committed])
+    run = TimeTrackingLateHoursRun.find_by(adjustment_pay_period_id: id) if persisted? && run_purpose == "adjustment"
+    return unless run && run.applied_at.blank?
+
+    errors.add(:base, "Finish importing the reserved late hours before calculating or finalizing this adjustment")
+  end
+
+  def verified_tax_year_for_finalization
+    return unless persisted? && will_save_change_to_status? && %w[approved committed].include?(status)
+    return if pay_date.blank?
+    unless AnnualTaxConfig.verified_for_year?(pay_date.year, lock: true)
+      errors.add(:base, AnnualTaxConfig.unverified_message(pay_date.year))
+      return
+    end
+    config = AnnualTaxConfig.current(pay_date.year)
+    # Retained legacy years have no annual verification workflow. Their table
+    # edits invalidate the year gate above; annual rules always require matching
+    # calculation evidence, including ordinary live runs through 2026.
+    return unless config
+    verification = config&.verified_at&.utc&.iso8601(6)
+    signatures = {}
+    # Historical corrective entries retain the original committed rule snapshot.
+    # New ordinary runs must prove which verified rules produced their money.
+    stale = payroll_items.financially_reportable.any? do |item|
+      next false if item.correction_entry?
+
+      snapshot = item.tax_rule_snapshot
+      status = case snapshot["engine"]
+      when "annual_tax_config_v2" then snapshot["filing_status"].presence
+      when "contractor_no_withholding" then :contractor
+      end
+      signature = signatures[status] ||= config.rules_digest(status == :contractor ? nil : status) if status
+      verification.nil? || snapshot["tax_year_verification_at"] != verification ||
+        signature.nil? || snapshot["tax_year_rules_digest"] != signature
+    end
+    if stale
+      errors.add(:base, "#{pay_date.year} tax tables were verified or changed after this payroll was calculated. Recalculate payroll before approval or commitment.")
+    end
+  end
+
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
+  validate :fixed_semimonthly_schedule_dates,
+           if: -> { new_record? || will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? || will_save_change_to_company_pay_schedule_id? || will_save_change_to_run_purpose? || will_save_change_to_cycle? }
   validate :supplemental_target_must_be_regular
   validate :off_cycle_tips_excludes_base_salary
   validate :purpose_fields_change_only_in_draft
@@ -160,8 +212,88 @@ class PayPeriod < ApplicationRecord
 
   before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
   before_validation :force_test_workspace_to_parallel
+  before_update :prevent_retired_history_mutation
+  before_destroy :prevent_retired_history_mutation
+  before_update :guard_pending_payment_resolution
   before_update :prevent_training_baseline_mutation
+
+  def guard_pending_payment_resolution
+    return unless (changes_to_save.keys & %w[status correction_status voided_at pay_date start_date end_date superseded_by_id]).any?
+
+    self.class.where(id: id).lock.pluck(:id)
+    return unless time_tracking_manual_allocations.pending_payment_resolution.exists?
+
+    errors.add(:base, "Reconcile the saved reported-payment match before revising or voiding this payroll. Its hours remain reserved.")
+    throw :abort
+  end
+  before_destroy :prevent_finalized_run_deletion, prepend: true
   before_destroy :prevent_training_baseline_mutation
+
+  def previously_approved?
+    approved? || approved_at.present? || unapproved_at.present? ||
+      payroll_review_packages.where.not(approved_at: nil).exists? ||
+      AuditLog.where(company_id: company_id, record_type: [ "pay_periods", "PayPeriod" ], record_id: id,
+        action: %w[pay_periods#approve pay_periods#unapprove]).exists?
+  end
+
+  def deletable_unapproved_run?
+    status.in?(%w[draft calculated]) && committed_at.nil? && !previously_approved?
+  end
+
+  # Run before any import/source/paycheck write, and again from before_destroy.
+  def ensure_deletable!
+    reason = deletion_blocker
+    return true unless reason
+
+    errors.add(:base, reason)
+    raise ActiveRecord::RecordNotDestroyed.new(reason, self)
+  end
+
+  def prevent_finalized_run_deletion
+    reason = deletion_blocker
+    return unless reason
+
+    errors.add(:base, reason)
+    throw :abort
+  end
+
+  def deletion_blocker
+    return "This run was approved before. Keep it and correct it instead, or ask an admin." if previously_approved?
+    unless deletable_unapproved_run?
+      return "Only unapproved payroll runs that have never been committed can be deleted. Keep this run and correct it instead, or ask an admin."
+    end
+    if training_baseline?
+      return "This run is a protected training baseline and cannot be deleted."
+    end
+    if payroll_review_packages.any?(&:client_review_history_unknown?)
+      return "This run has older client review records with unverified sharing history. Keep it and correct it instead, or ask an admin."
+    end
+    if payroll_review_packages.any?(&:retained_client_evidence?)
+      return "This run has client review history: it was shared for approval or has a client decision or comment. Keep it and correct it instead, or ask an admin."
+    end
+    deferred = PayrollIntakeRow.joins(:payroll_intake_session)
+      .where(payroll_intake_sessions: { pay_period_id: id }, disposition: "deferred")
+      .where.not(target_pay_period_id: [ nil, id ]).includes(:target_pay_period).order(:id).first
+    if deferred
+      target = deferred.target_pay_period
+      return "This run has hours carried over to run ##{target.id} (#{target.start_date} to #{target.end_date}). Keep it so those hours stay recorded."
+    end
+
+    if non_employee_checks.any? { |check| check.paid_at.present? || check.printed? || check.prepared_at.present? || check.payroll_liability_check_allocations.exists? }
+      return "This run has payment checks that were paid, printed, or prepared. Keep it for its payment history, or ask an admin."
+    end
+
+    # Check all declared retained associations before dependent destroy callbacks
+    # can touch source documents, paychecks or their entered hours.
+    retained = self.class.reflect_on_all_associations.select { |association| association.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) }
+    if retained.any? { |reflection| association(reflection.name).scope.exists? }
+      return "This run is linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    if PayrollItem.reflect_on_all_associations.any? { |reflection| reflection.options[:dependent].in?([ :restrict_with_error, :restrict_with_exception ]) && payroll_items.joins(reflection.name).exists? }
+      return "This run has paychecks linked to retained payroll or payment evidence. Keep it for its payroll history, or ask an admin."
+    end
+    nil
+  end
 
   scope :without_training_baselines, -> { where("test_workspace_role IS NULL OR test_workspace_role != ?", "baseline") }
   scope :draft, -> { where(status: "draft") }
@@ -232,8 +364,22 @@ class PayPeriod < ApplicationRecord
     test_workspace_role == "practice"
   end
 
+  def retired_history? = status == "retired_history"
+
+  # Reversal restores editable source evidence, never authorization to pay again.
+  # Immutable onboarding evidence retains this provenance after the active link
+  # is cleared, including across repeated reversal/reconversion cycles.
+  def paid_prior_provider_source?
+    retired_history? || (persisted? && PriorProviderHistoryOnboarding.where(company_id: company_id)
+      .where("evidence->'source_run_ids' @> ?::jsonb", [ id ].to_json).exists?)
+  end
+
+  def unresolved_prior_provider_history?
+    pay_date.present? && PriorProviderHistoryOnboarding.unresolved_reversed_for(company_id, tax_year: pay_date.year).exists?
+  end
+
   def can_edit?
-    !committed? && !voided? && !training_baseline?
+    !committed? && !voided? && !training_baseline? && !retired_history?
   end
 
   def intake_stale?
@@ -247,10 +393,11 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
         approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil,
         intake_stale_at: at,
         intake_stale_reason: reason,
         intake_stale_session: session
@@ -267,10 +414,11 @@ class PayPeriod < ApplicationRecord
         status: "draft",
         calculated_at: nil,
         calculated_by_id: nil,
+        # Keep approval history so deletion stays blocked, stamped with the
+        # invalidation time rather than attributed to the approver.
+        unapproved_at: unapproved_at || (approved_at && at),
         approved_at: nil,
-        approved_by_id: nil,
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        approved_by_id: nil
       )
       invalidate_later_rehearsal_calculations!
     end
@@ -288,8 +436,8 @@ class PayPeriod < ApplicationRecord
         )
         later.update!(
           status: "draft", calculated_at: nil, calculated_by_id: nil,
-          approved_at: nil, approved_by_id: nil,
-          unapproved_at: nil, unapproved_by_id: nil
+          unapproved_at: later.unapproved_at || (later.approved_at && Time.current),
+          approved_at: nil, approved_by_id: nil
         )
       end
   end
@@ -328,8 +476,16 @@ class PayPeriod < ApplicationRecord
     company_workweek || CompanyWorkweek.for_date(company_id, start_date)
   end
 
+  def annual_fica_review_note
+    if payroll_items.financially_reportable.any? { |item| item.tax_rule_snapshot.to_h.dig("annual_fica_context", "history_review_open") == true }
+      BelowThresholdFicaContext::NOTE
+    end
+  end
+
   def compliance_warnings
     warnings = []
+    note = annual_fica_review_note
+    warnings << note if note
     workweek = resolved_company_workweek
     if workweek.nil?
       warnings << "No legal overtime workweek is configured for this pay period. Confirm the employer's workweek before relying on overtime results."
@@ -550,7 +706,23 @@ class PayPeriod < ApplicationRecord
     end
   end
 
+  def prevent_retired_history_mutation
+    return unless self.class.where(id: id, status: "retired_history").exists?
+
+    errors.add(:base, "Prior-provider source runs are retired read-only evidence; use the history reversal workflow")
+    throw :abort
+  end
+
   def starts_after_historical_ytd_boundary
+    return if retired_history?
+    if company_id.present? && unresolved_prior_provider_history? && !paid_prior_provider_source?
+      errors.add(:base, "Record and activate replacement prior-provider history before starting live payroll; the previous history was undone")
+      return
+    end
+    if PriorProviderHistoryOnboarding.where(company_id: company_id, status: "converted").exists?
+      errors.add(:base, "Activate or reverse the converted prior-provider history before starting live payroll")
+      return
+    end
     return if company_id.blank?
     return if test_workspace? && validation_context != :payroll_calculation && draft?
 
@@ -569,7 +741,7 @@ class PayPeriod < ApplicationRecord
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end
-    if unbridged_batch && !PayPeriod.where(company_id: company_id).exists?
+    if unbridged_batch && !PayPeriod.where(company_id: company_id).where.not(status: "retired_history").exists?
       errors.add(:base, "Activate the verified historical YTD opening balances before starting live payroll processing")
       return
     end
@@ -589,12 +761,20 @@ class PayPeriod < ApplicationRecord
     end
     boundary_period_end = boundaries.map(&:first).max
     boundary_pay_date = boundaries.map(&:last).max
+    history_label = historical_boundary_label(batches.select(&:latest_applied_historical_ytd_bridge))
     if start_date.present? && start_date <= boundary_period_end
-      errors.add(:start_date, "must be after the imported QuickBooks history ending #{boundary_period_end.strftime('%m/%d/%Y')}")
+      errors.add(:start_date, "must be after the #{history_label} ending #{boundary_period_end.strftime('%m/%d/%Y')}")
     end
     if pay_date.present? && pay_date <= boundary_pay_date
-      errors.add(:pay_date, "must be after the imported QuickBooks history paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
+      errors.add(:pay_date, "must be after the #{history_label} paid through #{boundary_pay_date.strftime('%m/%d/%Y')}")
     end
+  end
+
+  def historical_boundary_label(batches)
+    sources = batches.map(&:source_system).uniq
+    return "imported QuickBooks history" unless sources.include?("prior_provider")
+
+    sources == [ "prior_provider" ] ? "recorded prior-provider history" : "recorded historical payroll"
   end
 
   def uses_current_historical_ytd_revision
@@ -619,6 +799,22 @@ class PayPeriod < ApplicationRecord
 
     if pay_date < end_date
       errors.add(:pay_date, "must be on or after end date")
+    end
+  end
+
+  def fixed_semimonthly_schedule_dates
+    return unless regular_cycle? && regular_run? && start_date && end_date && pay_date
+
+    schedule = company_pay_schedule
+    return unless schedule&.pay_date_rule == "semimonthly_15th_and_month_end"
+
+    first_half = start_date.day == 1 && end_date == start_date.change(day: 15)
+    second_half = start_date.day == 16 && end_date == start_date.end_of_month
+    unless first_half || second_half
+      errors.add(:base, "The fixed semimonthly schedule requires periods of the 1st–15th or 16th–month end")
+    end
+    unless pay_date == schedule.scheduled_pay_date_for(end_date)
+      errors.add(:pay_date, "must be the scheduled month-end or following 15th; weekends and holidays do not shift it")
     end
   end
 

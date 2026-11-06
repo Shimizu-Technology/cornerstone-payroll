@@ -1,0 +1,3 @@
+Session: 01a16ca4-4d6a-7673-a7d7-bc69d9795376
+Project: /Users/leonshimizu/Desktop/ShimizuTechnology/cornerstone-payroll
+Active owned resources: none

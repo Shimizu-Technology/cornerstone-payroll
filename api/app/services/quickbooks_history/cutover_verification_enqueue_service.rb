@@ -19,6 +19,8 @@ module QuickbooksHistory
       review, should_enqueue = prepare_pending_review!
       return Result.new(review: review, enqueued: false) unless should_enqueue
 
+      # Do not hold the batch/assignment locks through queue transport.
+      User.transaction { ensure_authorized!(lock: true) }
       enqueue!(review)
       Result.new(review: review, enqueued: true)
     end
@@ -27,9 +29,13 @@ module QuickbooksHistory
 
     attr_reader :batch, :actor
 
-    def ensure_authorized!
+    def ensure_authorized!(lock: false)
+      if lock
+        @actor = User.lock.find_by(id: actor&.id)
+        batch.company.company_assignments.where(user_id: actor&.id).lock.load
+      end
       authorized = actor&.payroll_access_allowed? && actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
       raise ArgumentError, "A manager or administrator with company access is required" unless authorized
       raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.reload.applied?
     end
@@ -37,9 +43,12 @@ module QuickbooksHistory
     def prepare_pending_review!
       batch.with_lock do
         batch.reload
+        review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
+        review.lock! if review.persisted?
+        ensure_authorized!(lock: true)
+        batch.reload
         raise ArgumentError, "Apply the historical import before verifying cutover readiness" unless batch.applied?
 
-        review = batch.historical_import_cutover_review || batch.build_historical_import_cutover_review(company: batch.company)
         raise ArgumentError, "The approved cutover review is sealed" if review.approved?
         if review.pending? && review.verification_started_at.present? &&
            review.verification_started_at > PENDING_RETRY_AFTER.ago
@@ -79,6 +88,7 @@ module QuickbooksHistory
       review.with_lock do
         return unless review.pending? && review.verification_started_at&.iso8601(6) == verification_token
 
+        ensure_authorized!(lock: true)
         review.update!(status: "failed", verification_error: "Cutover verification could not be queued. Try again.")
         record_audit!(review, "historical_imports#cutover_verification_failed")
       end

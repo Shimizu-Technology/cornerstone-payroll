@@ -277,8 +277,8 @@ module Api
             intake_stale_reason: pay_period.intake_stale_reason,
             intake_stale_session_id: pay_period.intake_stale_session_id,
             employee_count: pay_period.payroll_items.count,
-            total_gross: pay_period.payroll_items.not_voided.sum(:gross_pay),
-            total_net: pay_period.payroll_items.not_voided.sum(:net_pay),
+            total_gross: pay_period.payroll_items.financially_reportable.sum(:gross_pay),
+            total_net: pay_period.payroll_items.financially_reportable.sum(:net_pay),
             payroll_items: pay_period.payroll_items.includes(:employee, :payroll_item_field_entries).map { |item| payroll_item_json(item) }
           }
         end

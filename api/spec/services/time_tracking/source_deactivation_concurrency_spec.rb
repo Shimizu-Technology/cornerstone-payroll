@@ -5,6 +5,8 @@ require "timeout"
 
 RSpec.describe "Time tracking source deactivation", :postgres_concurrency, type: :service do
   self.use_transactional_tests = false
+  let!(:verification_tables) { ensure_verified_test_tax_years(2024) }
+  after { verification_tables.each(&:destroy!) }
 
   let!(:organization) { create(:organization) }
   let!(:company) { create(:company, organization: organization) }

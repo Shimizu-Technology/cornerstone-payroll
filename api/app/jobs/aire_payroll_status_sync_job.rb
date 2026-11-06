@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-class AirePayrollStatusSyncJob < ApplicationJob
+class AirePayrollStatusSyncJob < ConnectedPayrollJob
   queue_as :default
 
   retry_on TimeTracking::Client::Error, wait: :polynomially_longer, attempts: 8
   discard_on ActiveRecord::RecordNotFound
 
   def perform(acknowledgement_id)
+    return if StagingQuarantine.suppressed?("aire_payroll_acknowledgements", acknowledgement_id)
     acknowledgement = AirePayrollAcknowledgement.includes(
       time_tracking_import: [ :time_tracking_source, { pay_period: :company } ]
     ).find(acknowledgement_id)
@@ -14,7 +15,7 @@ class AirePayrollStatusSyncJob < ApplicationJob
 
     import = acknowledgement.time_tracking_import
     status = acknowledgement.status
-    return unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+    return unless import.finalized_batch?
 
     TimeTracking::Client.new(import.time_tracking_source).record_payroll_batch_processing_event(
       batch_id: import.external_batch_id,

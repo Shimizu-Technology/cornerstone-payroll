@@ -19,6 +19,7 @@ class InvoiceAiPreviewService
   end
 
   def call
+    StagingOutboundPolicy.block!("AI/OCR")
     return fallback_preview if api_key.blank?
 
     normalize_preview(call_openrouter)

@@ -1,4 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -132,13 +133,7 @@ export function Organizations() {
         } : undefined,
       });
 
-      if (response.invitation_sent) {
-        setSuccessMessage(`Organization created and invitation sent to ${response.admin_user?.email}`);
-      } else if (response.invitation_error) {
-        setSuccessMessage(`Organization created, but invitation email failed: ${response.invitation_error}`);
-      } else {
-        setSuccessMessage('Organization created');
-      }
+      setSuccessMessage(`Organization created. ${invitationOutcomeMessage(response)}`.trim());
       resetNewForm();
       setPage(1);
       await fetchOrganizations(1);
@@ -261,13 +256,7 @@ export function Organizations() {
         email: adminEmail.trim(),
         name: adminName.trim() || undefined,
       });
-      if (response.invitation_sent) {
-        setSuccessMessage(`Invitation sent to ${response.data.email}`);
-      } else if (response.invitation_error) {
-        setSuccessMessage(`Admin created, but invitation email failed: ${response.invitation_error}`);
-      } else {
-        setSuccessMessage('Organization admin created');
-      }
+      setSuccessMessage(`Organization admin created. ${invitationOutcomeMessage(response)}`.trim());
       setAdminOrgId(null);
       await fetchOrganizations();
     } catch (err) {

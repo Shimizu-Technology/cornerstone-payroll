@@ -18,9 +18,13 @@ class TimeTrackingEmployeeMapping < ApplicationRecord
             },
             if: -> { source_user_uuid.present? }
   validate :employee_belongs_to_company
+  validate :source_belongs_to_company
   before_validation :normalize_source_user_uuid
 
   def self.resolve_source_identity!(company:, source:, source_user_id:, source_user_uuid:)
+    unless source.company_id == company.id
+      raise IdentityConflict, "Time tracking source does not belong to this company"
+    end
     source_id = source_user_id.to_s
     source_uuid = normalize_uuid(source_user_uuid)
     by_id = find_by(company: company, time_tracking_source: source, source_user_id: source_id)
@@ -37,10 +41,10 @@ class TimeTrackingEmployeeMapping < ApplicationRecord
     return unless source_uuid
 
     if by_uuid && by_id && by_uuid.id != by_id.id
-      raise IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
+      raise IdentityConflict, "Time-tracking employee identity conflicts with two saved payroll mappings. Review the employee mappings before importing."
     end
     if by_id&.source_user_uuid.present? && normalize_uuid(by_id.source_user_uuid) != source_uuid
-      raise IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
+      raise IdentityConflict, "The time-tracking employee ID is already linked to a different permanent identity. Review the employee mapping before importing."
     end
   end
 
@@ -52,6 +56,12 @@ class TimeTrackingEmployeeMapping < ApplicationRecord
 
   def normalize_source_user_uuid
     self.source_user_uuid = self.class.normalize_uuid(source_user_uuid)
+  end
+
+  def source_belongs_to_company
+    return if time_tracking_source.nil? || time_tracking_source.company_id == company_id
+
+    errors.add(:time_tracking_source, "must belong to the same company")
   end
 
   def employee_belongs_to_company

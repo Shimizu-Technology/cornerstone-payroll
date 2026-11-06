@@ -34,6 +34,7 @@ type ReconciliationAction = 'cleared' | 'clearing_reversed' | 'replacement_requi
 
 interface CheckRegisterProps {
   companyId: number | null;
+  refreshVersion?: number;
 }
 
 function guamYearStart(): string {
@@ -49,7 +50,7 @@ function formatDate(value: string | null): string {
   return new Date(`${value}T00:00:00`).toLocaleDateString();
 }
 
-export function CheckRegister({ companyId }: CheckRegisterProps) {
+export function CheckRegister({ companyId, refreshVersion }: CheckRegisterProps) {
   const navigate = useNavigate();
   const [register, setRegister] = useState<CheckRegisterData | null>(null);
   const [from, setFrom] = useState(guamYearStart());
@@ -76,8 +77,9 @@ export function CheckRegister({ companyId }: CheckRegisterProps) {
 
   useEffect(() => {
     void companyId; // Re-fetch after the shared API client switches its company header.
+    void refreshVersion;
     void load();
-  }, [companyId, load]);
+  }, [companyId, load, refreshVersion]);
 
   const exportCsv = async (): Promise<void> => {
     setExporting(true);

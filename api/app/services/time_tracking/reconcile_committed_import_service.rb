@@ -41,12 +41,14 @@ module TimeTracking
     def reconcile_locked!(ids)
       # The enclosing payroll transaction retains this lock through all writes.
       raise ArgumentError, "Time tracking source is inactive" unless source.lock!.active?
+      source.connector.require!(:finalized_batch_v2)
+      source.connector.require!(:exact_line_receipts_v2)
       unless pay_period.committed? && !pay_period.voided?
         raise ArgumentError, "Historical reconciliation requires a committed, active pay period"
       end
 
       import.with_lock(requires_new: true) do
-        raise ArgumentError, "Only a previewed finalized AIRE batch can be reconciled" unless import.status == "previewed" && import.finalized_batch?
+        raise ArgumentError, "Only a previewed finalized time tracking batch can be reconciled" unless import.status == "previewed" && import.finalized_batch?
         validate_provenance!
 
         rows = Array(import.processed_payload.fetch("rows"))
@@ -89,7 +91,7 @@ module TimeTracking
           time_tracking_import: import,
           status: "committed",
           occurred_at: pay_period.committed_at || import.reconciled_at
-        ).id
+        ).id unless import.supplemental_batch?
         ids[:entries].concat(record_entry_lifecycle!.map(&:id))
 
         { reconciled: linked, rounding_exceptions: rounding_exceptions, errors: [] }
@@ -102,15 +104,16 @@ module TimeTracking
         payload: raw,
         start_date: import.start_date,
         end_date: import.end_date,
+        expected_source: source.connector.source_identifier,
         allow_legacy_uncategorized: true
       ).validate!
       checksum = raw.dig("export", "checksum")
       valid = import.processed_payload["validation_version"] == BatchImportPreviewService::VALIDATION_VERSION &&
         import.external_batch_id == raw["batch_id"] && import.external_batch_checksum == checksum &&
         import.source_payload_hash == checksum && import.contract_version == raw["schema_version"]
-      raise ArgumentError, "AIRE payroll batch provenance changed; refresh and investigate" unless valid
+      raise ArgumentError, "Time tracking payroll batch provenance changed; refresh and investigate" unless valid
     rescue PayrollBatchPayloadValidator::Error
-      raise ArgumentError, "AIRE payroll batch integrity check failed; refresh and investigate"
+      raise ArgumentError, "Time tracking payroll batch integrity check failed; refresh and investigate"
     end
 
     def validate_hours!(item, row, employee)
@@ -181,6 +184,13 @@ module TimeTracking
         .includes(:check_events)
         .to_a
       payment_acknowledgements = items.flat_map do |item|
+        if item.voided? && item.payroll_included?
+          cancellation = item.check_events.select { |event| event.check_number == item.check_number && event.payment_cancellation? }.max_by(&:id)
+          if cancellation && allocations_by_item.fetch(item.id, []).any? { |row| !PaymentCancellationBridge.valid_original_receipt?(item, row) }
+            raise ArgumentError, "The original exact check receipt is missing for these source lines; review cancellation before reconciling history"
+          end
+          next cancellation ? AirePayrollEntryAcknowledgement.record_for_check_event!(check_event: cancellation, status: "payment_cancelled") : []
+        end
         status = { "prepared" => "payment_prepared", "printed" => "payment_prepared", "delivered" => "payment_issued", "voided" => "payment_voided" }[item.check_status]
         item_allocations = allocations_by_item.fetch(item.id, [])
         next [] unless status && item_allocations.any?

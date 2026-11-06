@@ -61,7 +61,7 @@ export function PublicHome() {
             </div>
             <div>
               <p className="font-display text-sm font-extrabold leading-tight tracking-tight">Cornerstone Payroll</p>
-              <p className="text-xs font-medium text-neutral-500">Guam payroll operations</p>
+              <p className="text-xs font-medium text-neutral-600">Guam payroll operations</p>
             </div>
           </Link>
 
@@ -73,7 +73,7 @@ export function PublicHome() {
 
           <div className="flex items-center gap-2">
             {isLoading ? (
-              <span className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-500">
+              <span className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600">
                 Checking access
               </span>
             ) : isAuthenticated ? (
@@ -99,7 +99,7 @@ export function PublicHome() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(29,95,210,0.14),transparent_31%),radial-gradient(circle_at_88%_10%,rgba(244,127,11,0.13),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.22),rgba(255,255,255,0.74))]" />
         <div className="relative mx-auto grid max-w-7xl items-center gap-8 px-5 py-10 sm:px-6 sm:py-16 lg:min-h-[620px] lg:grid-cols-[minmax(0,1.03fr)_minmax(420px,0.72fr)] lg:gap-12 lg:px-8 lg:py-20">
           <div className="max-w-3xl">
-            <p className="mb-5 inline-flex rounded-full border border-primary-200 bg-white/80 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-[0.16em] text-primary-900 shadow-sm shadow-primary-100/60">
+            <p className="mb-5 inline-flex rounded-full border border-primary-200 bg-white/80 px-3.5 py-1.5 text-xs font-extrabold text-primary-900 shadow-sm shadow-primary-100/60">
               Payroll software for Guam firms
             </p>
             <h1 className="font-display text-3xl font-extrabold leading-[1.08] tracking-tight text-primary-950 text-balance sm:text-5xl lg:text-6xl">
@@ -137,7 +137,7 @@ export function PublicHome() {
               {proofPoints.map((point) => (
                 <div key={point.value} className="rounded-2xl border border-white/80 bg-white/65 px-4 py-3 shadow-sm shadow-neutral-200/50 backdrop-blur-sm">
                   <p className="font-display text-lg font-extrabold text-primary-950">{point.value}</p>
-                  <p className="mt-1 text-xs font-semibold leading-4 text-neutral-500">{point.label}</p>
+                  <p className="mt-1 text-xs font-semibold leading-4 text-neutral-600">{point.label}</p>
                 </div>
               ))}
             </div>
@@ -149,7 +149,7 @@ export function PublicHome() {
               <div className="rounded-[1.45rem] border border-neutral-200/70 bg-white p-5">
                 <div className="flex items-start justify-between gap-4 border-b border-neutral-200 pb-5">
                   <div>
-                    <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Today’s payroll desk</p>
+                    <p className="text-xs font-extrabold text-primary-700">Today’s payroll desk</p>
                     <h2 className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">Pay period review</h2>
                     <p className="mt-1 text-sm text-neutral-500">Illustrative client • Biweekly payroll</p>
                   </div>
@@ -182,7 +182,7 @@ export function PublicHome() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-bold text-neutral-950">{item.label}</p>
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-neutral-500 ring-1 ring-neutral-200">
+                          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-extrabold text-neutral-600 ring-1 ring-neutral-200">
                             {item.status}
                           </span>
                         </div>
@@ -205,7 +205,7 @@ export function PublicHome() {
             </div>
           </div>
           <div className="rounded-2xl border border-primary-100 bg-white/80 p-4 shadow-sm lg:hidden" aria-label="Payroll workflow at a glance">
-            <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-primary-700">How the work flows</p>
+            <p className="text-xs font-extrabold text-primary-700">How the work flows</p>
             <ol className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-sm font-semibold text-primary-950">
               <li>Set up client</li><li aria-hidden="true" className="text-accent-600">→</li>
               <li>Review payroll</li><li aria-hidden="true" className="text-accent-600">→</li>
@@ -219,7 +219,7 @@ export function PublicHome() {
         <div className="mx-auto max-w-7xl">
           <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
             <div>
-              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Built for the real desk work</p>
+              <p className="text-xs font-extrabold text-primary-700">Built for the real desk work</p>
               <h2 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance lg:text-4xl">
                 Professional payroll software should make the next step obvious.
               </h2>
@@ -247,7 +247,7 @@ export function PublicHome() {
       <section id="contact" className="bg-primary-950 px-5 py-14 text-white sm:px-6 lg:px-8">
         <div className="mx-auto grid max-w-7xl gap-5 md:grid-cols-2">
           <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.06] p-6">
-            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-accent-200">Platform</p>
+            <p className="text-xs font-extrabold text-accent-200">Platform</p>
             <h2 className="mt-3 font-display text-2xl font-extrabold">Shimizu Technology</h2>
             <p className="mt-3 text-sm leading-6 text-primary-100/80">
               Product, implementation, and platform inquiries for firms interested in Guam-native payroll software.
@@ -260,7 +260,7 @@ export function PublicHome() {
             </div>
           </div>
           <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.06] p-6">
-            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-accent-200">Payroll Services</p>
+            <p className="text-xs font-extrabold text-accent-200">Payroll Services</p>
             <h2 className="mt-3 font-display text-2xl font-extrabold">Cornerstone Accounting and Business Management</h2>
             <p className="mt-3 text-sm leading-6 text-primary-100/80">
               Payroll and accounting service inquiries for businesses that want help operating payroll in Guam.

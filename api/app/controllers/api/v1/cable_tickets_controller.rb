@@ -3,6 +3,8 @@
 module Api
   module V1
     class CableTicketsController < ApplicationController
+      include ExplicitCompanyAccess
+
       def create
         unless current_user&.can_access_company?(current_company_id)
           return render json: { error: "You do not have access to this company" }, status: :forbidden

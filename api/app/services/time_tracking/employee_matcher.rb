@@ -36,7 +36,7 @@ module TimeTracking
       email = source_employee["email"].to_s.downcase.strip
       if email.present?
         employee = @employee_scope.find_by("LOWER(email) = ?", email)
-        return matched(employee, "email", 1.0) if employee
+        return suggested(employee, "email", 1.0) if employee
       end
 
       source_name = source_employee["display_name"].to_s.presence || [ source_employee["first_name"], source_employee["last_name"] ].compact.join(" ")
@@ -50,9 +50,9 @@ module TimeTracking
         end
       end
 
-      return matched(best, "name", best_score.round(2)) if best && best_score >= THRESHOLD
+      return suggested(best, "name", best_score.round(2)) if best && best_score >= THRESHOLD
 
-      { employee_id: nil, employee_name: nil, match_method: "unmatched", match_score: best_score.round(2) }
+      unmatched(best_score.round(2))
     end
 
     private
@@ -79,6 +79,18 @@ module TimeTracking
 
     def matched(employee, method, score)
       { employee_id: employee.id, employee_name: employee.full_name, match_method: method, match_score: score }
+    end
+
+    def suggested(employee, method, score)
+      unmatched(score).merge(
+        suggested_employee_id: employee.id,
+        suggested_employee_name: employee.full_name,
+        suggestion_method: method
+      )
+    end
+
+    def unmatched(score)
+      { employee_id: nil, employee_name: nil, match_method: "unmatched", match_score: score }
     end
 
     def trigram_similarity(a, b)

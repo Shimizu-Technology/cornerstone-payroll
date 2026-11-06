@@ -1,5 +1,5 @@
 import { createConsumer, type Cable, type Channel } from '@rails/actioncable';
-import { authApi, getApiBaseUrl } from '@/services/api';
+import { ApiError, authApi, getApiBaseUrl } from '@/services/api';
 import type { ClientPortalThread } from '@/services/api';
 
 type PortalCablePayload = {
@@ -11,6 +11,7 @@ type PortalCableCallbacks = {
   onThread: (payload: PortalCablePayload) => void;
   onConnected?: () => void;
   onError?: () => void;
+  onUnavailable?: () => void;
 };
 
 function cableUrl(ticket: string) {
@@ -22,7 +23,7 @@ function cableUrl(ticket: string) {
   return url.toString();
 }
 
-export async function subscribeToClientPortalThreads(callbacks: PortalCableCallbacks) {
+export async function subscribeToClientPortalThreads(companyId: number, callbacks: PortalCableCallbacks) {
   let consumer: Cable | undefined;
   let channel: Channel | undefined;
   let stopped = false;
@@ -37,6 +38,16 @@ export async function subscribeToClientPortalThreads(callbacks: PortalCableCallb
     consumer?.disconnect();
     channel = undefined;
     consumer = undefined;
+  };
+
+  const stopUnavailable = (generation: number) => {
+    if (stopped || generation !== connectionGeneration) return;
+    stopped = true;
+    connectionGeneration += 1;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    disconnectCurrent();
+    callbacks.onError?.();
+    callbacks.onUnavailable?.();
   };
 
   const scheduleReconnect = (generation: number, delay = 1000) => {
@@ -58,7 +69,7 @@ export async function subscribeToClientPortalThreads(callbacks: PortalCableCallb
     connectionGeneration = generation;
 
     try {
-      const { ticket } = await authApi.createCableTicket();
+      const { ticket } = await authApi.createCableTicket(companyId);
       if (stopped || generation !== connectionGeneration) return;
 
       disconnectCurrent();
@@ -67,21 +78,29 @@ export async function subscribeToClientPortalThreads(callbacks: PortalCableCallb
         { channel: 'ClientPortalThreadChannel' },
         {
           connected() {
-            callbacks.onConnected?.();
+            if (!stopped && generation === connectionGeneration) callbacks.onConnected?.();
           },
           received(payload: PortalCablePayload) {
+            if (stopped || generation !== connectionGeneration) return;
+            if (payload.thread.company_id !== companyId) {
+              stopUnavailable(generation);
+              return;
+            }
             callbacks.onThread(payload);
           },
-          disconnected() {
-            scheduleReconnect(generation);
+          disconnected({ willAttemptReconnect }: { willAttemptReconnect?: boolean } = {}) {
+            if (willAttemptReconnect === false) stopUnavailable(generation);
+            else scheduleReconnect(generation);
           },
           rejected() {
-            scheduleReconnect(generation, 250);
+            stopUnavailable(generation);
           },
         }
       );
-    } catch {
-      if (!stopped && generation === connectionGeneration) {
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        stopUnavailable(generation);
+      } else if (!stopped && generation === connectionGeneration) {
         callbacks.onError?.();
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {

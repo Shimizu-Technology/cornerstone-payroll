@@ -1,0 +1,44 @@
+{
+  "phase": "F1/F2 final browser QA",
+  "validated_exact_parents": [
+    {
+      "kind": "fixture launcher",
+      "parent": 47493,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.3/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python kit/start.py",
+      "children": [
+        {
+          "name": "aire-api",
+          "pid": 47500
+        },
+        {
+          "name": "payroll-api",
+          "pid": 47505
+        },
+        {
+          "name": "aire-dispatcher",
+          "pid": 47510
+        },
+        {
+          "name": "payroll-dispatcher",
+          "pid": 47515
+        },
+        {
+          "name": "accountant-web",
+          "pid": 47520
+        },
+        {
+          "name": "admin-web",
+          "pid": 47529
+        }
+      ]
+    },
+    {
+      "kind": "baseline wrapper",
+      "parent": 47528,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.3/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python pr-b/review-f1/start-base.py",
+      "child": 47551
+    }
+  ],
+  "prior_receipt": "review-f1/prior-process-cleanup.json",
+  "termination": "SIGTERM to validated owned wrappers; their finally blocks stop exact child process groups and release claims"
+}

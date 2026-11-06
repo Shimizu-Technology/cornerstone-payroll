@@ -18,23 +18,26 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil, annual_fica_context: nil)
+    AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
+    TimeTracking::SourceEarningsConservation.validate!(payroll_item)
     case employment_type
     when "hourly"
-      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "salary"
-      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     when "contractor"
-      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
+      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
     else
       raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
-  def initialize(employee, payroll_item, calculation_context: nil)
+  def initialize(employee, payroll_item, calculation_context: nil, annual_fica_context: nil)
     @employee = employee
     @payroll_item = payroll_item
     @calculation_context = calculation_context&.deep_stringify_keys
+    @annual_fica_context = annual_fica_context
   end
 
   def calculate
@@ -54,6 +57,7 @@ class PayrollCalculator
         return snapshotted_tax_calculator
       end
 
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year)
       config = AnnualTaxConfig.current(pay_period.pay_date.year)
 
       if config.present?
@@ -129,6 +133,14 @@ class PayrollCalculator
     end
 
     taxes = tax_calculator.calculate(**tax_args)
+    unless historical_calculation?
+      taxes.merge!(annual_fica_context.increment(
+        wages_delta: payroll_item.gross_pay, tips_delta: payroll_item.cash_tips_reported,
+        rules: tax_calculator.rule_snapshot, current_item: payroll_item
+      ).transform_keys { |key| { social_security_tax: :social_security,
+        employer_social_security_tax: :employer_social_security, medicare_tax: :medicare,
+        employer_medicare_tax: :employer_medicare, additional_medicare_tax: :additional_medicare }.fetch(key, key) })
+    end
 
     calculated_withholding = taxes[:withholding].to_f
     if payroll_item.withholding_tax_override.present?
@@ -155,6 +167,7 @@ class PayrollCalculator
     end
     sync_additional_withholding_from_employee!
     payroll_item.tax_rule_snapshot = rule_snapshot.merge(employee_w4_snapshot)
+    payroll_item.tax_rule_snapshot["annual_fica_context"] = annual_fica_context.snapshot unless historical_calculation?
   end
 
   def capture_payroll_reporting_components!
@@ -264,7 +277,7 @@ class PayrollCalculator
       when "loan"
         aggregate_loan += amount
       when "insurance"
-        aggregate_insurance += amount
+        aggregate_insurance += amount unless dt.employer_contribution?
       end
     end
 
@@ -316,6 +329,12 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
+    if line_rounded_earnings?
+      total = Array(payroll_item.custom_earnings).sum(0.to_d) { |ce| PayrollEarningsRounding.line_amount(ce["amount"]) } +
+        payroll_item.taxable_payroll_adjustments_total.to_d
+      total += payroll_item.taxable_payroll_field_entries_total.to_d unless @exclude_payroll_field_entry_totals
+      return total
+    end
     total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
       payroll_item.taxable_payroll_adjustments_total
     total += payroll_item.taxable_payroll_field_entries_total unless @exclude_payroll_field_entry_totals
@@ -340,7 +359,11 @@ class PayrollCalculator
     payroll_item.payroll_item_field_entries.each do |entry|
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
-      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category, reporting_group: entry.reporting_group)
+      deduction = payroll_item.payroll_item_deductions.build(
+        deduction_type: payroll_field_mirror_type(entry, "employer_contribution"), amount: entry.amount,
+        category: "employer_contribution", label: entry.label, reporting_group: entry.reporting_group
+      )
+      PayrollComponentMirrors.record!(entry, deduction)
     end
   end
 
@@ -351,8 +374,8 @@ class PayrollCalculator
       next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
 
       category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
-      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
-      payroll_item.payroll_item_deductions.build(
+      deduction_type = payroll_field_mirror_type(entry, category)
+      deduction = payroll_item.payroll_item_deductions.build(
         deduction_type: deduction_type,
         amount: entry.amount,
         category: category,
@@ -361,7 +384,26 @@ class PayrollCalculator
         employee_loan_id: historical_calculation? ? nil : entry.metadata&.fetch("employee_loan_id", nil),
         loan_schedule_snapshot: historical_calculation? ? {} : (entry.metadata || {}).fetch("loan_schedule_snapshot", {})
       )
+      PayrollComponentMirrors.record!(entry, deduction)
     end
+  end
+
+  def payroll_field_mirror_type(entry, category)
+    identity = entry.metadata.to_h[PayrollComponentMirrors::IDENTITY_KEY]
+    if historical_calculation? && identity&.fetch("version", nil) == 1
+      return (payroll_item.company || pay_period.company).deduction_types.find(identity.fetch("deduction_type_id"))
+    end
+    label = entry.label
+    shared_label = payroll_item.payroll_item_field_entries.count do |field|
+      field.active? && field.label == entry.label && field.tax_treatment == entry.tax_treatment
+    end > 1
+    if shared_label
+      source_id = entry.payroll_field_definition_id || Digest::SHA256.hexdigest(
+        entry.attributes.slice("label", "kind", "tax_treatment", "category", "employee_paid", "employer_paid", "reporting_group", "source").to_json
+      ).first(12)
+      label = "#{label} [field #{source_id}]"
+    end
+    find_or_create_payroll_field_deduction_type(label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
   end
 
   def apply_named_loan_repayments!
@@ -527,6 +569,11 @@ class PayrollCalculator
         "legacy_allowances" => employee_value(:allowances)
       }
     }
+  end
+
+  def annual_fica_context
+    @annual_fica_context ||= EmployeeYearFicaContext.new(employee: employee, year: pay_period.pay_date.year,
+      excluding_pay_period_id: pay_period.id)
   end
 
   def ytd_before_totals
@@ -794,7 +841,13 @@ class PayrollCalculator
         next unless deduction.category == deduction_category
         loan_id = entry.metadata.to_h["employee_loan_id"]
         same_loan = loan_id.present? && deduction.employee_loan_id == loan_id.to_i
-        next unless same_loan || deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+        mirror_type_id = entry.metadata.to_h.dig(PayrollComponentMirrors::IDENTITY_KEY, "deduction_type_id")
+        mirrored = if mirror_type_id.present?
+          deduction.deduction_type_id == mirror_type_id.to_i
+        else
+          deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+        end
+        next unless same_loan || mirrored
 
         deduction.amount = next_amount
       end
@@ -837,7 +890,8 @@ class PayrollCalculator
     end
     payroll_item.loan_payment = (itemized_loan_payment + payroll_item.loan_deduction.to_f).round(2)
     payroll_item.insurance_payment = payroll_item.payroll_item_deductions.sum do |deduction|
-      deduction.deduction_type&.sub_category == "insurance" ? deduction.amount.to_f : 0.0
+      deduction.deduction_type&.sub_category == "insurance" && !deduction.employer_contribution? &&
+        !PayrollComponentMirrors.field_for(payroll_item, deduction) ? deduction.amount.to_f : 0.0
     end.round(2)
   end
 
@@ -890,6 +944,19 @@ class PayrollCalculator
     @calculation_context.present?
   end
 
+  def line_rounded_earnings?
+    payroll_item.employment_type.in?(%w[hourly contractor]) &&
+      (!historical_calculation? || @calculation_context["earnings_rounding"] == PayrollEarningsRounding::POLICY)
+  end
+
+  def wage_earning_amount(amount)
+    line_rounded_earnings? ? PayrollEarningsRounding.line_amount(amount) : amount
+  end
+
+  def saved_earning_amount(amount)
+    line_rounded_earnings? ? PayrollEarningsRounding.line_amount(amount) : amount.to_f.round(2)
+  end
+
   def snapshotted_tax_calculator
     snapshot = payroll_item.tax_rule_snapshot.deep_stringify_keys
     args = {
@@ -916,7 +983,21 @@ class PayrollCalculator
   end
 
   def capture_calculation_context!
-    return if historical_calculation?
+    if historical_calculation?
+      payroll_item.calculation_context_snapshot = @calculation_context.deep_dup.merge(built_in_employer_match_identity)
+      return
+    end
+
+    if payroll_item.tax_rule_snapshot["engine"] == "contractor_no_withholding"
+      AnnualTaxConfig.require_verified!(pay_period.pay_date.year, lock: true)
+      config = AnnualTaxConfig.current(pay_period.pay_date.year, lock: true)
+      if config
+        payroll_item.tax_rule_snapshot = payroll_item.tax_rule_snapshot.merge(
+          "tax_year_verification_at" => config.verified_at&.utc&.iso8601(6),
+          "tax_year_rules_digest" => config.rules_digest
+        )
+      end
+    end
 
     payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(
       employee: employee,
@@ -924,7 +1005,15 @@ class PayrollCalculator
       payroll_field_assignments: payroll_field_assignments_for_calculation,
       w4_election: w4_election_for_calculation,
       retirement_election: retirement_election_for_calculation
-    )
+    ).merge(built_in_employer_match_identity)
+    if line_rounded_earnings?
+      payroll_item.calculation_context_snapshot = payroll_item.calculation_context_snapshot.merge("earnings_rounding" => PayrollEarningsRounding::POLICY)
+    end
+  end
+
+  def built_in_employer_match_identity
+    { "built_in_employer_match_mirrors" => { "version" => 1,
+      "sources" => @built_in_employer_match_rows.to_h.transform_keys(&:to_s).transform_values(&:deduction_type_id) } }
   end
 
   def retirement_election_for_calculation

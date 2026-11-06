@@ -30,6 +30,13 @@ The source authenticates either `X-Payroll-Shared-Secret` or the legacy-compatib
 {
   "schema_version": "1.0",
   "source": "aire_services",
+  "integration": {
+    "protocol": "shimizu_time_payroll",
+    "protocol_version": "1.0",
+    "source_type": "aire_services",
+    "source_instance_id": "642b5fd9-53ed-4798-b69b-fe354fe70334",
+    "capabilities": ["time_summary_v1", "finalized_batch_v2"]
+  },
   "start_date": "2026-05-18",
   "end_date": "2026-05-24",
   "generated_at": "2026-05-25T08:00:00Z",
@@ -136,6 +143,14 @@ The source authenticates either `X-Payroll-Shared-Secret` or the legacy-compatib
 ```
 
 Cornerstone Tax may omit regular/overtime fields and provide category `hours` only. Payroll still recalculates the paid split. AIRE should provide the fuller evidence above, including category splits and rate snapshots.
+
+## Connection identity
+
+New providers should return the `integration` object on every time summary and finalized batch detail. `source_instance_id` is a durable UUID for one installed source database, not an employee, company, URL, or deploy. Releasing new code, changing a hostname, or restoring the same database must preserve it. A deliberate replacement or new database receives a different UUID.
+
+An administrator establishes trust by selecting **Test connection** in Payroll. Payroll saves the returned UUID, protocol version, and capabilities. Every later protected response must match the saved UUID; a missing or changed identity stops the import for review. Existing providers without this object continue as legacy connections until an administrator tests and pins an identity.
+
+Capabilities use lowercase keys with underscores and describe contracts the source currently supports. Adding a capability is compatible within protocol version `1.0`. Changing the identity meaning, trust handshake, or capability semantics requires a new protocol version.
 
 ## Blocking invariants
 

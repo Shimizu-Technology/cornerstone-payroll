@@ -92,7 +92,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
-      expect(data.map { |row| row.fetch("id") }).to eq([managed_assignment.id])
+      expect(data.map { |row| row.fetch("id") }).to eq([ managed_assignment.id ])
       expect(data.map { |row| row.fetch("user_id") }).not_to include(foreign_user.id)
       expect(data.map { |row| row.fetch("user_id") }).not_to include(employee_user.id)
     end
@@ -104,7 +104,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
-      expect(data.map { |row| row.fetch("id") }).to eq([managed_assignment.id])
+      expect(data.map { |row| row.fetch("id") }).to eq([ managed_assignment.id ])
       expect(data.map { |row| row.fetch("user_id") }).not_to include(switched_managed_user.id)
     end
   end
@@ -122,16 +122,16 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
   describe "PUT /api/v1/admin/company_assignments/bulk_update" do
     it "allows admins to assign any payroll client they can access globally" do
       put "/api/v1/admin/company_assignments/bulk_update",
-        params: { user_id: managed_user.id, company_ids: [other_company.id] }
+        params: { user_id: managed_user.id, company_ids: [ other_company.id ] }
 
       expect(response).to have_http_status(:ok)
-      expect(managed_user.company_assignments.reload.map(&:company_id)).to eq([other_company.id])
+      expect(managed_user.company_assignments.reload.map(&:company_id)).to eq([ other_company.id ])
     end
 
     it "rejects assignment writes for employee users" do
       expect {
         put "/api/v1/admin/company_assignments/bulk_update",
-          params: { user_id: employee_user.id, company_ids: [other_company.id] }
+          params: { user_id: employee_user.id, company_ids: [ other_company.id ] }
       }.not_to change { employee_user.company_assignments.reload.map(&:company_id) }
 
       expect(response).to have_http_status(:not_found)
@@ -144,7 +144,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
       expect {
         put "/api/v1/admin/company_assignments/bulk_update",
-          params: { user_id: managed_user.id, company_ids: [foreign_client_company.id] }
+          params: { user_id: managed_user.id, company_ids: [ foreign_client_company.id ] }
       }.not_to change { managed_user.company_assignments.reload.map(&:company_id) }
 
       expect(response).to have_http_status(:unprocessable_entity)

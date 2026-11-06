@@ -54,6 +54,29 @@ describe('saved paycheck explanation', () => {
   it('does not substitute current setup when a historical snapshot is unavailable', () => {
     expect(renderToStaticMarkup(<PaycheckWithholdingContext item={{} as PayrollItem} />)).toContain('No W-4 snapshot was retained');
   });
+  it('explains signed earnings without reporting that none were applied', () => {
+    const html = renderToStaticMarkup(<PayrollResultBreakdown disclosure={{ earnings: [{ label: 'Regular adjustment', amount: -25, source: 'correction_reference' }], other_pay: [], taxes: [{ label: 'Social Security', amount: -1.55 }, { label: 'Medicare', amount: -0.36 }], deductions: [], employer_contributions: [], reconciliation: { gross_pay: -25, other_pay: 0, employee_taxes: -1.91, other_deductions: 0, net_pay: -23.09 } }} />);
+    expect(html).toContain('Regular adjustment');
+    expect(html).toContain('Derived from saved correction inputs');
+    expect(html).toContain('-$25.00');
+    expect(html).toContain('-$23.09');
+    expect(html).not.toContain('differ from saved net pay');
+  });
+  it('labels validated inherited evidence instead of pretending it was stored on the corrective snapshot', () => {
+    const item: PayrollItem = { id: 4, employee_id: 3, employment_type: 'hourly', pay_rate: 25, tax_rule_snapshot: { w4: { filing_status_entered: 'single', signed_on: '2026-01-01', source_reference: 'Synthetic dated form', election_id: null, election_source: null } } };
+    const html = renderToStaticMarkup(<PaycheckWithholdingContext item={item} provenance={{ origin: 'original_payroll_snapshot', original_payroll_item_id: 3, original_pay_period_id: 5, election_id: 7, election_source: 'employee_creation' }} />);
+    expect(html).toContain('Inherited historical evidence from original payroll item #3');
+    expect(html).toContain('Election #7');
+    expect(html).toContain('employee creation');
+    expect(html).toContain('original frozen W-4 profile');
+    expect(html).not.toContain('Election #Not recorded');
+  });
+  it('keeps legacy identity explicitly unknown when provenance cannot be validated', () => {
+    const item: PayrollItem = { id: 4, employee_id: 3, employment_type: 'hourly', pay_rate: 25, tax_rule_snapshot: { w4: { filing_status_entered: 'single', election_id: null, election_source: null } } };
+    const html = renderToStaticMarkup(<PaycheckWithholdingContext item={item} />);
+    expect(html).toContain('Election identity and source were not retained');
+    expect(html).not.toContain('Inherited historical evidence');
+  });
   it('distinguishes pending catch-up verification from permitted annual capacity', () => {
     const item = { retirement_rule_snapshot: { election: { plan_name: 'Verified plan' },
       catch_up_permission_status: 'prior_wages_pending', potential_catch_up_limit: '11250.0', catch_up_limit: '0.0', annual_employee_cap: '24500.0', remaining_after: '100.0',

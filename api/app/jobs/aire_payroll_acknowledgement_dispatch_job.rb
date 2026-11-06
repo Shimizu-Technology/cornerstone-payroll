@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
-class AirePayrollAcknowledgementDispatchJob < ApplicationJob
+class AirePayrollAcknowledgementDispatchJob < ConnectedPayrollJob
   queue_as :default
 
   def perform
     AirePayrollAcknowledgement.dispatch_pending!
     AirePayrollEntryAcknowledgement.dispatch_pending!
+    TimeTrackingCorrectionReceipt.dispatch_pending!
   end
 end

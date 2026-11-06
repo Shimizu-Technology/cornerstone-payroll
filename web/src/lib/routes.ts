@@ -1,5 +1,5 @@
-export type EmployeeWorkspaceTab = 'overview' | 'pay-setup' | 'pay-history' | 'activity';
-export type PayRunWorkspaceTab = 'overview' | 'work' | 'checks' | 'activity';
+export type EmployeeWorkspaceTab = 'overview' | 'pay-setup' | 'pay-history' | 'hours-payroll' | 'activity';
+export type PayRunWorkspaceTab = 'overview' | 'work' | 'checks' | 'reports' | 'activity';
 
 interface ReturnContext {
   returnTo?: string;
@@ -68,6 +68,14 @@ export function payRunsPath(companyId: number, query = ''): string {
 
 export function payrollGoLivePath(companyId: number): string {
   return `${companyPath(companyId)}/payroll-go-live`;
+}
+
+export function aireAccountConnectionPath(sourceId?: number, returnTo?: string): string {
+  const query = new URLSearchParams();
+  if (sourceId && Number.isSafeInteger(sourceId) && sourceId > 0) query.set('source_id', String(sourceId));
+  if (returnTo) query.set('return_to', safeInternalReturnPath(returnTo, '/app'));
+  const path = `/app/aire-account-connection${query.size ? `?${query}` : ''}`;
+  return path.length <= MAX_APP_URL_LENGTH ? path : aireAccountConnectionPath(sourceId);
 }
 
 export function payRunPath(

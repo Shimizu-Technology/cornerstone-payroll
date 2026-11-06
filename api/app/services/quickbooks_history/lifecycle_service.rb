@@ -19,6 +19,7 @@ module QuickbooksHistory
       HistoricalImportBatch.transaction do
         Company.lock.find(batch.company_id)
         batch.lock!
+        ensure_authorized_actor!(lock: true)
         return batch if batch.applied? || batch.locked?
         raise ArgumentError, "Only a previewed historical import can be applied" unless batch.previewed?
         raise ArgumentError, "Resolve every reconciliation error before applying" if batch.blocking_errors?
@@ -46,6 +47,7 @@ module QuickbooksHistory
       verify_source_files!(action: "locking")
 
       batch.with_lock do
+        ensure_authorized_actor!(lock: true)
         return batch if batch.locked?
         raise ArgumentError, "Apply the historical import before locking it" unless batch.applied?
         raise ArgumentError, "Reconciliation must pass before the historical import can be locked" unless batch.reconciliation_summary.to_h["passed"] == true
@@ -66,10 +68,14 @@ module QuickbooksHistory
 
     attr_reader :batch, :actor
 
-    def ensure_authorized_actor!
+    def ensure_authorized_actor!(lock: false)
+      if lock
+        @actor = User.lock.find_by(id: actor&.id)
+        batch.company.company_assignments.where(user_id: actor&.id).lock.load
+      end
       authorized = actor.present? &&
         actor.can_access_company?(batch.company_id) &&
-        StaffRolePolicy.allowed?(actor, :manage_client_configuration)
+        StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: batch.company)
       return if authorized
 
       raise ArgumentError, "An attributed manager or administrator with company access is required"

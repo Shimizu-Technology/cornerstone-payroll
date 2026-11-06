@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 
 interface ReprintCheckModalProps {
   item: CheckItem;
+  readOnly?: boolean;
   onClose: () => void;
   onComplete: () => Promise<void>;
 }
@@ -24,7 +25,7 @@ const reasonExamples = [
   'Original check never received',
 ];
 
-export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckModalProps) {
+export function ReprintCheckModal({ item, readOnly = false, onClose, onComplete }: ReprintCheckModalProps) {
   const [reason, setReason] = useState('');
   const [replacementCheckNumber, setReplacementCheckNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,6 +41,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
   }, [item.events]);
 
   const handleReissue = async () => {
+    if (readOnly) return;
     if (!trimmedReason) {
       setError('Enter a reason before reissuing this check.');
       return;
@@ -140,6 +142,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           </div>
         </div>
 
+        {readOnly && <p role="status" className="text-sm text-amber-800">Changes are unavailable with your current workspace access. Your entered details remain here; Cancel is available.</p>}
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
@@ -150,7 +153,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           </Button>
           <Button
             onClick={handleReissue}
-            disabled={!canSubmit}
+            disabled={readOnly || !canSubmit}
             className="bg-orange-600 text-white hover:bg-orange-700"
           >
             {loading ? 'Processing…' : 'Reissue Check'}

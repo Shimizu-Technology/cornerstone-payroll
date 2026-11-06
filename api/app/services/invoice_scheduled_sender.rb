@@ -37,7 +37,7 @@ class InvoiceScheduledSender
         invoice = schedule.invoice
         artifact = invoice.primary_artifact
         raise ArgumentError, "An issued PDF is required before sending" unless artifact&.content_type == "application/pdf"
-        raise ArgumentError, "Invoice sender email is not configured" if ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
+        raise ArgumentError, "Invoice sender email is not configured" if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
 
         bytes = InvoiceArtifactStorageService.new.download(artifact)
         raise ArgumentError, "Invoice artifact is unavailable" if bytes.nil?
@@ -52,15 +52,23 @@ class InvoiceScheduledSender
         }
         message[:reply_to] = schedule.reply_to_email if schedule.reply_to_email.present?
 
-        response = Resend::Emails.send(message, options: { idempotency_key: "invoice-send-#{schedule.id}" })
+        response = StagingMailTransport.deliver(message, options: { idempotency_key: "invoice-send-#{schedule.id}" })
         reference = response[:id] || response["id"]
         raise "Invoice email provider did not return a message ID" if reference.blank?
 
         schedule.with_lock do
           return unless schedule.status == "sending"
 
+          if response["staging_captured"]
+            InvoiceEvent.record!(invoice: invoice, event_type: "staging_mail_captured", actor: schedule.created_by,
+                                 metadata: { send_schedule_id: schedule.id, recipient_count: schedule.recipients.size })
+            schedule.update!(status: "cancelled", provider_reference: reference, last_error: "STAGING capture only; no email was sent")
+            return
+          end
+
           sent_at = Time.current
-          schedule.recipients.each do |recipient|
+          recipients = StagingOutboundPolicy.staging? ? response.fetch("staging_recipients") : schedule.recipients
+          recipients.each do |recipient|
             delivery = invoice.deliveries.create!(
               organization: invoice.organization,
               invoice_artifact: artifact,

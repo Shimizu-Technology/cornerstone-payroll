@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourcesController < BaseController
+        include ConnectedPayrollControl
+        before_action :require_connected_payroll!, except: %i[index show]
         before_action :require_admin!, except: [
           :index,
           :show,
@@ -24,11 +26,13 @@ module Api
           :create_aire_account_link,
           :destroy_aire_account_link
         ]
+        before_action :require_own_account_link_access!, only: %i[show_aire_account_link create_aire_account_link destroy_aire_account_link]
         before_action :disable_http_caching
 
         def index
           sources = TimeTrackingSource.where(company_id: current_company_id).includes(:time_tracking_delegations).order(:name)
-          render json: { time_tracking_sources: sources.map { |source| source_json(source) } }
+          # At the top level too: a client with no sources still needs the paused state.
+          render json: { time_tracking_sources: sources.map { |source| source_json(source) }, connected_payroll: ConnectedPayrollMode.capability }
         end
 
         def show
@@ -62,13 +66,15 @@ module Api
             return
           end
 
-          payload = TimeTracking::Client.new(@source).time_summary(
+          client = TimeTracking::Client.new(@source)
+          payload = client.time_summary(
             start_date: test_connection_date,
             end_date: test_connection_date
           )
-          cockpit_ready = if @source.source_type == "aire_services"
+          identity = TimeTracking::ConnectionIdentity.verify_and_pin!(source: @source, payload: payload)
+          cockpit_ready = if @source.supports?(:payroll_cockpit)
             begin
-              TimeTracking::Client.new(@source).payroll_cockpit_employees(per_page: 1).key?("employees")
+              client.payroll_cockpit_employees(per_page: 1).key?("employees")
             rescue TimeTracking::Client::Error
               false
             end
@@ -83,10 +89,18 @@ module Api
             generated_at: payload["generated_at"],
             employee_count: Array(payload["employees"]).size,
             summary: payload["summary"] || {},
+            identity_verified: !identity.legacy,
+            connection_uuid: @source.connection_uuid,
+            source_instance_id: identity.source_instance_id,
+            source_protocol: identity.protocol,
+            source_protocol_version: identity.protocol_version,
+            source_capabilities: identity.capabilities,
+            supported_operations: @source.connector.capabilities,
+            identity_verified_at: @source.identity_verified_at,
             cockpit_ready: cockpit_ready,
             delegation_token_configured: @source.delegation_for(current_user).present?
           }
-        rescue TimeTracking::Client::Error, ArgumentError, SocketError, SystemCallError, Timeout::Error,
+        rescue TimeTracking::Client::Error, TimeTracking::ConnectionIdentity::Error, ArgumentError, SocketError, SystemCallError, Timeout::Error,
                Net::OpenTimeout, Net::ReadTimeout, OpenSSL::SSL::SSLError => e
           render json: { ok: false, error: "Connection test failed: #{e.message}" }, status: :unprocessable_entity
         end
@@ -146,7 +160,7 @@ module Api
         end
 
         def source_params
-          permitted = [ :name, :base_url, :shared_secret, :delegation_token, :active ]
+          permitted = [ :name, :base_url, :authorization_origin, :shared_secret, :delegation_token, :active ]
           permitted << :source_type if action_name == "create"
           params.require(:time_tracking_source).permit(*permitted)
         end
@@ -163,12 +177,26 @@ module Api
           Date.current.iso8601
         end
 
+        def require_own_account_link_access!
+          # Status GET belongs to the credential control surface with connect
+          # and disconnect. Require workspace write access for all three so a
+          # read-only reviewer cannot inspect or manage personal credentials.
+          return if StaffRolePolicy.own_aire_account_link_allowed?(current_user, @source.company) &&
+            TestWorkspaceAccessPolicy.allowed?(user: current_user, company: @source.company,
+              request_method: "POST", capability: :manage_own_aire_account_link)
+
+          render json: { error: "You do not have permission to connect your time tracking account for this company" }, status: :forbidden
+        end
+
         def account_link_client
-          unless @source.source_type == "aire_services"
-            raise TimeTracking::Client::Error.new("Account linking is only available for AIRE Services", response_status: 422)
+          unless @source.supports?(:account_linking)
+            raise TimeTracking::Client::Error.new("This source does not support account linking", response_status: 422)
+          end
+          unless @source.active? && @source.company_id == current_company_id
+            raise TimeTracking::Client::Error.new("This time tracking source is inactive. Ask your payroll administrator to review the current connection.", response_status: 422)
           end
           unless @source.shared_secret_configured?
-            raise TimeTracking::Client::Error.new("Save the AIRE shared secret before connecting your account", response_status: 422)
+            raise TimeTracking::Client::Error.new("This time tracking source needs its integration credential configured by your payroll administrator before connecting your account", response_status: 422)
           end
 
           TimeTracking::Client.new(@source)
@@ -176,7 +204,7 @@ module Api
 
         def aire_account_link_return_url
           frontend_url = ENV.fetch("FRONTEND_URL")
-          "#{frontend_url.to_s.chomp('/')}/time-tracking-sources?source_id=#{@source.id}"
+          "#{frontend_url.to_s.chomp('/')}/app/time-account-connection?source_id=#{@source.id}"
         end
 
         def render_one_active_source_error
@@ -185,6 +213,7 @@ module Api
 
         def source_json(source)
           {
+            connected_payroll: ConnectedPayrollMode.capability,
             id: source.id,
             company_id: source.company_id,
             name: source.name,
@@ -193,6 +222,17 @@ module Api
             active: source.active,
             shared_secret_configured: source.shared_secret_configured?,
             delegation_token_configured: source.delegation_for(current_user).present?,
+            connection_uuid: source.connection_uuid,
+            identity_verified: source.remote_identity_pinned?,
+            source_instance_id: source.expected_source_instance_id,
+            source_protocol: source.source_protocol,
+            source_protocol_version: source.source_protocol_version,
+            source_capabilities: source.source_capabilities,
+            supported_operations: source.connector.capabilities,
+            remote_source_identifier: source.connector.source_identifier,
+            authorization_origin: source.authorization_origin,
+            source_policy_constraints: source.source_policy_constraints,
+            identity_verified_at: source.identity_verified_at,
             last_synced_at: source.last_synced_at,
             created_at: source.created_at,
             updated_at: source.updated_at

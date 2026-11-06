@@ -21,7 +21,9 @@ module Api
           LIABILITY_LOCKED_FIELDS + %w[payment_date confirmation_number check_number]
         ).freeze
 
-        before_action :set_check, only: [ :show, :update, :destroy, :mark_printed, :mark_paid, :void_check, :check_pdf, :voucher_pdf, :history ]
+        before_action :set_check, only: [ :show, :update, :destroy, :mark_printed, :mark_paid, :void_check, :check_pdf, :voucher_pdf, :history, :payroll_matches, :supersede_with_payroll_item ]
+
+        before_action :require_supersession_access!, only: %i[supersede_with_payroll_item]
 
         # GET /api/v1/admin/non_employee_checks
         def index
@@ -32,7 +34,7 @@ module Api
           # only an `id → count` map in a single grouped query, then pass
           # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by, :paid_by, :line_items, :payroll_liability_check_allocations)
+            .includes(:pay_period, :created_by, :paid_by, :line_items, :payroll_liability_check_allocations, :non_employee_check_supersession)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.standalone if params[:standalone] == "true"
@@ -148,6 +150,7 @@ module Api
           ActiveRecord::Base.transaction do
             @check.company.lock!
             @check.lock!
+            raise ArgumentError, "This software check is superseded by a payroll check" if @check.non_employee_check_supersession
             raise ArgumentError, "Cannot update a voided check" if @check.voided?
             if @check.paid_at.present? && locked_field_change?(attrs, PAID_LOCKED_FIELDS)
               raise ArgumentError, "Void and recreate a paid payment to change its financial or payment details"
@@ -223,6 +226,50 @@ module Api
           render json: {
             history: edits.map { |edit| edit_payload(edit) }
           }
+        end
+
+        def payroll_matches
+          candidates = NonEmployeeCheckSupersessionService.new(check: @check, actor: current_user).candidates
+          render json: { payroll_matches: candidates.map do |item|
+            {
+              payroll_item_id: item.id,
+              employee_name: item.employee.full_name,
+              pay_period_id: item.pay_period_id,
+              pay_date: item.pay_period.pay_date,
+              check_number: item.check_number,
+              net_pay: item.net_pay
+            }
+          end }
+        end
+
+        def supersede_with_payroll_item
+          ActiveRecord::Base.transaction do
+            evidence = NonEmployeeCheckSupersessionService.new(check: @check, actor: current_user).supersede!(
+              payroll_item_id: params.require(:payroll_item_id), reason: params.require(:reason),
+              recipient_verified: params[:recipient_verified] == true
+            )
+            AuditLog.record!(
+              user: current_user, organization_id: @check.company.organization_id, company_id: @check.company_id,
+              action: "non_employee_checks#superseded", record_type: "non_employee_checks", record_id: @check.id,
+              subject_name: @check.payable_to,
+              metadata: { payroll_item_id: evidence.payroll_item_id, reason: evidence.reason,
+                          recipient_verified: true,
+                          check_number: @check.check_number, amount: @check.amount.to_s },
+              ip_address: request.remote_ip, user_agent: request.user_agent,
+              request_id: request.request_id, event_category: "activity"
+            )
+          end
+          skip_default_audit_log!
+          render json: { non_employee_check: check_payload(@check.reload) }
+        rescue ActionController::ParameterMissing, NonEmployeeCheckSupersessionService::Error,
+               ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::StatementInvalid => e
+          raise unless e.cause.is_a?(PG::RaiseException)
+
+          Rails.logger.warn("Standalone check supersession failed database evidence verification")
+          render json: { error: "The payroll link failed database verification. Refresh the matches and try again." },
+            status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/non_employee_checks/:id
@@ -350,6 +397,9 @@ module Api
 
         # GET /api/v1/admin/non_employee_checks/:id/check_pdf
         def check_pdf
+          if @check.non_employee_check_supersession
+            return render json: { error: "This software check is superseded by a payroll check" }, status: :unprocessable_entity
+          end
           unless @check.payment_method == "check"
             return render json: { error: "Only check payments have a printable check" }, status: :unprocessable_entity
           end
@@ -386,6 +436,10 @@ module Api
         end
 
         private
+
+        def require_supersession_access!
+          require_capability!(:manage_client_configuration)
+        end
 
         def render_company_for(company)
           CheckRenderSettings.resolve(
@@ -450,7 +504,7 @@ module Api
           # Preload :edits so check_payload's `edit_count: check.edits.size`
           # uses the loaded association instead of issuing a per-request COUNT.
           @check = NonEmployeeCheck
-            .includes(:edits, :line_items, :pay_period, :created_by, :paid_by, :payroll_liability_check_allocations)
+            .includes(:edits, :line_items, :pay_period, :created_by, :paid_by, :payroll_liability_check_allocations, :non_employee_check_supersession)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
@@ -565,6 +619,12 @@ module Api
             void_reason: check.void_reason,
             voided_at: check.voided_at,
             check_status: check.check_status,
+            supersession: check.non_employee_check_supersession && {
+              payroll_item_id: check.non_employee_check_supersession.payroll_item_id,
+              payroll_check_number: check.non_employee_check_supersession.verified_facts["payroll_check_number"],
+              reason: check.non_employee_check_supersession.reason,
+              linked_at: check.non_employee_check_supersession.created_at
+            },
             edit_count: edit_count_for(check, override: edit_count),
             created_by_id: check.created_by_id,
             created_by_name: check.created_by&.name,

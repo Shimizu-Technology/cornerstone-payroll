@@ -1,0 +1,326 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AireFinalizedBatchAction } from './AireFinalizedBatchAction';
+import type { AirePayrollRecord, PayPeriodStatus } from '@/types';
+
+const batch = {
+  event_id: 'event-1',
+  verification_status: 'verified' as const,
+  verification_attempts: 1,
+  occurred_at: '2026-09-23T09:00:00+10:00',
+  verified_at: '2026-09-23T09:01:00+10:00',
+  payroll_batch_id: 'time tracking-PAY-20260915',
+  payroll_batch_checksum: 'a'.repeat(64),
+  summary: {
+    employee_count: 2,
+    exclusion_count: 1,
+    total_hours: 72.5,
+    regular_hours: 69,
+    overtime_hours: 3.5,
+  },
+};
+
+const bucket = (lineCount: number, totalHours: number) => ({
+  line_count: lineCount,
+  total_hours: totalHours,
+  regular_hours: totalHours,
+  overtime_hours: 0,
+});
+
+const linkedRecord = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}): AirePayrollRecord => ({
+  id: 9,
+  source_name: 'time tracking Services',
+  source_active: true,
+  external_batch_id: batch.payroll_batch_id,
+  external_batch_checksum: batch.payroll_batch_checksum,
+  contract_version: '2.0',
+  source_cutoff_at: batch.occurred_at,
+  payable_line_status: {
+    line_count: 2,
+    total_hours: 72.5,
+    regular_hours: 69,
+    overtime_hours: 3.5,
+    in_payroll: bucket(2, 72.5),
+    payment_pending: bucket(0, 0),
+    paid: bucket(0, 0),
+    needs_attention: bucket(0, 0),
+    held: { entry_count: 1, total_hours: 4 },
+    synchronization: { pending_event_count: 0, failed_event_count: 0, last_confirmed_at: null },
+    ...overrides,
+  },
+});
+
+afterEach(() => cleanup());
+
+describe('AireFinalizedBatchAction', () => {
+  it('gives an editable payroll one clear review-and-add action', async () => {
+    const onReview = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="draft"
+        onReview={onReview}
+      />
+    );
+
+    expect(screen.getByText('Time tracking hours are ready to add')).toBeTruthy();
+    expect(screen.getByText('72.50 hrs')).toBeTruthy();
+    expect(screen.getByText('69.00 hrs')).toBeTruthy();
+    expect(screen.getByText('3.50 hrs')).toBeTruthy();
+    expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /review and add time tracking hours/i }));
+    expect(onReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the historical link action without implying payroll will change', () => {
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="committed"
+        onReview={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /review and link time tracking record/i })).toBeTruthy();
+    expect(screen.getByText(/without changing the payroll/i)).toBeTruthy();
+  });
+
+  it('shows the calculation and payment handoff after the batch is linked', () => {
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="draft"
+        aireRecord={linkedRecord()}
+        onReview={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Time tracking hours are in this payroll')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByText(/Next: select Calculate Payroll/i)).toBeTruthy();
+  });
+
+  it('shows committed lines without delivery evidence as payment pending', () => {
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="committed"
+        aireRecord={linkedRecord()}
+        onReview={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Time tracking hours are linked; payment evidence is pending')).toBeTruthy();
+    expect(screen.getByText('Payment pending')).toBeTruthy();
+    expect(screen.getByText('72.50 hrs', { selector: '.font-display.text-lg' })).toBeTruthy();
+    expect(screen.getByText(/Added to payroll; payment not yet recorded/i)).toBeTruthy();
+    expect(screen.getByText(/committed payroll records remain unpaid/i)).toBeTruthy();
+  });
+
+  it('calls hours paid only when every payable line has issuance evidence', () => {
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="committed"
+        aireRecord={linkedRecord({
+          in_payroll: bucket(0, 0),
+          paid: bucket(2, 72.5),
+        })}
+        onReview={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Time tracking hours are paid')).toBeTruthy();
+    expect(screen.getByText(/delivery or settlement evidence for every linked payable line/i)).toBeTruthy();
+  });
+
+  it('surfaces failed, voided, or missing payment evidence', () => {
+    render(
+      <AireFinalizedBatchAction
+        batch={batch}
+        payPeriodStatus="committed"
+        aireRecord={linkedRecord({
+          line_count: 3,
+          total_hours: 74.5,
+          in_payroll: bucket(2, 72.5),
+          needs_attention: bucket(1, 2),
+        })}
+        onReview={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+    expect(screen.getByText(/failed and voided payments require an explicit follow-up/i)).toBeTruthy();
+  });
+});
+
+
+it.each([
+  ['draft', 'Next: select Calculate Payroll.'],
+  ['calculated', 'Next: review the calculated payroll, then select Approve when ready.'],
+  ['approved', 'Next: select Commit & Finalize when the approved payroll is ready.'],
+] as const)('gives an added batch the next action for the actual %s payroll status', (status, nextAction) => {
+  const onReview = vi.fn();
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus={status} aireRecord={linkedRecord()} onReview={onReview} />);
+  expect(screen.getByText(nextAction, { exact: false })).toBeTruthy();
+  if (status !== 'draft') expect(screen.queryByText(/Next: select Calculate Payroll/)).toBeNull();
+  expect(screen.getByText(/Adding the batch records hours in payroll; it does not mark anyone paid/)).toBeTruthy();
+  expect(screen.queryByRole('button')).toBeNull();
+  expect(onReview).not.toHaveBeenCalled();
+});
+
+it('updates guidance through calculation, approval, rollback and commit without treating those stages as payment', () => {
+  const onReview = vi.fn();
+  const view = render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="draft" aireRecord={linkedRecord()} onReview={onReview} />);
+  for (const status of ['calculated', 'approved', 'calculated', 'draft', 'committed'] as PayPeriodStatus[]) {
+    view.rerender(<AireFinalizedBatchAction batch={batch} payPeriodStatus={status} aireRecord={linkedRecord()} onReview={onReview} />);
+    if (status === 'calculated') expect(screen.getByText(/Next: review the calculated payroll, then select Approve when ready/)).toBeTruthy();
+    else if (status === 'approved') expect(screen.getByText(/Next: select Commit & Finalize when the approved payroll is ready/)).toBeTruthy();
+    else if (status === 'draft') expect(screen.getByText(/Next: select Calculate Payroll/)).toBeTruthy();
+    else {
+      expect(screen.queryByText(/Next:/)).toBeNull();
+      expect(screen.getByText('Time tracking hours are linked; payment evidence is pending')).toBeTruthy();
+      expect(screen.getByText(/Delivery or settlement establishes paid status/)).toBeTruthy();
+    }
+    expect(screen.queryByText('Time tracking hours are paid')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  }
+  expect(onReview).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ['negative-only', -1, 1, 1],
+  ['mixed positive and negative', 7, 1, 1],
+  ['zero-total classification correction', 0, 2, 0],
+  ['positive correction', 1, 1, 0],
+  ['negative issue without correction count', 7, 0, 1],
+] as const)('reviews %s batch corrections without treating signed totals as new payable hours', async (_kind, total, correctionCount, negativeCount) => {
+  const onReview = vi.fn();
+  render(<AireFinalizedBatchAction batch={{ ...batch,
+    summary: { ...batch.summary, total_hours: total, correction_count: correctionCount },
+    issues: { negative_adjustment_count: negativeCount },
+  }} payPeriodStatus="draft" onReview={onReview} />);
+  expect(screen.getByText('Time tracking batch includes corrections')).toBeTruthy();
+  expect(screen.getByText('Signed batch hours')).toBeTruthy();
+  expect(screen.queryByText('Payable hours')).toBeNull();
+  expect(screen.queryByText(/then select Calculate Payroll/)).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'Review time tracking corrections' }));
+  expect(onReview).toHaveBeenCalledOnce();
+});
+
+it('preserves the ordinary empty batch review action without classifying it as a correction', () => {
+  render(<AireFinalizedBatchAction batch={{ ...batch, summary: { employee_count: 0, exclusion_count: 1,
+    total_hours: 0, regular_hours: 0, overtime_hours: 0, correction_count: 0 } }} payPeriodStatus="draft" onReview={vi.fn()} />);
+  expect(screen.getByText('Payable hours')).toBeTruthy();
+  expect(screen.getByText('Payable hours').parentElement?.textContent).toContain('0.00 hrs');
+  expect(screen.getByRole('button', { name: /Review and add time tracking hours/ })).toBeTruthy();
+});
+
+it('keeps linked correction guidance separate from ordinary calculation and paid status', () => {
+  render(<AireFinalizedBatchAction batch={{ ...batch, summary: { ...batch.summary, total_hours: -1, correction_count: 1 } }}
+    payPeriodStatus="draft" aireRecord={linkedRecord()} onReview={vi.fn()} />);
+  expect(screen.getByText('Time tracking correction batch is linked')).toBeTruthy();
+  expect(screen.queryByText(/Next: select Calculate Payroll/)).toBeNull();
+  expect(screen.queryByText('Time tracking hours are paid')).toBeNull();
+});
+
+it('preserves payment attention guidance when a linked batch also contains corrections', () => {
+  render(<AireFinalizedBatchAction batch={{ ...batch, summary: { ...batch.summary, correction_count: 1 } }}
+    payPeriodStatus="committed" aireRecord={linkedRecord({ needs_attention: bucket(1, 2) })} onReview={vi.fn()} />);
+  expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+  expect(screen.getByText(/Failed and voided payments require an explicit follow-up/)).toBeTruthy();
+});
+
+it('shows a committed payroll recorded before line-level payment tracking as recorded, not needing attention', () => {
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed"
+    aireRecord={linkedRecord({ in_payroll: bucket(0, 0), recorded_before_line_tracking: bucket(2, 72.5) })} onReview={vi.fn()} />);
+  expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
+  expect(screen.getByText('Recorded')).toBeTruthy();
+  expect(screen.getByText('Recorded earlier')).toBeTruthy();
+  expect(screen.getByText(/Its checks show who was paid and when/)).toBeTruthy();
+  expect(screen.queryByText('Needs attention')).toBeNull();
+  expect(screen.queryByText('time tracking payment needs attention')).toBeNull();
+});
+
+it('keeps attention when a run recorded earlier also has lines with no receipt', () => {
+  render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed"
+    aireRecord={linkedRecord({ in_payroll: bucket(0, 0), recorded_before_line_tracking: bucket(1, 70), needs_attention: bucket(1, 2.5) })} onReview={vi.fn()} />);
+  expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+  expect(screen.queryByText('Time tracking hours were recorded with this payroll')).toBeNull();
+});
+
+describe('committed wording', () => {
+  const earlier = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}) => linkedRecord({
+    in_payroll: bucket(0, 0),
+    recorded_before_line_tracking: bucket(2, 72.5),
+    ...overrides,
+  });
+
+  it('never tells a completed payroll to continue with payroll steps', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText(/saved the exact time tracking batch and its entry-level links with this completed payroll/)).toBeTruthy();
+    expect(screen.queryByText(/normal payroll steps/)).toBeNull();
+  });
+
+  it('keeps the payroll steps on an editable run', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="approved" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText(/continue with the normal payroll steps/)).toBeTruthy();
+    expect(screen.getByText(/Next: select Commit & Finalize/)).toBeTruthy();
+  });
+});
+
+describe('linked record without a batch', () => {
+  const earlier = (overrides: Partial<NonNullable<AirePayrollRecord['payable_line_status']>> = {}) => linkedRecord({
+    in_payroll: bucket(0, 0),
+    recorded_before_line_tracking: bucket(2, 72.5),
+    ...overrides,
+  });
+
+  it('shows the recorded card from the record totals without inventing a headcount', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier()} onReview={vi.fn()} />);
+    expect(screen.getByText('Time tracking hours were recorded with this payroll')).toBeTruthy();
+    expect(screen.getByText('Recorded')).toBeTruthy();
+    expect(screen.getByText(/recorded before Cornerstone tracked payment line by line/)).toBeTruthy();
+    expect(screen.getByText('Held time')).toBeTruthy();
+    expect(screen.getByText('1 held entry tracked for later')).toBeTruthy();
+    expect(screen.getAllByText('69.00 hrs').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/employee/)).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('labels signed totals when the record has accounting corrections', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.getByText('Time tracking correction batch is linked')).toBeTruthy();
+    expect(screen.getByText('Signed batch hours')).toBeTruthy();
+    expect(screen.queryByText('Payable hours')).toBeNull();
+    expect(screen.getByText(/Accounting-only corrections record no new payment or recovery/)).toBeTruthy();
+  });
+
+  it('keeps the attention title when a record has corrections and failed lines', () => {
+    render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2), needs_attention: bucket(1, 4) })} onReview={vi.fn()} />);
+    expect(screen.getByText('time tracking payment needs attention')).toBeTruthy();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+  });
+
+  it('keeps batch-based correction detection when a batch exists', () => {
+    render(<AireFinalizedBatchAction batch={batch} payPeriodStatus="committed" aireRecord={earlier({ accounting_corrections: bucket(1, -2) })} onReview={vi.fn()} />);
+    expect(screen.queryByText('Time tracking correction batch is linked')).toBeNull();
+    expect(screen.getByText('Payable hours')).toBeTruthy();
+  });
+
+  it.each([
+    ['failed or voided lines', { needs_attention: bucket(1, 4) }, 'Needs attention'],
+    ['unpaid lines', { payment_pending: bucket(1, 4) }, 'Payment pending'],
+  ])('still warns about %s', (_name, overrides, badge) => {
+    const { container } = render(<AireFinalizedBatchAction batch={null} payPeriodStatus="committed" aireRecord={earlier(overrides)} onReview={vi.fn()} />);
+    expect(screen.getByText(badge)).toBeTruthy();
+    expect(container.querySelector('[class*="border-warning-200"]')).toBeTruthy();
+  });
+});

@@ -44,6 +44,34 @@ RSpec.describe PayrollFilingEvidenceRecorder do
     ).call
   end
 
+  def ready_w2_workflow
+    company.update!(ein: "12-3456789")
+    period = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 1), end_date: Date.new(2026, 1, 14), pay_date: Date.new(2026, 1, 18))
+    employee = create(:employee, company: company, department: department)
+    create(:payroll_item, company: company, employee: employee, pay_period: period, gross_pay: 100, reported_tips: 0)
+    fingerprint = W2FilingInputsFingerprint.new(company: company, year: 2026).call
+    readiness = W2FilingReadiness.create!(company: company, year: 2026, status: "filing_ready",
+      preflight_fingerprint: fingerprint, ready_fingerprint: fingerprint, marked_ready_at: Time.current, marked_ready_by: actor)
+    [ readiness, employee ]
+  end
+
+  it "rejects stale W-2 submission evidence without creating an agency record or event" do
+    readiness, employee = ready_w2_workflow
+    employee.update!(address_line1: "Changed after filing review")
+    expect { record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss") }
+      .to raise_error(described_class::Error, /readiness is stale/)
+    expect(PayrollFilingRecord.where(company: company)).to be_empty
+    expect(PayrollFilingEvent.where(company: company)).to be_empty
+    expect(readiness.reload.status).to eq("filing_ready")
+  end
+
+  it "accepts evidence for current revalidated W-2 inputs" do
+    ready_w2_workflow
+    event = record_event(event_type: "submitted", filing_type: "w2_gu_w3_ss")
+    expect(event.event_type).to eq("submitted")
+    expect(event.payroll_filing_record.filing_type).to eq("w2_gu_w3_ss")
+  end
+
   it "records submission and later acceptance as an append-only evidence timeline" do
     ready_quarterly_workflow
 

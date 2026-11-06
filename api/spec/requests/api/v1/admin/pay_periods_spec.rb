@@ -3,6 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
+  before { ensure_verified_test_tax_years(2024, 2025, 2026) }
   let!(:organization) { create(:organization, name: "Pay Period Firm") }
   let!(:company) { Company.create!(name: "Test Company", organization: organization) }
   let!(:department) { Department.create!(name: "Engineering", company: company) }
@@ -81,6 +82,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       json = JSON.parse(response.body)
       period = json["pay_periods"].first
       expect(period["processed_at"]).to be_present
+      expect(period["processed_at"]).to match(/(?:Z|[+-]\d{2}:\d{2})\z/)
+      expect(Time.iso8601(period["processed_at"])).to eq(committed_at)
       expect(period["processed_by_name"]).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "created", "actor_name")).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
@@ -253,7 +256,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(response.parsed_body.fetch("error")).to eq("Manager, admin, or Client management access required")
       expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
     end
   end
@@ -321,6 +324,54 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "number_assigned" => true
       )
     end
+
+    it "rechecks a committed payroll voided after request loading before creating or numbering a FIT payment" do
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        withholding_tax: 43.13, additional_withholding: 5, voided: false)
+      # Keep the controller's initially loaded instance stale so the financial
+      # lock must reload it before checking the void state or using its items.
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:set_pay_period).and_wrap_original do |original|
+        original.call
+        pay_period.update!(correction_status: "voided", voided_at: Time.current, void_reason: "Retained voided payroll")
+      end
+      retained_item = item.attributes
+
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      end.not_to change {
+        [ NonEmployeeCheck.count, PayrollLiabilityPosting.count, PayrollLiabilityEntry.count,
+          PayrollLiabilityCheckAllocation.count, company.reload.next_check_number ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot generate a FIT check for a voided payroll")
+      expect(pay_period.reload).to have_attributes(status: "committed", correction_status: "voided")
+      expect(pay_period.voided_at).to be_present
+      expect(item.reload.attributes).to eq(retained_item)
+    end
+
+    it "rejects reuse of an unnumbered FIT payment after its committed payroll is voided" do
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        withholding_tax: 43.13, additional_withholding: 0, voided: false)
+      PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: admin_user)
+      fit_check = create(:non_employee_check,
+        company: company, pay_period: pay_period, amount: 43.13, payable_to: "Treasurer of Guam",
+        payment_period_type: "pay_period", tax_year: nil, tax_month: nil,
+        auto_generated_type: "fit_deposit", check_type: "tax_deposit", check_number: nil)
+      pay_period.update!(correction_status: "voided", voided_at: Time.current, void_reason: "Retained voided payroll")
+      retained_check = fit_check.attributes
+
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      end.not_to change {
+        [ NonEmployeeCheck.count, PayrollLiabilityPosting.count, PayrollLiabilityEntry.count,
+          PayrollLiabilityCheckAllocation.count, company.reload.next_check_number ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot generate a FIT check for a voided payroll")
+      expect(fit_check.reload.attributes).to eq(retained_check)
+    end
   end
 
   describe "GET /api/v1/admin/pay_periods/:id" do
@@ -331,6 +382,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       json = JSON.parse(response.body)
       expect(json["pay_period"]["id"]).to eq(pay_period.id)
       expect(json["pay_period"]).to have_key("payroll_items")
+    end
+
+    it "exposes earning provenance for draft estimates without changing saved components" do
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
+        custom_earnings: [ { "label" => "One-time work", "amount" => 55 } ],
+        custom_columns_data: { "custom_earnings_source" => "manual", "payroll_adjustments_overridden" => true })
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      row = response.parsed_body.fetch("pay_period").fetch("payroll_items").find { |entry| entry["id"] == item.id }
+      expect(row.fetch("draft_earning_sources")).to include("custom_earnings" => "manual", "payroll_adjustments_overridden" => true)
+      expect(item.reload.custom_earnings).to eq([ { "label" => "One-time work", "amount" => 55.0 } ])
     end
 
     it "batches payment activity across the whole run while preserving cancellation guards" do
@@ -906,6 +967,135 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:id" do
+    it "keeps every saved input when review evidence refuses deletion" do
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, approval_notes: "Client asked to review these hours")
+      records = [ pay_period, item, earning, entry, package ]
+      before = records.map { |record| record.reload.attributes }
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(records.map { |record| record.class.find_by(id: record.id)&.attributes }).to eq(before)
+    end
+
+    it "deletes a calculated run and its applied source package, document, row and paycheck dependents" do
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      session = pay_period.payroll_intake_sessions.create!(company: company, source_type: "spike_email", import_hash: "ux-fixture", parser_version: "1", package_id: SecureRandom.uuid, package_revision: 1, status: "draft")
+      document = session.documents.create!(document_type: "pasted_text", text_content: "Synthetic payroll hours", verification_status: "legacy_unverified")
+      row = session.rows.create!(source_employee_name: employee.full_name, employee: employee, applied_payroll_item: item)
+      session.update!(status: "applied")
+      item.payroll_item_earnings.create!(category: "other", label: "Synthetic earning", amount: 20)
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:no_content)
+      [ pay_period, item, session, document, row ].each { |record| expect(record.class.exists?(record.id)).to be(false) }
+      expect(PayrollItemEarning.where(payroll_item_id: item.id)).to be_empty
+    end
+
+    it "preserves an approved run and explains that it must be corrected instead" do
+      pay_period.update_columns(status: "approved", approved_at: Time.current)
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("This run was approved before. Keep it and correct it instead, or ask an admin.")
+      expect(pay_period.reload.status).to eq("approved")
+    end
+
+    it "preserves a never-finalized run with a shared review package and explains the blocker" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      before = [ item, earning, entry ].map { |record| record.reload.attributes }
+      pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, sent_for_client_approval_at: Time.current)
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("client review history")
+      expect(PayPeriod.exists?(pay_period.id)).to be(true)
+      expect([ item, earning, entry ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "deletes an actually calculated never-approved run and its automatic review revisions" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: { hours: { employee.id.to_s => { regular: 10 } } }
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.payroll_items).not_to be_empty
+      expect(pay_period.payroll_review_packages).not_to be_empty
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:no_content)
+      expect(PayPeriod.exists?(pay_period.id)).to be(false)
+      expect(PayrollReviewPackage.where(pay_period_id: pay_period.id)).to be_empty
+    end
+
+    it "rolls back child writes even when a late destroy callback refuses inside the financial lock" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      earning = item.payroll_item_earnings.create!(category: "other", label: "Saved bonus", amount: 20)
+      entry = create(:payroll_item_field_entry, payroll_item: item)
+      import = PayrollImportRecord.create!(pay_period: pay_period, status: "applied")
+      records = [ pay_period, item, earning, entry, import ]
+      before = records.map { |record| record.reload.attributes }
+      # Simulates a new or nested retention restriction after the pre-check.
+      allow_any_instance_of(PayPeriod).to receive(:destroy_row) { raise ActiveRecord::RecordNotDestroyed.new("Retain evidence", pay_period) }
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(records.map { |record| record.class.find_by(id: record.id)&.attributes }).to eq(before)
+    end
+
+    it "preserves all inputs and the review when a client approved a revision" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current,
+        status: "approved", approved_at: Time.current, approved_by: admin_user, approval_recorded_by: admin_user, approval_method: "client_portal", approval_acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
+      before = [ pay_period, item, package ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect([ pay_period, item, package ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "retains portal publication after client approval is disabled again" do
+      pay_period.update!(status: "calculated")
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      package = pay_period.payroll_review_packages.create!(client_review_history_unknown: false, company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current)
+      company.update!(client_payroll_approval_required: true)
+      expect(package.reload.sent_for_client_approval_at).to be_present
+      company.update!(client_payroll_approval_required: false)
+      before = [ pay_period, item, package ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect([ pay_period, item, package ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    it "preserves a historical review whose prior sharing cannot be verified" do
+      package = pay_period.payroll_review_packages.create!(company: company, revision: 1, schema_version: "1", calculation_checksum: "a" * 64, generated_at: Time.current, client_review_history_unknown: true)
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+      before = [ pay_period, package, item ].map { |record| record.reload.attributes }
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("unverified sharing history")
+      expect([ pay_period, package, item ].map { |record| record.reload.attributes }).to eq(before)
+    end
+
+    %i[paid_at printed_at prepared_at].each do |evidence|
+      it "preserves the run and its non-employee payment with #{evidence}" do
+        check = create(:non_employee_check, company: company, pay_period: pay_period)
+        attributes = { evidence => Time.current }
+        attributes.merge!(paid_by: admin_user, payment_method: "ach", confirmation_number: "Synthetic paid-payment evidence") if evidence == :paid_at
+        check.update!(attributes)
+        item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, hours_worked: 10)
+        before = [ pay_period, check, item ].map { |record| record.reload.attributes }
+        delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to include("payment checks")
+        expect([ pay_period, check, item ].map { |record| record.reload.attributes }).to eq(before)
+      end
+    end
+
     it "deletes a draft pay period" do
       expect {
         delete "/api/v1/admin/pay_periods/#{pay_period.id}"
@@ -1107,6 +1297,15 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       end
     end
 
+    it "retains the operator's reason for calculating without imported source hours in the audit trail" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 8 } }, source_coverage_reason: "  Manual hours verified against approved timecards.  "
+      }
+      expect(response).to have_http_status(:ok)
+      audit = AuditLog.where(action: "pay_periods#run_payroll", record_id: pay_period.id).last
+      expect(audit.metadata.fetch("source_coverage_reason")).to eq("Manual hours verified against approved timecards.")
+    end
+
     it "calculates payroll for employees with pay activity" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
         hours: { employee.id.to_s => { regular: 80, overtime: 0 } }
@@ -1258,7 +1457,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload).to be_draft
     end
 
-    it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
+    it "preserves unapproval history when payroll is recalculated" do
       pay_period.update!(
         status: "calculated",
         unapproved_at: 1.day.ago,
@@ -1270,8 +1469,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload).to have_attributes(
         status: "calculated",
-        unapproved_at: nil,
-        unapproved_by_id: nil
+        unapproved_at: be_present,
+        unapproved_by_id: admin_user.id
       )
     end
 
@@ -1715,8 +1914,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         gross_pay: 150.00,
         net_pay: 120.00,
         withholding_tax: 10.00,
-        social_security_tax: 9.30,
-        medicare_tax: 2.18
+        social_security_tax: 9.30, employer_social_security_tax: 9.30,
+        medicare_tax: 2.18, employer_medicare_tax: 2.18, additional_medicare_tax: 0,
+        social_security_taxable_wages: 150, social_security_taxable_tips: 0,
+        medicare_taxable_wages: 150, additional_medicare_taxable_wages: 0
       )
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
@@ -1845,6 +2046,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       company.update!(client_payroll_approval_required: true)
       payroll_item = create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
       pay_period.update!(status: "calculated", calculated_at: Time.current)
+      payroll_item.update!(tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(
+        employee: employee, year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot })
       review_package = PayrollReview::RevisionService.new(pay_period: pay_period, actor: admin_user).issue!
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
@@ -1935,7 +2138,9 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         withholding_tax: 100.00,
         social_security_tax: 74.40,
         medicare_tax: 17.40,
-        net_pay: 1008.20
+        net_pay: 1008.20,
+        tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+          year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot }
       )
     end
 
@@ -2089,6 +2294,55 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
       expect(fit_check.amount).to eq(125.00)
       expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(125.00)
+
+      retained_check = fit_check.attributes
+      retained_allocations = fit_check.payroll_liability_check_allocations.map(&:attributes)
+      next_number = company.reload.next_check_number
+      posting_ids = pay_period.payroll_liability_postings.pluck(:id)
+
+      # A repeated commit is refused; a subsequent explicit Generate FIT retry
+      # reuses the existing automatic check and its liability reservations.
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+      expect(response).to have_http_status(:unprocessable_content)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.non_employee_checks.where(auto_generated_type: "fit_deposit").count).to eq(1)
+      expect(fit_check.reload.attributes).to eq(retained_check)
+      expect(fit_check.payroll_liability_check_allocations.map(&:attributes)).to eq(retained_allocations)
+      expect(company.reload.next_check_number).to eq(next_number)
+      expect(pay_period.payroll_liability_postings.pluck(:id)).to eq(posting_ids)
+    end
+
+    it "rolls back a failed automatic FIT reservation and creates one complete payment on commit retry" do
+      company.update!(auto_create_fit_check: true)
+      item = pay_period.payroll_items.first
+      item.update!(additional_withholding: 25)
+      next_number = company.reload.next_check_number
+      retained_ytd = EmployeeYtdTotal.where(employee: employee).map(&:attributes)
+      allow(PayrollLiabilityFitPaymentConnector).to receive(:connect!)
+        .and_raise(PayrollLiabilityCheckAllocationService::Error, "Synthetic reservation failure")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to include("Synthetic reservation failure")
+      expect(pay_period.reload).to be_approved
+      expect(pay_period.non_employee_checks).to be_empty
+      expect(pay_period.payroll_liability_postings).to be_empty
+      expect(company.reload.next_check_number).to eq(next_number)
+      expect(item.reload.check_number).to be_nil
+      expect(EmployeeYtdTotal.where(employee: employee).map(&:attributes)).to eq(retained_ytd)
+
+      allow(PayrollLiabilityFitPaymentConnector).to receive(:connect!).and_call_original
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to be_committed
+      fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
+      expect(pay_period.non_employee_checks.count).to eq(1)
+      expect(fit_check.amount).to eq(125.to_d)
+      expect(fit_check.payroll_liability_check_allocations.sum(:amount)).to eq(125.to_d)
+      expect(pay_period.payroll_liability_postings.where(posting_type: "commit").count).to eq(1)
     end
 
     it "rolls back the payroll commit when liability posting fails" do
@@ -2119,6 +2373,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         pay_period: prior_period,
         employee: employee,
         check_number: "1000")
+      # This fixture is prepared after its prior committed check exists.
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      item.update!(tax_rule_snapshot: { "annual_fica_context" => EmployeeYearFicaContext.new(employee: employee,
+        year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id).snapshot })
       second_employee = create(:employee, company: company, department: department)
       create(:payroll_item,
         pay_period: pay_period,

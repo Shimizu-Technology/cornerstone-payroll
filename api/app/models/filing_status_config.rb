@@ -10,6 +10,14 @@ class FilingStatusConfig < ApplicationRecord
   }.freeze
 
   belongs_to :annual_tax_config
+  after_save :invalidate_annual_verification, if: :saved_changes?
+  after_destroy :invalidate_annual_verification
+
+  def invalidate_annual_verification
+    config = annual_tax_config
+    config.with_lock { config.invalidate_verification! } unless config.destroyed?
+  end
+
   has_many :tax_brackets, -> { order(:bracket_order) }, dependent: :destroy
 
   validates :filing_status, presence: true, inclusion: { in: FILING_STATUSES }

@@ -174,17 +174,82 @@ test('keeps an imported run visible when a native run with the same numeric id i
       },
     });
   });
-  await page.route('**/api/v1/admin/pay_periods/77', (route): Promise<void> => {
+  await page.route('**/api/v1/admin/pay_periods/77**', (route): Promise<void> => {
+    // The delete dialog loads the run's details first; only DELETE removes it.
+    if (route.request().method() !== 'DELETE') {
+      return fulfillJson(route, {
+        pay_period: {
+          id: 77, company_id: 1, start_date: '2024-01-15', end_date: '2024-01-28', pay_date: '2024-02-02',
+          status: 'draft', employee_count: 0, total_gross: 0, payroll_items: [],
+        },
+      });
+    }
     nativeDeleted = true;
     return fulfillJson(route, {});
   });
-  page.on('dialog', (dialog): Promise<void> => dialog.accept());
 
   await page.goto('/companies/1/pay-runs');
 
   const nativeRow = page.getByRole('row').filter({ hasText: 'Cornerstone' });
   await nativeRow.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
 
   await expect(page.getByRole('row').filter({ hasText: 'QuickBooks import' })).toBeVisible();
   await expect(page.getByText('Synthetic refresh failure')).toBeVisible();
 });
+for (const width of [1440, 390]) {
+  test(`replaces deletion success with a later refusal at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockShell(page);
+    const runs = [77, 78].map((id) => ({
+      key: `native:${id}`, record_type: 'native', id, company_id: 1,
+      start_date: id === 77 ? '2024-01-15' : '2024-02-01',
+      end_date: id === 77 ? '2024-01-28' : '2024-02-14',
+      pay_date: id === 77 ? '2024-02-02' : '2024-02-16',
+      status: 'draft', run_purpose: 'regular', includes_base_salary: true, correction_status: null,
+      employee_count: 0, total_gross: 0, total_net: 0, processed_at: null, processed_by_name: null,
+      source: { system: 'cornerstone', label: 'Cornerstone', detail: 'Cornerstone', locked: false },
+      capabilities: { ...capabilities, delete: true },
+    }));
+    let deleted = false;
+    const deleteRequests: number[] = [];
+    await page.route('**/api/v1/admin/payroll_history**', (route) => fulfillJson(route, {
+      data: deleted ? [runs[1]] : runs,
+      meta: {
+        current_page: 1, per_page: 50, total_count: deleted ? 1 : 2, total_pages: 1,
+        statuses: { draft: deleted ? 1 : 2 }, sources: { cornerstone: deleted ? 1 : 2 }, years: [2024],
+      },
+    }));
+    await page.route(/\/api\/v1\/admin\/pay_periods\/(77|78)(\?|$)/, (route) => {
+      const id = Number(new URL(route.request().url()).pathname.split('/').at(-1));
+      if (route.request().method() !== 'DELETE') {
+        return fulfillJson(route, { pay_period: { ...runs.find((run) => run.id === id), payroll_items: [] } });
+      }
+      deleteRequests.push(id);
+      if (id === 78) return fulfillJson(route, { error: 'This run was approved before. Keep it and correct it instead.' }, 422);
+      deleted = true;
+      return fulfillJson(route, {});
+    });
+    await page.goto('/companies/1/pay-runs');
+    const run = (date: string) => width === 390
+      ? page.getByRole('group', { name: `Pay period ${date}` })
+      : page.getByRole('row').filter({ hasText: date });
+    await run('Jan 15 - 28, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
+    const success = page.getByText(/^Deleted MoSa/);
+    await expect(success).toBeVisible();
+    await success.hover();
+    await expect(run('Jan 15 - 28, 2024')).toHaveCount(0);
+    await run('Feb 1 - 14, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(success).toHaveCount(0);
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
+    await expect(page.getByText('This run was approved before. Keep it and correct it instead.')).toBeVisible();
+    await expect(success).toHaveCount(0);
+    await page.screenshot({ path: `${process.env.ROUND2_EVIDENCE_DIR || 'test-results'}/delete-refusal-${width}.png`, fullPage: true });
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+    await expect(run('Feb 1 - 14, 2024')).toBeVisible();
+    await page.reload();
+    await expect(run('Feb 1 - 14, 2024')).toBeVisible();
+    expect(deleteRequests).toEqual([77, 78]);
+  });
+}

@@ -112,7 +112,7 @@ module TimecardOcr
 
       until remaining.empty?
         seed = remaining.shift
-        group = [seed]
+        group = [ seed ]
 
         loop do
           matching, rest = remaining.partition do |entry|

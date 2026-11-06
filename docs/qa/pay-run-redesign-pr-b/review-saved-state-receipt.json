@@ -1,0 +1,12 @@
+{
+  "unchanged": true,
+  "counts": {
+    "periods": 4,
+    "items": 4,
+    "transmittals": 0,
+    "signoffs": 0,
+    "form500s": 0,
+    "tax_checks": 0
+  },
+  "scope": "Pay periods, payroll items, transmittals, sign-off sheets, Form 500 filings and tax checks. Audit/user activity writes are outside this snapshot."
+}

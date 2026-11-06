@@ -249,6 +249,60 @@ RSpec.describe "Check-number worksheet", type: :request do
     expect(item_a.reload.check_number).to eq("3000")
   end
 
+  it "preserves a prepared check when another worksheet check has genuine duplicate-link evidence" do
+    item_a.mark_package_prepared!(user: admin_user)
+    item_b.mark_printed!(user: admin_user)
+    item_b.mark_delivered!(user: admin_user, delivered_on: Date.current,
+                           delivery_method: "hand_delivery", attestation: true)
+    approver = create(:user, company: company, role: "org_admin")
+    CheckSupersessionRolloutApproval.create!(company: company, approved_by: approver,
+      reason: "Approved for isolated duplicate-link worksheet regression", approved_at: Time.current)
+    duplicate_check = create(:non_employee_check, :standalone, company: company, check_type: "other",
+      payment_period_type: "none", tax_year: nil, tax_month: nil, payable_to: employee_b.full_name,
+      amount: item_b.net_pay, check_number: item_b.check_number, printed_at: Time.current, payment_method: "check")
+    supersession = NonEmployeeCheckSupersessionService.new(check: duplicate_check, actor: admin_user).supersede!(
+      payroll_item_id: item_b.id, reason: "Verified both records represent the same physical employee check",
+      recipient_verified: true)
+    expect(item_b.reload.duplicate_check_linked?).to be(true)
+    expect(CheckReconciliationStatus.for(item_b)).to eq("issued")
+
+    transmittal = Transmittal.create!(pay_period: pay_period, company: company,
+      payroll_check_numbers: %w[3000 3001], non_employee_check_numbers: { non_employee_check.id.to_s => "3500" })
+    signoff = CheckSignoffSheet.create!(pay_period: pay_period, company: company,
+      entries: [ { name: "Reyes, Alice", check_number: "3000" }, { name: "Cruz, Ben", check_number: "3001" } ])
+    package = CheckPrintRun.create!(company: company, pay_period: pay_period, created_by: admin_user, status: "prepared",
+      check_stock_type: company.check_stock_type, starting_slot: 1, selected_count: 1,
+      manifest: [ { "key" => "payroll_item:#{item_a.id}", "source_type" => "payroll_item", "source_id" => item_a.id,
+                    "check_number" => item_a.check_number, "amount" => item_a.net_pay.to_s,
+                    "source_updated_at" => item_a.updated_at.iso8601(6), "print_count" => 0, "printed_at" => nil } ],
+      storage_key: "check-print-runs/duplicate-link-guard-spec.pdf", filename: "duplicate-link-guard-spec.pdf",
+      sha256: "a" * 64, byte_size: 100, generated_at: Time.current)
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }.not_to raise_error
+
+    retained_records = lambda do
+      [ item_a, item_b, company, non_employee_check, duplicate_check, supersession, transmittal, signoff, package ]
+        .map { |record| record.reload.attributes }
+    end
+    originals = retained_records.call
+    expect {
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/check_numbers", params: {
+        reason: "Attempt to renumber a mixed prepared and duplicate-linked worksheet",
+        changes: [
+          { source_type: "payroll_item", source_id: item_a.id, check_number: "4100" },
+          { source_type: "payroll_item", source_id: item_b.id, check_number: "4101" }
+        ]
+      }
+    }.not_to change { [ AuditLog.count, CheckEvent.count, NonEmployeeCheckEdit.count, CheckPrintRun.count, NonEmployeeCheckSupersession.count ] }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("linked to a duplicate software record")
+    expect(retained_records.call).to eq(originals)
+    expect(item_a.check_prepared_at).to be_present
+    expect(item_a.check_printed_at).to be_nil
+    expect(item_b.duplicate_check_linked?).to be(true)
+    expect { CheckPrintRunSelectionVerifier.new(run: package).call }.not_to raise_error
+  end
+
   it "corrects a prepared TOG check and payroll check together without recreating the tax payment" do
     item_a.update!(withholding_tax: 150)
     non_employee_check.update!(payable_to: "Treasurer of Guam", check_type: "tax_deposit",

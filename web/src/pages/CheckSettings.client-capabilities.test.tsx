@@ -1,0 +1,124 @@
+// @vitest-environment jsdom
+import { MemoryRouter, useNavigate } from 'react-router';
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CompanyListItem } from '@/services/api';
+import { CheckSettingsPage } from './CheckSettings';
+const mocks = vi.hoisted(() => ({
+  company: null as CompanyListItem | null, id: 1,
+  get: vi.fn(), update: vi.fn(), layout: vi.fn(), profiles: vi.fn(), next: vi.fn(), select: vi.fn(),
+}));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { role: 'accountant' }, hasCapability: () => false }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: mocks.company, activeCompanyId: mocks.id }) }));
+vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
+vi.mock('@/components/documents/PdfPreview', () => ({ PdfPreview: () => null }));
+vi.mock('@/components/checks/CheckLayoutEditor', () => ({ CheckLayoutEditor: () => null }));
+vi.mock('@/services/api', () => ({
+  checksApi: { getSettings: mocks.get, updateSettings: mocks.update, getLayout: mocks.layout, updateNextCheckNumber: mocks.next },
+  printerProfilesApi: { list: mocks.profiles, selectForMe: mocks.select },
+}));
+const BANK_LABEL = 'Bank Name (printed on check face)';
+const settings = { check_stock_type: 'top_check', check_offset_x: 0, check_offset_y: 0, bank_name: 'Synthetic bank', bank_address: '', check_layout_config: {}, next_check_number: 1001 };
+beforeEach(() => {
+  vi.clearAllMocks(); mocks.id = 1;
+  mocks.company = { id: 1, client_capabilities: ['manage_client_check_settings'] } as CompanyListItem;
+  mocks.get.mockResolvedValue({ check_settings: settings }); mocks.update.mockResolvedValue({ check_settings: settings });
+  mocks.layout.mockResolvedValue({ check_layout: null }); mocks.profiles.mockResolvedValue({ printer_profiles: [], selections: [] });
+});
+afterEach(cleanup);
+describe('selected client check controls', () => {
+  it('prefills an editable historical check suggestion for the selected client without saving it automatically', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mocks.next.mockResolvedValue({ check_settings: { ...settings, next_check_number: 709 } });
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    expect(number.value).toBe('708');
+    expect(mocks.next).not.toHaveBeenCalled();
+    await user.clear(number);
+    await user.type(number, '709');
+    await user.click(screen.getByRole('button', { name: 'Save Client Check Settings' }));
+    await screen.findByText('Client check settings saved. Select a printer profile to keep calibration with your printer.');
+    expect(number.value).toBe('709');
+    expect(mocks.next).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Update Next Number' }));
+    expect(mocks.next).toHaveBeenCalledWith(709);
+  });
+  it('preserves an edited next number when a printer profile refreshes settings', async () => {
+    const user = userEvent.setup();
+    const profile = { id: 9, name: 'Example printer', check_stock_type: 'top_check', check_offset_x: 0, check_offset_y: 0, check_layout_config: {}, lock_version: 0 };
+    mocks.profiles.mockResolvedValue({ printer_profiles: [profile], selections: [] });
+    mocks.select.mockResolvedValue({});
+    mocks.get.mockResolvedValueOnce({ check_settings: settings }).mockResolvedValue({ check_settings: { ...settings, active_printer_profile_id: 9, active_printer_profile_name: profile.name } });
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    await user.clear(number);
+    await user.type(number, '712');
+    await user.click(screen.getByRole('button', { name: 'Use This Profile' }));
+    await screen.findByText(/is now your selected printer profile/);
+    expect(mocks.select).toHaveBeenCalledWith('top_check', 9);
+    expect(number.value).toBe('712');
+    expect(mocks.next).not.toHaveBeenCalled();
+  });
+  it('applies a new suggestion that arrives while the page stays open without reloading over unsaved edits', async () => {
+    const user = userEvent.setup();
+    function Navigation() {
+      const navigate = useNavigate();
+      return <>
+        <button type="button" onClick={() => navigate('/check-settings?company_id=1&suggested_next=715')}>Newer suggestion</button>
+        <button type="button" onClick={() => navigate('/check-settings')}>Without suggestion</button>
+      </>;
+    }
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=1&suggested_next=708']}><CheckSettingsPage /><Navigation /></MemoryRouter>);
+    const number = await screen.findByLabelText('Next Check Number') as HTMLInputElement;
+    expect(number.value).toBe('708');
+    const bank = screen.getByLabelText(BANK_LABEL) as HTMLInputElement;
+    await user.clear(bank);
+    await user.type(bank, 'Unsaved bank');
+    await user.click(screen.getByRole('button', { name: 'Newer suggestion' }));
+    await vi.waitFor(() => expect(number.value).toBe('715'));
+    await user.click(screen.getByRole('button', { name: 'Without suggestion' }));
+    expect(number.value).toBe('715');
+    expect(bank.value).toBe('Unsaved bank');
+    // The settings were loaded once; a suggestion change never refetches them.
+    expect(mocks.get).toHaveBeenCalledOnce();
+    expect(mocks.next).not.toHaveBeenCalled();
+  });
+  it('ignores a check suggestion addressed to another client', async () => {
+    render(<MemoryRouter initialEntries={['/check-settings?company_id=2&suggested_next=708']}><CheckSettingsPage /></MemoryRouter>);
+    expect((await screen.findByLabelText('Next Check Number') as HTMLInputElement).value).toBe('1001');
+  });
+
+  it('allows a delegated accountant to save client check settings without granting printer-library management', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: 'Save Client Check Settings' }));
+    await screen.findByText('Client check settings saved. Select a printer profile to keep calibration with your printer.');
+    expect(mocks.update).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Edit details' })).toBeNull();
+  });
+  it('removes client controls immediately on client switch and fails closed until the new client grants access', async () => {
+    const view = render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Save Client Check Settings' });
+    mocks.id = 2;
+    view.rerender(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update Next Number' })).toBeNull();
+    mocks.company = { id: 2 } as CompanyListItem;
+    view.rerender(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it.each<Partial<CompanyListItem>>([
+    { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { payroll_operations: true, manage_client_check_settings: false } },
+    { test_workspace: true, workspace_can_write: true, workspace_write_permissions: { payroll_operations: true } },
+    { test_workspace_expired: true }, { test_workspace_sealed_at: '2026-10-01T00:00:00Z' },
+  ])('retains workspace write restrictions despite a client grant: %j', async restrictions => {
+    mocks.company = { ...mocks.company!, ...restrictions };
+    render(<MemoryRouter><CheckSettingsPage /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Save Calibration as New Profile' });
+    expect(screen.queryByRole('button', { name: 'Save Client Check Settings' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update Next Number' })).toBeNull();
+  });
+});

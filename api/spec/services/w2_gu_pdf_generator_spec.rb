@@ -55,6 +55,14 @@ RSpec.describe W2GuPdfGenerator do
   subject(:generator) { described_class.new(report_data) }
 
   describe "#generate" do
+    it "includes employee address in the preparation PDF and keeps SSNs masked" do
+      require "pdf/reader"
+      report_data[:employees].first[:employee_address] = "1 Main St, Tamuning, GU 96913"
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join
+      expect(text).to include("1 Main St", "Tamuning", "96913", "***-**-6789")
+      expect(text).not_to include("123-45-6789")
+    end
+
     it "returns binary PDF data" do
       pdf = generator.generate
       expect(pdf).to be_a(String)

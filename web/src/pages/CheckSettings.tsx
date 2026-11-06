@@ -4,6 +4,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { Copy, Eye, LockKeyhole } from 'lucide-react';
 import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
 import { Header } from '@/components/layout/Header';
@@ -19,7 +20,9 @@ import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile, PrinterProfileSelection } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 import { selectedPrinterProfileLockVersion } from './checkSettingsPrinterProfile';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 
 type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
 
@@ -105,8 +108,16 @@ function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentP
 }
 
 export function CheckSettingsPage() {
-  const { hasCapability } = useAuth();
-  const canManageClientCheckSettings = hasCapability('manage_client_check_settings');
+  const { activeCompany, activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(activeCompanyId);
+  const [searchParams] = useSearchParams();
+  const suggestion = searchParams.get('company_id') === String(scopeCompanyId) ? searchParams.get('suggested_next') ?? '' : '';
+  const suggestedNumber = /^\d+$/.test(suggestion) && Number(suggestion) > 0 && Number(suggestion) <= 2_147_483_647 ? suggestion : '';
+  // The suggestion last applied; the initial settings load keeps it, and a new
+  // suggestion on the same page applies again.
+  const appliedSuggestion = useRef('');
+  const hasClientCheckAccess = useSelectedCompanyCapability('manage_client_check_settings', scopeCompanyId);
+  const canManageClientCheckSettings = hasClientCheckAccess && canWriteCompany(activeCompany, 'manage_client_check_settings');
   const skipNextLayoutEffectRef = useRef(false);
   const newProfileNameInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -161,7 +172,7 @@ export function CheckSettingsPage() {
 
   const hasUnsavedCheckSettings = savedSettingsSnapshot !== null && currentSettingsSnapshot !== savedSettingsSnapshot;
 
-  const applySettingsToForm = useCallback((s: CheckSettingsType) => {
+  const applySettingsToForm = useCallback((s: CheckSettingsType, preserveNextNumber = false) => {
     const normalizedOffsetX = typeof s.check_offset_x === 'number'
       ? s.check_offset_x
       : Number(s.check_offset_x || 0);
@@ -185,7 +196,7 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson(nextLayoutOverridesJson);
     setMemoTemplate(nextMemoTemplate);
     setAutoCreateFitCheck(nextAutoCreateFitCheck);
-    setNextCheckNumber(String(s.next_check_number));
+    if (!preserveNextNumber) setNextCheckNumber(appliedSuggestion.current || String(s.next_check_number));
     setActivePrinterProfileId(s.active_printer_profile_id ?? null);
     setActivePrinterProfileName(s.active_printer_profile_name ?? null);
     setSavedSettingsSnapshot(checkSettingsSnapshot({
@@ -200,6 +211,14 @@ export function CheckSettingsPage() {
     }));
   }, []);
 
+  // Apply a suggestion to the number input only: never refetch settings, so
+  // unsaved offset, bank, memo and layout edits survive a suggestion change.
+  useEffect(() => {
+    if (!suggestedNumber || appliedSuggestion.current === suggestedNumber) return;
+    appliedSuggestion.current = suggestedNumber;
+    setNextCheckNumber(suggestedNumber);
+  }, [suggestedNumber]);
+
   useEffect(() => {
     if (!hasUnsavedCheckSettings) return;
 
@@ -211,6 +230,16 @@ export function CheckSettingsPage() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedCheckSettings]);
+
+  const suggestionFocused = useRef(false);
+  useEffect(() => {
+    if (loading || !suggestedNumber || !canManageClientCheckSettings || suggestionFocused.current) return;
+    const input = document.getElementById('next-check-number');
+    if (!input) return;
+    input.scrollIntoView?.({ block: 'center' });
+    input.focus({ preventScroll: true });
+    suggestionFocused.current = true;
+  }, [loading, suggestedNumber, canManageClientCheckSettings]);
 
   useEffect(() => {
     if (!activePrinterProfileId) {
@@ -346,7 +375,7 @@ export function CheckSettingsPage() {
 
   const handleSaveSettings = async () => {
     if (!canManageClientCheckSettings) {
-      setError('Your role can manage personal printer profiles, but only managers and organization admins can change client check controls.');
+      setError('Your role can manage personal printer profiles, but client check controls require permission for the selected client.');
       return;
     }
     setSaving(true);
@@ -382,7 +411,7 @@ export function CheckSettingsPage() {
         ),
         check_layout_config: parsedLayoutOverrides,
       });
-      applySettingsToForm(data.check_settings);
+      applySettingsToForm(data.check_settings, true);
       await loadCheckLayout(stockType);
       setSuccess(data.check_settings.active_printer_profile_id
         ? `Saved calibration to “${data.check_settings.active_printer_profile_name || 'your selected profile'}” and client check settings.`
@@ -396,7 +425,7 @@ export function CheckSettingsPage() {
 
   const handleUpdateNextCheckNumber = async () => {
     if (!canManageClientCheckSettings) {
-      setError('Only managers and organization admins can change the client check-number sequence.');
+      setError('Changing the client check-number sequence requires permission for the selected client.');
       return;
     }
     const num = parseInt(nextCheckNumber, 10);
@@ -558,7 +587,7 @@ export function CheckSettingsPage() {
       if (data.check_settings.check_stock_type !== stockType) {
         skipNextLayoutEffectRef.current = true;
       }
-      applySettingsToForm(data.check_settings);
+      applySettingsToForm(data.check_settings, true);
       await loadCheckLayout(data.check_settings.check_stock_type);
       setSuccess(`“${profile.name}” is now your selected printer profile for ${stockType.replaceAll('_', ' ')} stock.`);
       await loadProfiles();
@@ -753,7 +782,7 @@ export function CheckSettingsPage() {
             <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
             <div>
               <p className="font-semibold text-slate-900">Your printer choice is personal</p>
-              <p className="mt-1 leading-5">You can use, create, and copy profiles shared by your organization. Managers and organization admins control check stock, bank text, automation, and check numbering for the client.</p>
+              <p className="mt-1 leading-5">You can use, create, and copy profiles shared by your organization. Client check stock, bank text, automation, and numbering require client management access granted by an administrator.</p>
             </div>
           </div>
         )}
@@ -1295,7 +1324,11 @@ export function CheckSettingsPage() {
             </p>
           </div>
           <CardContent className="p-4 space-y-4">
-            <div className="flex items-end gap-3">
+            {suggestedNumber && <div className="space-y-2 text-sm leading-6">
+              <p>Suggested from the previous provider’s highest numeric check: {suggestedNumber}. Current saved next number: {settings?.next_check_number}. Confirm the number on the client’s actual check stock, edit if needed, then select Update Next Number.</p>
+              <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/companies/${scopeCompanyId}/prior-provider-history`}>Back to prior-provider history</Link>
+            </div>}
+            <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label htmlFor="next-check-number">Next Check Number</Label>
                 <NumericInput

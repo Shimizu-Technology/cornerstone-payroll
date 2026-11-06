@@ -22,7 +22,7 @@ export function lockedBatchCopy(batch: AirePayrollCalendarState['finalized_batch
   if (!batch) {
     return {
       headline: 'No finalized batch received',
-      detail: 'AIRE has not sent locked hours for this period.',
+      detail: 'The time tracking system has not sent locked hours for this period.',
     };
   }
 
@@ -40,4 +40,13 @@ export function lockedBatchCopy(batch: AirePayrollCalendarState['finalized_batch
     return { headline: 'Batch rejected', detail: 'Review the connection error before using these hours.' };
   }
   return { headline: 'Verification in progress', detail: 'Cornerstone is checking the finalized batch.' };
+}
+
+export function lockScheduleCopy(period: { lock_mode?: 'manual' | 'scheduled'; cutoff_at?: string | null }, locked = false): string {
+  if (period.lock_mode === 'manual') return locked ? 'Locked manually' : 'Lock manually when you are ready';
+  if (!period.cutoff_at) return 'Automatic lock time unavailable';
+  const date = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Pacific/Guam', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(new Date(period.cutoff_at)).replace(/\s*AM$/, ' a.m.').replace(/\s*PM$/, ' p.m.');
+  return `Locks automatically ${date} ChST`;
 }

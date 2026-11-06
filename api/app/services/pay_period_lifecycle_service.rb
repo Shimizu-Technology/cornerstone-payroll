@@ -17,6 +17,7 @@ class PayPeriodLifecycleService
 
   def approve!
     with_financial_pay_period_lock do
+      validate_prior_provider_source!
       validate_current_intake!
       unless pay_period.calculated?
         raise InvalidTransitionError, "Can only approve a calculated pay period"
@@ -26,8 +27,11 @@ class PayPeriodLifecycleService
       validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
+      validate_annual_fica_context!
+      validate_employer_contribution_tracking!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       pay_period.update!(
         status: "approved",
         approved_by_id: actor&.id,
@@ -59,6 +63,7 @@ class PayPeriodLifecycleService
   def commit!
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
+      validate_prior_provider_source!
       validate_current_intake!
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
@@ -74,8 +79,11 @@ class PayPeriodLifecycleService
       validate_payroll_participation!
       validate_variable_period_pay!
       validate_employee_document_readiness!
+      validate_annual_fica_context!
+      validate_employer_contribution_tracking!
       validate_client_approval!
       validate_payment_delivery!
+      validate_source_earnings!
       committed_items = pay_period.payroll_items.includes(
         :employee,
         payroll_item_deductions: :deduction_type,
@@ -86,6 +94,7 @@ class PayPeriodLifecycleService
         item.update!(payment_delivery_method: item.effective_payment_delivery_method)
       end
 
+      validate_financial_source_correction!
       pay_period.update!(
         status: "committed",
         committed_at: Time.current,
@@ -104,7 +113,7 @@ class PayPeriodLifecycleService
       acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
     end
 
-    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
+    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
     AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
 
     pay_period
@@ -114,8 +123,43 @@ class PayPeriodLifecycleService
 
   attr_reader :pay_period, :actor, :ip_address
 
+  def validate_employer_contribution_tracking!
+    pay_period.payroll_items.financially_reportable.each do |item|
+      if item.payroll_item_field_entries.any? { |row| row.active? && row.employer_contribution? && row.amount.to_d.nonzero? && row.metadata.to_h.dig(PayrollComponentMirrors::IDENTITY_KEY, "version") != 1 }
+        raise PayrollComponentMirrors::AmbiguousHistoryError
+      end
+      PayrollEmployerContributions.sources(item)
+      PayrollInsuranceComponents.scalar_amount(item)
+    end
+  rescue PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
+    raise InvalidTransitionError, "Recalculate this payroll — it was calculated before employer contribution tracking was added"
+  end
+
+  def validate_annual_fica_context!
+    items = pay_period.payroll_items.financially_reportable.includes(:employee).reject { |item| item.employment_type == "contractor" }
+    contexts = EmployeeYearFicaContext.batch(company: pay_period.company, employees: items.map(&:employee),
+      year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
+    items.each do |item|
+      stored = item.tax_rule_snapshot.to_h["annual_fica_context"]
+      raise InvalidTransitionError, EmployeeYearFicaContext::MISSING_MESSAGE unless stored
+      next if stored == contexts.fetch(item.employee_id).snapshot_for(item, lock_rules: true)
+
+      raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
+    end
+  rescue EmployeeYearFicaContext::UnreconciledLedgerError
+    raise InvalidTransitionError, EmployeeYearFicaContext::STALE_MESSAGE
+  end
+
+  def validate_source_earnings!
+    pay_period.payroll_items.financially_reportable.each do |item|
+      TimeTracking::SourceEarningsConservation.validate!(item, calculated: true)
+    end
+  rescue ArgumentError => e
+    raise InvalidTransitionError, e.message
+  end
+
   def validate_payroll_participation!
-    items = pay_period.payroll_items.not_voided.includes(:employee).to_a
+    items = pay_period.payroll_items.financially_reportable.includes(:employee).to_a
     raise EmptyPayPeriodError, "Cannot finalize a pay period with no payroll items" if items.empty?
 
     invalid = items.reject { |item| PayrollItemActivity.classify(item) == :active }
@@ -139,6 +183,15 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, "Remove draft check numbers for direct-deposit employees before approving payroll for #{names}."
   end
 
+  def validate_prior_provider_source!
+    if pay_period.paid_prior_provider_source?
+      raise InvalidTransitionError, "Prior-provider source payroll was already paid; reconcile and convert it as history instead of approving or committing it"
+    end
+    if pay_period.unresolved_prior_provider_history?
+      raise InvalidTransitionError, "Record and activate replacement prior-provider history before live payroll; the previous history was undone"
+    end
+  end
+
   def with_financial_pay_period_lock
     ApplicationRecord.transaction do
       Company.lock.find(pay_period.company_id)
@@ -148,7 +201,7 @@ class PayPeriodLifecycleService
   end
 
   def validate_variable_period_pay!
-    missing = pay_period.payroll_items.not_voided.includes(:employee).select do |item|
+    missing = pay_period.payroll_items.financially_reportable.includes(:employee).select do |item|
       item.variable_salary_missing?(use_calculation_snapshot: true)
     end
     return if missing.empty?
@@ -183,16 +236,28 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, e.message
   end
 
+  def validate_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).validate_before_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
+  def record_financial_source_correction!
+    TimeTracking::FinancialCorrectionService.new(pay_period: pay_period, actor: actor).record_commit!
+  rescue TimeTracking::FinancialCorrectionService::Error => e
+    raise InvalidTransitionError, e.message
+  end
+
   def record_aire_processing_acknowledgements
-    result = { batch: [], entries: [] }
+    result = { batch: [], entries: record_financial_source_correction!.map(&:id) }
     pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
-      next unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+      next unless import.finalized_batch?
 
       result[:batch] << AirePayrollAcknowledgement.record!(
         time_tracking_import: import,
         status: "committed",
         occurred_at: pay_period.committed_at
-      ).id
+      ).id unless import.supplemental_batch?
       result[:entries].concat(
         AirePayrollEntryAcknowledgement.record_for_import!(
           time_tracking_import: import,
@@ -271,7 +336,7 @@ class PayPeriodLifecycleService
       voided: false
     )
 
-    w2_items = items.reject { |item| item.employment_type == "contractor" || item.voided? }
+    w2_items = items.reject { |item| item.employment_type == "contractor" || !item.payroll_included? }
     total_fit = w2_items.sum(&:total_income_tax_withheld)
     return unless total_fit.positive?
 

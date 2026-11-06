@@ -9,7 +9,7 @@ class OcrProcessJob < ApplicationJob
     # Atomic guard: only proceed if we can claim the timecard for processing.
     # Prevents duplicate work if concurrency is ever increased.
     updated = Timecard
-      .where(id: timecard_id, ocr_status: [:pending, :processing, :failed])
+      .where(id: timecard_id, ocr_status: [ :pending, :processing, :failed ])
       .update_all(ocr_status: Timecard.ocr_statuses[:processing])
     return if updated == 0
 

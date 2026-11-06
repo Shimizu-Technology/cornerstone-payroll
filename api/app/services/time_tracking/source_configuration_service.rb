@@ -24,9 +24,9 @@ module TimeTracking
 
     def save_delegation!(token)
       normalized_token = token.to_s.strip
-      source.errors.add(:base, "AIRE delegation token is required") if normalized_token.blank?
-      unless source.source_type == "aire_services"
-        source.errors.add(:base, "Delegated payroll access is only available for AIRE Services")
+      source.errors.add(:base, "Delegation token is required") if normalized_token.blank?
+      unless source.supports?(:account_linking)
+        source.errors.add(:base, "This source does not support delegated payroll access")
       end
       raise ActiveRecord::RecordInvalid, source if source.errors.any?
 

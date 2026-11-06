@@ -17,7 +17,7 @@ class CreateClientDocuments < ActiveRecord::Migration[8.0]
     end
 
     add_index :client_documents, :file_key, unique: true
-    add_index :client_documents, [:company_id, :category]
-    add_index :client_documents, [:company_id, :created_at]
+    add_index :client_documents, [ :company_id, :category ]
+    add_index :client_documents, [ :company_id, :created_at ]
   end
 end

@@ -8,6 +8,7 @@ class HistoricalPaycheck < ApplicationRecord
   belongs_to :historical_worker
   belongs_to :company
   belongs_to :employee, optional: true
+  has_one :fica_basis_proof, class_name: "HistoricalPaycheckFicaBasisProof", dependent: :restrict_with_error
   has_many :historical_paycheck_adjustments, dependent: :restrict_with_error
 
   validates :external_key, :source_employee_name, :pay_date, :period_start, :period_end, presence: true

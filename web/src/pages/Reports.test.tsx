@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { ApiError, type YtdSummaryReport } from '@/services/api';
@@ -38,13 +38,70 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
+const companyScope = vi.hoisted(() => ({ activeCompanyId: 42, authCompanyId: 42 as number | null }));
+
 vi.mock('@/contexts/CompanyContext', () => ({
-  useCompany: () => ({ activeCompanyId: 42 }),
+  useCompany: () => ({ activeCompanyId: companyScope.activeCompanyId }),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, organization_id: 1, company_id: 42 } }),
+  useAuth: () => ({ user: { id: 1, organization_id: 1, company_id: companyScope.authCompanyId } }),
 }));
+
+beforeEach(() => {
+  companyScope.activeCompanyId = 42;
+  companyScope.authCompanyId = 42;
+  localStorage.clear();
+});
+
+describe.each([
+  { label: 'an inaccessible explicit auth company', companyId: null },
+  { label: 'a different home company', companyId: 99 },
+])('report preferences with $label', ({ companyId }) => {
+  afterEach(cleanup);
+
+  it('isolates favorites and recents when switching active companies and restores them on return', () => {
+    companyScope.authCompanyId = companyId;
+    const favorite42 = 'cornerstone-report-favorites:org-1:company-42:user-1';
+    const favorite43 = 'cornerstone-report-favorites:org-1:company-43:user-1';
+    const recent42 = 'cornerstone-report-recents:org-1:company-42:user-1';
+    const recent43 = 'cornerstone-report-recents:org-1:company-43:user-1';
+    const oldAuthScope = `cornerstone-report-favorites:org-1:company-${companyId}:user-1`;
+    localStorage.setItem(favorite42, JSON.stringify(['checks-payments-register']));
+    localStorage.setItem(favorite43, JSON.stringify(['employee-pay-history']));
+    localStorage.setItem(recent42, JSON.stringify(['checks-payments-register']));
+    localStorage.setItem(recent43, JSON.stringify(['quarterly-compliance-packet']));
+    localStorage.setItem(oldAuthScope, JSON.stringify(['w2-gu']));
+
+    const view = render(<MemoryRouter><Reports /></MemoryRouter>);
+    let favorites = screen.getByRole('region', { name: 'Favorite reports' });
+    expect(within(favorites).getByRole('heading', { name: 'Checks & Payments Register', level: 3 })).toBeTruthy();
+    expect(within(favorites).queryByRole('heading', { name: 'W-2GU Annual Report', level: 3 })).toBeNull();
+    expect(within(favorites).getByRole('button', { name: 'Checks & Payments Register' })).toBeTruthy();
+
+    companyScope.activeCompanyId = 43;
+    view.rerender(<MemoryRouter><Reports /></MemoryRouter>);
+    favorites = screen.getByRole('region', { name: 'Favorite reports' });
+    expect(within(favorites).getByRole('heading', { name: 'Employee Pay History', level: 3 })).toBeTruthy();
+    expect(within(favorites).queryByRole('heading', { name: 'Checks & Payments Register', level: 3 })).toBeNull();
+    expect(within(favorites).getByRole('button', { name: 'Quarterly Compliance Packet' })).toBeTruthy();
+    fireEvent.click(within(favorites).getByRole('button', { name: 'Remove from favorites' }));
+    expect(JSON.parse(localStorage.getItem(favorite43) || 'null')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Review checks' }));
+    expect(JSON.parse(localStorage.getItem(recent43) || 'null')).toEqual(['checks-payments-register', 'quarterly-compliance-packet']);
+    expect(JSON.parse(localStorage.getItem(favorite42) || 'null')).toEqual(['checks-payments-register']);
+    expect(JSON.parse(localStorage.getItem(recent42) || 'null')).toEqual(['checks-payments-register']);
+    expect(JSON.parse(localStorage.getItem(oldAuthScope) || 'null')).toEqual(['w2-gu']);
+
+    companyScope.activeCompanyId = 42;
+    view.rerender(<MemoryRouter><Reports /></MemoryRouter>);
+    favorites = screen.getByRole('region', { name: 'Favorite reports' });
+    expect(within(favorites).getByRole('heading', { name: 'Checks & Payments Register', level: 3 })).toBeTruthy();
+    expect(within(favorites).getByRole('button', { name: 'Remove from favorites' })).toBeTruthy();
+    expect(within(favorites).queryByRole('button', { name: 'Quarterly Compliance Packet' })).toBeNull();
+    expect(companyScope.authCompanyId).toBe(companyId);
+  });
+});
 
 describe('Reports library navigation', () => {
   afterEach(cleanup);

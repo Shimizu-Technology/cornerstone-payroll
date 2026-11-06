@@ -1,4 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -19,6 +20,7 @@ import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
 import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
 import { UserActivityPanel } from '@/components/users/UserActivityPanel';
 import {
   assignmentCompanyIdsForRole,
@@ -42,7 +44,7 @@ const allRoleOptions: RoleOption[] = [
   { value: 'org_admin', label: 'Organization Admin', scope: 'Every client in their organization', can: 'Manage users, clients, tax configuration, audit history, client check controls, and payroll operations.', cannot: 'Cannot manage other organizations or platform-wide settings.', assignment: 'Automatically receives all organization clients.' },
   { value: 'admin', label: 'Organization Admin (legacy)', scope: 'Every client in their organization', can: 'Same access as Organization Admin.', cannot: 'Legacy role name retained for existing accounts; use Organization Admin for new invitations.', assignment: 'Automatically receives all organization clients.', legacy: true },
   { value: 'manager', label: 'Manager', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, configure client settings, and manage the shared printer-profile library.', cannot: 'Cannot manage users, organization tax configuration, or organization-wide audit history.', assignment: 'At least one payroll client should be assigned.' },
-  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Cannot change other client-wide settings, manage users, or edit another person’s printer profile.', assignment: 'At least one payroll client should be assigned.' },
+  { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Client management is off by default. An administrator can grant it separately for each assigned client. This never grants Users, source credentials, firm-wide settings, or another person’s printer-profile access.', assignment: 'At least one payroll client should be assigned.' },
   { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'Maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
   { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
@@ -86,6 +88,10 @@ export function Users() {
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [managementUser, setManagementUser] = useState<User | null>(null);
+  const canDelegate = ['admin', 'org_admin', 'super_admin'].includes(currentUser?.role ?? '');
+  const managementAction = (user: User) => canDelegate && user.role === 'accountant' && user.id !== currentUser?.id
+    ? <Button size="sm" variant="outline" onClick={() => setManagementUser(user)}>Client management</Button> : null;
   const [activityUser, setActivityUser] = useState<User | null>(null);
   const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
@@ -177,15 +183,7 @@ export function Users() {
         company_ids: assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies),
       };
       const response = await usersApi.create(payload);
-      const createdUser = response.data;
-
-      if (response.invitation_sent) {
-        setSuccessMessage(`Invitation sent to ${createdUser.email}`);
-      } else if (response.invitation_error) {
-        setSuccessMessage(`User created, but invitation email failed: ${response.invitation_error}. You can resend it.`);
-      } else {
-        setSuccessMessage(`User created. Configure Resend to send invitation emails.`);
-      }
+      setSuccessMessage(`User created. ${invitationOutcomeMessage(response)}`);
 
       handleCancelAddNew();
       await fetchUsers();
@@ -201,12 +199,11 @@ export function Users() {
     setResendingId(user.id);
     try {
       const response = await usersApi.resendInvitation(user.id);
-      if (response.invitation_sent) {
-        setSuccessMessage(`Invitation resent to ${user.email}`);
-      } else {
-        setError(response.invitation_error || 'Failed to resend invitation');
-      }
-      fetchUsers();
+      await fetchUsers();
+      setError(null);
+      setSuccessMessage(null);
+      if (response.invitation_delivery_status === 'failed') setError(invitationOutcomeMessage(response));
+      else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invitation');
     } finally {
@@ -311,7 +308,7 @@ export function Users() {
     const assignedCompanies = assignedCompaniesForUser(user);
     if (assignedCompanies.length === 0) {
       return needsClientAssignment(user.role) ? (
-        <p className="mt-1 text-xs text-gray-400">No assigned payroll clients</p>
+        <p className="mt-1 text-xs text-neutral-600">No assigned payroll clients</p>
       ) : null;
     }
 
@@ -320,7 +317,7 @@ export function Users() {
         {assignedCompanies.map((company) => (
           <span
             key={company.id}
-            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600"
+            className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
           >
             {company.name}{company.test_workspace ? ` · ${company.workspace_access_level?.replace('_', ' ') || 'operator'}` : ''}
           </span>
@@ -352,11 +349,11 @@ export function Users() {
     }
 
     if (isLoadingCompanies && availableCompanies.length === 0) {
-      return <p className="text-sm text-gray-500">Loading payroll clients...</p>;
+      return <p className="text-sm text-neutral-500">Loading payroll clients...</p>;
     }
 
     if (assignableCompanies.length === 0) {
-      return <p className="text-sm text-gray-500">No payroll clients available.</p>;
+      return <p className="text-sm text-neutral-500">No payroll clients available.</p>;
     }
 
     return (
@@ -367,21 +364,21 @@ export function Users() {
             return (
               <label
                 key={company.id}
-                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
+                className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-xs ${
                   selectedIds.includes(company.id)
                     ? 'border-primary-300 bg-primary-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50'
+                    : 'border-neutral-200 bg-white hover:bg-neutral-50'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={selectedIds.includes(company.id)}
                   onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
-                  className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                  className="h-4 w-4 text-primary-600 rounded border-neutral-300 focus:ring-primary-500"
                 />
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-gray-500'}`}>
+                  <p className="font-medium text-neutral-900 truncate">{company.name}</p>
+                  <p className={`text-xs ${testWorkspace ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>
                     {testWorkspace ? `${company.test_workspace_purpose_label || 'Test workspace'} · operator access` : `${company.active_employees} employees`}
                   </p>
                 </div>
@@ -390,7 +387,7 @@ export function Users() {
           })}
         </div>
         {summaryLabel && (
-          <p className="text-xs text-gray-500 mt-2">{summaryLabel}</p>
+          <p className="text-xs text-neutral-600 mt-2">{summaryLabel}</p>
         )}
       </>
     );
@@ -413,42 +410,42 @@ export function Users() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         {/* Role guide */}
-        <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 bg-slate-950 px-4 py-4 text-white">
+        <section className="mb-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+          <div className="border-b border-neutral-200 bg-neutral-950 px-4 py-4 text-white">
             <h2 className="font-semibold">Choose the narrowest role that fits</h2>
-            <p className="mt-1 text-sm leading-5 text-slate-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
+            <p className="mt-1 text-sm leading-5 text-neutral-300">Permissions are enforced by capability and organization scope. Client assignments further limit managers, accountants, and client portal users.</p>
           </div>
-          <div className="divide-y divide-slate-200 sm:hidden">
+          <div className="divide-y divide-neutral-200 sm:hidden">
             {roleGuideOptions.map((role) => (
               <details key={role.value} className="group bg-white px-4 py-4">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
                   <span>
-                    <span className="block font-semibold text-slate-950">{role.label}</span>
-                    <span className="mt-0.5 block text-xs text-slate-500">{role.scope}</span>
+                    <span className="block font-semibold text-neutral-950">{role.label}</span>
+                    <span className="mt-0.5 block text-xs text-neutral-600">{role.scope}</span>
                   </span>
                   <span className="text-xs font-semibold text-primary-700 group-open:hidden">View</span>
                   <span className="hidden text-xs font-semibold text-primary-700 group-open:inline">Close</span>
                 </summary>
                 <dl className="space-y-4 pb-2 pt-4 text-xs leading-5">
-                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
                 </dl>
               </details>
             ))}
           </div>
-          <div className="hidden gap-px bg-slate-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
+          <div className="hidden gap-px bg-neutral-200 sm:grid sm:grid-cols-2 xl:grid-cols-3">
             {roleGuideOptions.map((role) => (
               <article key={role.value} className="bg-white p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <h3 className="font-semibold text-slate-950">{role.label}</h3>
-                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">Exceptional</span>}
+                  <h3 className="font-semibold text-neutral-950">{role.label}</h3>
+                  {role.exceptional && <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">Exceptional</span>}
                 </div>
                 <dl className="mt-4 space-y-4 text-xs leading-5">
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Scope</dt><dd className="text-slate-700">{role.scope}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-emerald-700">Can</dt><dd className="text-slate-700">{role.can}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-rose-700">Cannot</dt><dd className="text-slate-700">{role.cannot}</dd></div>
-                  <div><dt className="font-semibold uppercase tracking-wide text-slate-400">Assignment</dt><dd className="text-slate-700">{role.assignment}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Scope</dt><dd className="text-neutral-700">{role.scope}</dd></div>
+                  <div><dt className="font-semibold text-emerald-700">Can</dt><dd className="text-neutral-700">{role.can}</dd></div>
+                  <div><dt className="font-semibold text-rose-700">Cannot</dt><dd className="text-neutral-700">{role.cannot}</dd></div>
+                  <div><dt className="font-semibold text-neutral-600">Assignment</dt><dd className="text-neutral-700">{role.assignment}</dd></div>
                 </dl>
               </article>
             ))}
@@ -468,9 +465,9 @@ export function Users() {
         {/* Invite New User Form */}
         {isAddingNew && (
           <Card className="mb-6 p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">Invite New User</h3>
-            <p className="text-xs text-gray-500 mb-4">
-              An invitation will be sent via Clerk. Their name will update from their profile when they accept.
+            <h3 className="text-sm font-semibold text-neutral-900 mb-1">Invite New User</h3>
+            <p className="text-xs text-neutral-600 mb-4">
+              Create a pending account and request an invitation email. Their name will update from their profile when they accept.
             </p>
             {newError && (
               <ActionFeedback retryKey={newErrorFeedbackAttempt} tone="error" message={newError}><p className="text-sm text-danger-600">{newError}</p></ActionFeedback>
@@ -478,7 +475,7 @@ export function Users() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
               <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
+              <Select aria-label="Role" value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
                 {invitationRoleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
@@ -486,10 +483,10 @@ export function Users() {
             </div>
 
             {needsClientAssignment(newRole) && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <p className="text-sm font-medium text-gray-700 mb-2">
+              <div className="mt-4 pt-4 border-t border-neutral-200">
+                <p className="text-sm font-medium text-neutral-700 mb-2">
                   Assign Payroll Clients
-                  <span className="text-xs font-normal text-gray-400 ml-2">(can also be changed later)</span>
+                  <span className="text-xs font-normal text-neutral-600 ml-2">(can also be changed later)</span>
                 </p>
                 {renderClientAssignmentPicker(
                   newClientIds,
@@ -515,7 +512,7 @@ export function Users() {
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto" />
-              <p className="mt-2 text-sm text-gray-500">Loading users...</p>
+              <p className="mt-2 text-sm text-neutral-500">Loading users...</p>
             </div>
           </div>
         ) : (
@@ -530,8 +527,8 @@ export function Users() {
                     <div className="min-w-0 flex-1">
                       {editingId === user.id ? (
                         <div className="space-y-3">
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -547,7 +544,7 @@ export function Users() {
                               <Check className="mr-1 h-4 w-4" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="outline" onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
+                            <Button size="sm" variant="outline" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
                           </MobileCardActions>
                         </div>
                       ) : (
@@ -575,6 +572,7 @@ export function Users() {
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
                           <MobileCardActions>
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {managementAction(user)}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
@@ -587,7 +585,7 @@ export function Users() {
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {user.active === false ? 'Activate' : 'Deactivate'}
                                 </Button>
-                                <Button size="sm" variant="ghost" className="text-danger-700" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" className="text-danger-700" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   Delete
                                 </Button>
                               </>
@@ -618,7 +616,7 @@ export function Users() {
                     <TableRow>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Input aria-label="Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
                         ) : (
                           <span className="flex items-center gap-2">
                             {user.name}
@@ -635,7 +633,7 @@ export function Users() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         {editingId === user.id ? (
-                          <Select value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                          <Select aria-label="Role" value={editRole} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
                             {editRoleOptions.map((role) => (
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
@@ -651,7 +649,7 @@ export function Users() {
                       </TableCell>
                       <TableCell>
                         {user.active === false ? (
-                          <span className="text-sm text-gray-500">Inactive</span>
+                          <span className="text-sm text-neutral-500">Inactive</span>
                         ) : (
                           <span className="text-sm text-green-600">Active</span>
                         )}
@@ -666,13 +664,14 @@ export function Users() {
                               <Check className="w-4 h-4 mr-1" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                            <Button size="sm" variant="ghost" aria-label={`Cancel editing ${user.name} (${user.email})`} onClick={handleCancelEdit} disabled={isSavingEdit}>
                               <X className="w-4 h-4" />
                             </Button>
                           </div>
                         ) : (
                           <div className="flex justify-end gap-2">
                             <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {managementAction(user)}
                             {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button
@@ -689,14 +688,14 @@ export function Users() {
                               <>
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {togglingId === user.id ? (
-                                    <span className="flex items-center"><div className="w-4 h-4 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />{user.active === false ? 'Activating...' : 'Deactivating...'}</span>
+                                    <span className="flex items-center"><div className="w-4 h-4 mr-1 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />{user.active === false ? 'Activating...' : 'Deactivating...'}</span>
                                   ) : user.active === false ? (
                                     <span className="flex items-center"><UserCheck className="w-4 h-4 mr-1" />Activate</span>
                                   ) : (
                                     <span className="flex items-center text-danger-700"><UserX className="w-4 h-4 mr-1" />Deactivate</span>
                                   )}
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                <Button size="sm" variant="ghost" aria-label={`Delete user ${user.name} (${user.email})`} onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
                                   {deletingId === user.id ? (
                                     <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
                                   ) : (
@@ -716,15 +715,15 @@ export function Users() {
                     {/* Inline edit details row */}
                     {editingId === user.id && (
                       <TableRow>
-                        <TableCell colSpan={6} className="bg-gray-50 p-0">
+                        <TableCell colSpan={6} className="bg-neutral-50 p-0">
                           <div className="px-6 py-4">
                             {needsClientAssignment(editRole) ? (
                               <>
                                 <div className="mb-3 flex items-center justify-between">
-                                  <p className="text-sm font-medium text-gray-700">
+                                  <p className="text-sm font-medium text-neutral-700">
                                     Payroll clients for <strong>{editName || user.name}</strong>
                                   </p>
-                                  <span className="text-xs text-gray-500">
+                                  <span className="text-xs text-neutral-600">
                                     {editClientIds.length} selected
                                   </span>
                                 </div>
@@ -732,7 +731,7 @@ export function Users() {
                                 {renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole)}
                               </>
                             ) : (
-                              <p className="text-sm text-gray-500">
+                              <p className="text-sm text-neutral-500">
                                 This role does not use payroll client assignments. Saving will clear any existing client assignments.
                               </p>
                             )}
@@ -748,6 +747,7 @@ export function Users() {
           </>
         )}
       </div>
+      {managementUser && <ClientManagementDialog key={managementUser.id} accountant={managementUser} onClose={() => setManagementUser(null)} />}
       {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}
     </div>
   );
@@ -755,7 +755,7 @@ export function Users() {
 
 function OwnerBadge() {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700" title="Permanent primary platform owner">
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700" title="Permanent primary platform owner">
       <ShieldCheck className="h-3 w-3" /> Primary owner
     </span>
   );

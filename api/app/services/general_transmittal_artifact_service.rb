@@ -24,7 +24,7 @@ class GeneralTransmittalArtifactService
       pdf_bytes = generator.generate
       version = locked.artifacts.maximum(:version_number).to_i + 1
       token = SecureRandom.uuid
-      storage_key = "general-transmittals/company-#{locked.company_id}/transmittal-#{locked.id}/#{token}.pdf"
+      storage_key = StagingStoragePolicy.new_key("general-transmittals/company-#{locked.company_id}/transmittal-#{locked.id}/#{token}.pdf")
       filename = versioned_filename(generator.filename, version)
       storage.upload(storage_key, StringIO.new(pdf_bytes), content_type: "application/pdf")
 

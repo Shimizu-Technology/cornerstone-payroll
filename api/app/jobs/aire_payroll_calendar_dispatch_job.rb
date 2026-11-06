@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class AirePayrollCalendarDispatchJob < ApplicationJob
+class AirePayrollCalendarDispatchJob < ConnectedPayrollJob
   queue_as :default
 
   def perform

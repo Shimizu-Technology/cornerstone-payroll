@@ -1,5 +1,7 @@
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { useLayoutEffect, useRef, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ActionFeedback } from '@/components/ui/action-feedback';
@@ -9,8 +11,9 @@ import { formatDate, formatGuamDateTime } from '@/lib/utils';
 import type { Employee } from '@/types';
 
 export function EmployeeIntakePanel({ companyId, employee, onUpdated }: { companyId: number; employee: Employee; onUpdated: (employee: Employee) => void }) {
-  const { hasCapability } = useAuth();
-  const canReview = hasCapability?.('manage_client_configuration') ?? false;
+  const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', companyId);
+  const { activeCompany } = useCompany();
+  const canReview = employee.company_id === companyId && canWriteCompany(activeCompany, 'manage_client_configuration') && hasConfigurationAccess;
   const [dueOn, setDueOn] = useState(employee.intake_readiness?.exception?.follow_up_due_on || '');
   const [eligibleFrom, setEligibleFrom] = useState(employee.intake_readiness?.exception?.payroll_eligible_from || employee.hire_date || '');
   const [reason, setReason] = useState('');
@@ -28,6 +31,7 @@ export function EmployeeIntakePanel({ companyId, employee, onUpdated }: { compan
   const missingWithholding = readiness.missing_fields.includes('withholding_election');
 
   const save = async (confirm: boolean) => {
+    if (!canReview) return;
     const scope = `${companyId}:${employee.id}`;
     setSaving(true);
     setError(null);

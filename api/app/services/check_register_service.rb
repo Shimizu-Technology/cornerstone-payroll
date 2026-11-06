@@ -44,6 +44,7 @@ class CheckRegisterService
   def non_employee_rows
     NonEmployeeCheck
       .where(company_id: company.id, payment_method: "check")
+      .where.not(id: NonEmployeeCheckSupersession.select(:non_employee_check_id))
       .where.not(check_number: [ nil, "" ])
       .where(<<~SQL.squish, from, to)
         COALESCE(

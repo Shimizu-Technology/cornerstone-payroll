@@ -1,0 +1,1033 @@
+[
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx",
+    "line": 55,
+    "tag": "Button",
+    "label": "{clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => void openClientApproval()}",
+      "disabled={clientApprovalLoading}",
+      "className=\"shrink-0 bg-white\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx",
+    "line": 74,
+    "tag": "Button",
+    "label": "Review current source",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "className=\"shrink-0 border-danger-300 bg-white text-danger-900 hover:bg-danger-100\"",
+      "onClick={() => canImportMosa ? setImportModalOpen(true) : setPayrollIntakeImportOpen(true)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx",
+    "line": 96,
+    "tag": "Link",
+    "label": "Review settings",
+    "attributes": [
+      "to=\"/pay-schedule-settings\"",
+      "target=\"_blank\"",
+      "rel=\"noreferrer\"",
+      "className=\"inline-flex min-h-9 items-center justify-center rounded-full border border-warning-300 bg-white px-4 py-2 text-xs font-semibold text-warning-950 transition-colors hover:bg-warning-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-400 focus-visible:ring-offset-2\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx",
+    "line": 104,
+    "tag": "Button",
+    "label": "{adoptingConfirmedWorkweek ? (<><Loader2 className=\"mr-2 h-4 w-4 animate-spin\"/>Applying…</>) : 'Use confirmed workweek'}",
+    "attributes": [
+      "type=\"button\"",
+      "size=\"sm\"",
+      "onClick={() => void handleAdoptConfirmedWorkweek()}",
+      "disabled={adoptingConfirmedWorkweek}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunBlockers.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunChecks.tsx",
+    "line": 33,
+    "tag": "Link",
+    "label": "Check Settings ›",
+    "attributes": [
+      "to=\"/check-settings\"",
+      "className=\"text-xs text-blue-600 hover:underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunChecks.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunChecks.tsx",
+    "line": 34,
+    "tag": "Button",
+    "label": "Print checks",
+    "attributes": [
+      "size=\"sm\"",
+      "onClick={() => setCheckPrintOpen(true)}",
+      "disabled={paperCheckCount === 0 && !nonEmployeeChecks.some((check) => !check.voided)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunChecks.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunComparison.tsx",
+    "line": 56,
+    "tag": "Button",
+    "label": "Retry comparison",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "onClick={() => loadComparison(payPeriod.id)}",
+      "disabled={comparisonLoading}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunComparison.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx",
+    "line": 236,
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => setClientApprovalOpen(false)}",
+      "disabled={clientApprovalLoading}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx",
+    "line": 237,
+    "tag": "Button",
+    "label": "{clientApprovalLoading ? 'Recording…' : 'Bind Approval to This Revision'}",
+    "attributes": [
+      "type=\"submit\"",
+      "disabled={clientApprovalLoading || clientApprovers.length === 0 || !clientApproverId || !clientApprovalEvidence.trim() || !clientApprovalConfirmed}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx",
+    "line": 292,
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "onClick={() => setPayDateCorrectionOpen(false)}",
+      "disabled={payDateCorrectionSubmitting}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx",
+    "line": 300,
+    "tag": "Button",
+    "label": "{payDateCorrectionSubmitting ? 'Saving...' : 'Save Pay Date Correction'}",
+    "attributes": [
+      "type=\"submit\"",
+      "disabled={payDateCorrectionSubmitting}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunDialogs.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 149,
+    "tag": "Link",
+    "label": "{item.employee_name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-800\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 161,
+    "tag": "button",
+    "label": "View details",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"inline-flex min-h-11 items-center justify-center rounded-xl border border-primary-200 px-3 text-sm font-semibold text-primary-700\"",
+      "onClick={() => setReviewingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 162,
+    "tag": "Button",
+    "label": "Edit payroll",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setEditingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 163,
+    "tag": "Button",
+    "label": "Correct",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setCorrectingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 164,
+    "tag": "Button",
+    "label": "Replace check",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "onClick={() => setReplacingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 247,
+    "tag": "Link",
+    "label": "{lastName || '—'}",
+    "attributes": [
+      "className=\"font-medium text-neutral-900 hover:text-primary-700 hover:underline\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 313,
+    "tag": "button",
+    "label": "Open payroll item <ArrowRight className=\"h-3.5 w-3.5\"/>",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900\"",
+      "onClick={() => setReviewingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 544,
+    "tag": "button",
+    "label": "Edit",
+    "attributes": [
+      "onClick={() => setEditingItem(item)}",
+      "className=\"text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 567,
+    "tag": "button",
+    "label": "Correct",
+    "attributes": [
+      "onClick={() => setCorrectingItem(item)}",
+      "className=\"text-xs text-warning-700 hover:text-warning-900 hover:underline font-medium\"",
+      "title=\"Issue a separate supplemental check for the difference (use when the original was cashed)\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx",
+    "line": 576,
+    "tag": "button",
+    "label": "Replace",
+    "attributes": [
+      "onClick={() => setReplacingItem(item)}",
+      "className=\"text-xs text-orange-700 hover:text-orange-900 hover:underline font-medium\"",
+      "title=\"Void & reissue this check (use when the original is uncashed or never distributed)\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmployeeResults.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunEmptyState.tsx",
+    "line": 22,
+    "tag": "Link",
+    "label": "<UserPlus className=\"mr-2 h-4 w-4\" aria-hidden=\"true\"/> Add employee",
+    "attributes": [
+      "className=\"mt-4 inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2\"",
+      "to={newEmployeePath(companyId, { returnTo: currentPath })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunEmptyState.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunFeedback.tsx",
+    "line": 31,
+    "tag": "Button",
+    "label": "Review affected employees",
+    "attributes": [
+      "variant=\"outline\"",
+      "className=\"mt-3\"",
+      "onClick={() => { const section = document.getElementById('payroll-calculation-issues'); section?.scrollIntoView({ block: 'start' }); section?.focus({ preventScroll: true }); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunFeedback.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunFeedback.tsx",
+    "line": 40,
+    "tag": "Button",
+    "label": "Reload saved payroll",
+    "attributes": [
+      "className=\"mt-3 min-h-11\"",
+      "variant=\"outline\"",
+      "disabled={processing || timeTrackingImportOpen}",
+      "onClick={() => void reloadSavedSourceImport()}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunFeedback.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 90,
+    "tag": "Link",
+    "label": "Review paycheck",
+    "attributes": [
+      "className=\"font-semibold underline underline-offset-2\"",
+      "to={`/companies/${payPeriod.company_id}/pay-runs/${payPeriod.id}/payroll-items/${item.id}`}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 167,
+    "tag": "button",
+    "label": "{showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={(event) => { event.preventDefault(); event.stopPropagation(); tipsLoansVisibilityModeRef.current = 'manual'; setShowTipsLoans(prev => !prev); }}",
+      "className={`max-sm:min-h-[44px] text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${showTipsLoans ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200'}`}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 183,
+    "tag": "button",
+    "label": "{showPayrollFields ? `Payroll Fields (${worksheetPayrollFields.length}) ✓` : `+ Payroll Fields (${worksheetPayrollFields.length})`}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={(event) => { event.preventDefault(); event.stopPropagation(); setShowPayrollFields((previous) => !previous); }}",
+      "className={`max-sm:min-h-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${showPayrollFields ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-neutral-200 bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 238,
+    "tag": "Link",
+    "label": "{name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-800\"",
+      "to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 257,
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Clear this payroll amount' : 'Use employee default'}",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"mt-1 text-xs font-medium text-primary-700 underline\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 341,
+    "tag": "Link",
+    "label": "{emp.first_name} {emp.last_name}",
+    "attributes": [
+      "className=\"font-medium text-neutral-900 hover:text-primary-700 hover:underline\"",
+      "to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 604,
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Enter an amount or clear this payroll amount' : 'Enter an amount or use the employee default'}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}",
+      "className=\"text-center text-xs font-semibold leading-tight text-danger-600 transition-colors hover:text-danger-700 hover:underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx",
+    "line": 612,
+    "tag": "button",
+    "label": "{payPeriod.includes_recurring_items === false ? 'Override · clear this payroll amount' : `Override · use ${defaultLabel}`}",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={() => resetPayrollFieldDraft(emp.id, field.id)}",
+      "className=\"text-xs font-medium text-blue-700 hover:text-blue-900 hover:underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunHoursWorksheet.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunLinkedCorrections.tsx",
+    "line": 42,
+    "tag": "Link",
+    "label": "Supplemental period · pay date {sp.pay_date}",
+    "attributes": [
+      "to={payRunPath(companyId, sp.id, 'work', { returnTo: currentPath })}",
+      "className=\"text-sm font-semibold text-blue-700 hover:underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunLinkedCorrections.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunLinkedCorrections.tsx",
+    "line": 86,
+    "tag": "Link",
+    "label": "the original committed period",
+    "attributes": [
+      "to={payRunPath(companyId, payPeriod.corrects_pay_period_id, 'work', { returnTo: currentPath })}",
+      "className=\"font-semibold underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunLinkedCorrections.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunMetadata.tsx",
+    "line": 70,
+    "tag": "Button",
+    "label": "{retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}",
+    "attributes": [
+      "variant=\"outline\"",
+      "size=\"sm\"",
+      "onClick={handleRetryTaxSync}",
+      "disabled={retryingSyncTax}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunMetadata.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 59,
+    "tag": "Button",
+    "label": "View linked time record",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setAireRecordsOpen(true)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 64,
+    "tag": "Link",
+    "label": "Review checks and payments",
+    "attributes": [
+      "className=\"inline-flex min-h-11 items-center rounded-full bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800\"",
+      "to={payRunPath(companyId, payRunId, 'checks', { returnTo })}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 65,
+    "tag": "Button",
+    "label": "Link time tracking record",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 73,
+    "tag": "Button",
+    "label": "Correct Pay Date",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={openPayDateCorrection}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 80,
+    "tag": "Button",
+    "label": "Import (MoSa)",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setImportModalOpen(true)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 85,
+    "tag": "Button",
+    "label": "Import Spike Email",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => setPayrollIntakeImportOpen(true)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 90,
+    "tag": "Button",
+    "label": "{needsSourceCoverageAcknowledgement(payPeriod) ? 'Review & add hours' : 'Import time tracking'}",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { setTimeTrackingAutoPreview(false); setTimeTrackingImportOpen(true); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 102,
+    "tag": "Button",
+    "label": "Refresh current setup",
+    "attributes": [
+      "variant=\"outline\"",
+      "disabled={processing || savedImportReloadRequired || hasStagedWorksheetChanges}",
+      "title={hasStagedWorksheetChanges ? 'Calculate your worksheet edits first so they are saved.' : undefined}",
+      "onClick={() => { setRefreshRecurring(payPeriod.includes_recurring_items); setRefreshBaseSalary(payPeriod.includes_base_salary); setRefreshSetupOpen(true); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 120,
+    "tag": "Button",
+    "label": "{processing ? 'Calculating...' : 'Calculate Payroll'}",
+    "attributes": [
+      "variant={needsSourceCoverageAcknowledgement(payPeriod) ? 'outline' : 'primary'}",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 127,
+    "tag": "Button",
+    "label": "Recalculate",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 130,
+    "tag": "Button",
+    "label": "Approve",
+    "attributes": [
+      "onClick={handleApprove}",
+      "disabled={processing || financialActionsHeld || standaloneLoanConflicts.length > 0 || calculationFailures.length > 0 || payrollItems.length === 0 || hasPendingCalculationChanges || (payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved')}",
+      "title={savedImportReloadRequired ? 'Reload the saved source import before approval' : correctionCalculationHeld ? 'Review retained source evidence and pay setup before approval' : calculationFailures.length > 0 ? 'Resolve the employee calculation errors and calculate again before approval' : payrollItems.length === 0 ? 'Enter pay for at least one employee before approval' : hasPendingCalculationChanges ? 'Recalculate the staged payroll changes before approval' : payPeriod.client_payroll_approval_required === true && payPeriod.payroll_review?.status !== 'approved' ? 'Client approval is required for this revision' : undefined}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 150,
+    "tag": "Button",
+    "label": "Roll Back Approval",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={handleUnapprove}",
+      "disabled={processing}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx",
+    "line": 155,
+    "tag": "Button",
+    "label": "{processing ? 'Committing...' : 'Commit & Finalize'}",
+    "attributes": [
+      "onClick={() => setCommitPeriodId(payPeriod.id)}",
+      "disabled={processing || financialActionsHeld}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunProcessingActions.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx",
+    "line": 50,
+    "tag": "button",
+    "label": "Remove from this run",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"min-h-11 text-xs font-medium text-primary-700 underline\"",
+      "aria-label={`Remove ${emp.first_name} ${emp.last_name} from this run`}",
+      "onClick={() => { setAdditionalEmployeeIds(previous => { const next = new Set(previous); next.delete(emp.id); return next; }); const withoutEmployee = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([key]) => key !== String(emp.id))); setHoursMap(withoutEmployee); setSalaryOverrideMap(withoutEmployee); setBonusMap(withoutEmployee); setBonusEdits(withoutEmployee); setTipsMap(withoutEmployee); setTipsPaidOutMap(withoutEmployee); setLoansMap(withoutEmployee); setNamedLoanDrafts(withoutEmployee); setPayrollFieldDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${emp.id}:`)))); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx",
+    "line": 61,
+    "tag": "button",
+    "label": "Enter pay",
+    "attributes": [
+      "onClick={() => { setAdditionalEmployeeIds(prev => { const next = new Set(prev); next.add(emp.id); return next; }); setHoursMap(prev => ({ ...prev, [String(emp.id)]: { regular: 0, overtime: 0, wage_rates: prev[String(emp.id)]?.wage_rates }, })); }}",
+      "className=\"min-h-11 rounded-lg px-3 py-2 text-xs font-medium text-primary-700 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx",
+    "line": 79,
+    "tag": "Button",
+    "label": "{isDraft ? 'Calculate' : 'Recalculate'} with {additionalEmployeeIds.size} added",
+    "attributes": [
+      "size=\"sm\"",
+      "className=\"min-h-11\"",
+      "variant=\"outline\"",
+      "onClick={() => void handleRunPayroll()}",
+      "disabled={processing || financialActionsHeld}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunRoster.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx",
+    "line": 28,
+    "tag": "Link",
+    "label": "Return to original payroll",
+    "attributes": [
+      "to={payRunPath(companyId, payPeriod.late_hours_origin_pay_period_id, 'work')}",
+      "className=\"mt-2 inline-block font-semibold text-primary-700 underline\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunSourceCheckpoint.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunSupportingDetails.tsx",
+    "line": 52,
+    "tag": "Button",
+    "label": "Change payment method",
+    "attributes": [
+      "size=\"sm\"",
+      "variant=\"outline\"",
+      "className=\"min-h-11 w-full sm:w-auto\"",
+      "aria-label={`Change payment method for ${item.employee_name}`}",
+      "onClick={() => setPaymentMethodItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunSupportingDetails.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/PayRunSupportingDetails.tsx",
+    "line": 74,
+    "tag": "summary",
+    "label": "Run notes and processing history",
+    "attributes": [
+      "className=\"cursor-pointer py-1 font-semibold text-primary-800\""
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/PayRunSupportingDetails.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/RefreshSetupDialog.tsx",
+    "line": 49,
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "variant=\"outline\"",
+      "disabled={processing}",
+      "onClick={() => setRefreshSetupOpen(false)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/RefreshSetupDialog.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/RefreshSetupDialog.tsx",
+    "line": 50,
+    "tag": "Button",
+    "label": "{processing ? 'Refreshing…' : 'Refresh and recalculate'}",
+    "attributes": [
+      "disabled={processing}",
+      "onClick={() => void handleRefreshSetup()}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/RefreshSetupDialog.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/SourceCoverageDialog.tsx",
+    "line": 42,
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={() => { pendingCoverageActionRef.current = null; setSourceCoverageOpen(false); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/SourceCoverageDialog.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/SourceCoverageDialog.tsx",
+    "line": 43,
+    "tag": "Button",
+    "label": "Calculate without imported hours",
+    "attributes": [
+      "disabled={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() || processing}",
+      "title={!sourceCoverageAcknowledged || !sourceCoverageReason.trim() ? 'Enter a reason and acknowledge the missing hours.' : undefined}",
+      "onClick={() => { const pending = pendingCoverageActionRef.current; pendingCoverageActionRef.current = null; setSourceCoverageOpen(false); if (!pending || pending.companyId !== companyId || pending.payRunId !== payRunId || pending.generation !== commitRouteGenerationRef.current) return; const coverage: CoverageAcknowledgement = { source_coverage_reason: sourceCoverageReason.trim(), source_coverage_acknowledged: true }; if (pending.action === 'refresh') void handleRefreshSetup(pending.refreshScope, coverage); else void handleRunPayroll(coverage); }}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/SourceCoverageDialog.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/pay-run/usePayRunController.tsx",
+    "line": 1032,
+    "tag": "Button",
+    "label": "Try again",
+    "attributes": [
+      "className=\"mt-4\"",
+      "variant=\"outline\"",
+      "onClick={() => void loadPayPeriod(payRunId)}"
+    ],
+    "destination": "web/src/pages/pay-periods/pay-run/usePayRunController.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 175,
+    "tag": "Button",
+    "label": "<RefreshCw className=\"mr-2 h-4 w-4\"/> Try again",
+    "attributes": [
+      "onClick={() => void load()}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 175,
+    "tag": "Link",
+    "label": "<ArrowLeft className=\"h-4 w-4\"/> Back to pay runs",
+    "attributes": [
+      "className=\"inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700\"",
+      "to={returnTo}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 202,
+    "tag": "Link",
+    "label": "<ArrowLeft className=\"h-4 w-4\"/> Back",
+    "attributes": [
+      "className=\"inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800\"",
+      "to={returnTo}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 202,
+    "tag": "Link",
+    "label": "<Banknote className=\"h-4 w-4\"/> Open processing",
+    "attributes": [
+      "className=\"inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800\"",
+      "to={payRunPath(companyId, payRunId, 'work', { returnTo })}",
+      "preventScrollReset"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 285,
+    "tag": "Link",
+    "label": "Process payroll",
+    "attributes": [
+      "className=\"text-sm font-bold text-primary-700 hover:text-primary-900\"",
+      "to={payRunPath(companyId, payRun.id, 'work', { returnTo })}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 287,
+    "tag": "Link",
+    "label": "{item.employee_name}",
+    "attributes": [
+      "className=\"font-semibold text-neutral-950 hover:text-primary-800\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 287,
+    "tag": "button",
+    "label": "Open <ArrowRight className=\"h-4 w-4\"/>",
+    "attributes": [
+      "type=\"button\"",
+      "aria-label={`Open payroll item for ${item.employee_name}`}",
+      "className=\"inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-4 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50\"",
+      "onClick={() => setReviewingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 459,
+    "tag": "Link",
+    "label": "{item.employee_name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-700 hover:text-primary-900\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 469,
+    "tag": "Button",
+    "label": "Change payment method",
+    "attributes": [
+      "size=\"sm\"",
+      "variant=\"outline\"",
+      "aria-label={`Change payment method for ${item.employee_name}`}",
+      "onClick={() => setSwitchItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 470,
+    "tag": "button",
+    "label": "Open record <ArrowRight className=\"h-4 w-4\"/>",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-primary-200 px-3 text-sm font-bold text-primary-700\"",
+      "onClick={() => setReviewingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 484,
+    "tag": "Link",
+    "label": "{item.employee_name}",
+    "attributes": [
+      "className=\"font-semibold text-primary-700 hover:text-primary-900\"",
+      "to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 492,
+    "tag": "Button",
+    "label": "Change payment method",
+    "attributes": [
+      "size=\"sm\"",
+      "variant=\"outline\"",
+      "aria-label={`Change payment method for ${item.employee_name}`}",
+      "onClick={() => setSwitchItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 495,
+    "tag": "button",
+    "label": "Open <ArrowRight className=\"h-4 w-4\"/>",
+    "attributes": [
+      "type=\"button\"",
+      "className=\"inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900\"",
+      "onClick={() => setReviewingItem(item)}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 529,
+    "tag": "Button",
+    "label": "Prepare checks for payment",
+    "attributes": [
+      "className=\"shrink-0\"",
+      "onClick={() => setPaymentDialogOpen(true)}",
+      "disabled={paymentPreviewBusy || !paymentPreview?.eligible}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 549,
+    "tag": "Button",
+    "label": "<Printer className=\"mr-2 h-4 w-4\"/> {mockPreviewBusy ? 'Preparing…' : 'Preview rehearsal checks'}",
+    "attributes": [
+      "onClick={() => void previewMockChecks()}",
+      "disabled={mockPreviewBusy || mockPreviewEligible === 0}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 554,
+    "tag": "Button",
+    "label": "<Printer className=\"mr-2 h-4 w-4\"/> Print checks",
+    "attributes": [
+      "onClick={() => setCheckPrintOpen(true)}",
+      "disabled={countActivePayrollChecks(items) === 0 && hasNonEmployeeChecks !== true}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 567,
+    "tag": "summary",
+    "label": "Review payment methods and amounts",
+    "attributes": [
+      "className=\"cursor-pointer px-4 py-3 text-sm font-semibold text-primary-700 sm:px-6\""
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 631,
+    "tag": "Button",
+    "label": "Cancel",
+    "attributes": [
+      "variant=\"outline\"",
+      "onClick={resetPaymentDialog}",
+      "disabled={paymentBusy}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 632,
+    "tag": "Button",
+    "label": "{paymentBusy ? 'Preparing checks…' : 'Assign check numbers'}",
+    "attributes": [
+      "onClick={() => void preparePromotedPayment()}",
+      "disabled={readOnly || paymentBusy || !paymentStartingNumber || !paymentCheckDate || !paymentConfirmed}"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/pages/pay-periods/PayRunWorkspace.tsx",
+    "line": 684,
+    "tag": "Link",
+    "label": "{actionLabel}",
+    "attributes": [
+      "className=\"mt-4 inline-flex min-h-11 items-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-bold text-primary-700 transition hover:border-primary-300 hover:bg-primary-50\"",
+      "to={actionHref}",
+      "preventScrollReset"
+    ],
+    "destination": "web/src/pages/pay-periods/PayRunWorkspace.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 72,
+    "tag": "Button",
+    "label": "Pay late hours",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "disabled={!canPay}",
+      "title={!canPay ? 'Client management access and an AIRE connection are required' : undefined}",
+      "onClick={() => { setOpen(true); setSelected([]); setCancellation(null); commandId.current = null; void load(); }}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 85,
+    "tag": "Link",
+    "label": "Open adjustment # {run.pay_period_id}",
+    "attributes": [
+      "to={adjustmentPath(run.pay_period_id)}",
+      "className=\"font-semibold text-primary-700 underline\""
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 87,
+    "tag": "Button",
+    "label": "Resume adjustment",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "disabled={busy || !review.can_pay}",
+      "onClick={() => void submit(run.id)}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 88,
+    "tag": "Button",
+    "label": "Review cancellation",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "disabled={busy || !review.can_pay}",
+      "onClick={() => setCancellation({ runId: run.id, reason: '' })}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 93,
+    "tag": "Button",
+    "label": "Cancel unpaid claim",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "disabled={busy || cancellation.reason.trim().length < 10 || !review.can_pay}",
+      "onClick={() => void cancelClaim()}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 113,
+    "tag": "Button",
+    "label": "Close",
+    "attributes": [
+      "type=\"button\"",
+      "variant=\"outline\"",
+      "disabled={busy}",
+      "onClick={() => setOpen(false)}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 114,
+    "tag": "Button",
+    "label": "Try again",
+    "attributes": [
+      "type=\"button\"",
+      "onClick={() => void load()}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  },
+  {
+    "file": "web/src/components/payroll/PayLateHours.tsx",
+    "line": 115,
+    "tag": "Button",
+    "label": "{busy ? 'Creating adjustment…' : 'Create adjustment run'}",
+    "attributes": [
+      "type=\"button\"",
+      "disabled={busy || !review.can_pay || !selected.length || !payDate}",
+      "onClick={() => void submit()}"
+    ],
+    "destination": "web/src/components/payroll/PayLateHours.tsx"
+  }
+]

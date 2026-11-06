@@ -1,0 +1,79 @@
+{
+  "state_viewport_pairs": 14,
+  "runtime_actions_unchanged": true,
+  "source_definitions_unchanged": true,
+  "lost": [],
+  "added": [],
+  "state_counts": [
+    {
+      "state": "connected-committed",
+      "width": 1280,
+      "actions": 171
+    },
+    {
+      "state": "connected-draft",
+      "width": 1280,
+      "actions": 36
+    },
+    {
+      "state": "adjustment",
+      "width": 1280,
+      "actions": 66
+    },
+    {
+      "state": "manual-committed",
+      "width": 1280,
+      "actions": 92
+    },
+    {
+      "state": "fresh-draft",
+      "width": 1280,
+      "actions": 15
+    },
+    {
+      "state": "fresh-calculated",
+      "width": 1280,
+      "actions": 39
+    },
+    {
+      "state": "fresh-approved",
+      "width": 1280,
+      "actions": 32
+    },
+    {
+      "state": "connected-committed",
+      "width": 390,
+      "actions": 171
+    },
+    {
+      "state": "connected-draft",
+      "width": 390,
+      "actions": 36
+    },
+    {
+      "state": "adjustment",
+      "width": 390,
+      "actions": 66
+    },
+    {
+      "state": "manual-committed",
+      "width": 390,
+      "actions": 92
+    },
+    {
+      "state": "fresh-draft",
+      "width": 390,
+      "actions": 15
+    },
+    {
+      "state": "fresh-calculated",
+      "width": 390,
+      "actions": 39
+    },
+    {
+      "state": "fresh-approved",
+      "width": 390,
+      "actions": 32
+    }
+  ]
+}
