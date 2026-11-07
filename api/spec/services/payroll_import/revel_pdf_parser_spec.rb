@@ -52,6 +52,23 @@ RSpec.describe PayrollImport::RevelPdfParser do
       )
     end
 
+    it "reads the pay period from Revel's real filename" do
+      path = build_revel_pdf([ { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 600 } ])
+
+      result = described_class.parse_with_metadata(path, source_name: "payroll_2026-10-19_00-00_to_2026-11-01_23-59.pdf")
+
+      expect(result.dig(:metadata, :period)).to eq(start_date: "2026-10-19", end_date: "2026-11-01")
+    end
+
+    it "reads Revel's US report dates as month/day" do
+      parser = described_class.allocate
+
+      expect(parser.send(:detect_period, "From 10/19/2026 12:00 AM To 11/01/2026 11:59 PM", "report.pdf"))
+        .to eq(start_date: "2026-10-19", end_date: "2026-11-01")
+      expect(parser.send(:detect_period, "From 11/02/26 12:00 AM To 11/15/26 11:59 PM", "report.pdf"))
+        .to eq(start_date: "2026-11-02", end_date: "2026-11-15")
+    end
+
     it "returns the complete downstream import shape with numeric, plausible values" do
       required_keys = %i[
         employee_name regular_hours overtime_hours regular_pay overtime_pay

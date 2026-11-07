@@ -37,6 +37,58 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
     tempfile
   end
 
+  it "reads MoSa's current template dates from C2/C3" do
+    tempfile = Tempfile.new([ "mosa-current-template", ".xlsx" ])
+    package = Axlsx::Package.new
+    package.workbook.add_worksheet(name: described_class::LOANS_SHEET) do |sheet|
+      sheet.add_row([ "LOANS (Do NOT Enter Any Amounts with Installment Payments)" ])
+      sheet.add_row([ "PAY PERIOD ENDING", nil, Date.new(2026, 10, 31) ])
+      sheet.add_row([ "PAY DAY", nil, Date.new(2026, 11, 5) ])
+      sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "ENTER LOAN AMOUNTS HERE" ])
+      sheet.add_row([ 1, nil, "Moyer", "Addison", "Hourly Maintenance", 219.70 ])
+    end
+    package.serialize(tempfile.path)
+
+    result = described_class.parse_with_metadata(tempfile.path)
+
+    expect(result[:metadata]).to include(period_end: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 5))
+    expect(result[:rows]).to contain_exactly(include(last_name: "Moyer", recurring_loan_deduction: 219.70))
+  ensure
+    tempfile&.unlink
+  end
+
+  def legacy_header_workbook(c2:, c3:, f2: nil, f3: nil)
+    tempfile = Tempfile.new([ "mosa-template", ".xlsx" ])
+    package = Axlsx::Package.new
+    package.workbook.add_worksheet(name: described_class::LOANS_SHEET) do |sheet|
+      sheet.add_row([ "LOANS" ])
+      sheet.add_row([ "PAY PERIOD ENDING", nil, c2, nil, nil, f2 ])
+      sheet.add_row([ "PAY DAY", nil, c3, nil, nil, f3 ])
+      sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "Amount" ])
+      sheet.add_row([ 1, nil, "Moyer", "Addison", "Hourly Maintenance", 20.00 ])
+    end
+    package.serialize(tempfile.path)
+    tempfile
+  end
+
+  it "reads typed US dates with a time as month/day" do
+    tempfile = legacy_header_workbook(c2: "11/01/2026 12:00 AM", c3: "11/05/2026 12:00 AM")
+
+    expect(described_class.parse_with_metadata(tempfile.path)[:metadata])
+      .to include(period_end: Date.new(2026, 11, 1), pay_date: Date.new(2026, 11, 5))
+  ensure
+    tempfile&.unlink
+  end
+
+  it "uses F2/F3 when C2/C3 hold a month label instead of a date" do
+    tempfile = legacy_header_workbook(c2: "May 2026", c3: "May 2026", f2: "5/16/2026", f3: "5/21/2026")
+
+    expect(described_class.parse_with_metadata(tempfile.path)[:metadata])
+      .to include(period_end: Date.new(2026, 5, 16), pay_date: Date.new(2026, 5, 21))
+  ensure
+    tempfile&.unlink
+  end
+
   def add_header_rows(sheet, title:)
     sheet.add_row([ title ])
     sheet.add_row([ "PAY PERIOD ENDING", nil, nil, nil, nil, "5/16/2026" ])

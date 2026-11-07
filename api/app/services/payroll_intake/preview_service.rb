@@ -18,6 +18,11 @@ module PayrollIntake
       "spike_email" => PayrollIntake::Adapters::SpikeEmail,
       "mosa_revel" => PayrollIntake::Adapters::MosaRevel
     }.freeze
+
+    def self.source_reports_overtime?(source_type)
+      adapter = SOURCE_ADAPTERS[source_type.to_s]
+      adapter.respond_to?(:reports_overtime?) && adapter.reports_overtime?
+    end
     MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
     def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil,
@@ -232,6 +237,14 @@ module PayrollIntake
         detected_period: extraction[:detected_period]
       )
       warnings = Array(extraction[:warnings]) + Array(normalized[:warnings])
+      if workweek_evidence["aligned_with_pay_period"] == false
+        warnings << {
+          code: "pay_period_workweek_offset",
+          message: "This pay period starts on a different day than the client's saved overtime workweek. " \
+                   "Overtime is used exactly as the source reports it. Update the workweek in Cornerstone if it is wrong.",
+          severity: "warning"
+        }
+      end
 
       if normalized[:rows].empty?
         warnings << { code: "no_rows_detected", message: "No payroll rows were detected. Paste a clearer table or upload a clearer screenshot.", severity: "warning" }
@@ -241,7 +254,9 @@ module PayrollIntake
     end
 
     def capture_workweek_evidence!
-      @workweek_evidence = PayrollIntake::WorkweekEvidence.new(pay_period: pay_period).capture!
+      @workweek_evidence = PayrollIntake::WorkweekEvidence.new(
+        pay_period: pay_period, allow_misaligned: self.class.source_reports_overtime?(source_type)
+      ).capture!
     end
 
     def workweek_evidence
