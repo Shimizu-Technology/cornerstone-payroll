@@ -3,9 +3,15 @@
 module PayrollIntake
   class WorkweekEvidence
     PERIOD_DAYS = 14
+    # Previews saved before these were recorded still apply if the rest matches.
+    LATER_KEYS = %w[aligned_with_pay_period legal_week_starts].freeze
 
-    def initialize(pay_period:)
+    # allow_misaligned: the source reports overtime itself (Revel), so a pay
+    # period that starts on a different weekday than the saved workweek is
+    # recorded and warned about instead of refused.
+    def initialize(pay_period:, allow_misaligned: false)
       @pay_period = pay_period
+      @allow_misaligned = allow_misaligned
     end
 
     def capture!
@@ -17,7 +23,8 @@ module PayrollIntake
       unless (pay_period.end_date - pay_period.start_date).to_i == PERIOD_DAYS - 1
         raise ArgumentError, "Payroll intake requires a 14-day pay period containing two complete legal workweeks"
       end
-      unless pay_period.start_date.wday == workweek.starts_on_weekday
+      aligned = pay_period.start_date.wday == workweek.starts_on_weekday
+      unless aligned || allow_misaligned
         raise ArgumentError, "Payroll intake requires the pay period to begin on the confirmed legal workweek start day"
       end
       if workweek.effective_on > pay_period.start_date || (workweek.ends_on.present? && workweek.ends_on < pay_period.end_date)
@@ -38,20 +45,22 @@ module PayrollIntake
         "updated_at" => workweek.updated_at.utc.iso8601(6),
         "pay_period_start" => pay_period.start_date.iso8601,
         "pay_period_end" => pay_period.end_date.iso8601,
-        "legal_week_starts" => [ pay_period.start_date.iso8601, (pay_period.start_date + 7.days).iso8601 ]
+        "aligned_with_pay_period" => aligned,
+        "legal_week_starts" => (pay_period.start_date..pay_period.end_date)
+          .select { |date| date.wday == workweek.starts_on_weekday }.map(&:iso8601)
       }
     end
 
     def validate_snapshot!(snapshot)
       expected = capture!
       actual = snapshot.to_h.stringify_keys
-      return expected if actual == expected
+      return expected if actual == expected.except(*(LATER_KEYS - actual.keys))
 
       raise ArgumentError, "The legal workweek changed after this payroll intake preview. Create a new preview before applying."
     end
 
     private
 
-    attr_reader :pay_period
+    attr_reader :pay_period, :allow_misaligned
   end
 end

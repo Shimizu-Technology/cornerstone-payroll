@@ -154,6 +154,9 @@ module PayrollImport
           next unless employee
 
           payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+          # Calculation resolves deduction mirrors before the first save, and they
+          # must belong to this client; a blank company reads as ambiguous history.
+          payroll_item.company_id ||= pay_period.company_id
 
           # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
           if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite

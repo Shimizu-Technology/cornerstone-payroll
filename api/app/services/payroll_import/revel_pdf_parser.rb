@@ -118,7 +118,8 @@ module PayrollImport
     def detect_period(text, source_name)
       candidates = [ source_name.to_s, text.to_s ]
       candidates.each do |candidate|
-        iso_match = candidate.match(/(?<start>20\d{2}[-_]\d{2}[-_]\d{2}).{0,40}?(?:to|through|thru|[-–—])\s*(?<finish>20\d{2}[-_]\d{2}[-_]\d{2})/i)
+        # Revel names files like payroll_2026-10-19_00-00_to_2026-11-01_23-59.pdf.
+        iso_match = candidate.match(/(?<start>20\d{2}[-_]\d{2}[-_]\d{2}).{0,40}?(?:to|through|thru|[-–—])[\s_]*(?<finish>20\d{2}[-_]\d{2}[-_]\d{2})/i)
         if iso_match
           return {
             start_date: Date.parse(iso_match[:start].tr("_", "-")).iso8601,
@@ -129,8 +130,8 @@ module PayrollImport
         us_match = candidate.match(/(?<start>\d{1,2}\/\d{1,2}\/\d{2,4}).{0,40}?(?:to|through|thru|[-–—])\s*(?<finish>\d{1,2}\/\d{1,2}\/\d{2,4})/i)
         if us_match
           return {
-            start_date: Date.parse(us_match[:start]).iso8601,
-            end_date: Date.parse(us_match[:finish]).iso8601
+            start_date: us_date(us_match[:start]).iso8601,
+            end_date: us_date(us_match[:finish]).iso8601
           }
         end
       end
@@ -138,6 +139,12 @@ module PayrollImport
       nil
     rescue Date::Error
       nil
+    end
+
+    # Revel prints US month/day/year. Date.parse reads 10/19/2026 as day/month
+    # and fails, and would silently turn 11/01/2026 into January 11.
+    def us_date(value)
+      Date.strptime(value, value.split("/").last.length == 2 ? "%m/%d/%y" : "%m/%d/%Y")
     end
 
     # Find the line containing column headers

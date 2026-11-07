@@ -99,6 +99,58 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       workbook_file&.unlink
     end
 
+    it "previews MoSa's real Revel and template shape with a one-time loan ready to deduct" do
+      pay_period.update!(start_date: Date.new(2026, 10, 19), end_date: Date.new(2026, 11, 1), pay_date: Date.new(2026, 11, 5))
+      CompanyWorkweek.create!(
+        company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
+        effective_on: Date.new(2026, 9, 1), source: "operator_confirmed", confirmation_status: "confirmed",
+        confirmed_by: admin_user, confirmed_at: Time.current, notes: "Sunday workweek; MoSa pay periods start Monday"
+      )
+      storage = Class.new do
+        def initialize = @objects = {}
+        def upload(key, data, content_type:) = @objects[key] = { data: data, content_type: content_type }
+        def download_with_limit(key, max_bytes:) = @objects.fetch(key).fetch(:data).byteslice(0, max_bytes)
+        def delete(key) = @objects.delete(key)
+      end.new
+      allow(R2StorageService).to receive(:new).and_return(storage)
+
+      pdf_path = build_revel_pdf([ { name: "Example, Avery", regular_hours: 40, overtime_hours: 2, regular_pay: 9_999 } ])
+      workbook_file = Tempfile.new([ "real-payroll-template", ".xlsx" ])
+      package = Axlsx::Package.new
+      [ [ "TIPS - BOH", "TIPS - BOH (KITCHEN)", 125.25 ], [ "LOANS (NO INSTALLMENTS)", "LOANS (Do NOT Enter Any Amounts with Installment Payments)", 50.00 ] ].each do |name, title, amount|
+        package.workbook.add_worksheet(name: name) do |sheet|
+          sheet.add_row([ title ])
+          sheet.add_row([ "PAY PERIOD ENDING", nil, Date.new(2026, 10, 31) ])
+          sheet.add_row([ "PAY DAY", nil, Date.new(2026, 11, 5) ])
+          sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "ENTER AMOUNTS HERE" ])
+          sheet.add_row([ 1, nil, "Example", "Avery", "Kitchen", amount ])
+        end
+      end
+      package.serialize(workbook_file.path)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             pdf_file: Rack::Test::UploadedFile.new(pdf_path, "application/pdf", true, original_filename: "payroll_2026-10-19_00-00_to_2026-11-01_23-59.pdf"),
+             excel_file: Rack::Test::UploadedFile.new(workbook_file.path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", true, original_filename: "REAL PAYROLL TEMPLATE.xlsx")
+           }
+
+      expect(response).to have_http_status(:ok), response.body
+      preview = response.parsed_body.fetch("preview")
+      expect(preview.fetch("source_warnings").map { |warning| warning["code"] })
+        .to include("pay_period_workweek_offset", "workbook_period_end_differs")
+      expect(preview.fetch("can_apply")).to be(true)
+      expect(preview.fetch("matched")).to contain_exactly(include(
+        "employee_id" => included_employee.id, "regular_hours" => 40.0, "overtime_hours" => 2.0,
+        "total_tips" => 125.25, "loan_deduction" => 50.0
+      ))
+      expect(preview.fetch("source_rows").flat_map { |row| row["errors"] }).to be_empty
+
+      import_record = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      expect(import_record.matched_data).to contain_exactly(include("loan_deduction" => 50.0, "loan_reconciliation_errors" => []))
+    ensure
+      workbook_file&.unlink
+    end
+
     it "persists the reviewed tip payout mode with the server preview" do
       source_package = create(
         :payroll_intake_session,

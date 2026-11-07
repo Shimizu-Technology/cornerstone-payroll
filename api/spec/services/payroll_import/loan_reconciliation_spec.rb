@@ -58,15 +58,50 @@ RSpec.describe PayrollImport::LoanReconciliation do
     expect(result[:matches]).to contain_exactly(include(employee_loan_id: loan.id, tracking_mode: "recurring_no_balance", amount: 50.to_d))
   end
 
-  it "blocks a workbook amount when no named recurring ledger exists" do
+  it "deducts a one-time or varying loan directly when no recurring ledger is set up" do
     result = described_class.new(
       employee: employee,
       pay_date: pay_date,
       source_row: { loan_deduction: 50, recurring_loan_deduction: 50 }
     ).call
 
-    expect(result[:direct_loan_deduction]).to eq(50)
-    expect(result[:errors]).to include(/Set up the named recurring deduction/)
+    expect(result).to include(direct_loan_deduction: 50.to_d, errors: [], warnings: [], matches: [])
+  end
+
+  it "still reconciles to a set-up recurring ledger so its deduction is not taken twice" do
+    recurring_loan(amount: 50)
+
+    result = described_class.new(
+      employee: employee,
+      pay_date: pay_date,
+      source_row: { loan_deduction: 40, recurring_loan_deduction: 40 }
+    ).call
+
+    expect(result[:errors]).to include(/is \$50.00 for this payday, but the workbook says \$40.00/)
+    expect(result[:matches]).to be_empty
+  end
+
+  it "flags a workbook amount for a paused recurring ledger instead of deducting it directly" do
+    recurring_loan(amount: 50).suspend!
+
+    result = described_class.new(
+      employee: employee,
+      pay_date: pay_date,
+      source_row: { loan_deduction: 50, recurring_loan_deduction: 50 }
+    ).call
+
+    expect(result[:errors]).to include(/Recurring employee loan is paused or not scheduled for this payday/)
+    expect(result[:matches]).to be_empty
+  end
+
+  it "keeps blocking installment amounts until the balance-tracked loan is set up" do
+    result = described_class.new(
+      employee: employee,
+      pay_date: pay_date,
+      source_row: { loan_deduction: 50, installment_beginning_balance: 200, installment_payment: 50 }
+    ).call
+
+    expect(result[:errors]).to include(/Set up the named installment loan/)
   end
 
   it "keeps a generated one-payroll deduction direct without pretending it is recurring" do
