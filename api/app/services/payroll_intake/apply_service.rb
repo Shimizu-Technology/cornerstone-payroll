@@ -30,10 +30,7 @@ module PayrollIntake
 
           session.with_lock(requires_new: true) do
             raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
-            PayrollIntake::WorkweekEvidence.new(
-              pay_period: pay_period,
-              allow_misaligned: PayrollIntake::PreviewService.source_reports_overtime?(session.source_type)
-            ).validate_snapshot!(
+            PayrollIntake::WorkweekEvidence.new(pay_period: pay_period).validate_snapshot!(
               session.evidence_snapshot.to_h["workweek"]
             )
 

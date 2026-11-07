@@ -3,6 +3,8 @@
 module PayrollIntake
   class WorkweekEvidence
     PERIOD_DAYS = 14
+    # Previews saved before these were recorded still apply if the rest matches.
+    LATER_KEYS = %w[aligned_with_pay_period legal_week_starts].freeze
 
     # allow_misaligned: the source reports overtime itself (Revel), so a pay
     # period that starts on a different weekday than the saved workweek is
@@ -52,7 +54,7 @@ module PayrollIntake
     def validate_snapshot!(snapshot)
       expected = capture!
       actual = snapshot.to_h.stringify_keys
-      return expected if actual == expected
+      return expected if actual == expected.except(*(LATER_KEYS - actual.keys))
 
       raise ArgumentError, "The legal workweek changed after this payroll intake preview. Create a new preview before applying."
     end
