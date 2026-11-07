@@ -81,6 +81,19 @@ RSpec.describe PayrollImport::LoanReconciliation do
     expect(result[:matches]).to be_empty
   end
 
+  it "flags a workbook amount for a paused recurring ledger instead of deducting it directly" do
+    recurring_loan(amount: 50).suspend!
+
+    result = described_class.new(
+      employee: employee,
+      pay_date: pay_date,
+      source_row: { loan_deduction: 50, recurring_loan_deduction: 50 }
+    ).call
+
+    expect(result[:errors]).to include(/Recurring employee loan is paused or not scheduled for this payday/)
+    expect(result[:matches]).to be_empty
+  end
+
   it "keeps blocking installment amounts until the balance-tracked loan is set up" do
     result = described_class.new(
       employee: employee,

@@ -23,9 +23,9 @@ module PayrollImport
       direct_amount = one_payroll_amount
       if recurring_amount.positive?
         # One-time or varying loans (MoSa's LOANS (NO INSTALLMENTS) tab) have no
-        # Employee Loans record; deduct them as entered. A set-up ledger still
-        # reconciles so its scheduled deduction is never taken twice.
-        if active_loans("recurring_no_balance").empty?
+        # Employee Loans record; deduct them as entered. A set-up or paused
+        # ledger still reconciles so its deduction is never taken twice.
+        if open_recurring_loans.none?
           direct_amount += recurring_amount
         else
           reconcile_recurring!(recurring_amount)
@@ -51,6 +51,12 @@ module PayrollImport
     attr_reader :employee, :pay_date, :source_row, :errors, :warnings, :matches
 
     def reconcile_recurring!(source_amount)
+      if active_loans("recurring_no_balance").empty?
+        names = open_recurring_loans.map(&:name).to_sentence
+        errors << "#{names} is paused or not scheduled for this payday in Employee Loans, but the workbook says #{currency(source_amount)}. Resume the deduction or correct the workbook."
+        return
+      end
+
       loan = unique_active_loan("recurring_no_balance", "recurring deduction")
       return unless loan
 
@@ -107,6 +113,10 @@ module PayrollImport
       employee.employee_loans.active.where(tracking_mode: mode).select do |loan|
         loan.repayment_schedule_active_on?(pay_date)
       end
+    end
+
+    def open_recurring_loans
+      employee.employee_loans.where(tracking_mode: "recurring_no_balance", status: %w[active suspended])
     end
 
     def unique_active_loan(mode, label)

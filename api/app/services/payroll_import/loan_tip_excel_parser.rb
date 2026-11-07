@@ -35,6 +35,8 @@ module PayrollImport
     INSTALLMENT_SHEET = "INSTALLMENT LOANS"
     BONUS_SHEET = "BONUSES"
     SKIP_SHEETS = [ "SUMMARY" ].freeze
+    # Month/day/year, optionally followed by a time ("11/01/2026 12:00 AM").
+    US_DATE = %r{\A(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})(?:\s|\z)}
     GENERATED_COMPONENT_TYPES = {
       "BONUS" => { kind: "addition", tax_treatment: "taxable_addition", default_label: "Bonus", default_category: "other" },
       "REIMBURSEMENT" => { kind: "addition", tax_treatment: "non_taxable_addition", default_label: "Reimbursement", default_category: "reimbursement" },
@@ -197,8 +199,8 @@ module PayrollImport
       # MoSa's current template keeps the dates in C2/C3; older copies used F2/F3.
       {
         schema_version: "mosa-legacy-workbook",
-        period_end: date(sheet.cell(2, 3)) || date(sheet.cell(2, 6)),
-        pay_date: date(sheet.cell(3, 3)) || date(sheet.cell(3, 6)),
+        period_end: exact_date(sheet.cell(2, 3)) || date(sheet.cell(2, 6)),
+        pay_date: exact_date(sheet.cell(3, 3)) || date(sheet.cell(3, 6)),
         no_changes: false
       }
     end
@@ -449,10 +451,20 @@ module PayrollImport
       nil
     end
 
+    # Older templates keep a label such as "May 2026" in C2/C3; only a full date
+    # there counts, so those copies fall through to F2/F3.
+    def exact_date(value)
+      return value.to_date if value.is_a?(Date) || value.is_a?(Time)
+      return unless value.is_a?(String)
+
+      text = value.strip
+      date(text) if text.match?(US_DATE) || text.match?(/\A\d{4}-\d{2}-\d{2}(?:[\sT]|\z)/)
+    end
+
     def date(value)
       return nil if value.blank?
       # Typed dates are US month/day; String#to_date would read them day/month.
-      if value.is_a?(String) && (match = value.strip.match(%r{\A(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})\z}))
+      if value.is_a?(String) && (match = value.strip.match(US_DATE))
         year = match[3].length == 2 ? 2000 + match[3].to_i : match[3].to_i
         return Date.new(year, match[1].to_i, match[2].to_i)
       end

@@ -254,6 +254,15 @@ RSpec.describe PayrollIntake::ApplyService do
     )
   end
 
+  it "applies a preview saved before workweek alignment was recorded" do
+    legacy = session.evidence_snapshot["workweek"].except("aligned_with_pay_period", "legal_week_starts")
+    session.update!(evidence_snapshot: session.evidence_snapshot.merge("workweek" => legacy))
+
+    result = described_class.new(session: session, row_overrides: [ included_override(row, employee) ]).call
+
+    expect(result[:errors]).to be_empty
+  end
+
   it "blocks a preview after its confirmed workweek evidence changes" do
     workweek.update!(notes: "Confirmed workweek evidence changed")
 
