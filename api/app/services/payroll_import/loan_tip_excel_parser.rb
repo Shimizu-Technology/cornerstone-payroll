@@ -22,7 +22,8 @@ module PayrollImport
   # - one_payroll_deduction (decimal): generated-template amount that is not a
   #   recurring setup and remains a direct deduction for this payroll only
   # - recurring_loan_deduction (decimal): legacy LOANS (NO INSTALLMENTS)
-  #   amount that must reconcile to a named no-balance deduction ledger
+  #   amount. It reconciles to a named no-balance deduction ledger when one is
+  #   set up; otherwise it is a direct deduction for this payroll only
   # - installment_beginning_balance (decimal)
   # - installment_new_amount (decimal)
   # - installment_payment (decimal)
@@ -193,10 +194,11 @@ module PayrollImport
       return {} unless candidate
 
       sheet = xlsx.sheet(candidate)
+      # MoSa's current template keeps the dates in C2/C3; older copies used F2/F3.
       {
         schema_version: "mosa-legacy-workbook",
-        period_end: date(sheet.cell(2, 6)),
-        pay_date: date(sheet.cell(3, 6)),
+        period_end: date(sheet.cell(2, 3)) || date(sheet.cell(2, 6)),
+        pay_date: date(sheet.cell(3, 3)) || date(sheet.cell(3, 6)),
         no_changes: false
       }
     end
@@ -448,8 +450,13 @@ module PayrollImport
     end
 
     def date(value)
-      return value.to_date if value.respond_to?(:to_date)
       return nil if value.blank?
+      # Typed dates are US month/day; String#to_date would read them day/month.
+      if value.is_a?(String) && (match = value.strip.match(%r{\A(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})\z}))
+        year = match[3].length == 2 ? 2000 + match[3].to_i : match[3].to_i
+        return Date.new(year, match[1].to_i, match[2].to_i)
+      end
+      return value.to_date if value.respond_to?(:to_date)
 
       Date.parse(value.to_s)
     rescue Date::Error
