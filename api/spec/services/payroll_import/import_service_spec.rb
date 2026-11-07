@@ -21,6 +21,23 @@ RSpec.describe PayrollImport::ImportService do
       expect(PayrollReview::CalculationSnapshot.new(pay_period: pay_period).call[:checksum]).to eq(checksum)
     end
 
+    it "calculates a new imported paycheck for an employee with a default payroll deduction" do
+      config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: pay_period.pay_date.year)
+      create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+      employee = create(:employee, company: company, pay_rate: 15)
+      field = create(:payroll_field_definition, company: company, name: "Health Insurance", kind: "deduction",
+        tax_treatment: "post_tax_deduction", category: "insurance")
+      employee.employee_payroll_fields.create!(payroll_field_definition: field, amount: 105)
+
+      results = service.apply!(matched: [ { employee_id: employee.id, regular_hours: 40, overtime_hours: 0, total_tips: 0 } ])
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.company_id).to eq(company.id)
+      expect(item.gross_pay).to eq(600)
+      expect(item.payroll_item_field_entries.map { |entry| [ entry.label, entry.amount.to_f ] }).to include([ "Health Insurance", 105.0 ])
+    end
+
     it "copies employee recurring payroll adjustments onto MoSa imported payroll items before calculating" do
       employee = create(
         :employee,
@@ -472,7 +489,7 @@ RSpec.describe PayrollImport::ImportService do
       ))
     end
 
-    it "blocks a legacy recurring workbook amount until its named ledger exists" do
+    it "deducts a legacy one-time loan amount directly when no named ledger exists" do
       employee = create(:employee, company: company, first_name: "Sarah", last_name: "Owner")
 
       result = service.preview(
@@ -480,8 +497,8 @@ RSpec.describe PayrollImport::ImportService do
         excel_records: [ { employee_id: employee.id, loan_deduction: 50, recurring_loan_deduction: 50 } ]
       )
 
-      expect(result[:can_apply]).to be(false)
-      expect(result[:matched].first[:loan_reconciliation_errors]).to include(/Set up the named recurring deduction/)
+      expect(result[:can_apply]).to be(true)
+      expect(result[:matched].first).to include(loan_deduction: 50.0, loan_reconciliation_errors: [], loan_reconciliation_matches: [])
     end
 
     it "uses a separate workbook amount as the variable employee's period pay" do

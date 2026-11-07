@@ -15,6 +15,11 @@ module PayrollIntake
         "supporting_document"
       end
 
+      # Revel splits regular and overtime hours itself.
+      def self.reports_overtime?
+        true
+      end
+
       def initialize(pay_period:, company:)
         @pay_period = pay_period
         @company = company
@@ -33,8 +38,9 @@ module PayrollIntake
         raise ArgumentError, "No employee hours were found in the Revel PDF." if revel.fetch(:rows).empty?
 
         workbook = workbook_files.first && PayrollImport::LoanTipExcelParser.parse_file_with_metadata(workbook_files.first)
+        date_warnings = []
         if workbook
-          validate_workbook!(workbook.fetch(:metadata, {}))
+          date_warnings = validate_workbook!(workbook.fetch(:metadata, {}))
           validate_supported_workbook_rows!(workbook.fetch(:rows))
         end
 
@@ -50,7 +56,7 @@ module PayrollIntake
             workbook: workbook&.fetch(:metadata, {}) || {},
             preview: preview.except(:matched)
           },
-          warnings: workbook_warnings(workbook)
+          warnings: workbook_warnings(workbook) + date_warnings
         }
       end
 
@@ -119,9 +125,34 @@ module PayrollIntake
           raise ArgumentError, "The change workbook belongs to another Cornerstone client." unless metadata[:company_id].to_i == company.id
           raise ArgumentError, "The change workbook must include its attestation." if metadata[:attestation].blank?
           validate_date!(metadata[:period_start], pay_period.start_date, "start")
+          validate_date!(metadata[:period_end], pay_period.end_date, "end")
+          validate_date!(metadata[:pay_date], pay_period.pay_date, "pay date")
+          return []
         end
-        validate_date!(metadata[:period_end], pay_period.end_date, "end")
+
         validate_date!(metadata[:pay_date], pay_period.pay_date, "pay date")
+        legacy_period_end_warnings(metadata[:period_end])
+      end
+
+      # MoSa's own template has typed the period end a day before Revel's
+      # (10/31 vs 11/01). With the pay date matching, keep Revel's dates and
+      # ask them to correct the template; a larger gap is a different payroll.
+      def legacy_period_end_warnings(period_end)
+        raise ArgumentError, "The change workbook must include the pay-period end." if period_end.blank?
+        return [] if period_end.to_date == pay_period.end_date
+        unless (period_end.to_date - pay_period.end_date).abs <= 1
+          raise ArgumentError,
+                "The change workbook end is #{period_end.to_date.iso8601}, but this payroll uses #{pay_period.end_date.iso8601}. Upload the workbook for this payroll."
+        end
+
+        [
+          warning(
+            "workbook_period_end_differs",
+            "The workbook says the period ends #{period_end.to_date.strftime('%-m/%-d/%Y')}, but Revel and this payroll end " \
+            "#{pay_period.end_date.strftime('%-m/%-d/%Y')}. The pay date matches, so this payroll's dates are used. " \
+            "Update the template's period end to match Revel."
+          )
+        ]
       end
 
       def validate_supported_workbook_rows!(rows)
