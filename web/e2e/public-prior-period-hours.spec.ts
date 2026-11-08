@@ -96,3 +96,16 @@ test('a supplemental run verifies its origin installation before reading matchin
   await expect(page.getByText('Prior-period hours · Sep 15, 2026', { exact: true })).toBeVisible();
   expect(state.reads()).toBe(0);
 });
+
+test('saved leave earnings use their display label without borrowing imported work dates', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page);
+  await page.goto('/');
+  await page.addScriptTag({ type: 'module', content: "import { mountSavedLeaveDisclosure } from '/e2e/fixtures/prior-period-import-harness.tsx'; mountSavedLeaveDisclosure();" });
+  const disclosure = page.getByTestId('saved-leave-disclosure');
+  await disclosure.scrollIntoViewIfNeeded();
+  await expect(disclosure.getByText('Admin Duties PTO', { exact: true })).toBeVisible();
+  await expect(disclosure).not.toContainText('Sep 15');
+  await expect(disclosure.getByText('$20.00', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
