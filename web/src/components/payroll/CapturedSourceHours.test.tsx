@@ -54,3 +54,16 @@ it('does not imply a reason or dates for payroll without captured source hours',
   const view = render(<CapturedSourceHours item={{ id: 1 } as PayrollItem} payPeriod={payPeriod} />);
   expect(view.container.textContent).toBe('');
 });
+
+it('does not link another time source to the AIRE entry with the same numeric ID', () => {
+  render(<CapturedSourceHours item={{ ...item, import_source: 'time_tracking:custom:2:BATCH', time_tracking_provenance: { source: 'aire_services' } } as PayrollItem} payPeriod={payPeriod} />);
+  expect(screen.queryByRole('button', { name: 'Review source entry #1804' })).toBeNull();
+  expect(screen.getByText(/review history in the original time system/)).toBeTruthy();
+  expect(api.read).not.toHaveBeenCalled();
+});
+
+it('retains captured evidence when the current calendar belongs to a different source installation', () => {
+  render(<CapturedSourceHours item={item} payPeriod={{ ...payPeriod, time_tracking: { aire_calendar: { source_id: 2 } } } as PayPeriod} />);
+  expect(screen.queryByRole('button', { name: 'Review source entry #1804' })).toBeNull();
+  expect(screen.getByText('Prior-period hours · Sep 15, 2026')).toBeTruthy();
+});

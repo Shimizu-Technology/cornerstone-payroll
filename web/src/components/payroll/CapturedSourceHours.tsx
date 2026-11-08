@@ -19,7 +19,9 @@ export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; pa
   useEffect(() => () => { request.current += 1; }, []);
   if (!rates.length) return null;
   const selected = entries.find(entry => entry.id === selectedId);
-  const hasAireSource = item.import_source?.startsWith('time_tracking:aire_services:') || item.time_tracking_provenance?.source === 'aire_services';
+  const calendarSourceId = payPeriod.time_tracking?.aire_calendar?.source_id;
+  const hasAireSource = item.import_source?.startsWith('time_tracking:aire_services:')
+    && (!calendarSourceId || calendarSourceId === Number(item.import_source.split(':')[2]));
   const earnings = (item as PayrollItem & { component_disclosure?: PayrollComponentDisclosure }).component_disclosure?.earnings;
 
   async function loadSource(id: string, page = 1) {
