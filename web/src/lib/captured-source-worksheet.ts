@@ -59,7 +59,13 @@ export function worksheetHoursInvalid(entry: WorksheetHours, item: PayrollItem |
 
 export function capturedSourceContext(rate: PayrollItemWageRateHours): string | null {
   if (!rate.source_lines?.length) return null;
-  const labels: Record<string, string> = { current: 'Current work', carryover: 'Carryover', correction: 'Correction' };
+  const labels: Record<string, string> = { current: 'Current-period hours', carryover: 'Prior-period hours', correction: 'Correction' };
   const parts = rate.source_lines.map(line => `${labels[line.source_kind] || line.source_kind} · ${formatDate(line.original_work_date)}`);
   return [...new Set(parts)].join('; ');
+}
+
+export function priorPeriodHours(item: PayrollItem): number {
+  const lines = item.wage_rate_hours?.flatMap(rate => rate.source_lines || []);
+  return lines?.length ? lines.filter(line => line.source_kind === 'carryover').reduce((sum, line) => sum + Number(line.total_hours), 0)
+    : Number(item.time_tracking_provenance?.carryover_hours || 0);
 }

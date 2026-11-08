@@ -298,7 +298,7 @@ class CheckGenerator
 
     table_y1 = row1_top + stub_cfg["pay_table_y_offset"].to_f
 
-    draw_section_table(pdf,
+    pay_height = draw_section_table(pdf,
       x: lx, y: table_y1, w: left_w - 8,
       title: "PAY",
       columns: %w[Hours Rate Current YTD],
@@ -306,7 +306,9 @@ class CheckGenerator
       rows: pay_rows,
       table_height: stub_cfg["table_height"].to_f,
       padding_y: stub_cfg["table_padding_y"].to_f,
-      padding_x: stub_cfg["table_padding_x"].to_f
+      padding_x: stub_cfg["table_padding_x"].to_f,
+      max_height: table_y1 - sect_bot - 80.0,
+      min_scale: 1.0
     )
 
     taxes_height = draw_section_table(pdf,
@@ -323,7 +325,7 @@ class CheckGenerator
     # ================================================================
     # ROW 2:  OTHER PAY (left)  |  DEDUCTIONS (right)
     # ================================================================
-    table_y2 = row2_top
+    table_y2 = [ row2_top, table_y1 - pay_height - 6.0 ].min
 
     other_pay_height = draw_section_table(pdf,
       x: lx, y: table_y2, w: left_w - 8,
@@ -335,6 +337,10 @@ class CheckGenerator
       padding_y: stub_cfg["table_padding_y"].to_f,
       padding_x: stub_cfg["table_padding_x"].to_f
     )
+    memo_clearance = [ 52.0, -stub_cfg["memo_y_offset"].to_f + 16.0 ].max
+    if table_y2 - other_pay_height - 6.0 < sect_bot + memo_clearance
+      raise ArgumentError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
+    end
 
     # The right column flows independently: use the space below taxes, and
     # reserve the expanded summary plus NET PAY before rendering deductions.
@@ -429,6 +435,9 @@ class CheckGenerator
     end
     table.height * scale
   rescue Prawn::Errors::CannotFit
+    if title == "PAY"
+      raise ArgumentError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
+    end
     if title == "DEDUCTIONS"
       return draw_readable_deductions(pdf, x: x, y: y, w: w, data: data, max_height: max_height)
     end
@@ -462,7 +471,7 @@ class CheckGenerator
   def pay_rows
     rows = earnings_ytd_breakdown.call.map do |earning|
       [
-        stub_label(earning.label),
+        source_earning_labels.call(earning.source_label, compact: true) || stub_label(earning.label),
         earning.hours.present? ? fh(earning.hours) : "-",
         earning.rate.present? ? fn(earning.rate) : "-",
         fn(earning.current),
@@ -480,6 +489,10 @@ class CheckGenerator
 
   def earnings_ytd_breakdown
     @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+  end
+
+  def source_earning_labels
+    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: earnings_ytd_breakdown.source_items)
   end
 
   def pay_ytd_total

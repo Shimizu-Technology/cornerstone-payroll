@@ -1,4 +1,5 @@
 import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
+import { CapturedSourceHours } from '@/components/payroll/CapturedSourceHours';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ArrowLeft,
@@ -242,6 +243,8 @@ export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetai
         </div>
 
         </details>
+
+        <CapturedSourceHours key={payrollItem.id} item={payrollItem} payPeriod={payRun} />
 
         {importedComponents.length > 0 && (
           <Card>

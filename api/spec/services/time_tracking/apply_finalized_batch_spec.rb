@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   def setup_records(source_type: "aire_services")
@@ -415,6 +416,21 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       [ "imported", "101" ],
       [ "imported", "88" ]
     )
+    ensure_verified_test_tax_years(2026)
+    item = pay_period.payroll_items.find_by!(employee: employee)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    item.reload
+    saved = item.attributes
+    earnings = item.payroll_item_earnings.order(:id).pluck(:label, :amount)
+    expect(item.gross_pay).to eq(BigDecimal("287.50"))
+    expect(earnings.map(&:first)).to include(/current period/, /carryover from Aug 14/)
+    check_rows = CheckGenerator.new(item).render_input_payload.fetch("pay_rows")
+    expect(check_rows.map(&:first)).to include("Prior-period\n08/14/26\nFlight Hours")
+    statement = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join(" ")
+    expect(statement).to include("Prior-period hours worked Aug 14, 2026")
+    expect(item.reload.attributes).to eq(saved)
+    expect(item.payroll_item_earnings.order(:id).pluck(:label, :amount)).to eq(earnings)
   end
 
   it "links an exact committed historical payroll without recalculating its amounts" do
