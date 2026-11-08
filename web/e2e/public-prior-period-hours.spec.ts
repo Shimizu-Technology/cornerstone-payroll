@@ -11,7 +11,7 @@ async function fixture(page: Page) {
     hours_worked: 4.25, overtime_hours: 1, total_hours: 5.25, gross_pay: 57.50, net_pay: 53.10, total_deductions: 4.40,
     import_source: 'time_tracking:aire_services:1:BATCH', check_number: 'TEST-ONLY', check_status: 'delivered', earnings_statement_eligible: true,
     wage_rate_hours: [{ label, rate: 10, regular_hours: 4.25, overtime_hours: 1, source_bucket_key: 'prior', source_lines: [sourceLine] }] };
-  const payPeriod = { id: 2, company_id: 1, start_date: '2026-10-16', end_date: '2026-10-31', pay_date: '2026-11-15', status: 'committed', payroll_items: [item] };
+  const payPeriod = { id: 2, company_id: 1, start_date: '2026-10-16', end_date: '2026-10-31', pay_date: '2026-11-15', status: 'committed', time_tracking: { aire_calendar: { source_id: 1 } }, payroll_items: [item] };
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (!['GET', 'OPTIONS'].includes(route.request().method())) writes.push(path);
@@ -27,7 +27,7 @@ async function fixture(page: Page) {
       processed_payload: { validation_version: 'payroll_batch_v2', ready: true, exclusions: [], issues: {}, summary: { total_hours: 5.25 }, rows: [{ source_user_id: '37', source_display_name: 'Casey Example', employee_id: 7, employee_name: 'Casey Example', match_method: 'saved_mapping', match_score: 100, ready: true, warnings: [], issues: {}, regular_hours: 4.25, overtime_hours: 1, total_hours: 5.25, source_kind_counts: { carryover: 1 }, categories: [{ name: 'Admin Duties', source_category_id: '4', key: 'admin', regular_hours: 4.25, overtime_hours: 1, total_hours: 5.25, source_kinds: ['carryover'], employee_wage_rate_id: 1, payroll_rate_cents: 1000, original_work_dates: ['2026-09-15'] }] }] } } };
     else if (path.endsWith('/aire_payroll_cockpit/time_entries')) {
       sourceReads += 1;
-      if (sourceReads === 1) {
+      if (sourceReads === 1 || sourceReads === 3) {
         await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Source unavailable for this test' }) });
         return;
       }
@@ -38,7 +38,7 @@ async function fixture(page: Page) {
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
-  return { reads: () => sourceReads, writes };
+  return { reads: () => sourceReads, writes, payPeriod };
 }
 
 for (const width of [1280, 390]) {
@@ -57,10 +57,15 @@ for (const width of [1280, 390]) {
     await page.getByRole('button', { name: 'Try source again', exact: true }).click();
     await expect(page.getByText('Reviewed against original records.', { exact: true })).toBeVisible();
     await expect(page.getByText(/approved.*Review Manager/)).toBeVisible();
+    await page.getByRole('button', { name: 'Review source entry #1804', exact: true }).click();
+    await expect(page.getByText(/Saved work dates and hours remain available above/)).toBeVisible();
+    await expect(page.getByText('Reviewed against original records.', { exact: true })).not.toBeVisible();
+    await page.getByRole('button', { name: 'Try source again', exact: true }).click();
+    await expect(page.getByText('Reviewed against original records.', { exact: true })).toBeVisible();
     if (process.env.PRIOR_PERIOD_BROWSER_DIR) await page.screenshot({ path: `${process.env.PRIOR_PERIOD_BROWSER_DIR}/source-history-${width}.png`, fullPage: true });
     await page.reload();
     await expect(page.getByText('Prior-period hours · Sep 15, 2026', { exact: true })).toBeVisible();
-    expect(state.reads()).toBe(2);
+    expect(state.reads()).toBe(4);
     expect(state.writes).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await expect(card).toBeAttached();
@@ -78,4 +83,16 @@ test('import review shows original work dates next to prior-period hours before 
   await expect(page.getByText(/Pay date: Nov 15, 2026/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   if (process.env.PRIOR_PERIOD_BROWSER_DIR) await page.screenshot({ path: `${process.env.PRIOR_PERIOD_BROWSER_DIR}/import-review-390.png` });
+});
+
+test('a supplemental run verifies its origin installation before reading matching entry IDs', async ({ page }) => {
+  const state = await fixture(page);
+  await page.route(url => url.pathname.endsWith('/pay_periods/2'), route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pay_period: { ...state.payPeriod, time_tracking: undefined, late_hours_origin_pay_period_id: 99 } }) }));
+  await page.route(url => url.pathname.endsWith('/pay_periods/99'), route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pay_period: { ...state.payPeriod, id: 99, time_tracking: { aire_calendar: { source_id: 2 } } } }) }));
+  await page.goto('/companies/1/pay-runs/2/payroll-items/3');
+  await page.getByText('Original source entries', { exact: true }).click();
+  await page.getByRole('button', { name: 'Review source entry #1804', exact: true }).click();
+  await expect(page.getByText(/original source installation could not be verified/)).toBeVisible();
+  await expect(page.getByText('Prior-period hours · Sep 15, 2026', { exact: true })).toBeVisible();
+  expect(state.reads()).toBe(0);
 });

@@ -127,6 +127,23 @@ RSpec.describe CheckGenerator do
       expect(prior_ot[4]).to eq("30.00")
     end
 
+    it "keeps mixed source-kind dates and OT visible without splitting financial rows" do
+      captured_prior_period_earnings(payroll_item)
+      rates = payroll_item.wage_rate_hours.deep_dup
+      rates.last["source_lines"].last["source_kind"] = "correction"
+      payroll_item.update!(wage_rate_hours: rates)
+      before = payroll_item.attributes
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+      expect(reader.page_count).to eq(1)
+      text = reader.pages.first.text
+      expect(text.scan("Prior-period OT").size).to eq(2)
+      expect(text.scan("Correction OT").size).to eq(2)
+      expect(text.scan("12/31/25").size).to eq(4)
+      expect(text.scan("09/15/26").size).to eq(4)
+      expect(text).not_to include("[TABLE]")
+      expect(payroll_item.reload.attributes).to eq(before)
+    end
+
     it "refuses crowded earnings instead of losing work dates or overlapping sections" do
       allow(generator).to receive(:pay_rows).and_return(20.times.map { [ "Prior-period OT\n09/15/26\nAdmin Duties", "1", "10", "10", "10" ] })
       expect { generator.generate }.to raise_error(ArgumentError, /earnings cannot fit readably/)
