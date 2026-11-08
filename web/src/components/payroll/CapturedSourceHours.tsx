@@ -19,18 +19,30 @@ export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; pa
   useEffect(() => () => { request.current += 1; }, []);
   if (!rates.length) return null;
   const selected = entries.find(entry => entry.id === selectedId);
-  const calendarSourceId = payPeriod.time_tracking?.aire_calendar?.source_id;
+  const historyPeriodId = payPeriod.late_hours_origin_pay_period_id || payPeriod.id;
+  const calendarSourceId = historyPeriodId === payPeriod.id ? payPeriod.time_tracking?.aire_calendar?.source_id : undefined;
+  const capturedSourceId = Number(item.import_source?.split(':')[2]);
   const hasAireSource = item.import_source?.startsWith('time_tracking:aire_services:')
-    && (!calendarSourceId || calendarSourceId === Number(item.import_source.split(':')[2]));
+    && Number.isInteger(capturedSourceId) && capturedSourceId > 0
+    && (!calendarSourceId || calendarSourceId === capturedSourceId);
   const earnings = (item as PayrollItem & { component_disclosure?: PayrollComponentDisclosure }).component_disclosure?.earnings;
 
   async function loadSource(id: string, page = 1) {
     setSelectedId(id);
+    if (page === 1) {
+      setEntries([]);
+      setNextPage(null);
+    }
     setLoading(true);
     setError(null);
     const current = ++request.current;
     try {
-      const response = await payPeriodsApi.airePayrollTimeEntries(payPeriod.late_hours_origin_pay_period_id || payPeriod.id, { page });
+      // Supplemental runs may have no calendar. Verify the requested origin
+      // period before reading an entry ID that another installation can reuse.
+      const verifiedSourceId = calendarSourceId ?? (await payPeriodsApi.get(historyPeriodId, payPeriod.company_id)).pay_period.time_tracking?.aire_calendar?.source_id;
+      if (current !== request.current) return;
+      if (verifiedSourceId !== capturedSourceId) throw new Error('The original source installation could not be verified for this payroll.');
+      const response = await payPeriodsApi.airePayrollTimeEntries(historyPeriodId, { page });
       if (current !== request.current) return;
       setEntries(previous => page === 1 ? response.time_entries : [...previous, ...response.time_entries]);
       setNextPage(response.pagination.current_page < response.pagination.total_pages ? response.pagination.current_page + 1 : null);
