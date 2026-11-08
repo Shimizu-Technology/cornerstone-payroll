@@ -875,6 +875,7 @@ export interface AirePayrollReadiness {
 
 export interface AirePayrollTimeEntry {
   id: string;
+  created_at?: string;
   version: number;
   work_date: string;
   start_time?: string | null;

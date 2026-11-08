@@ -194,6 +194,13 @@ async function review(overrides: Partial<TimeTrackingImportData['processed_paylo
 }
 
 describe('TimeTrackingImportModal payroll-first review', () => {
+  it('shows original dates on included prior-period hours without inferring a late-approval reason', async () => {
+    await review({ rows: [{ ...row, source_kind_counts: { carryover: 2 }, categories: [{ ...row.categories![0], source_kinds: ['carryover'], original_work_dates: ['2026-09-15', '2025-12-31'] }] }] });
+    expect(screen.getByText('Worked: Dec 31, 2025; Sep 15, 2026')).toBeTruthy();
+    expect(screen.getAllByText(/Prior-period hours/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/approved late/i)).toBeNull();
+  });
+
   it('leads with payroll context, payable hours and held entries while audit details start collapsed', async () => {
     await review({ exclusions: [{ source_time_entry_id: 'held-1', source_user_id: 'user-7', display_name: 'Test Direct', reason: 'pending_approval', original_work_date: '2026-10-02', held_total_hours: 4, held_regular_hours: 4, held_overtime_hours: 0 }] });
     expect(screen.getByText('Mosa Restaurant')).toBeTruthy();

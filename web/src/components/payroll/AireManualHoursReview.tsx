@@ -103,7 +103,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
               <Badge variant="info">Live preview</Badge>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-700">
-              Review current hours, mappings, carryover, and held entries before cutoff. After time tracking locks the period, this area switches to the verified batch that can be added to payroll.
+              Review current hours, mappings, prior-period hours, and held entries before cutoff. After time tracking locks the period, this area switches to the verified batch that can be added to payroll.
             </p>
           </div>
           <Button className="max-sm:min-h-[44px]" type="button" size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
@@ -161,7 +161,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
                       <p className="text-xs font-semibold text-neutral-500">Time tracking currently shows</p>
                       <p className="mt-2 font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
-                      {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
+                      {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} prior-period hours</p>}
                       {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
                     </div>
                     <div className="rounded-lg border border-neutral-200 bg-white p-4">
@@ -192,7 +192,7 @@ export function AireManualHoursReview({ payPeriodId, payPeriodStatus, payrollHou
                       </td>
                       <td className="px-4 py-4 align-top">
                         <p className="font-semibold text-neutral-950">{hours(employee.regular_hours)} regular · {hours(employee.overtime_hours)} OT</p>
-                        {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} carryover</p>}
+                        {carryover !== 0 && <p className="mt-2 text-xs font-semibold text-primary-800">Includes {hours(carryover)} prior-period hours</p>}
                         {corrections !== 0 && <p className="mt-2 text-xs text-neutral-600">Includes {corrections > 0 ? '+' : ''}{hours(corrections)} correction</p>}
                       </td>
                       <td className="px-4 py-4 align-top">

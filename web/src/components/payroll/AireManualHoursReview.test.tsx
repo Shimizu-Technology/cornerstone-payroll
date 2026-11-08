@@ -100,7 +100,7 @@ describe('AireManualHoursReview', () => {
     );
 
     expect(await screen.findByText('Hours ready for payroll')).toBeTruthy();
-    expect(await screen.findAllByText('Includes 6.10 carryover')).toHaveLength(2);
+    expect(await screen.findAllByText('Includes 6.10 prior-period hours')).toHaveLength(2);
     expect(screen.getAllByText('The verified batch will replace manual entry after cutoff.')).toHaveLength(2);
     expect(screen.getByText('Malia Cruz · 2.50 hrs')).toBeTruthy();
     expect(screen.getByText(/carries its exact entry links through calculation/i)).toBeTruthy();
@@ -243,13 +243,13 @@ it('keeps owner-reported historical payments visibly held pending check evidence
 it('retains the read-only snapshot and payroll values during same-period source refresh', async () => {
   const props = { payPeriodId: 67, payPeriodStatus: 'draft' as const, payrollHours: { '7': { regular: 7.25, overtime: 1 } }, aireRecordLinked: false };
   const view = render(<AireManualHoursReview {...props} />);
-  const retained = (await screen.findAllByText('Includes 6.10 carryover'))[0];
+  const retained = (await screen.findAllByText('Includes 6.10 prior-period hours'))[0];
   let resolveRefresh!: (value: typeof review) => void;
   apiMocks.manualReview.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
   view.rerender(<AireManualHoursReview {...props} refreshToken={1} />);
   expect(screen.getByRole('status').textContent).toContain('Refreshing hours ready for payroll');
   expect(screen.queryByText(/Comparing time tracking with the hours entered/)).toBeNull();
-  expect(screen.getAllByText('Includes 6.10 carryover')[0]).toBe(retained);
+  expect(screen.getAllByText('Includes 6.10 prior-period hours')[0]).toBe(retained);
   expect(screen.getAllByText('7.25 regular · 1.00 OT')).toHaveLength(2);
   await act(async () => resolveRefresh({ ...review, summary: { ...review.summary, total_hours: 34.2, regular_hours: 33.2 } }));
   expect(await screen.findByText('33.20 regular · 1.00 OT')).toBeTruthy();

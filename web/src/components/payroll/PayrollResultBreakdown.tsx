@@ -28,7 +28,7 @@ export function PayrollResultBreakdown({ disclosure }: { disclosure: PayrollComp
 function ComponentList({ title, entries }: { title: string; entries: PayrollComponentLine[] }): ReactElement {
   return <section><h2 className="text-sm font-bold text-neutral-950">{title}</h2>{entries.length ? <dl className="mt-4 space-y-2">{entries.map((entry, index) => {
     const source = payrollComponentSource(entry.source);
-    return <div key={`${entry.label}-${index}`} className="flex items-center justify-between gap-4 rounded-xl bg-neutral-50 px-4 py-2 text-sm"><dt className="font-medium text-neutral-700">{entry.label}{source && <span className="block text-xs font-normal text-neutral-500">{source}</span>}{entry.treatment && <span className="block text-xs font-normal text-neutral-500">{entry.treatment === 'pre_tax' ? 'Pre-tax deduction' : 'After-tax deduction'}</span>}</dt><dd className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(entry.amount || 0))}</dd></div>;
+    return <div key={`${entry.label}-${index}`} className="flex items-center justify-between gap-4 rounded-xl bg-neutral-50 px-4 py-2 text-sm"><dt className="whitespace-pre-line break-words font-medium text-neutral-700">{entry.display_label || entry.label}{source && <span className="block text-xs font-normal text-neutral-500">{source}</span>}{entry.treatment && <span className="block text-xs font-normal text-neutral-500">{entry.treatment === 'pre_tax' ? 'Pre-tax deduction' : 'After-tax deduction'}</span>}</dt><dd className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(entry.amount || 0))}</dd></div>;
   })}</dl> : <p className="mt-4 text-sm text-neutral-500">None applied.</p>}</section>;
 }
 

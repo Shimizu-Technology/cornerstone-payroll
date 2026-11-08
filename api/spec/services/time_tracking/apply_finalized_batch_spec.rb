@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   def setup_records(source_type: "aire_services")
@@ -367,6 +368,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
     rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    create(:payroll_item, company: company, pay_period: pay_period, employee: employee, hours_worked: 0, holiday_hours: 3, pto_hours: 2)
     adjustments = [
       {
         "source_time_entry_id" => "101",
@@ -415,6 +417,80 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       [ "imported", "101" ],
       [ "imported", "88" ]
     )
+    ensure_verified_test_tax_years(2026)
+    item = pay_period.payroll_items.find_by!(employee: employee)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    item.reload
+    saved = item.attributes
+    earnings = item.payroll_item_earnings.order(:id).pluck(:label, :amount)
+    expect(item.gross_pay).to eq(BigDecimal("412.50"))
+    expect(earnings.map(&:first)).to include(/current period/, /carryover from Aug 14/)
+    check_rows = CheckGenerator.new(item).render_input_payload.fetch("pay_rows")
+    expect(check_rows.map(&:first)).to include("Prior-period\n08/14/26\nFlight Hours")
+    statement = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join(" ")
+    expect(statement).to include("Prior-period hours worked Aug 14, 2026")
+    leave_rows = check_rows.select { |row| row.first.to_s.start_with?("Holiday\n", "PTO\n") }
+    expect(leave_rows.map(&:first)).to contain_exactly("Holiday\nFlight Hours", "PTO\nFlight Hours")
+    expect(leave_rows.map { |row| row[3] }).to contain_exactly("75.00", "50.00")
+    display = PayrollItemDisclosure.new(item).as_json[:earnings]
+    expect(display).to include(hash_including(display_label: "Flight Hours PTO", amount: 50), hash_including(display_label: "Flight Hours Holiday", amount: 75))
+    expect(item.reload.attributes).to eq(saved)
+    expect(item.payroll_item_earnings.order(:id).pluck(:label, :amount)).to eq(earnings)
+  end
+
+  it "prints dated regular and OT reversals from an actual signed import without changing pay" do
+    ensure_verified_test_tax_years(2026)
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "signed@example.com")
+    rate = create(:employee_wage_rate, employee: employee, label: "Ground Instruction and Administrative Training Duties", rate: 25, is_primary: true, active: true)
+    adjustments = [
+      { "source_time_entry_id" => "101", "line_key" => "current", "source_kind" => "current",
+        "original_work_date" => "2026-08-20", "original_week_start" => "2026-08-16", "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0 },
+      { "source_time_entry_id" => "88", "line_key" => "reversal", "source_kind" => "correction",
+        "original_work_date" => "2026-08-17", "original_week_start" => "2026-08-16", "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => -2.0, "regular_hours" => -1.0, "overtime_hours" => -1.0 }
+    ]
+    payload = payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments)
+    source_user_uuid = SecureRandom.uuid
+    payload.fetch("employees").first["source_user_uuid"] = source_user_uuid
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    confirm_mapping!(company: company, source: source, employee: employee, source_user_uuid: source_user_uuid)
+    import = preview_import(pay_period: pay_period, source: source, payload: payload)
+    result = described_class.new(import: import, mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id, include: true,
+      wage_rate_mappings: %w[current correction].map { |kind| { source_category_id: "flight", source_category_key: "flight_hours", source_category_name: "Flight Hours", source_kind: kind, employee_wage_rate_id: rate.id } } } ], applied_by: create(:user, company: company),
+      acknowledge_negative_adjustments: true, negative_adjustment_note: "Reviewed the exact signed source correction.").call
+    expect(result[:errors]).to be_empty
+    item = pay_period.payroll_items.find_by!(employee: employee)
+    PayrollCalculator.for(employee, item).calculate
+    item.save!
+    item.reload
+    saved = item.attributes
+    earnings = item.payroll_item_earnings.order(:id).pluck(:label, :amount)
+    expect(item.gross_pay).to eq(BigDecimal("212.50"))
+    expect(earnings).to include([ a_string_ending_with(" correction reversal"), BigDecimal("-25.00") ],
+      [ a_string_ending_with(" OT correction reversal"), BigDecimal("-37.50") ])
+    generator = CheckGenerator.new(item)
+    rows = generator.render_input_payload.fetch("pay_rows")
+    expect(rows).to include([ a_string_starting_with("Correction reversal\n08/17/26"), "-", "-", "-25.00", anything ],
+      [ a_string_starting_with("Correction OT reversal\n08/17/26"), "-", "-", "-37.50", anything ])
+    check_pdf = generator.generate_rehearsal_preview
+    if ENV["PRIOR_PERIOD_PDF_DIR"]
+      File.binwrite(ENV.fetch("PRIOR_PERIOD_PDF_DIR") + "/negative-source-check.pdf", check_pdf)
+      File.binwrite(ENV.fetch("PRIOR_PERIOD_PDF_DIR") + "/negative-source-statement.pdf", PayStubGenerator.new(item).generate)
+    end
+    check = PDF::Reader.new(StringIO.new(check_pdf))
+    expect(check.page_count).to eq(1)
+    expect(check.pages.first.runs.count { |run| run.text == "Correction OT reversal" }).to eq(2)
+    expect(check.pages.first.runs.count { |run| run.text == "08/17/26" }).to eq(4)
+    expect(check.pages.first.text).to include("-25.00", "-37.50")
+    statement = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join(" ")
+    expect(statement).to include("Correction reversal hours worked Aug 17, 2026", "OT reversal")
+    expect(item.reload.attributes).to eq(saved)
+    expect(item.payroll_item_earnings.order(:id).pluck(:label, :amount)).to eq(earnings)
   end
 
   it "links an exact committed historical payroll without recalculating its amounts" do

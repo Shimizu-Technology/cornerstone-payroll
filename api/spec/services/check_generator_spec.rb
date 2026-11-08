@@ -97,6 +97,59 @@ RSpec.describe CheckGenerator do
     expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
   end
 
+  describe "captured prior-period work on paper stubs" do
+    include PriorPeriodEarningsFixture
+
+    it "prints exact cross-year dates and OT on both copies without changing saved pay" do
+      captured_prior_period_earnings(payroll_item)
+      before = payroll_item.attributes
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+      expect(reader.page_count).to eq(1)
+      text = reader.pages.first.text
+      expect(text.scan("12/31/25").size).to eq(4)
+      expect(text.scan("09/15/26").size).to eq(4)
+      expect(text.scan("Prior-period OT").size).to eq(2)
+      expect(text).to include("4.25", "42.50", "30.00")
+      expect(text).not_to include("[TABLE]", "[SUMMARY]")
+      expect(payroll_item.reload.attributes).to eq(before)
+      File.binwrite(ENV.fetch("PRIOR_PERIOD_PDF_DIR") + "/paper-check.pdf", described_class.new(payroll_item).generate_rehearsal_preview) if ENV["PRIOR_PERIOD_PDF_DIR"]
+    end
+
+    it "retains original dates and OT on prior-paycheck rows shown only in YTD" do
+      captured_prior_period_earnings(payroll_item)
+      later = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 30))
+      later_item = create(:payroll_item, pay_period: later, employee: employee, hours_worked: 1, pay_rate: 10, gross_pay: 10, net_pay: 10)
+      later_item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 1, rate: 10, amount: 10)
+      rows = described_class.new(later_item).render_input_payload.fetch("pay_rows")
+      prior_ot = rows.find { |row| row.first.to_s.start_with?("Prior-period OT") }
+      expect(prior_ot.first).to include("12/31/25", "09/15/26")
+      expect(prior_ot[3]).to eq("0.00")
+      expect(prior_ot[4]).to eq("30.00")
+    end
+
+    it "keeps mixed source-kind dates and OT visible without splitting financial rows" do
+      captured_prior_period_earnings(payroll_item)
+      rates = payroll_item.wage_rate_hours.deep_dup
+      rates.last["source_lines"].last["source_kind"] = "correction"
+      payroll_item.update!(wage_rate_hours: rates)
+      before = payroll_item.attributes
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+      expect(reader.page_count).to eq(1)
+      text = reader.pages.first.text
+      expect(text.scan("Prior-period OT").size).to eq(2)
+      expect(text.scan("Correction OT").size).to eq(2)
+      expect(text.scan("12/31/25").size).to eq(4)
+      expect(text.scan("09/15/26").size).to eq(4)
+      expect(text).not_to include("[TABLE]")
+      expect(payroll_item.reload.attributes).to eq(before)
+    end
+
+    it "refuses crowded earnings instead of losing work dates or overlapping sections" do
+      allow(generator).to receive(:pay_rows).and_return(20.times.map { [ "Prior-period OT\n09/15/26\nAdmin Duties", "1", "10", "10", "10" ] })
+      expect { generator.generate }.to raise_error(ArgumentError, /earnings cannot fit readably/)
+    end
+  end
+
   describe "#generate" do
     subject(:pdf) { generator.generate }
 
@@ -501,7 +554,7 @@ RSpec.describe CheckGenerator do
       payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
       payroll_item.payroll_item_earnings.create!(
         category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
-      breakdown = instance_double(PayrollEarningsYtdBreakdown, pay_ytd_total: 117.70.to_d, call: [
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: [
         PayrollEarningsYtdBreakdown::Row.new(
           label: "Joint", source_label: "Joint", category: "regular",
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
