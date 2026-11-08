@@ -158,7 +158,10 @@ class PayStubGenerator
     ]
 
     pdf.font_size(8) do
-      pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
+      # Long source descriptions wrap in their own column; never squeeze a
+      # currency value or its decimal onto a second line to accommodate them.
+      pdf.table(earnings_data, header: true, width: pdf.bounds.width,
+        column_widths: [ pdf.bounds.width - 278, 46, 64, 80, 88 ]) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
         cells.padding = [ 2, 6 ]

@@ -53,6 +53,19 @@ RSpec.describe PayStubGenerator do
     expect(payroll_item.reload.attributes).to eq(before)
   end
 
+  it "keeps money and hours unbroken beside long mixed-source descriptions" do
+    extend PriorPeriodEarningsFixture
+    captured_prior_period_earnings(payroll_item)
+    rates = payroll_item.wage_rate_hours.deep_dup
+    rates.last["source_lines"].last["source_kind"] = "correction"
+    payroll_item.update!(wage_rate_hours: rates)
+    reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+    expect(reader.page_count).to eq(1)
+    text = reader.pages.first.text
+    expect(text).to include("$10.00", "$15.00", "$42.50", "$152.50", "Dec 31, 2025", "Sep 15, 2026")
+    expect(reader.pages.first.runs.map(&:text)).to include("$10.00", "$15.00", "$152.50")
+  end
+
   describe "plain-paper pagination" do
     [ 3, 8 ].each do |count|
       it "fits #{count} additional deductions and non-taxable pay on one readable page" do
