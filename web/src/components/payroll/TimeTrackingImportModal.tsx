@@ -30,6 +30,11 @@ function categoryMappingKey(category: TimeTrackingPreviewCategory): string {
   return [category.source_category_id || '', category.key || '', category.name || '', (category.source_kinds || []).join(',')].join('|');
 }
 
+function priorWorkDates(row: TimeTrackingPreviewRow): string {
+  const dates = row.categories?.filter(category => category.source_kinds?.includes('carryover')).flatMap(category => category.original_work_dates || []) || [];
+  return [...new Set(dates)].sort().map(date => formatDate(date)).join('; ');
+}
+
 function categoryHours(category: TimeTrackingPreviewCategory): number {
   return Number(category.total_hours ?? category.hours ?? 0);
 }
@@ -866,6 +871,7 @@ export function TimeTrackingImportModal({
                             {Object.entries(row.source_kind_counts || {}).map(([kind, count]) => Number(count) > 0 && (
                               <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{count} time {Number(count) === 1 ? 'entry' : 'entries'} · {kind === 'carryover' ? 'Prior-period hours' : kind === 'current' ? 'Current-period hours' : kind.replaceAll('_', ' ')}</span>
                             ))}
+                            {priorWorkDates(row) && <p className="basis-full break-words text-xs font-medium text-primary-800">Prior-period work dates: {priorWorkDates(row)}</p>}
                           </div>
                           {row.source_email && <div className="mt-2 text-xs text-neutral-600">{row.source_email}</div>}
 
