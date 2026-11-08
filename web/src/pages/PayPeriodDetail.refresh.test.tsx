@@ -1560,9 +1560,9 @@ it.each(['mobile', 'desktop'])('calculates unchanged signed captured buckets and
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={period} />} /></Routes></MemoryRouter>);
   await screen.findByRole('region', { name: 'Payroll entry for Ana Cruz' });
   const entry = surface === 'mobile' ? screen.getByRole('region', { name: 'Payroll entry for Ana Cruz' }) : screen.getAllByRole('row').find(row => within(row).queryByRole('link', { name: 'Ana Cruz' }))!;
-  expect(within(entry).getAllByText('Current work · Oct 20, 2026').length).toBeGreaterThan(0);
+  expect(within(entry).getAllByText('Current-period hours · Oct 20, 2026').length).toBeGreaterThan(0);
   expect(within(entry).getAllByText('Correction · Oct 10, 2026').length).toBeGreaterThan(0);
-  expect(within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Current work · Oct 20, 2026' })).toHaveProperty('disabled', true);
+  expect(within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Current-period hours · Oct 20, 2026' })).toHaveProperty('disabled', true);
   expect(within(entry).getByRole('textbox', { name: 'Overtime hours for Ana Cruz · Regular · Correction · Oct 10, 2026' })).toHaveProperty('disabled', true);
   const signedInput = within(entry).getByRole('textbox', { name: 'Regular hours for Ana Cruz · Regular · Correction · Oct 10, 2026' }) as HTMLInputElement;
   expect(signedInput.disabled).toBe(true);

@@ -864,7 +864,7 @@ export function TimeTrackingImportModal({
                             )}
                             <h3 className="font-semibold text-neutral-950">{row.source_display_name}</h3>
                             {Object.entries(row.source_kind_counts || {}).map(([kind, count]) => Number(count) > 0 && (
-                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{count} time {Number(count) === 1 ? 'entry' : 'entries'}{kind === 'current' ? '' : ` · ${kind === 'carryover' ? 'from earlier periods' : kind.replaceAll('_', ' ')}`}</span>
+                              <span key={kind} className="rounded-full bg-neutral-100 px-2 text-xs font-semibold text-neutral-700">{count} time {Number(count) === 1 ? 'entry' : 'entries'} · {kind === 'carryover' ? 'Prior-period hours' : kind === 'current' ? 'Current-period hours' : kind.replaceAll('_', ' ')}</span>
                             ))}
                           </div>
                           {row.source_email && <div className="mt-2 text-xs text-neutral-600">{row.source_email}</div>}
@@ -945,9 +945,10 @@ export function TimeTrackingImportModal({
                                     </div>
                                   </div>
                                   {(category.source_kinds || []).map((kind) => (
-                                    <span key={kind} className="rounded-full bg-white px-2 text-xs font-semibold capitalize text-neutral-600">{kind}</span>
+                                    <span key={kind} className="rounded-full bg-white px-2 text-xs font-semibold text-neutral-600">{kind === 'carryover' ? 'Prior-period hours' : kind === 'current' ? 'Current-period hours' : 'Correction'}</span>
                                   ))}
                                 </div>
+                                {Boolean(category.original_work_dates?.length) && <p className="mt-2 break-words text-xs font-medium text-neutral-700">Worked: {[...new Set(category.original_work_dates)].sort().map(date => formatDate(date)).join('; ')}</p>}
                                 {needsRateMapping && lacksActiveWageRates && (
                                   <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-2 text-xs font-medium text-warning-900">
                                     Add an active wage rate with an amount for this employee before importing.

@@ -244,6 +244,9 @@ class PayStubGenerator
   end
 
   def itemized_earning_label(row)
+    source_label = source_earning_labels.call(row.source_label)
+    return source_label if source_label
+
     if row.current.nonzero? && !stored_earning_rows?
       UNSTORED_EARNING_LABELS.fetch(row.category.to_s) { row.source_label }
     else
@@ -289,7 +292,7 @@ class PayStubGenerator
     if payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
       item_earnings.each do |earning|
         earnings_data << [
-          earning.label.presence || earning.category.to_s.titleize,
+          source_earning_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
           earning.hours.present? ? format_hours(earning.hours) : "—",
           earning.rate.present? ? format_currency(earning.rate) : "—",
           format_currency(earning.amount),
@@ -617,6 +620,10 @@ class PayStubGenerator
 
   def earnings_ytd_breakdown
     @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+  end
+
+  def source_earning_labels
+    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: earnings_ytd_breakdown.source_items)
   end
 
   def payroll_field_entries_for(*treatments)

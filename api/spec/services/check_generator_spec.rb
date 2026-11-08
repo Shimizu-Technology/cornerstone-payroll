@@ -97,6 +97,42 @@ RSpec.describe CheckGenerator do
     expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
   end
 
+  describe "captured prior-period work on paper stubs" do
+    include PriorPeriodEarningsFixture
+
+    it "prints exact cross-year dates and OT on both copies without changing saved pay" do
+      captured_prior_period_earnings(payroll_item)
+      before = payroll_item.attributes
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+      expect(reader.page_count).to eq(1)
+      text = reader.pages.first.text
+      expect(text.scan("12/31/25").size).to eq(4)
+      expect(text.scan("09/15/26").size).to eq(4)
+      expect(text.scan("Prior-period OT").size).to eq(2)
+      expect(text).to include("4.25", "42.50", "30.00")
+      expect(text).not_to include("[TABLE]", "[SUMMARY]")
+      expect(payroll_item.reload.attributes).to eq(before)
+      File.binwrite(ENV.fetch("PRIOR_PERIOD_PDF_DIR") + "/paper-check.pdf", described_class.new(payroll_item).generate_rehearsal_preview) if ENV["PRIOR_PERIOD_PDF_DIR"]
+    end
+
+    it "retains original dates and OT on prior-paycheck rows shown only in YTD" do
+      captured_prior_period_earnings(payroll_item)
+      later = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 30))
+      later_item = create(:payroll_item, pay_period: later, employee: employee, hours_worked: 1, pay_rate: 10, gross_pay: 10, net_pay: 10)
+      later_item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 1, rate: 10, amount: 10)
+      rows = described_class.new(later_item).render_input_payload.fetch("pay_rows")
+      prior_ot = rows.find { |row| row.first.to_s.start_with?("Prior-period OT") }
+      expect(prior_ot.first).to include("12/31/25", "09/15/26")
+      expect(prior_ot[3]).to eq("0.00")
+      expect(prior_ot[4]).to eq("30.00")
+    end
+
+    it "refuses crowded earnings instead of losing work dates or overlapping sections" do
+      allow(generator).to receive(:pay_rows).and_return(20.times.map { [ "Prior-period OT\n09/15/26\nAdmin Duties", "1", "10", "10", "10" ] })
+      expect { generator.generate }.to raise_error(ArgumentError, /earnings cannot fit readably/)
+    end
+  end
+
   describe "#generate" do
     subject(:pdf) { generator.generate }
 

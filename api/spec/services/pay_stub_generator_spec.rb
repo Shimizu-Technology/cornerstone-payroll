@@ -42,6 +42,17 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  it "prints full original work dates and overtime on the standalone statement" do
+    extend PriorPeriodEarningsFixture
+    captured_prior_period_earnings(payroll_item)
+    before = payroll_item.attributes
+    pdf = described_class.new(payroll_item).generate
+    File.binwrite(ENV.fetch("PRIOR_PERIOD_PDF_DIR") + "/earnings-statement.pdf", pdf) if ENV["PRIOR_PERIOD_PDF_DIR"]
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+    expect(text.gsub(/\s+/, " ")).to include("Dec 31, 2025", "Sep 15, 2026", "Prior-period hours", " OT", "$42.50", "$30.00")
+    expect(payroll_item.reload.attributes).to eq(before)
+  end
+
   describe "plain-paper pagination" do
     [ 3, 8 ].each do |count|
       it "fits #{count} additional deductions and non-taxable pay on one readable page" do
