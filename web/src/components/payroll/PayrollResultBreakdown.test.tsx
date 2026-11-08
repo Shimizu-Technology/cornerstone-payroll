@@ -4,6 +4,16 @@ import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingC
 import type { PayrollItem } from '../../types';
 
 describe('saved paycheck explanation', () => {
+  it('uses the source display label while retaining the raw financial label and amount', () => {
+    const earning = { label: 'Admin Duties · AIRE carryover from Sep 15, 2026 · $10.00/hr PTO', display_label: 'Admin Duties PTO', amount: 20 };
+    const html = renderToStaticMarkup(<PayrollResultBreakdown disclosure={{ earnings: [earning], other_pay: [], taxes: [], deductions: [], employer_contributions: [], reconciliation: { gross_pay: 20, other_pay: 0, employee_taxes: 0, other_deductions: 0, net_pay: 20 } }} />);
+    expect(html).toContain('Admin Duties PTO');
+    expect(html).toContain('$20.00');
+    expect(html).not.toContain('Sep 15');
+    expect(earning.label).toContain('carryover from Sep 15, 2026');
+    expect(earning.amount).toBe(20);
+  });
+
   it('shows recurring and one-time bonuses, classified taxes, and employer amounts separately', () => {
     const html = renderToStaticMarkup(<PayrollResultBreakdown disclosure={{
       earnings: [{ label: 'Bonus', amount: 250, source: 'one_time' }, { label: 'Doctor bonus', amount: 100, source: 'employee_default' }],

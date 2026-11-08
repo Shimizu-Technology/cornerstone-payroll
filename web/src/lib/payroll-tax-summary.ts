@@ -22,6 +22,7 @@ export function payrollTaxSummary(item: Pick<PayrollItem, 'withholding_tax' | 'a
 
 export interface PayrollComponentLine {
   label: string;
+  display_label?: string;
   amount: number;
   source?: string | null;
   treatment?: string;
