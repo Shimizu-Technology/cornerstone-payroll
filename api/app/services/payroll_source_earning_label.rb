@@ -3,35 +3,47 @@
 # Presentation only: captured labels are part of the immutable earnings proof.
 # Never replace the stored label or use the display label as a YTD grouping key.
 class PayrollSourceEarningLabel
+  EARNING_SUFFIXES = [ "", " OT", " Holiday", " PTO", " correction reversal", " OT correction reversal", " Holiday correction reversal", " PTO correction reversal" ].freeze
+
   def initialize(item, source_items: [])
     @item = item
     @source_items = [ item, *source_items ].uniq
   end
 
   def call(label, compact: false)
-    bucket = buckets.find { |entry| label == entry["label"] || %w[OT Holiday PTO].any? { |kind| label == "#{entry['label']} #{kind}" } }
+    bucket = buckets.find { |entry| EARNING_SUFFIXES.any? { |suffix| label == "#{entry['label']}#{suffix}" } }
     return unless bucket
+
+    suffix = label.delete_prefix(bucket.fetch("label"))
+    reversal = suffix.end_with?(" correction reversal")
+    earning_kind = suffix.delete_suffix(" correction reversal").strip
+    kind_suffix = earning_kind.present? ? " #{earning_kind}" : ""
+    reversal_suffix = reversal ? " reversal" : ""
+    category = bucket.fetch("label").sub(/ · [^·]+ (?:carryover from|correction for|current period).*\z/, "")
+    # Preserved leave can share a bucket with imported work, but the source
+    # lines establish REG/OT work dates only. They never establish leave dates.
+    if earning_kind.in?(%w[Holiday PTO])
+      return compact ? "#{earning_kind}#{reversal_suffix}\n#{category.truncate(28)}" : "#{category}#{kind_suffix}#{reversal_suffix}"
+    end
 
     lines = Array(bucket["source_lines"])
     groups = lines.group_by { |line| line["source_kind"] }
     return if groups.empty? || (groups.keys - %w[current carryover correction]).any?
 
-    suffix = label.delete_prefix(bucket.fetch("label"))
-    category = bucket.fetch("label").sub(/ · [^·]+ (?:carryover from|correction for|current period).*\z/, "")
-    return compact ? "#{suffix.strip.presence && "#{suffix.strip}: "}#{category.truncate(28)}" : nil if groups.keys == [ "current" ]
+    return compact ? "#{earning_kind.presence && "#{earning_kind}: "}#{category.truncate(28)}" : nil if groups.keys == [ "current" ] && !reversal
     titles = { "current" => "Current-period", "carryover" => "Prior-period", "correction" => "Correction" }
     provenance = %w[current carryover correction].filter_map do |kind|
       next unless groups[kind]
 
       dates = groups.fetch(kind).map { |line| Date.iso8601(line.fetch("original_work_date")) }.uniq.sort
       if compact
-        "#{titles.fetch(kind)}#{suffix}\n#{date_ranges(dates, '%m/%d/%y')}"
+        "#{titles.fetch(kind)}#{kind_suffix}#{reversal_suffix}\n#{date_ranges(dates, '%m/%d/%y')}"
       else
-        "#{titles.fetch(kind)} hours worked #{date_ranges(dates, '%b %-d, %Y')}"
+        "#{titles.fetch(kind)}#{reversal_suffix} hours worked #{date_ranges(dates, '%b %-d, %Y')}"
       end
     end.join("\n")
     # Keep the financial row intact, but identify each kind's work dates.
-    compact ? "#{provenance}\n#{category.truncate(28)}" : "#{provenance}\n#{category}#{suffix}"
+    compact ? "#{provenance}\n#{category.truncate(28)}" : "#{provenance}\n#{category}#{kind_suffix}#{reversal_suffix}"
   rescue Date::Error, KeyError
     # Do not invent dates when a legacy record has incomplete source evidence.
     nil

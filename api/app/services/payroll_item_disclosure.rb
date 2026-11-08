@@ -12,8 +12,13 @@ class PayrollItemDisclosure
     deductions = @report.deduction_contribution_entries_for_item(@item)
     other_pay = @report.other_pay_lines_for(@item)
     tax = PayrollTaxSummary.new(@item)
+    source_labels = PayrollSourceEarningLabel.new(@item) if @item.import_source.to_s.start_with?("time_tracking:") ||
+      @item.wage_rate_hours.any? { |entry| entry["source_lines"].present? }
     {
-      earnings: lines(@report.earnings_lines_for(@item).drop(1)),
+      earnings: lines(@report.earnings_lines_for(@item).drop(1)).map do |line|
+        display_label = source_labels&.call(line[:label])
+        display_label ? line.merge(display_label: display_label) : line
+      end,
       other_pay: lines(other_pay),
       taxes: tax.lines,
       deductions: deductions.filter_map do |entry|

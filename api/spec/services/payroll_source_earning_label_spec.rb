@@ -32,6 +32,20 @@ RSpec.describe PayrollSourceEarningLabel do
     expect(described_class.new(item).call("#{label} OT", compact: true)).to start_with("Correction OT\n09/15/26")
   end
 
+  it "never borrows imported REG/OT dates for preserved holiday or PTO" do
+    %w[Holiday PTO].each do |kind|
+      expect(described_class.new(item).call("#{label} #{kind}", compact: true)).to eq("#{kind}\nAdmin Duties")
+      expect(described_class.new(item).call("#{label} #{kind}")).to eq("Admin Duties #{kind}")
+    end
+  end
+
+  it "retains dates, OT and reversal meaning for negative calculator labels" do
+    bucket["source_lines"].first["source_kind"] = "correction"
+    expect(described_class.new(item).call("#{label} correction reversal", compact: true)).to eq("Correction reversal\n09/15/26\nAdmin Duties")
+    expect(described_class.new(item).call("#{label} OT correction reversal", compact: true)).to eq("Correction OT reversal\n09/15/26\nAdmin Duties")
+    expect(described_class.new(item).call("#{label} OT correction reversal")).to include("Correction reversal hours worked Sep 15, 2026", "Admin Duties OT reversal")
+  end
+
   it "retains each source kind's dates on a mixed-kind YTD-only financial row" do
     allow(item).to receive_messages(wage_rate_hours: [], time_tracking_entry_allocations: [])
     correction = { "label" => label, "source_lines" => [ { "source_kind" => "correction", "original_work_date" => "2026-09-16" } ] }
