@@ -72,9 +72,10 @@ test('import review shows original work dates next to prior-period hours before 
   await fixture(page);
   await page.goto('/');
   await page.addScriptTag({ type: 'module', content: "import { mountPriorPeriodImport } from '/e2e/fixtures/prior-period-import-harness.tsx'; mountPriorPeriodImport();" });
+  await expect(page.getByText('Prior-period work dates: Sep 15, 2026', { exact: true })).toBeInViewport();
   await expect(page.getByText('Worked: Sep 15, 2026', { exact: true })).toBeVisible();
   await expect(page.getByText('Prior-period hours', { exact: true })).toBeVisible();
   await expect(page.getByText(/Pay date: Nov 15, 2026/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  if (process.env.PRIOR_PERIOD_BROWSER_DIR) await page.screenshot({ path: `${process.env.PRIOR_PERIOD_BROWSER_DIR}/import-review-390.png`, fullPage: true });
+  if (process.env.PRIOR_PERIOD_BROWSER_DIR) await page.screenshot({ path: `${process.env.PRIOR_PERIOD_BROWSER_DIR}/import-review-390.png` });
 });
