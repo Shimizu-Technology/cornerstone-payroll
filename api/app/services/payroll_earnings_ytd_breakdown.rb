@@ -49,6 +49,12 @@ class PayrollEarningsYtdBreakdown
     (gross.to_d - (historical_balance&.non_taxable_pay || 0).to_d).round(2)
   end
 
+  # The formatter also needs the evidence for YTD-only earning rows, while
+  # retaining the original labels as this breakdown's financial grouping keys.
+  def source_items
+    ytd_source_items
+  end
+
   private
 
   attr_reader :payroll_item, :employee, :pay_period, :company

@@ -158,7 +158,10 @@ class PayStubGenerator
     ]
 
     pdf.font_size(8) do
-      pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
+      # Long source descriptions wrap in their own column; never squeeze a
+      # currency value or its decimal onto a second line to accommodate them.
+      pdf.table(earnings_data, header: true, width: pdf.bounds.width,
+        column_widths: [ pdf.bounds.width - 278, 46, 64, 80, 88 ]) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
         cells.padding = [ 2, 6 ]
@@ -244,6 +247,9 @@ class PayStubGenerator
   end
 
   def itemized_earning_label(row)
+    source_label = source_earning_labels.call(row.source_label)
+    return source_label if source_label
+
     if row.current.nonzero? && !stored_earning_rows?
       UNSTORED_EARNING_LABELS.fetch(row.category.to_s) { row.source_label }
     else
@@ -289,7 +295,7 @@ class PayStubGenerator
     if payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
       item_earnings.each do |earning|
         earnings_data << [
-          earning.label.presence || earning.category.to_s.titleize,
+          source_earning_labels.call(earning.label) || earning.label.presence || earning.category.to_s.titleize,
           earning.hours.present? ? format_hours(earning.hours) : "—",
           earning.rate.present? ? format_currency(earning.rate) : "—",
           format_currency(earning.amount),
@@ -617,6 +623,10 @@ class PayStubGenerator
 
   def earnings_ytd_breakdown
     @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+  end
+
+  def source_earning_labels
+    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: earnings_ytd_breakdown.source_items)
   end
 
   def payroll_field_entries_for(*treatments)
