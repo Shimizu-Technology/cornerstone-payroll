@@ -537,7 +537,7 @@ RSpec.describe CheckGenerator do
       payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
       payroll_item.payroll_item_earnings.create!(
         category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
-      breakdown = instance_double(PayrollEarningsYtdBreakdown, pay_ytd_total: 117.70.to_d, call: [
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: [
         PayrollEarningsYtdBreakdown::Row.new(
           label: "Joint", source_label: "Joint", category: "regular",
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
