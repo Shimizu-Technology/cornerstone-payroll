@@ -15,6 +15,21 @@ RSpec.describe "Configured AIRE import categories" do
       earning_label: "Flight Hours", import_enabled: true, reviewed_by: actor,
       reason: "Reviewed Solo as Flight Hours configuration", evidence: "Leon November4 category decision")
   end
+  it "treats a category and the same earning named with Hours as one match" do
+    ground = create(:employee_wage_rate, employee: employee, label: "Ground Instruction Hours", rate: 30)
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 30)
+
+    rate, method = preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, employee.employee_wage_rates.to_a, employee_id: employee.id)
+    expect([ rate, method ]).to eq([ ground, "label" ])
+  end
+
+  it "leaves the choice to staff when both spellings of an earning exist" do
+    plain = create(:employee_wage_rate, employee: employee, label: "Ground Instruction", rate: 25)
+    hours = create(:employee_wage_rate, employee: employee, label: "Ground Instruction Hours", rate: 30)
+
+    expect(preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ nil, nil ])
+  end
+
   it "uses configured Maintenance first, then Regular, and blocks when neither exists" do
     policy = TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
       earning_label: "Maintenance", fallback_earning_label: "Regular", import_enabled: true, reviewed_by: actor,
