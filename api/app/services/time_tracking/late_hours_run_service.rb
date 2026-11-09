@@ -149,10 +149,8 @@ module TimeTracking
       rates = employee ? employee.active_wage_rates.reject { |rate| rate.rate.nil? } : []
       lines = Array(row["adjustments"]).map do |line|
         category = line["category"] || {}
-        keys = [ category["key"], category["name"] ].compact.map { |label| normalize_label(label) }
-        matches = rates.select { |rate| keys.include?(normalize_label(rate.label)) }
-        rate = matches.one? ? matches.first : nil
-        reasons << "Set up one matching Payroll earning type for #{category['name'] || 'this category'}" unless rate
+        rate, _method, mapping_error = employee ? rate_matcher.call(category, rates, employee_id: employee.id) : nil
+        reasons << (mapping_error || "Set up one matching Payroll earning type for #{category['name'] || 'this category'}") if employee && !rate
         line.merge("payroll_rate" => rate&.rate&.to_f, "employee_wage_rate_id" => rate&.id)
       end
       reasons << "No approved positive source hours are available" if lines.empty? || lines.any? { |line| BigDecimal(line.fetch("total_hours").to_s) <= 0 }
@@ -161,8 +159,8 @@ module TimeTracking
         "blocked_reason" => reasons.uniq.presence&.join(". "))
     end
 
-    def normalize_label(value)
-      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").strip
+    def rate_matcher
+      @rate_matcher ||= CategoryRateMatcher.new(source: source)
     end
 
     def block_conflicting_case(row, unresolved)
