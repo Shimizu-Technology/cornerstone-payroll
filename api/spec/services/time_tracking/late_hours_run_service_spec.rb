@@ -105,6 +105,24 @@ RSpec.describe TimeTracking::LateHoursRunService do
     end
   end
 
+  context "when an accountant chose the Solo earning for this employee" do
+    let(:line) { super().merge("category" => { "id" => 7, "key" => "aire_solo", "name" => "Solo" }) }
+
+    it "offers and pays the hours at that employee's chosen rate" do
+      TimeTrackingEarningChoice.create!(time_tracking_source: source, employee: employee, employee_wage_rate: rate, reviewed_by: actor,
+        source_category_key: "solo", rate_snapshot: rate.attributes.slice("id", "employee_id", "label", "rate", "active").as_json)
+
+      expect(service.review.fetch("cases").sole.fetch("adjustments").sole).to include("employee_wage_rate_id" => rate.id)
+      expect(create_run.adjustment_pay_period.payroll_items.sole.wage_rate_hours.sole).to include("employee_wage_rate_id" => rate.id)
+    end
+  end
+
+  it "asks staff to link an unmapped employee before anything about pay rates" do
+    review["cases"].first["employee"]["payroll_integration_id"] = SecureRandom.uuid
+
+    expect(service.review.fetch("cases").sole["blocked_reason"]).to eq("Link this AIRE employee to an active Payroll employee first")
+  end
+
   it "resumes an ambiguous network failure using the same command, destination and captured rate" do
     allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Connection timed out")
     expect { create_run }.to raise_error(TimeTracking::Client::Error, /timed out/)

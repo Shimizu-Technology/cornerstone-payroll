@@ -149,8 +149,8 @@ module TimeTracking
       rates = employee ? employee.active_wage_rates.reject { |rate| rate.rate.nil? } : []
       lines = Array(row["adjustments"]).map do |line|
         category = line["category"] || {}
-        rate, _method, mapping_error = rate_matcher.call(category, rates, employee_id: employee&.id)
-        reasons << (mapping_error || "Set up one matching Payroll earning type for #{category['name'] || 'this category'}") unless rate
+        rate, _method, mapping_error = employee ? rate_matcher.call(category, rates, employee_id: employee.id) : nil
+        reasons << (mapping_error || "Set up one matching Payroll earning type for #{category['name'] || 'this category'}") if employee && !rate
         line.merge("payroll_rate" => rate&.rate&.to_f, "employee_wage_rate_id" => rate&.id)
       end
       reasons << "No approved positive source hours are available" if lines.empty? || lines.any? { |line| BigDecimal(line.fetch("total_hours").to_s) <= 0 }
