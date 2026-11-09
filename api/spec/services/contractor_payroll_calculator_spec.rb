@@ -29,6 +29,15 @@ RSpec.describe ContractorPayrollCalculator do
     )
   end
 
+  it "pays hours reported as overtime at the contract rate, without a premium" do
+    payroll_item.update!(hours_worked: 10, overtime_hours: 2, loan_payment: 0, insurance_payment: 0)
+
+    described_class.new(employee, payroll_item).calculate
+
+    expect(payroll_item.gross_pay).to eq(300.0)
+    expect(payroll_item.payroll_item_earnings.find { |earning| earning.category == "overtime" }).to have_attributes(hours: 2, rate: 25, amount: 50)
+  end
+
   it "persists mandatory service charges without applying employee payroll taxes" do
     payroll_item.service_charge_wages = 30.00
 
