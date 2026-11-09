@@ -22,11 +22,11 @@ module TimeTracking
         rate = choice&.current_rate
         return rate && rates.any? { |candidate| candidate.id == rate.id } ? [ rate, "accountant_choice" ] : [ nil, nil ]
       end
-      label_matches = rates.select do |rate|
-        candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize(value) }
-        candidates.include?(normalize(rate.label))
-      end
-      return [ label_matches.first, "label" ] if label_matches.one?
+      candidates = [ category[:key], category[:name] ].compact_blank
+      matches = labels_matching(rates, candidates) { |value| normalize(value) }
+      # An earning named exactly like the category wins; "Hours" is only a fallback.
+      matches = labels_matching(rates, candidates) { |value| normalize(value).delete_suffix(" hours") } if matches.empty?
+      return [ matches.first, "label" ] if matches.one?
 
       [ nil, nil ]
     end
@@ -35,9 +35,13 @@ module TimeTracking
 
     attr_reader :source
 
-    # "Ground Instruction" and "Ground Instruction Hours" name the same earning.
+    def labels_matching(rates, candidates)
+      keys = candidates.map { |value| yield value }
+      rates.select { |rate| keys.include?(yield(rate.label)) }
+    end
+
     def normalize(value)
-      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish.delete_suffix(" hours")
+      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
     end
   end
 end

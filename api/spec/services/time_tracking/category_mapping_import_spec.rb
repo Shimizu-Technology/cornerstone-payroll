@@ -23,11 +23,11 @@ RSpec.describe "Configured AIRE import categories" do
     expect([ rate, method ]).to eq([ ground, "label" ])
   end
 
-  it "leaves the choice to staff when both spellings of an earning exist" do
+  it "keeps the exactly named earning when both spellings exist" do
     plain = create(:employee_wage_rate, employee: employee, label: "Ground Instruction", rate: 25)
     hours = create(:employee_wage_rate, employee: employee, label: "Ground Instruction Hours", rate: 30)
 
-    expect(preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ nil, nil ])
+    expect(preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ plain, "label" ])
   end
 
   it "uses configured Maintenance first, then Regular, and blocks when neither exists" do
