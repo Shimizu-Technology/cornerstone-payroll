@@ -148,7 +148,8 @@ module TimeTracking
       regular_hours = decimal(source_employee.fetch("regular_hours"))
       overtime_hours = decimal(source_employee.fetch("overtime_hours"))
       total_hours = decimal(source_employee.fetch("total_hours"))
-      estimated_gross_delta_cents = payroll_gross_delta_cents(categories)
+      employment_type = Employee.where(id: match[:employee_id], company_id: pay_period.company_id).pick(:employment_type) if match[:employee_id]
+      estimated_gross_delta_cents = payroll_gross_delta_cents(categories, OvertimePremium.multiplier(employment_type))
       warnings = warnings_for(
         source_employee,
         match,
@@ -306,12 +307,12 @@ module TimeTracking
       end
     end
 
-    def payroll_gross_delta_cents(categories)
+    def payroll_gross_delta_cents(categories, overtime_multiplier)
       Array(categories).sum do |category|
         rate_cents = decimal(category[:payroll_rate_cents] || 0)
         regular = decimal(category[:regular_hours] || 0)
         overtime = decimal(category[:overtime_hours] || 0)
-        (regular * rate_cents) + (overtime * rate_cents * BigDecimal("1.5"))
+        (regular * rate_cents) + (overtime * rate_cents * overtime_multiplier)
       end
     end
 
