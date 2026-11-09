@@ -78,6 +78,33 @@ RSpec.describe TimeTracking::LateHoursRunService do
     expect { item.update!(hours_worked: 8) }.to raise_error(ActiveRecord::RecordInvalid, /captured earning/)
   end
 
+  context "when the company maps the source category to a differently named earning" do
+    let(:reviewer) { create(:user, company: company, organization: company.organization, role: "admin") }
+    let!(:category_rule) do
+      TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "flight",
+        earning_label: "Admin Duties", fallback_earning_label: "Regular", import_enabled: true, reviewed_by: reviewer,
+        reason: "Company rule for this source category", evidence: "Reviewed against the company's committed payroll")
+    end
+    let!(:rate) { create(:employee_wage_rate, employee: employee, label: "Regular", rate: 12.5, is_primary: true) }
+
+    it "offers and pays the hours at the same rate the cutoff import would use" do
+      offered = service.review.fetch("cases").sole
+      expect(offered["blocked_reason"]).to be_nil
+      expect(offered.fetch("adjustments").sole).to include("employee_wage_rate_id" => rate.id, "payroll_rate" => 12.5)
+
+      item = create_run.adjustment_pay_period.payroll_items.sole
+      expect(item.wage_rate_hours.sole).to include("rate" => 12.5, "employee_wage_rate_id" => rate.id)
+    end
+
+    it "still blocks the hours when the employee has neither company earning" do
+      rate.update!(label: "Aerial Tours")
+
+      expect(service.review.fetch("cases").sole["blocked_reason"]).to match(/requires this employee's active Admin Duties or Regular rate/)
+      expect(client).not_to receive(:create_payroll_late_hours)
+      expect { create_run }.to raise_error(described_class::Error, /Admin Duties or Regular/)
+    end
+  end
+
   it "resumes an ambiguous network failure using the same command, destination and captured rate" do
     allow(client).to receive(:create_payroll_late_hours).and_raise(TimeTracking::Client::Error, "Connection timed out")
     expect { create_run }.to raise_error(TimeTracking::Client::Error, /timed out/)

@@ -213,24 +213,7 @@ module TimeTracking
     end
 
     def find_wage_rate(category, rates, employee_id: nil)
-      policy = source.source_type == "aire_services" && TimeTrackingCategoryMapping.find_by(time_tracking_source: source,
-        source_category_key: TimeTrackingCategoryMapping.category_key(category), import_enabled: true)
-      if policy
-        rate = policy.matching_rate(rates)
-        return [ rate, "company_category_mapping", rate ? nil : "#{category[:name]} requires this employee's active #{policy.required_rate_description} rate; configure that rate before importing" ]
-      end
-      if source.source_type == "aire_services" && TimeTrackingEarningChoice.solo_category?(category)
-        choice = TimeTrackingEarningChoice.find_by(time_tracking_source: source, employee_id: employee_id, source_category_key: "solo")
-        rate = choice&.current_rate
-        return rate && rates.any? { |candidate| candidate.id == rate.id } ? [ rate, "accountant_choice" ] : [ nil, nil ]
-      end
-      label_matches = rates.select do |rate|
-        candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize_match_key(value) }
-        candidates.include?(normalize_match_key(rate.label))
-      end
-      return [ label_matches.first, "label" ] if label_matches.one?
-
-      [ nil, nil ]
+      TimeTracking::CategoryRateMatcher.new(source: source).call(category, rates, employee_id: employee_id)
     end
 
     def warnings_for(source_employee, match, categories, requires_category_mapping, total_hours:, regular_hours:, overtime_hours:, estimated_gross_delta_cents:)
