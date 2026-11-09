@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
 import type { ExactTimeCorrectionDisposition, ExactTimeCorrectionLine, ExactTimeCorrectionPreview, TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
+import { overtimeMultiplier } from '@/lib/overtime';
 
 interface Props {
   open: boolean;
@@ -358,9 +359,10 @@ export function TimeTrackingImportModal({
     if (!employeeNeedsRateMapping(employeeId)) return row.estimated_gross_delta ?? null;
     const rates = activeWageRatesFor(employeeId);
     const selected = wageRateMappings.get(row.source_user_id) || {};
+    const multiplier = overtimeMultiplier(employeeId ? employeeById.get(employeeId)?.employment_type : null);
     return rowCategories(row).reduce((sum, category) => {
       const rate = rates.find(candidate => candidate.id === selected[categoryMappingKey(category)]);
-      return sum + Number(rate?.rate || 0) * (Number(category.regular_hours || 0) + Number(category.overtime_hours || 0) * 1.5);
+      return sum + Number(rate?.rate || 0) * (Number(category.regular_hours || 0) + Number(category.overtime_hours || 0) * multiplier);
     }, 0);
   };
 

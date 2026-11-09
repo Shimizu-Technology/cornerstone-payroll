@@ -344,7 +344,7 @@ module TimeTracking
       # Unset rates are setup placeholders, not zero-dollar earning types. Keep
       # them in the mapping-required decision above, but never serialize them.
       active_rates = active_rates.reject { |rate| rate.rate.nil? }
-      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
+      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override, OvertimePremium.multiplier(employee.employment_type)).negative?
         return "This time tracking correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
       end
 
@@ -692,7 +692,7 @@ module TimeTracking
       category["name"] || category[:name] || "this source category"
     end
 
-    def finalized_payroll_gross_delta(categories, active_rates, override)
+    def finalized_payroll_gross_delta(categories, active_rates, override, overtime_multiplier)
       override_by_category_key = wage_rate_overrides_by_category_key(override)
       categories.sum do |category|
         wage_rate = wage_rate_for_category(category, active_rates, override_by_category_key)
@@ -700,7 +700,7 @@ module TimeTracking
 
         rate = wage_rate.rate.to_d
         (category_regular_hours(category).to_d * rate) +
-          (category_overtime_hours(category).to_d * rate * BigDecimal("1.5"))
+          (category_overtime_hours(category).to_d * rate * overtime_multiplier)
       end
     end
 

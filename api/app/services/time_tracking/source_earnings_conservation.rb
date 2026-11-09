@@ -101,7 +101,7 @@ module TimeTracking
         expected_earnings = buckets.flat_map do |entry|
           %w[regular overtime].filter_map do |kind|
             hours = decimal(entry["#{kind}_hours"])
-            employment_type = expected.fetch(entry["source_bucket_key"]).first.earning_snapshot["employment_type"]
+            employment_type = expected.fetch(entry["source_bucket_key"]).first.earning_snapshot["employment_type"] || item.employment_type
             rate = decimal(entry["rate"]) * (kind == "overtime" ? OvertimePremium.multiplier(employment_type) : 1.to_d)
             amount = hours * rate
             next if amount.zero?
