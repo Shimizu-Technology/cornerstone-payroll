@@ -21,6 +21,7 @@ import type {
   ReplaceCheckPreview,
   ReplaceCheckResult,
 } from '@/types';
+import { overtimeMultiplier } from '@/lib/overtime';
 
 // ---------------------------------------------------------------------------
 // ReplaceCheckModal
@@ -123,10 +124,10 @@ function bucketsToPayload(rows: WageRateRowForm[]): PayrollItemWageRateHours[] {
   }));
 }
 
-function bucketGross(rows: WageRateRowForm[]): number {
+function bucketGross(rows: WageRateRowForm[], employmentType?: string | null): number {
   return rows.reduce((sum, row) => {
     const reg = num(row.regular_hours) * row.rate;
-    const ot = num(row.overtime_hours) * row.rate * 1.5;
+    const ot = num(row.overtime_hours) * row.rate * overtimeMultiplier(employmentType);
     const hol = num(row.holiday_hours) * row.rate;
     const pto = num(row.pto_hours) * row.rate;
     return sum + reg + ot + hol + pto;
@@ -411,7 +412,7 @@ export function ReplaceCheckModal({
                 <div className="rounded bg-gray-100 px-3 py-2 text-xs text-gray-700">
                   Bucket gross (locally computed):{' '}
                   <span className="font-semibold">
-                    {formatCurrency(bucketGross(form.wage_rate_hours))}
+                    {formatCurrency(bucketGross(form.wage_rate_hours, payrollItem.employment_type))}
                   </span>{' '}
                   — final taxes & net come from the server preview on the right.
                 </div>

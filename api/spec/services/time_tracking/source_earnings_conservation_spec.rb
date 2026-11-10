@@ -78,6 +78,30 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     end
   end
 
+  context "a 1099 contractor whose source reports overtime" do
+    let(:next_import) do
+      make_import(next_period, 3, "current", "CONTRACTOR-OT", daily_lines: [
+        { source_time_entry_id: "104", line_key: "current-line", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 3, regular_hours: 1, overtime_hours: 2 }
+      ])
+    end
+
+    it "pays every hour at the contract rate through calculation, approval and commitment" do
+      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly") # fixture starts W-2
+      item = apply!(same_rate: true, source_kinds: %w[current])
+      item.calculate!
+
+      expect(item.reload.gross_pay).to eq(75.0) # 3 hours at 25, no overtime premium
+      expect(item.overtime_hours).to eq(2)
+      expect(described_class.validate!(item, calculated: true)).to eq(true)
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.gross_pay).to eq(75.0)
+    end
+  end
+
   context "a zero-total REG/OT correction alongside current overtime" do
     let(:next_import) do
       make_import(next_period, 3, "current", "RECLASS", daily_lines: [
