@@ -62,4 +62,34 @@ RSpec.describe Rack::Attack do
       end
     end
   end
+
+  describe "AIRE worker statement throttles" do
+    let(:app) { described_class.new(lambda { |_env| [ 200, { "Content-Type" => "text/plain" }, [ "ok" ] ] }) }
+    let(:worker) { "6f1c1d3e-9a4b-4c2d-8e7f-0a1b2c3d4e5f" }
+
+    before { described_class.cache.store.clear }
+    after { described_class.cache.store.clear }
+
+    def fetch(path) = Rack::MockRequest.new(app).get(path, "REMOTE_ADDR" => "203.0.113.40")
+
+    it "limits PDF reads per worker without blocking another worker or JSON reads" do
+      pdf = "/api/v1/integrations/time_payroll/workers/#{worker}/statements/9/pdf"
+      limit = described_class.throttles.fetch("worker_statements/pdf").limit
+
+      statuses = Array.new(limit + 1) { fetch(pdf).status }
+      expect(statuses.last).to eq(429)
+      expect(statuses.first(limit)).to all(eq(200))
+      expect(fetch("/api/v1/integrations/time_payroll/workers/#{worker}/statements/9").status).to eq(200)
+      expect(fetch("/api/v1/integrations/time_payroll/workers/#{SecureRandom.uuid}/statements/9/pdf").status).to eq(200)
+    end
+
+    it "keys worker reads by worker and ignores other integration paths" do
+      throttle = described_class.throttles.fetch("worker_statements/worker")
+      request = ->(path) { Rack::Attack::Request.new(Rack::MockRequest.env_for(path, "REMOTE_ADDR" => "203.0.113.40")) }
+
+      expect(throttle.block.call(request.call("/api/v1/integrations/time_payroll/workers/#{worker.upcase}/statements")))
+        .to eq("203.0.113.40:#{worker}")
+      expect(throttle.block.call(request.call("/api/v1/integrations/time_payroll/events"))).to be_nil
+    end
+  end
 end
