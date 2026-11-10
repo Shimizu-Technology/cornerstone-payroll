@@ -15,6 +15,7 @@ class TimeTrackingImport < ApplicationRecord
     source_payload_hash external_batch_id external_batch_checksum contract_version source_cutoff_at
     raw_payload processed_payload warnings
   ].freeze
+  PREVIEW_REFRESH_ATTRIBUTES = %w[processed_payload warnings].freeze
   RECONCILIATION_IMMUTABLE_ATTRIBUTES = %w[
     reconciled_at reconciled_by_id reconciliation_note reconciliation_exceptions
   ].freeze
@@ -111,6 +112,9 @@ class TimeTrackingImport < ApplicationRecord
     return unless finalized_batch_persisted?
 
     changed_fields = FINALIZED_IMMUTABLE_ATTRIBUTES.select { |attribute| will_save_change_to_attribute?(attribute) }
+    # A re-preview refreshes the review of an unapplied batch; the source
+    # payload and its provenance remain fixed.
+    changed_fields -= PREVIEW_REFRESH_ATTRIBUTES if status_in_database == "previewed" && status == "previewed"
     return if changed_fields.empty?
 
     errors.add(:base, "Finalized payroll batch provenance and payload cannot be changed after preview creation")

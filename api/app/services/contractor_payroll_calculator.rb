@@ -45,8 +45,8 @@ class ContractorPayrollCalculator < PayrollCalculator
         calculate_multi_rate_gross_pay
       else
         rate = BigDecimal(payroll_item.pay_rate.to_s)
-        @base_pay = wage_earning_amount(BigDecimal(payroll_item.hours_worked.to_s) * rate).to_f
-        @overtime_pay = wage_earning_amount(BigDecimal(payroll_item.overtime_hours.to_s) * rate * overtime_multiplier).to_f
+        @base_pay = wage_earning_amount(contract_hours(payroll_item.hours_worked, payroll_item.overtime_hours) * rate).to_f
+        @overtime_pay = 0.0
         @holiday_pay = 0.0
         @pto_pay = 0.0
         @multi_rate_entries = nil
@@ -73,16 +73,14 @@ class ContractorPayrollCalculator < PayrollCalculator
           rate = entry[:rate].to_f
           label = entry[:label]
 
-          build_multi_rate_earning("regular", label, entry[:regular_hours], rate, entry[:regular_pay])
-          build_multi_rate_earning("overtime", "#{label} OT", entry[:overtime_hours], rate * overtime_multiplier, entry[:overtime_pay])
+          # One row at the contract rate. The source's REG/OT split stays on
+          # the item and its allocations for receipts and conservation.
+          build_multi_rate_earning("regular", label, entry[:contract_hours], rate, entry[:contract_pay])
           build_multi_rate_earning("holiday", "#{label} Holiday", entry[:holiday_hours], rate, entry[:holiday_pay])
           build_multi_rate_earning("pto", "#{label} PTO", entry[:pto_hours], rate, entry[:pto_pay])
         end
       else
-        build_earning("regular", "Contract Labor", payroll_item.hours_worked, payroll_item.pay_rate, @base_pay)
-        if @overtime_pay > 0
-          build_earning("overtime", "Contract OT", payroll_item.overtime_hours, payroll_item.pay_rate.to_f * overtime_multiplier, @overtime_pay)
-        end
+        build_earning("regular", "Contract Labor", contract_hours(payroll_item.hours_worked, payroll_item.overtime_hours).to_f, payroll_item.pay_rate, @base_pay)
       end
     else
       build_earning("contract_fee", "Contract Fee", nil, nil, @base_pay) if @base_pay > 0
@@ -183,6 +181,7 @@ class ContractorPayrollCalculator < PayrollCalculator
       overtime_hours = BigDecimal(entry["overtime_hours"].to_s)
       holiday_hours = BigDecimal(entry["holiday_hours"].to_s)
       pto_hours = BigDecimal(entry["pto_hours"].to_s)
+      worked_hours = contract_hours(regular_hours, overtime_hours)
 
       {
         label: entry["label"],
@@ -191,8 +190,8 @@ class ContractorPayrollCalculator < PayrollCalculator
         overtime_hours: overtime_hours.to_f,
         holiday_hours: holiday_hours.to_f,
         pto_hours: pto_hours.to_f,
-        regular_pay: wage_earning_amount(regular_hours * rate),
-        overtime_pay: wage_earning_amount(overtime_hours * rate * overtime_multiplier),
+        contract_hours: worked_hours.to_f,
+        contract_pay: wage_earning_amount(worked_hours * rate),
         holiday_pay: wage_earning_amount(holiday_hours * rate),
         pto_pay: wage_earning_amount(pto_hours * rate)
       }
@@ -203,13 +202,15 @@ class ContractorPayrollCalculator < PayrollCalculator
     payroll_item.holiday_hours = @multi_rate_entries.sum { |entry| entry[:holiday_hours] }
     payroll_item.pto_hours = @multi_rate_entries.sum { |entry| entry[:pto_hours] }
 
-    @base_pay = @multi_rate_entries.sum { |entry| entry[:regular_pay] }
-    @overtime_pay = @multi_rate_entries.sum { |entry| entry[:overtime_pay] }
+    @base_pay = @multi_rate_entries.sum { |entry| entry[:contract_pay] }
+    @overtime_pay = 0
     @holiday_pay = @multi_rate_entries.sum { |entry| entry[:holiday_pay] }
     @pto_pay = @multi_rate_entries.sum { |entry| entry[:pto_pay] }
   end
 
-  def overtime_multiplier
-    OvertimePremium.multiplier("contractor")
+  # A contractor earns the contract rate for every hour, including hours the
+  # source reports as overtime (OvertimePremium), so both are one quantity.
+  def contract_hours(regular_hours, overtime_hours)
+    BigDecimal(regular_hours.to_s) + BigDecimal(overtime_hours.to_s)
   end
 end

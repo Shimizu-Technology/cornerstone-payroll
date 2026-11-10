@@ -393,6 +393,32 @@ describe('TimeTrackingImportModal payroll-first review', () => {
     expect(apiMocks.apply).toHaveBeenCalledOnce();
   });
 
+  it('shows a contractor one hours figure, the contract-rate estimate and a quiet over-40 note', async () => {
+    const contractor = { ...employee, employment_type: 'contractor', contractor_pay_type: 'hourly', wage_rates: [{ id: 22, label: 'Flight Hours', rate: 30, is_primary: true, active: true }] } as Employee;
+    const contractorRow = { ...row, regular_hours: 74.6, overtime_hours: 1.2, total_hours: 75.8, estimated_gross_delta: 2274,
+      categories: [{ ...row.categories![0], name: 'Flight Hours', regular_hours: 74.6, overtime_hours: 1.2, total_hours: 75.8 }] };
+    await review({ rows: [contractorRow] }, payPeriod, [contractor]);
+    const card = screen.getByText('Test Direct', { selector: 'h3' }).closest('article')!;
+    expect(within(card).getByText('Hours')).toBeTruthy();
+    expect(within(card).getByText('75.80')).toBeTruthy();
+    expect(within(card).getByText('$2,274.00')).toBeTruthy(); // 75.80 hours at $30, no premium
+    expect(within(card).getByText(/75.80 hrs/)).toBeTruthy();
+    expect(within(card).getByText('time tracking Services counted 1.20 hours over 40 this period. Contractors are paid the contract rate for every hour.')).toBeTruthy();
+    expect(within(card).queryByText('Overtime')).toBeNull();
+    expect(card.textContent).not.toMatch(/\bOT\b/);
+  });
+
+  it('keeps an employee\'s regular, overtime and total hours with the premium estimate', async () => {
+    const employeeRow = { ...row, regular_hours: 74.6, overtime_hours: 1.2, total_hours: 75.8,
+      categories: [{ ...row.categories![0], regular_hours: 74.6, overtime_hours: 1.2, total_hours: 75.8 }] };
+    await review({ rows: [employeeRow] });
+    const card = screen.getByText('Test Direct', { selector: 'h3' }).closest('article')!;
+    expect(within(card).getByText('Overtime')).toBeTruthy();
+    expect(within(card).getByText('74.60 reg / 1.20 OT', { exact: false })).toBeTruthy();
+    expect(within(card).getByText('$1,910.00')).toBeTruthy(); // 74.60 x 25 + 1.20 x 37.50
+    expect(within(card).queryByText(/hours over 40/)).toBeNull();
+  });
+
   it('continues to block missing employee and earning mappings', async () => {
     await review({ rows: [{ ...row, employee_id: null }] });
     const apply = screen.getByRole('button', { name: 'Add time tracking Hours to Payroll' });

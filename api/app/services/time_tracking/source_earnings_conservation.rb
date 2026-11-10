@@ -97,15 +97,13 @@ module TimeTracking
       raise ArgumentError, MESSAGE unless item.wage_rate_hours.sum { |entry| decimal(entry["regular_hours"]) } == rows.sum(&:regular_hours) &&
         item.wage_rate_hours.sum { |entry| decimal(entry["overtime_hours"]) } == rows.sum(&:overtime_hours)
 
-      if calculated
+      # Committed history keeps the rows it was paid with, including contractor
+      # OT rows from before contractors earned one contract-rate row.
+      if calculated && !item.pay_period.committed?
         expected_earnings = buckets.flat_map do |entry|
-          %w[regular overtime].filter_map do |kind|
-            hours = decimal(entry["#{kind}_hours"])
-            employment_type = expected.fetch(entry["source_bucket_key"]).first.earning_snapshot["employment_type"] || item.employment_type
-            rate = decimal(entry["rate"]) * (kind == "overtime" ? OvertimePremium.multiplier(employment_type) : 1.to_d)
+          expected_earning_lines(entry, expected.fetch(entry["source_bucket_key"]).first.earning_snapshot["employment_type"] || item.employment_type).filter_map do |kind, label, hours, rate|
             amount = hours * rate
             next if amount.zero?
-            label = kind == "overtime" ? "#{entry['label']} OT" : entry["label"]
             if amount.positive?
               [ kind, label, hours, rate, PayrollEarningsRounding.line_amount(amount) ]
             else
@@ -123,6 +121,19 @@ module TimeTracking
       true
     rescue KeyError, TypeError, PayrollBatchPayloadValidator::Error, ConnectionIdentity::Error
       raise ArgumentError, MESSAGE
+    end
+
+    # Employees earn REG and premium OT rows. A contractor earns the contract
+    # rate for every hour, so the source's REG/OT split is one row; the split
+    # itself remains on the item and its allocations.
+    def self.expected_earning_lines(entry, employment_type)
+      rate = decimal(entry["rate"])
+      regular = decimal(entry["regular_hours"])
+      overtime = decimal(entry["overtime_hours"])
+      return [ [ "regular", entry["label"], regular + overtime, rate ] ] if employment_type == "contractor"
+
+      [ [ "regular", entry["label"], regular, rate ],
+        [ "overtime", "#{entry['label']} OT", overtime, rate * OvertimePremium.multiplier(employment_type) ] ]
     end
 
     def self.canonical_earnings(entries)
