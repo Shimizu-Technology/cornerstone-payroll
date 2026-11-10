@@ -550,6 +550,36 @@ RSpec.describe PayStubGenerator do
       end
     end
 
+    context "for an hourly contractor after earlier paychecks saved contractor OT rows" do
+      let(:worker) { create(:employee, :contractor, company: company, pay_rate: 30, contractor_pay_type: "hourly") }
+
+      def contractor_item(pay_date, regular, overtime, overtime_rate:)
+        period = create(:pay_period, :committed, company: company, start_date: pay_date - 14, end_date: pay_date - 4, pay_date: pay_date)
+        regular_amount = (regular * 30).to_d
+        overtime_amount = (overtime * overtime_rate).to_d
+        create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: "contractor", pay_rate: 30,
+          hours_worked: regular, overtime_hours: overtime, gross_pay: regular_amount + overtime_amount, net_pay: regular_amount + overtime_amount).tap do |item|
+          item.payroll_item_earnings.create!(category: "regular", label: "Contract Labor", hours: regular, rate: 30, amount: regular_amount)
+          item.payroll_item_earnings.create!(category: "overtime", label: "Contract OT", hours: overtime, rate: overtime_rate, amount: overtime_amount) if overtime.positive?
+        end
+      end
+
+      it "folds the earlier OT into the contract row's YTD and lists no OT on the new statement" do
+        prior = contractor_item(Date.new(2026, 1, 15), 40, 2, overtime_rate: 45)
+        item = calculated_item(worker, "contractor", Date.new(2026, 1, 29), hours_worked: 40, overtime_hours: 1.2)
+
+        rows = statement_rows(item)
+        expect(rows).to eq([ [ "Contract Labor", "41.20", "$30.00", "$1,236.00", "$2,526.00" ] ])
+        expect_rows_to_foot(item, rows)
+        expect(statement_lines(item).last).not_to match(/\bOT\b|Overtime/)
+        # The earlier paycheck still prints what it actually paid.
+        expect(statement_rows(prior)).to eq([
+          [ "Contract Labor", "40.00", "$30.00", "$1,200.00", "$1,200.00" ],
+          [ "Contract OT", "2.00", "$45.00", "$90.00", "$90.00" ]
+        ])
+      end
+    end
+
     context "with contractor items saved without earning rows" do
       def contractor(pay_type) = create(:employee, :contractor, company: company, pay_rate: 20, contractor_pay_type: pay_type)
 
