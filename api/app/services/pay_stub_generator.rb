@@ -285,16 +285,18 @@ class PayStubGenerator
     payroll_item.payroll_item_earnings.any? { |earning| earning.category.to_s != "non_taxable" }
   end
 
-  # Current-period earning lines as printed, without YTD-only rows.
+  # Earning lines as printed, in print order, including YTD-only rows (a zero
+  # current amount with earlier pay this year). YTD is nil wherever the PDF
+  # prints "—" because the year cannot be attributed row by row.
   def statement_earnings
     lines = if (rows = itemized_earnings_rows)
-      rows.reject { |row| row.current.zero? }.map do |row|
-        { label: itemized_earning_label(row), hours: row.hours, rate: row.rate, amount: row.current, category: row.category }
+      rows.map do |row|
+        { label: itemized_earning_label(row), hours: row.hours, rate: row.rate, amount: row.current, ytd: row.ytd, category: row.category }
       end
     else
       unitemized_earning_lines
     end
-    lines.map { |line| line.slice(:label, :hours, :rate, :amount).merge(kind: statement_earning_kind(line[:category])) }
+    lines.map { |line| line.slice(:label, :hours, :rate, :amount, :ytd).merge(kind: statement_earning_kind(line[:category])) }
   end
 
   def statement_earning_kind(category)

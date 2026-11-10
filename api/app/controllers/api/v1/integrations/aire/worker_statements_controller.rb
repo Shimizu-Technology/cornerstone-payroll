@@ -27,7 +27,8 @@ module Api
             record_access!("worker_statement#viewed", record_type: "PayrollItem", record_id: @item.id)
             render json: summary_json(@item).merge(
               earnings: statement.fetch(:earnings).map do |row|
-                { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), amount: money(row[:amount]), kind: row[:kind] }
+                { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), amount: money(row[:amount]), ytd: money(row[:ytd]),
+                  kind: row[:kind] }
               end,
               taxes: statement.fetch(:taxes).map { |row| amount_row(row) },
               deductions: statement.fetch(:deductions).map { |row| amount_row(row) },

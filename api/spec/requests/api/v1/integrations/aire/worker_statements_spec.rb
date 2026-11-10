@@ -38,6 +38,23 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
     response.parsed_body
   end
 
+  # The cells PayStubGenerator draws in its EARNINGS table, without the header
+  # and GROSS PAY rows.
+  def printed_earnings(item)
+    pdf = Prawn::Document.new
+    rows = nil
+    allow(pdf).to receive(:table) { |data, **| rows = data }
+    PayStubGenerator.new(PayrollItem.find(item.id)).send(:render_earnings, pdf)
+    rows[1...-1]
+  end
+
+  def cash(value) = "$#{ActiveSupport::NumberHelper.number_to_delimited(format('%.2f', value.to_d))}"
+
+  def as_printed(earnings)
+    printed = ->(value) { value.nil? ? "—" : cash(value) }
+    earnings.map { |row| [ row["label"], row["hours"] || "—", printed.call(row["rate"]), printed.call(row["amount"]), printed.call(row["ytd"]) ] }
+  end
+
   describe "authentication" do
     it "rejects missing, wrong, inactive and non-AIRE credentials without detail" do
       paycheck(worker, Date.new(2026, 10, 9))
@@ -148,17 +165,20 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
   end
 
   describe "GET statements/:id" do
-    it "returns the pay stub's own earnings, taxes, deductions, YTD and source entries" do
+    it "returns the pay stub's own earnings with each row's YTD, taxes, deductions and source entries" do
+      current_label = "Flight Hours · AIRE current period · $30.00/hr"
+      carryover_label = "Flight Hours · AIRE carryover from Sep 15, 2026 · $30.00/hr"
       paycheck(worker, Date.new(2026, 9, 25), gross: 1260, net: 1100, withholding_tax: 100, social_security_tax: 40, medicare_tax: 20,
         ytd_gross: 1260, ytd_net: 1100, ytd_withholding_tax: 100, ytd_social_security_tax: 40, ytd_medicare_tax: 20).tap do |prior|
-        earn!(prior, "Flight Hours", 40, 30, 1200)
-        earn!(prior, "Flight Hours OT", 1.33, 45, 60, category: "overtime")
+        earn!(prior, current_label, 40, 30, 1200)
+        earn!(prior, "#{current_label} OT", 1.33, 45, 60, category: "overtime")
       end
-      item = paycheck(worker, Date.new(2026, 10, 9), gross: 1245, net: 1090, hours_worked: 40, overtime_hours: 1,
-        withholding_tax: 90, social_security_tax: 45, medicare_tax: 10, ytd_gross: 2505, ytd_net: 2190,
+      item = paycheck(worker, Date.new(2026, 10, 9), gross: 1372.5, net: 1200, hours_worked: 44.25, overtime_hours: 1,
+        withholding_tax: 90, social_security_tax: 45, medicare_tax: 10, ytd_gross: 2632.5, ytd_net: 2300,
         ytd_withholding_tax: 190, ytd_social_security_tax: 85, ytd_medicare_tax: 30)
-      earn!(item, "Flight Hours", 40, 30, 1200)
-      earn!(item, "Flight Hours OT", 1, 45, 45, category: "overtime")
+      earn!(item, current_label, 40, 30, 1200)
+      earn!(item, "#{current_label} OT", 1, 45, 45, category: "overtime")
+      earn!(item, carryover_label, 4.25, 30, 127.5)
       import = create(:time_tracking_import, pay_period: item.pay_period, time_tracking_source: source)
       TimeTrackingEntryAllocation.new(company: company, pay_period: item.pay_period, payroll_item: item, employee: worker,
         time_tracking_source: source, time_tracking_import: import, source_user_id: "aire-#{worker.id}", source_user_uuid: uuid,
@@ -170,55 +190,105 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       pdf_text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join("\n")
 
       expect(response).to have_http_status(:ok)
-      expect(body).to include("id" => item.id, "gross_pay" => "1245.00", "net_pay" => "1090.00", "has_source_entries" => true)
+      expect(body).to include("id" => item.id, "gross_pay" => "1372.50", "net_pay" => "1200.00", "has_source_entries" => true)
       expect(body.fetch("earnings")).to eq([
-        { "label" => "Flight Hours", "hours" => "40.00", "rate" => "30.00", "amount" => "1200.00", "kind" => "regular" },
-        { "label" => "Flight Hours OT", "hours" => "1.00", "rate" => "45.00", "amount" => "45.00", "kind" => "overtime" }
+        { "label" => current_label, "hours" => "40.00", "rate" => "30.00", "amount" => "1200.00", "ytd" => "2400.00", "kind" => "regular" },
+        { "label" => "#{current_label} OT", "hours" => "1.00", "rate" => "45.00", "amount" => "45.00", "ytd" => "105.00", "kind" => "overtime" },
+        { "label" => carryover_label, "hours" => "4.25", "rate" => "30.00", "amount" => "127.50", "ytd" => "127.50", "kind" => "regular" }
       ])
+      expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
       expect(body.fetch("taxes")).to eq([
         { "label" => "Federal/Guam Income Tax", "amount" => "90.00", "ytd" => "190.00" },
         { "label" => "Social Security (6.2%)", "amount" => "45.00", "ytd" => "85.00" },
         { "label" => "Medicare (1.45%)", "amount" => "10.00", "ytd" => "30.00" }
       ])
       expect(body.fetch("deductions")).to eq(stub.fetch(:deductions).map { |row| { "label" => row[:label], "amount" => format("%.2f", row[:amount]), "ytd" => format("%.2f", row[:ytd]) } })
-      expect(body.fetch("ytd")).to eq("gross" => "2505.00", "net" => "2190.00")
+      expect(body.fetch("ytd")).to eq("gross" => "2632.50", "net" => "2300.00")
       expect(body.fetch("source_entries")).to eq([
         { "source_time_entry_id" => "2282", "work_date" => "2026-09-29", "hours" => "8.51", "regular_hours" => "7.37",
           "overtime_hours" => "1.14", "source_kind" => "current", "category" => "Admin Duties" }
       ])
-      # Paper and app agree: each label and amount is on the printed statement.
+      # Paper and app agree: each label, amount and YTD is on the printed statement.
       (body.fetch("earnings") + body.fetch("taxes")).each do |row|
-        expect(pdf_text).to include(row["label"])
-        expect(pdf_text).to include("$#{row['amount'].to_d.to_fs(:delimited, precision: 2)}")
+        expect(pdf_text.gsub(/\s+/, " ")).to include(row["label"])
+        expect(pdf_text).to include(cash(row["amount"]), cash(row["ytd"]))
       end
-      expect(pdf_text).to include("$2,505.00", "$190.00")
+      expect(pdf_text).to include("$2,632.50", "$190.00")
       expect(response.body).not_to include("123-45-6789", "employer")
       expect(AuditLog.find_by!(action: "worker_statement#viewed")).to have_attributes(record_type: "PayrollItem", record_id: item.id)
     end
 
-    it "shows a contractor's combined contract rows, no taxes, and historical OT rows exactly as paid" do
+    it "lists earnings paid earlier this year but not on this check as zero-amount YTD rows, as the stub prints them" do
+      paycheck(worker, Date.new(2026, 9, 25), gross: 1300, bonus: 100).tap do |prior|
+        earn!(prior, "Regular Pay", 40, 30, 1200)
+        earn!(prior, "Bonus", nil, nil, 100, category: "bonus")
+      end
+      item = paycheck(worker, Date.new(2026, 10, 9), gross: 1200)
+      earn!(item, "Flight Hours", 40, 30, 1200)
+
+      body = get_json(path("/#{item.id}"))
+
+      expect(body.fetch("earnings")).to contain_exactly(
+        { "label" => "Flight Hours", "hours" => "40.00", "rate" => "30.00", "amount" => "1200.00", "ytd" => "1200.00", "kind" => "regular" },
+        { "label" => "Regular Pay", "hours" => nil, "rate" => nil, "amount" => "0.00", "ytd" => "1200.00", "kind" => "regular" },
+        { "label" => "Bonus", "hours" => nil, "rate" => nil, "amount" => "0.00", "ytd" => "100.00", "kind" => "bonus" }
+      )
+      expect(body.fetch("earnings").first["label"]).to eq("Flight Hours")
+      expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
+      expect(body.fetch("earnings").sum { |row| row["amount"].to_d }).to eq(body["gross_pay"].to_d)
+      expect(body.fetch("earnings").sum { |row| row["ytd"].to_d }).to eq(body.dig("ytd", "gross").to_d)
+    end
+
+    it "leaves each row's YTD empty where the stub prints a dash" do
+      paycheck(worker, Date.new(2026, 9, 25), gross: 1200)
+      # Stored rows that omit the saved bonus cannot be attributed row by row.
+      item = paycheck(worker, Date.new(2026, 10, 9), gross: 1350, bonus: 50)
+      earn!(item, "Flight Hours", 40, 30, 1200)
+      earn!(item, "Ground School", 4, 25, 100)
+
+      body = get_json(path("/#{item.id}"))
+
+      expect(body.fetch("earnings").map { |row| row.values_at("label", "amount", "ytd") }).to eq([
+        [ "Flight Hours", "1200.00", nil ], [ "Ground School", "100.00", nil ], [ "Bonus", "50.00", nil ]
+      ])
+      expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
+      expect(body.dig("ytd", "gross")).to eq("2550.00")
+    end
+
+    it "shows a contractor's combined contract rows with YTD, no taxes, and historical OT rows exactly as paid" do
       contractor = create(:employee, :contractor, company: company, contractor_pay_type: "hourly", pay_rate: 30, first_name: "Casey", last_name: "Contract")
       contractor_uuid = SecureRandom.uuid
       map!(contractor, contractor_uuid)
-      old = paycheck(contractor, Date.new(2026, 9, 25), gross: 1290, net: 1290)
+      combined = "Flight Hours · AIRE current period · $30.00/hr"
+      old = paycheck(contractor, Date.new(2026, 9, 11), gross: 1290, net: 1290)
       earn!(old, "Contract Labor", 40, 30, 1200)
       earn!(old, "Contract OT", 2, 45, 90, category: "overtime")
-      current = paycheck(contractor, Date.new(2026, 10, 9), gross: 1854, net: 1854, hours_worked: 60.6, overtime_hours: 1.2, ytd_net: 3144)
-      earn!(current, "Flight Hours · AIRE current period · $30.00/hr", 61.8, 30, 1854)
+      earlier = paycheck(contractor, Date.new(2026, 9, 25), gross: 1200, net: 1200)
+      earn!(earlier, combined, 40, 30, 1200)
+      current = paycheck(contractor, Date.new(2026, 10, 9), gross: 1854, net: 1854, hours_worked: 60.6, overtime_hours: 1.2, ytd_net: 4344)
+      earn!(current, combined, 61.8, 30, 1854)
 
       list = get_json(path(worker_uuid: contractor_uuid))
       body = get_json(path("/#{current.id}", worker_uuid: contractor_uuid))
       history = get_json(path("/#{old.id}", worker_uuid: contractor_uuid))
 
       expect(list.fetch("worker")).to eq("employment_type" => "contractor", "contractor" => true, "display_name" => "Casey Contract")
-      expect(body.fetch("earnings")).to eq([
-        { "label" => "Flight Hours · AIRE current period · $30.00/hr", "hours" => "61.80", "rate" => "30.00", "amount" => "1854.00", "kind" => "regular" }
-      ])
+      expect(body.fetch("earnings").first).to eq(
+        "label" => combined, "hours" => "61.80", "rate" => "30.00", "amount" => "1854.00", "ytd" => "3054.00", "kind" => "regular"
+      )
+      # Earlier Contract Labor/OT rows carry as zero-amount YTD rows exactly as the
+      # stub prints them. PR #437 folds a contractor's earlier OT rows into the
+      # contract row on both, so this stays equal when it merges.
+      expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(current))
+      expect(body.fetch("earnings").drop(1).map { |row| row["amount"] }).to all(eq("0.00"))
+      expect(body.fetch("earnings").sum { |row| row["ytd"].to_d }).to eq(body.dig("ytd", "gross").to_d)
+      expect(body.dig("ytd", "gross")).to eq("4344.00")
       expect(body.fetch("taxes")).to eq([])
       expect(body.fetch("total_hours")).to eq("61.80")
-      expect(history.fetch("earnings").map { |row| row.values_at("label", "amount", "kind") }).to eq([
-        [ "Contract Labor", "1200.00", "regular" ], [ "Contract OT", "90.00", "overtime" ]
+      expect(history.fetch("earnings").map { |row| row.values_at("label", "amount", "ytd", "kind") }).to eq([
+        [ "Contract Labor", "1200.00", "1200.00", "regular" ], [ "Contract OT", "90.00", "90.00", "overtime" ]
       ])
+      expect(as_printed(history.fetch("earnings"))).to eq(printed_earnings(old))
     end
 
     it "does not return statements from uncommitted payroll" do
