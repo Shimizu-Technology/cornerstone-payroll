@@ -66,8 +66,25 @@ class PayrollEarningsYtdBreakdown
   end
 
   def live_components
-    ytd_source_items.flat_map { |item| components_for(item) }
+    ytd_source_items.flat_map { |item| components_for(item).map { |component| contract_rate_component(item, component) } }
       .reject { |component| non_taxable_component?(component) }
+  end
+
+  # Contractors now earn one contract-rate row per rate. Earlier contractor OT
+  # rows add to that row's YTD so a new statement lists no OT for a contractor.
+  # A saved paycheck with its own OT rows still prints exactly what it paid.
+  def contract_rate_component(item, component)
+    return component unless contract_rate_statement? && item.employment_type == "contractor" && component.category.to_s == "overtime"
+
+    label = component.label.to_s == "Contract OT" ? "Contract Labor" : component.label.to_s.delete_suffix(" OT")
+    component.with(label: label, category: "regular")
+  end
+
+  def contract_rate_statement?
+    return @contract_rate_statement if defined?(@contract_rate_statement)
+
+    @contract_rate_statement = payroll_item.employment_type == "contractor" &&
+      current_components.none? { |component| component.category.to_s == "overtime" }
   end
 
   def ytd_source_items

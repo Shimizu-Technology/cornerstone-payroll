@@ -48,7 +48,21 @@ RSpec.describe TimeTrackingImport do
     expect(import.reload.external_batch_id).to eq("AIRE-PAY-IMMUTABLE-001")
     expect(import.raw_payload).to eq("batch_id" => "AIRE-PAY-IMMUTABLE-001")
 
+    expect(import.update(processed_payload: { "validation_version" => "payroll_batch_v2", "rows" => [] }, warnings: [ { "code" => "refreshed" } ])).to eq(true)
+    expect(import.reload.processed_payload).to eq("validation_version" => "payroll_batch_v2", "rows" => [])
+
     expect(import.update(status: "applied", applied_at: Time.current)).to eq(true)
+    expect(import.update(processed_payload: { "validation_version" => "payroll_batch_v2" })).to eq(false)
+    expect(import.errors[:base]).to include("Finalized payroll batch provenance and payload cannot be changed after preview creation")
+    expect(import.reload.processed_payload).to eq("validation_version" => "payroll_batch_v2", "rows" => [])
+  end
+
+  it "does not refresh a finalized payload in the same save that applies it" do
+    import = create(:time_tracking_import, external_batch_id: "AIRE-PAY-APPLY-001", external_batch_checksum: "b" * 64,
+      contract_version: "2.0", source_cutoff_at: Time.iso8601("2026-08-31T01:00:00Z"), processed_payload: { "rows" => [] })
+
+    expect(import.update(status: "applied", processed_payload: { "rows" => [ {} ] })).to eq(false)
+    expect(import.reload.processed_payload).to eq("rows" => [])
   end
 
   it "keeps historical reconciliation evidence immutable after the payroll is linked" do

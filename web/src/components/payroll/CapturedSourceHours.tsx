@@ -27,6 +27,9 @@ export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; pa
     && Number.isInteger(capturedSourceId) && capturedSourceId > 0
     && (!calendarSourceId || calendarSourceId === capturedSourceId);
   const earnings = (item as PayrollItem & { component_disclosure?: PayrollComponentDisclosure }).component_disclosure?.earnings;
+  // Contractors earn the contract rate for every hour; the source's over-40
+  // split is kept for receipts but never shown as overtime.
+  const contractor = item.employment_type === 'contractor';
 
   async function loadSource(id: string, page = 1) {
     setSelectedId(id);
@@ -64,11 +67,15 @@ export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; pa
         return <section key={rate.source_bucket_key || index} className="min-w-0 rounded-xl border border-neutral-200 p-4">
         <p className="break-words text-sm font-semibold text-neutral-950">{rate.label}</p>
         <p className="mt-1 break-words text-sm font-medium text-primary-800">{capturedSourceContext(rate)}</p>
-        <p className="mt-2 text-sm tabular-nums text-neutral-700">{Number(rate.regular_hours).toFixed(2)} regular hrs × {formatCurrency(Number(rate.rate))}{Number(rate.overtime_hours) !== 0 && <> · {Number(rate.overtime_hours).toFixed(2)} OT hrs × {formatCurrency(Number(rate.rate) * overtimeMultiplier(item.employment_type))}</>}</p>
+        <p className="mt-2 text-sm tabular-nums text-neutral-700">{contractor
+          ? <>{(Number(rate.regular_hours) + Number(rate.overtime_hours)).toFixed(2)} hrs × {formatCurrency(Number(rate.rate))}</>
+          : <>{Number(rate.regular_hours).toFixed(2)} regular hrs × {formatCurrency(Number(rate.rate))}{Number(rate.overtime_hours) !== 0 && <> · {Number(rate.overtime_hours).toFixed(2)} OT hrs × {formatCurrency(Number(rate.rate) * overtimeMultiplier(item.employment_type))}</>}</>}</p>
         {Boolean(savedEarnings?.length) && <p className="mt-1 text-sm font-semibold tabular-nums">Saved hourly earnings: {formatCurrency(savedEarnings!.reduce((sum, entry) => sum + Number(entry.amount), 0))}</p>}
         <details className="mt-3 text-sm"><summary className="min-h-11 cursor-pointer py-3 font-semibold text-primary-700">Original source entries</summary>
           <ul className="space-y-2">{rate.source_lines!.map(line => <li key={`${line.source_time_entry_id}:${line.line_key}`} className="break-words rounded-lg bg-neutral-50 p-3">
-            <p>Worked {formatDate(line.original_work_date)} · {Number(line.regular_hours).toFixed(2)} regular / {Number(line.overtime_hours).toFixed(2)} OT hrs</p>
+            <p>Worked {formatDate(line.original_work_date)} · {contractor
+              ? `${(Number(line.regular_hours) + Number(line.overtime_hours)).toFixed(2)} hrs`
+              : `${Number(line.regular_hours).toFixed(2)} regular / ${Number(line.overtime_hours).toFixed(2)} OT hrs`}</p>
             {hasAireSource ? <Button variant="outline" size="sm" className="mt-2 min-h-11 whitespace-normal text-left" disabled={loading} onClick={() => void loadSource(line.source_time_entry_id)}>Review source entry #{line.source_time_entry_id}</Button> : <p className="text-xs text-neutral-600">Source entry #{line.source_time_entry_id} · review history in the original time system.</p>}
           </li>)}</ul>
         </details>
