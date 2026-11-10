@@ -48,6 +48,11 @@ function formatHours(value: number | null | undefined): string {
   return Number(value || 0).toFixed(2);
 }
 
+// A contractor's paid hours: the source's regular and over-40 hours together.
+function contractHours(hours: { regular_hours?: number | null; overtime_hours?: number | null }): number {
+  return Number(hours.regular_hours || 0) + Number(hours.overtime_hours || 0);
+}
+
 function formatRate(cents: number | null | undefined): string {
   return cents == null ? 'Cornerstone rate not mapped' : `$${(cents / 100).toFixed(2)}/hr in Cornerstone`;
 }
@@ -295,6 +300,7 @@ export function TimeTrackingImportModal({
   );
   const connectedPaused = selectedSource?.connected_payroll?.enabled === false;
   const selectedSourceSupportsFinalizedBatch = supportsSourceOperation(selectedSource, 'finalized_batch_v2');
+  const sourceShortName = selectedSource?.name || 'The time source';
   const isHistoricalReconciliation = payPeriod.status === 'committed';
   const rows = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
   const isFinalizedBatch = preview?.processed_payload?.validation_version === 'payroll_batch_v2';
@@ -848,6 +854,10 @@ export function TimeTrackingImportModal({
                   const needsRateMapping = !isHistoricalReconciliation && included && mapped && employeeNeedsRateMapping(mappedEmployeeId) && categories.length > 0 &&
                     requiresCategoryMapping(mappedEmployeeId);
                   const rowRateMappings = wageRateMappings.get(row.source_user_id) || {};
+                  // Contractors earn the contract rate for every hour, so the
+                  // source's over-40 split is shown only as a quiet note.
+                  const contractorRow = mappedEmployeeId != null && employeeById.get(mappedEmployeeId)?.employment_type === 'contractor';
+                  const sourceOvertimeHours = Number(row.overtime_hours || 0);
 
                   return (
                     <article key={row.source_user_id} className={`rounded-2xl border p-4 sm:p-6 ${!included ? 'border-neutral-200 bg-neutral-50 opacity-70' : effectiveWarnings.length || !mapped || duplicateMapping ? 'border-warning-200 bg-warning-50/40' : 'border-neutral-200 bg-white'}`}>
@@ -877,20 +887,34 @@ export function TimeTrackingImportModal({
                           </div>
                           {row.source_email && <div className="mt-2 text-xs text-neutral-600">{row.source_email}</div>}
 
-                          <div className="mt-4 grid grid-cols-3 gap-2 sm:max-w-md">
-                            <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-xs font-semibold text-neutral-600">Regular</div>
-                              <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.regular_hours)}</div>
+                          {contractorRow ? (
+                            <>
+                              <div className="mt-4 w-fit min-w-32 rounded-lg bg-neutral-50 p-2">
+                                <div className="text-xs font-semibold text-neutral-600">Hours</div>
+                                <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(contractHours(row))}</div>
+                              </div>
+                              {sourceOvertimeHours > 0 && (
+                                <p className="mt-2 max-w-md text-xs leading-5 text-neutral-600">
+                                  {sourceShortName} counted {formatHours(sourceOvertimeHours)} hours over 40 this period. Contractors are paid the contract rate for every hour.
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <div className="mt-4 grid grid-cols-3 gap-2 sm:max-w-md">
+                              <div className="rounded-lg bg-neutral-50 p-2">
+                                <div className="text-xs font-semibold text-neutral-600">Regular</div>
+                                <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.regular_hours)}</div>
+                              </div>
+                              <div className="rounded-lg bg-neutral-50 p-2">
+                                <div className="text-xs font-semibold text-neutral-600">Overtime</div>
+                                <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.overtime_hours)}</div>
+                              </div>
+                              <div className="rounded-lg bg-neutral-50 p-2">
+                                <div className="text-xs font-semibold text-neutral-600">Total</div>
+                                <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(row.total_hours)}</div>
+                              </div>
                             </div>
-                            <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-xs font-semibold text-neutral-600">Overtime</div>
-                              <div className="mt-2 font-mono text-sm text-neutral-900">{formatHours(row.overtime_hours)}</div>
-                            </div>
-                            <div className="rounded-lg bg-neutral-50 p-2">
-                              <div className="text-xs font-semibold text-neutral-600">Total</div>
-                              <div className="mt-2 font-mono text-sm font-semibold text-neutral-950">{formatHours(row.total_hours)}</div>
-                            </div>
-                          </div>
+                          )}
                           {isFinalizedBatch && !isHistoricalReconciliation && (
                             <div className="mt-2 text-xs font-medium text-neutral-600">
                               Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">{mappedGrossEstimate(row) == null ? 'Select earning types to estimate' : formatCurrency(mappedGrossEstimate(row)!)}</span>
@@ -949,7 +973,9 @@ export function TimeTrackingImportModal({
                                     <div className="text-sm font-semibold text-neutral-900">{category.name}</div>
                                     <div className="mt-2 text-xs text-neutral-600">
                                       {!isHistoricalReconciliation && <>{formatRate(selectedRateCents)} · </>}
-                                      {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT
+                                      {contractorRow
+                                        ? <>{formatHours(contractHours(category))} hrs</>
+                                        : <>{formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT</>}
                                     </div>
                                   </div>
                                   {(category.source_kinds || []).map((kind) => (

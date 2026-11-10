@@ -29,13 +29,55 @@ RSpec.describe ContractorPayrollCalculator do
     )
   end
 
-  it "pays hours reported as overtime at the contract rate, without a premium" do
+  it "pays hours reported as overtime at the contract rate, as one contract labor row" do
     payroll_item.update!(hours_worked: 10, overtime_hours: 2, loan_payment: 0, insurance_payment: 0)
 
     described_class.new(employee, payroll_item).calculate
 
     expect(payroll_item.gross_pay).to eq(300.0)
-    expect(payroll_item.payroll_item_earnings.find { |earning| earning.category == "overtime" }).to have_attributes(hours: 2, rate: 25, amount: 50)
+    expect(payroll_item.payroll_item_earnings.map { |earning| earning.slice(:category, :label, :hours, :rate, :amount).symbolize_keys }).to eq([
+      { category: "regular", label: "Contract Labor", hours: 12, rate: 25, amount: 300 }
+    ])
+    expect(payroll_item).to have_attributes(hours_worked: 10, overtime_hours: 2)
+  end
+
+  it "combines each rate's regular and source overtime hours into one row, keeping the item's split" do
+    rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 30, is_primary: true, active: true)
+    payroll_item.update!(loan_payment: 0, insurance_payment: 0)
+    payroll_item.wage_rate_hours = [
+      { employee_wage_rate_id: rate.id, label: "Flight Hours · AIRE current period · $30.00/hr", rate: 30, regular_hours: 60.6,
+        overtime_hours: 1.2, holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+      { employee_wage_rate_id: rate.id, label: "Admin Duties · AIRE current period · $15.00/hr", rate: 15, regular_hours: 14,
+        overtime_hours: 0, holiday_hours: 0, pto_hours: 0, is_primary: false, active: true }
+    ]
+
+    payroll_item.calculate!
+
+    expect(payroll_item.reload).to have_attributes(gross_pay: 2064.0, hours_worked: 74.6, overtime_hours: 1.2)
+    expect(payroll_item.payroll_item_earnings.map(&:category).uniq).to eq([ "regular" ])
+    expect(payroll_item.payroll_item_earnings.map { |earning| [ earning.label, earning.hours, earning.rate, earning.amount ] }).to contain_exactly(
+      [ "Flight Hours · AIRE current period · $30.00/hr", 61.8, 30, 1854 ],
+      [ "Admin Duties · AIRE current period · $15.00/hr", 14, 15, 210 ]
+    )
+    expect(payroll_item.payroll_item_earnings.map(&:label).grep(/OT/)).to be_empty
+  end
+
+  it "nets a signed REG/OT reclassification to the contract-rate hours actually worked" do
+    rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 100, is_primary: true, active: true)
+    payroll_item.update!(loan_payment: 0, insurance_payment: 0)
+    payroll_item.wage_rate_hours = [
+      { employee_wage_rate_id: rate.id, label: "Flight Hours · correction", rate: 100, regular_hours: 1, overtime_hours: -1,
+        holiday_hours: 0, pto_hours: 0, is_primary: true, active: true },
+      { employee_wage_rate_id: rate.id, label: "Admin Duties · current", rate: 10, regular_hours: 0, overtime_hours: 1,
+        holiday_hours: 0, pto_hours: 0, is_primary: false, active: true }
+    ]
+
+    payroll_item.calculate!
+
+    expect(payroll_item.reload.gross_pay).to eq(10.0)
+    expect(payroll_item.payroll_item_earnings.map { |earning| [ earning.category, earning.label, earning.hours, earning.amount ] }).to eq([
+      [ "regular", "Admin Duties · current", 1, 10 ]
+    ])
   end
 
   it "persists mandatory service charges without applying employee payroll taxes" do
