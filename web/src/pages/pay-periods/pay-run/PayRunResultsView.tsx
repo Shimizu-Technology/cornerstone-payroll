@@ -37,8 +37,8 @@ export function PayRunResultsView(props: Props) {
     const regular = Number(item.hours_worked || 0).toFixed(2);
     const overtime = Number(item.overtime_hours || 0).toFixed(2);
     const splitMatches = (Number(regular) + Number(overtime)).toFixed(2) === displayed.toFixed(2);
-    const showSplit = splitMatches && item.employment_type !== 'salary'
-      && !(item.employment_type === 'contractor' && displayed === 0);
+    // Contractors earn the contract rate for every hour; never label their hours OT.
+    const showSplit = splitMatches && item.employment_type !== 'salary' && item.employment_type !== 'contractor';
     return <>{displayed.toFixed(2)}{showSplit && <p className="whitespace-normal text-xs text-neutral-600">{regular} reg + {overtime} OT</p>}</>;
   };
   const rowMenu = (item: PayrollItem): ReactNode => <details data-result-menu className="relative shrink-0" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.removeAttribute('open'); event.currentTarget.querySelector('summary')?.focus(); } }}>

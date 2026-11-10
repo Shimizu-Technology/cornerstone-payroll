@@ -115,6 +115,7 @@ module TimeTracking
       result = {}
       items.each do |item|
         earnings = item.payroll_item_earnings.select { |earning| earning.category.in?(%w[regular overtime]) }
+        earnings = [] if OvertimePremium.combined_contract_rows?(item, earnings)
         components = if earnings.any?
           earnings.map { |earning| [ "earning:#{earning.label}", earning.label, earning.category == "regular" ? "REG" : "OT", decimal(earning.hours) ] }
         elsif item.wage_rate_hours.any?

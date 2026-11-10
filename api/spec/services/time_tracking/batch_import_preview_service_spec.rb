@@ -280,6 +280,49 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     expect(TimeTrackingImport.where(external_batch_id: payload["batch_id"]).count).to eq(1)
   end
 
+  it "recomputes an unapplied preview's estimates and warnings, and never rewrites an applied import" do
+    company, _workweek, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
+    confirm_mapping!(company: company, source: source, employee: employee)
+    employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    adjustment = {
+      "source_time_entry_id" => "101", "line_key" => "flight:2500", "source_kind" => "current",
+      "original_work_date" => pay_period.start_date.iso8601, "original_week_start" => pay_period.start_date.beginning_of_week(:sunday).iso8601,
+      "source_category_id" => "flight", "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+      "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0
+    }
+    payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date, employees: [
+      { "source_user_id" => "aire-user-1", "email" => "pilot@example.com", "display_name" => "Pilot One",
+        "adjustments" => [ adjustment ], "total_hours" => 10.0, "regular_hours" => 8.0, "overtime_hours" => 2.0 }
+    ])
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).and_return(client)
+    allow(client).to receive(:payroll_batches).and_return(
+      "payroll_batches" => [ { "id" => payload["batch_id"], "start_date" => payload["start_date"], "end_date" => payload["end_date"], "cutoff_at" => payload["cutoff_at"], "checksum" => payload.dig("export", "checksum") } ]
+    )
+    allow(client).to receive(:payroll_batch).and_return(payload)
+
+    first = described_class.new(pay_period: pay_period, source: source).call
+    expect(first.processed_payload.dig("rows", 0, "estimated_gross_delta")).to eq(275.0) # 8 x 25 + 2 x 37.50
+    # A saved estimate from an older rule, and a warning that no longer applies.
+    first.update!(warnings: [ { "code" => "stale" } ])
+
+    employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+    refreshed = described_class.new(pay_period: pay_period, source: source).call
+
+    expect(refreshed.id).to eq(first.id)
+    expect(refreshed.reload.processed_payload.dig("rows", 0, "estimated_gross_delta")).to eq(250.0) # every hour at 25
+    expect(refreshed.warnings).to eq([])
+    expect(refreshed.raw_payload).to eq(payload)
+
+    refreshed.update!(status: "applied", applied_at: Time.current)
+    employee.update_columns(employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)
+    applied = described_class.new(pay_period: pay_period, source: source).call
+
+    expect(applied.reload.processed_payload.dig("rows", 0, "estimated_gross_delta")).to eq(250.0)
+    expect(applied.status).to eq("applied")
+  end
+
   it "rejects a reused batch ID with different valid contents" do
     _company, _workweek, pay_period, source = setup_records
     first_payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date, employees: [])
