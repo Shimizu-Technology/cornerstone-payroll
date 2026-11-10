@@ -50,9 +50,13 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
 
   def cash(value) = "$#{ActiveSupport::NumberHelper.number_to_delimited(format('%.2f', value.to_d))}"
 
+  # AIRE renders a salary rate per year, as the stub prints it.
   def as_printed(earnings)
     printed = ->(value) { value.nil? ? "—" : cash(value) }
-    earnings.map { |row| [ row["label"], row["hours"] || "—", printed.call(row["rate"]), printed.call(row["amount"]), printed.call(row["ytd"]) ] }
+    earnings.map do |row|
+      rate = row["pay_basis"] == "salary" ? "#{cash(row['rate'])}/yr" : printed.call(row["rate"])
+      [ row["label"], row["hours"] || "—", rate, printed.call(row["amount"]), printed.call(row["ytd"]) ]
+    end
   end
 
   describe "authentication" do
@@ -136,7 +140,7 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       reversed.update_columns(payroll_reversed_at: 2.months.ago, payroll_reversed_by_id: actor.id, payroll_reversal_reason: "Entered twice")
       pending = paycheck(worker, Date.new(2026, 10, 23), check_number: "103300", check_prepared_at: nil)
       paycheck(worker, Date.new(2026, 11, 6), status: "calculated")
-      paycheck(worker, Date.new(2026, 7, 31), gross: 0, net: 0, hours_worked: 0) # roster row, no activity
+      roster = paycheck(worker, Date.new(2026, 7, 31), gross: 0, net: 0, hours_worked: 0) # roster row, no activity
 
       body = get_json(path)
 
@@ -158,6 +162,11 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       expect(statements.find { |row| row["id"] == deposit.id }.fetch("payment"))
         .to eq("method" => "direct_deposit", "status" => "issued", "issued_on" => "2026-10-09", "check_number_last4" => nil)
       expect(response.body).not_to include("ACH-123456789", "123-45-6789", "6789\"")
+      # A single statement is found under the same rules as the list.
+      get path("/#{roster.id}"), headers: headers
+      expect(response).to have_http_status(:not_found)
+      get path("/#{reversed.id}"), headers: headers
+      expect(response).to have_http_status(:ok)
       log = AuditLog.find_by!(action: "worker_statements#listed")
       expect(log).to have_attributes(company_id: company.id, record_type: "Employee", record_id: worker.id, event_category: "integration", user_id: nil)
       expect(log.metadata).to include("employee_id" => worker.id, "time_tracking_source_id" => source.id, "source_user_uuid" => uuid, "statement_count" => 6)
@@ -192,9 +201,9 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       expect(response).to have_http_status(:ok)
       expect(body).to include("id" => item.id, "gross_pay" => "1372.50", "net_pay" => "1200.00", "has_source_entries" => true)
       expect(body.fetch("earnings")).to eq([
-        { "label" => current_label, "hours" => "40.00", "rate" => "30.00", "amount" => "1200.00", "ytd" => "2400.00", "kind" => "regular" },
-        { "label" => "#{current_label} OT", "hours" => "1.00", "rate" => "45.00", "amount" => "45.00", "ytd" => "105.00", "kind" => "overtime" },
-        { "label" => carryover_label, "hours" => "4.25", "rate" => "30.00", "amount" => "127.50", "ytd" => "127.50", "kind" => "regular" }
+        { "label" => current_label, "hours" => "40.00", "rate" => "30.00", "pay_basis" => nil, "amount" => "1200.00", "ytd" => "2400.00", "kind" => "regular" },
+        { "label" => "#{current_label} OT", "hours" => "1.00", "rate" => "45.00", "pay_basis" => nil, "amount" => "45.00", "ytd" => "105.00", "kind" => "overtime" },
+        { "label" => carryover_label, "hours" => "4.25", "rate" => "30.00", "pay_basis" => nil, "amount" => "127.50", "ytd" => "127.50", "kind" => "regular" }
       ])
       expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
       expect(body.fetch("taxes")).to eq([
@@ -229,9 +238,9 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       body = get_json(path("/#{item.id}"))
 
       expect(body.fetch("earnings")).to contain_exactly(
-        { "label" => "Flight Hours", "hours" => "40.00", "rate" => "30.00", "amount" => "1200.00", "ytd" => "1200.00", "kind" => "regular" },
-        { "label" => "Regular Pay", "hours" => nil, "rate" => nil, "amount" => "0.00", "ytd" => "1200.00", "kind" => "regular" },
-        { "label" => "Bonus", "hours" => nil, "rate" => nil, "amount" => "0.00", "ytd" => "100.00", "kind" => "bonus" }
+        { "label" => "Flight Hours", "hours" => "40.00", "rate" => "30.00", "pay_basis" => nil, "amount" => "1200.00", "ytd" => "1200.00", "kind" => "regular" },
+        { "label" => "Regular Pay", "hours" => nil, "rate" => nil, "pay_basis" => nil, "amount" => "0.00", "ytd" => "1200.00", "kind" => "regular" },
+        { "label" => "Bonus", "hours" => nil, "rate" => nil, "pay_basis" => nil, "amount" => "0.00", "ytd" => "100.00", "kind" => "bonus" }
       )
       expect(body.fetch("earnings").first["label"]).to eq("Flight Hours")
       expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
@@ -274,7 +283,7 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
 
       expect(list.fetch("worker")).to eq("employment_type" => "contractor", "contractor" => true, "display_name" => "Casey Contract")
       expect(body.fetch("earnings").first).to eq(
-        "label" => combined, "hours" => "61.80", "rate" => "30.00", "amount" => "1854.00", "ytd" => "3054.00", "kind" => "regular"
+        "label" => combined, "hours" => "61.80", "rate" => "30.00", "pay_basis" => nil, "amount" => "1854.00", "ytd" => "3054.00", "kind" => "regular"
       )
       # Earlier Contract Labor/OT rows carry as zero-amount YTD rows exactly as the
       # stub prints them. PR #437 folds a contractor's earlier OT rows into the
@@ -289,6 +298,55 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
         [ "Contract Labor", "1200.00", "1200.00", "regular" ], [ "Contract OT", "90.00", "90.00", "overtime" ]
       ])
       expect(as_printed(history.fetch("earnings"))).to eq(printed_earnings(old))
+    end
+
+    it "returns a salaried worker's annual rate with its pay basis, as the stub prints it" do
+      salaried = create(:employee, company: company, employment_type: "salary", salary_type: "annual", pay_rate: 52_000,
+        first_name: "Sam", last_name: "Salary")
+      salaried_uuid = SecureRandom.uuid
+      map!(salaried, salaried_uuid)
+      first = paycheck(salaried, Date.new(2026, 9, 11), gross: 2000, pay_rate: 52_000, hours_worked: 0)
+      # Stored rows that omit the saved bonus leave later checks unitemized.
+      paycheck(salaried, Date.new(2026, 9, 25), gross: 2050, bonus: 50, pay_rate: 52_000, hours_worked: 0).tap do |omitted|
+        earn!(omitted, "Salary", nil, nil, 2000, category: "salary")
+      end
+      current = paycheck(salaried, Date.new(2026, 10, 9), gross: 2000, pay_rate: 52_000, hours_worked: 0)
+
+      itemized = get_json(path("/#{first.id}", worker_uuid: salaried_uuid))
+      unitemized = get_json(path("/#{current.id}", worker_uuid: salaried_uuid))
+
+      expect(itemized.fetch("earnings")).to eq([
+        { "label" => "Salary", "hours" => nil, "rate" => "52000.00", "pay_basis" => "salary", "amount" => "2000.00", "ytd" => "2000.00", "kind" => "regular" }
+      ])
+      expect(as_printed(itemized.fetch("earnings"))).to eq(printed_earnings(first))
+      expect(unitemized.fetch("earnings")).to eq([
+        { "label" => "Salary", "hours" => nil, "rate" => "52000.00", "pay_basis" => "salary", "amount" => "2000.00", "ytd" => nil, "kind" => "regular" }
+      ])
+      expect(as_printed(unitemized.fetch("earnings"))).to eq(printed_earnings(current))
+      expect(printed_earnings(current).sole[2]).to eq("$52,000.00/yr")
+    end
+
+    it "returns a fixed-fee contractor's fee rate with its pay basis, as the stub prints it" do
+      contractor = create(:employee, :contractor, company: company, pay_rate: 1500, first_name: "Fran", last_name: "Fee")
+      contractor_uuid = SecureRandom.uuid
+      map!(contractor, contractor_uuid)
+      first = paycheck(contractor, Date.new(2026, 9, 25), gross: 1500, net: 1500, pay_rate: 1500, hours_worked: 0,
+        calculation_context_snapshot: { "employee" => { "contractor_pay_type" => "flat_fee" } })
+      # Without a saved pay basis the stub cannot attribute YTD row by row.
+      current = paycheck(contractor, Date.new(2026, 10, 9), gross: 1500, net: 1500, pay_rate: 1500, hours_worked: 0)
+
+      itemized = get_json(path("/#{first.id}", worker_uuid: contractor_uuid))
+      unitemized = get_json(path("/#{current.id}", worker_uuid: contractor_uuid))
+
+      expect(itemized.fetch("earnings")).to eq([
+        { "label" => "Contract Fee", "hours" => nil, "rate" => "1500.00", "pay_basis" => "contractor", "amount" => "1500.00", "ytd" => "1500.00", "kind" => "regular" }
+      ])
+      expect(as_printed(itemized.fetch("earnings"))).to eq(printed_earnings(first))
+      expect(unitemized.fetch("earnings")).to eq([
+        { "label" => "Contract Fee", "hours" => nil, "rate" => "1500.00", "pay_basis" => "contractor", "amount" => "1500.00", "ytd" => nil, "kind" => "regular" }
+      ])
+      expect(as_printed(unitemized.fetch("earnings"))).to eq(printed_earnings(current))
+      expect(printed_earnings(current).sole[2]).to eq("$1,500.00")
     end
 
     it "does not return statements from uncommitted payroll" do

@@ -27,8 +27,8 @@ module Api
             record_access!("worker_statement#viewed", record_type: "PayrollItem", record_id: @item.id)
             render json: summary_json(@item).merge(
               earnings: statement.fetch(:earnings).map do |row|
-                { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), amount: money(row[:amount]), ytd: money(row[:ytd]),
-                  kind: row[:kind] }
+                { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), pay_basis: row[:pay_basis],
+                  amount: money(row[:amount]), ytd: money(row[:ytd]), kind: row[:kind] }
               end,
               taxes: statement.fetch(:taxes).map { |row| amount_row(row) },
               deductions: statement.fetch(:deductions).map { |row| amount_row(row) },
@@ -78,8 +78,8 @@ module Api
           # Load the statement as the staff pay stub route does, not from the
           # list preload, so rows print and serialize in the same order.
           def set_statement_item!
-            listed = statement_items.find { |item| item.id.to_s == params[:id].to_s }
-            return not_found unless listed
+            listed = statement_scope.find_by(id: params[:id])
+            return not_found unless listed && statement?(listed)
 
             @item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, :time_tracking_entry_allocations,
               { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company }).find(listed.id)
@@ -94,13 +94,21 @@ module Api
           # Reversed and voided payroll stays listed as voided history; roster rows
           # without statement activity are not statements.
           def statement_items
-            @statement_items ||= @employee.payroll_items.reportable
-              .joins(:pay_period)
-              .where(company_id: @source.company_id, pay_periods: { company_id: @source.company_id, status: "committed" })
+            @statement_items ||= statement_scope
               .includes(:pay_period, :check_events, :direct_deposit_payment_confirmation, :payroll_item_earnings,
                 :payroll_item_deductions, :payroll_item_field_entries, :time_tracking_entry_allocations)
               .order("pay_periods.pay_date DESC, pay_periods.id DESC, payroll_items.id DESC")
-              .select { |item| EarningsStatementEligibility.printable?(item) || voided_history?(item) }
+              .select { |item| statement?(item) }
+          end
+
+          def statement_scope
+            @employee.payroll_items.reportable
+              .joins(:pay_period)
+              .where(company_id: @source.company_id, pay_periods: { company_id: @source.company_id, status: "committed" })
+          end
+
+          def statement?(item)
+            EarningsStatementEligibility.printable?(item) || voided_history?(item)
           end
 
           def voided_history?(item)
