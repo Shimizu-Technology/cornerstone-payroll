@@ -110,6 +110,7 @@ module TimeTracking
         raise ArgumentError, "Voided or reversed historical payroll item" unless item.payroll_included?
 
         earnings = item.payroll_item_earnings.select { |earning| earning.category.in?(%w[regular overtime]) }
+        earnings = [] if OvertimePremium.combined_contract_rows?(item, earnings)
         components = if earnings.any?
           earnings.map { |earning| [ "earning:#{earning.label}", earning.category == "regular" ? "REG" : "OT", decimal(earning.hours) ] }
         elsif item.wage_rate_hours.any?

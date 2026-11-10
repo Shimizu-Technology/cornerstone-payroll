@@ -74,6 +74,7 @@ it.each([
   { employmentType: 'salary', regular: 16, overtime: 0, displayed: 16, split: false },
   { employmentType: 'contractor', regular: 16, overtime: 0, displayed: 0, split: false },
   { employmentType: 'contractor', regular: 0, overtime: 0, displayed: 0, split: false },
+  { employmentType: 'contractor', regular: 74.6, overtime: 1.2, displayed: 75.8, split: false },
 ])('keeps desktop and phone hours consistent for $employmentType ($regular + $overtime → $displayed)', ({ employmentType, regular, overtime, displayed, split }): void => {
   const item = { ...props.sortPayrollItems[0], employment_type: employmentType as PayrollItem['employment_type'], hours_worked: regular, overtime_hours: overtime };
   render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} payrollItemDisplayedHours={() => displayed} /></MemoryRouter>);

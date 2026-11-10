@@ -95,3 +95,18 @@ it('removes cached approval details when a page-one refresh fails', async () => 
   expect(screen.queryByText('Reviewed the missing day.')).toBeNull();
   expect(screen.queryByText(/Oct 7, 2026.*Manager/)).toBeNull();
 });
+
+it('shows a contractor one hours figure per rate without overtime wording', () => {
+  const contractorLine = { ...line, total_hours: 61.8, regular_hours: 60.6, overtime_hours: 1.2 };
+  const contractorItem = { ...item, employment_type: 'contractor', wage_rate_hours: [{ ...item.wage_rate_hours![0], label: 'Flight Hours', rate: 30, regular_hours: 60.6, overtime_hours: 1.2, source_lines: [contractorLine] }] } as PayrollItem;
+  const view = render(<CapturedSourceHours item={contractorItem} payPeriod={payPeriod} />);
+  expect(screen.getByText('61.80 hrs × $30.00')).toBeTruthy();
+  expect(screen.getByText(/Worked Sep 15, 2026 · 61.80 hrs/)).toBeTruthy();
+  expect(view.container.textContent).not.toMatch(/\bOT\b|overtime|regular hrs/i);
+});
+
+it('keeps an employee\'s regular and premium overtime split', () => {
+  const employeeItem = { ...item, employment_type: 'hourly', wage_rate_hours: [{ ...item.wage_rate_hours![0], rate: 20, regular_hours: 40, overtime_hours: 2 }] } as PayrollItem;
+  render(<CapturedSourceHours item={employeeItem} payPeriod={payPeriod} />);
+  expect(screen.getByText(/40.00 regular hrs × \$20.00/).textContent).toContain('2.00 OT hrs × $30.00');
+});

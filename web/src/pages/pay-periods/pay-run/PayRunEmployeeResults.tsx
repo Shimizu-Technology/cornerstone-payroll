@@ -147,7 +147,7 @@ export function PayRunEmployeeResults({
                     <div><dt className="text-xs text-neutral-600">Employee Medicare</dt><dd className="tabular-nums">{formatCurrency(payrollTaxSummary(item).totalMedicare)}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Employer Medicare</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.employer_medicare_tax))}</dd></div>
                   </dl>
-                  {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {toNumber(rate.regular_hours)} REG / {toNumber(rate.overtime_hours)} OT{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
+                  {item.wage_rate_hours?.filter(rate => rate.source_bucket_key).map(rate => <p key={rate.source_bucket_key} className="text-xs text-neutral-600">{rate.label} · {formatCurrency(toNumber(rate.rate))}/hr · {item.employment_type === 'contractor' ? `${Number((toNumber(rate.regular_hours) + toNumber(rate.overtime_hours)).toFixed(2))} hrs` : `${toNumber(rate.regular_hours)} REG / ${toNumber(rate.overtime_hours)} OT`}{capturedSourceContext(rate) ? ` · ${capturedSourceContext(rate)}` : ""}</p>)}
                   {item.correction_pay_basis_hold && <p className="text-xs text-warning-800">Retained saved amounts · {item.correction_pay_basis_hold.reason}</p>}
                   {item.check_number && <p className="text-xs text-neutral-600">Check #{item.check_number}</p>}
                   <div className="grid grid-cols-2 gap-2">
@@ -346,7 +346,7 @@ export function PayRunEmployeeResults({
                                     <div key={`${item.id}-${rate.source_bucket_key || rate.label}-hours`} className="text-xs">
                                       <span className="font-medium text-neutral-900">{rate.label}</span>{' '}
                                       <span className="text-neutral-600">{totalHours}</span>
-                                      {toNumber(rate.overtime_hours) > 0 && (
+                                      {!isContractor && toNumber(rate.overtime_hours) > 0 && (
                                         <span className="text-warning-800 ml-1">({toNumber(rate.overtime_hours)} OT)</span>
                                       )}
                                     </div>
@@ -354,7 +354,7 @@ export function PayRunEmployeeResults({
                                 })}
                               </div>
                             ) : (
-                              <>
+                              isContractor ? <>{Number((regularHours + overtimeHours).toFixed(2))}</> : <>
                                 {regularHours}
                                 {overtimeHours > 0 && (
                                   <span className="text-warning-800 ml-1">+{overtimeHours} OT</span>

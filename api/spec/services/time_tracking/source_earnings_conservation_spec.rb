@@ -15,20 +15,26 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
     ])
   end
 
-  def apply!(same_rate: false, mapping_change: nil, source_kinds: %w[carryover current], signed_acknowledgement: false)
+  def apply!(same_rate: false, mapping_change: nil, source_kinds: %w[carryover current], signed_acknowledgement: false, rate_ids: {}, expect_errors: false)
     category = next_import.raw_payload["employees"].first["adjustments"].first
     mappings = source_kinds.map do |kind|
       { source_category_id: category["source_category_id"], source_category_key: category.dig("category", "key"),
         source_category_name: category.dig("category", "name"), source_kind: kind,
-        employee_wage_rate_id: kind == "carryover" && !same_rate ? carry_rate.id : rate.id }
+        employee_wage_rate_id: rate_ids.fetch(kind) { kind == "carryover" && !same_rate ? carry_rate.id : rate.id } }
     end
     mappings.first.merge!(mapping_change) if mapping_change
     result = TimeTracking::ApplyImportService.new(import: next_import,
       mappings: [ { source_user_id: "42", employee_id: employee.id, wage_rate_mappings: mappings } ], applied_by: actor,
       acknowledge_negative_adjustments: signed_acknowledgement,
       negative_adjustment_note: signed_acknowledgement ? "Reviewed the signed source hours correction." : nil).call
+    return result if expect_errors
+
     expect(result[:errors]).to eq([])
     next_period.payroll_items.find_by!(employee: employee)
+  end
+
+  def earning_rows(item)
+    item.payroll_item_earnings.reload.map { |earning| [ earning.category, earning.label, earning.hours.to_d, earning.rate.to_d, earning.amount.to_d ] }
   end
 
   context "fractional-cent source buckets" do
@@ -99,6 +105,103 @@ RSpec.describe TimeTracking::SourceEarningsConservation do
       lifecycle.approve!
       lifecycle.commit!
       expect(item.reload.gross_pay).to eq(75.0)
+    end
+
+    it "saves one contract-rate row per rate and keeps the source REG/OT split for receipts" do
+      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      item = apply!(same_rate: true, source_kinds: %w[current])
+      item.calculate!
+      label = item.reload.wage_rate_hours.sole.fetch("label")
+
+      expect(earning_rows(item)).to eq([ [ "regular", label, 3.to_d, 25.to_d, 75.to_d ] ])
+      expect(item.wage_rate_hours.sole).to include("regular_hours" => 1, "overtime_hours" => 2)
+      expect(item.time_tracking_entry_allocations.sole).to have_attributes(regular_hours: 1, overtime_hours: 2)
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(earning_rows(item)).to eq([ [ "regular", label, 3.to_d, 25.to_d, 75.to_d ] ])
+      text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item.reload).generate)).pages.map(&:text).join("\n")
+      expect(text).not_to match(/\bOT\b|Overtime/)
+    end
+
+    it "keeps an employee's REG and premium OT rows" do
+      item = apply!(same_rate: true, source_kinds: %w[current])
+      item.calculate!
+      label = item.reload.wage_rate_hours.sole.fetch("label")
+
+      expect(item.gross_pay).to eq(100.0) # 1 x 25 + 2 x 37.50
+      expect(earning_rows(item)).to contain_exactly(
+        [ "regular", label, 1.to_d, 25.to_d, 25.to_d ], [ "overtime", "#{label} OT", 2.to_d, "37.5".to_d, 75.to_d ]
+      )
+      expect(described_class.validate!(item, calculated: true)).to eq(true)
+    end
+
+    it "keeps a committed contractor item paid with a 1.5x OT row readable, printable and unrecalculated" do
+      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      item = apply!(same_rate: true, source_kinds: %w[current])
+      item.calculate!
+      label = item.reload.wage_rate_hours.sole.fetch("label")
+      # Shape saved before contractors earned one contract-rate row.
+      item.payroll_item_earnings.delete_all
+      item.payroll_item_earnings.create!(category: "regular", label: label, hours: 1, rate: 25, amount: 25)
+      item.payroll_item_earnings.create!(category: "overtime", label: "#{label} OT", hours: 2, rate: "37.5", amount: 75)
+      item.update_columns(gross_pay: 100, net_pay: 100)
+      next_period.update_columns(status: "committed", committed_at: Time.current)
+      item.reload
+
+      expect(described_class.validate!(item)).to eq(true)
+      expect(described_class.validate!(item, calculated: true)).to eq(true)
+      expect(described_class.hold_reason(item)).to be_nil
+      expect(item.update(check_printed_at: Time.current)).to eq(true)
+      text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item.reload).generate)).pages.map(&:text).join("\n")
+      expect(text).to include("OT", "100.00")
+      item.update_columns(check_number: "3155")
+      check = PDF::Reader.new(StringIO.new(CheckGenerator.new(item.reload).generate)).pages.map(&:text).join("\n")
+      expect(check).to include("100.00")
+      expect(earning_rows(item)).to contain_exactly(
+        [ "regular", label, 1.to_d, 25.to_d, 25.to_d ], [ "overtime", "#{label} OT", 2.to_d, "37.5".to_d, 75.to_d ]
+      )
+    end
+  end
+
+  context "a signed multi-rate REG/OT correction" do
+    let(:next_import) do
+      make_import(next_period, 1, "current", "SIGNED-MULTI", daily_lines: [
+        { source_time_entry_id: "101", line_key: "reclassified-line", source_kind: "correction", source_time_entry_version: 1,
+          original_work_date: "2026-10-10", total_hours: 0, regular_hours: 1, overtime_hours: -1 },
+        { source_time_entry_id: "104", line_key: "current-line", source_kind: "current", source_time_entry_version: 1,
+          original_work_date: "2026-10-20", original_week_start: "2026-10-18", total_hours: 1, regular_hours: 0, overtime_hours: 1 }
+      ])
+    end
+
+    before { rate.update!(rate: 100) }
+
+    def apply_signed!(**options)
+      apply!(source_kinds: %w[correction current], signed_acknowledgement: true,
+        rate_ids: { "correction" => rate.id, "current" => carry_rate.id }, **options)
+    end
+
+    it "accepts a contractor's positive contract-rate gross (+$10) through commit" do
+      employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly")
+      item = apply_signed!
+      item.calculate!
+
+      expect(item.reload.gross_pay).to eq(10.0) # (1 - 1) x 100 + 1 x 10
+      expect(item).to have_attributes(hours_worked: 1, overtime_hours: 0)
+      expect(earning_rows(item)).to eq([ [ "regular", item.wage_rate_hours.find { |entry| entry["rate"].to_d == 10 }.fetch("label"), 1.to_d, 10.to_d, 10.to_d ] ])
+      next_period.update!(status: "calculated")
+      lifecycle = PayPeriodLifecycleService.new(pay_period: next_period, actor: actor)
+      lifecycle.approve!
+      lifecycle.commit!
+      expect(item.reload.gross_pay).to eq(10.0)
+    end
+
+    it "blocks the same import for an employee, whose premium makes it -$35" do
+      result = apply_signed!(expect_errors: true)
+
+      expect(result[:errors]).to contain_exactly(include(error: /negative Cornerstone payroll gross adjustment/))
+      expect(next_period.payroll_items.where(employee: employee)).not_to exist
     end
   end
 

@@ -277,15 +277,25 @@ module TimeTracking
         # Match rollout/source writers: source row before import table/row locks.
         source.lock!
         existing = TimeTrackingImport.lock.find_by(time_tracking_source: source, external_batch_id: batch_id)
-        return validate_existing_import!(existing, checksum) if existing
+        return refresh_existing_preview!(validate_existing_import!(existing, checksum), processed, warnings) if existing
 
         begin
           TimeTrackingImport.transaction(requires_new: true) { TimeTrackingImport.create!(attrs) }
         rescue ActiveRecord::RecordNotUnique
           existing = TimeTrackingImport.lock.find_by!(time_tracking_source: source, external_batch_id: batch_id)
-          validate_existing_import!(existing, checksum)
+          refresh_existing_preview!(validate_existing_import!(existing, checksum), processed, warnings)
         end
       end
+    end
+
+    # The source batch is immutable, but its review (matches, rates, estimates,
+    # warnings) follows current payroll setup until the import is applied.
+    # Applied imports are payroll evidence and are never rewritten.
+    def refresh_existing_preview!(import, processed, warnings)
+      return import unless import.status == "previewed"
+
+      import.update!(processed_payload: processed, warnings: warnings)
+      import
     end
 
     def validate_existing_import!(import, checksum)
