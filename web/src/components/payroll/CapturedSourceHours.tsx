@@ -6,6 +6,7 @@ import { capturedSourceContext } from '@/lib/captured-source-worksheet';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
 import type { AirePayrollTimeEntry, PayPeriod, PayrollItem } from '@/types';
 import type { PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
+import { overtimeMultiplier } from '@/lib/overtime';
 
 // Saved evidence stays readable even when the source connection is unavailable.
 export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; payPeriod: PayPeriod }) {
@@ -63,7 +64,7 @@ export function CapturedSourceHours({ item, payPeriod }: { item: PayrollItem; pa
         return <section key={rate.source_bucket_key || index} className="min-w-0 rounded-xl border border-neutral-200 p-4">
         <p className="break-words text-sm font-semibold text-neutral-950">{rate.label}</p>
         <p className="mt-1 break-words text-sm font-medium text-primary-800">{capturedSourceContext(rate)}</p>
-        <p className="mt-2 text-sm tabular-nums text-neutral-700">{Number(rate.regular_hours).toFixed(2)} regular hrs × {formatCurrency(Number(rate.rate))}{Number(rate.overtime_hours) !== 0 && <> · {Number(rate.overtime_hours).toFixed(2)} OT hrs × {formatCurrency(Number(rate.rate) * 1.5)}</>}</p>
+        <p className="mt-2 text-sm tabular-nums text-neutral-700">{Number(rate.regular_hours).toFixed(2)} regular hrs × {formatCurrency(Number(rate.rate))}{Number(rate.overtime_hours) !== 0 && <> · {Number(rate.overtime_hours).toFixed(2)} OT hrs × {formatCurrency(Number(rate.rate) * overtimeMultiplier(item.employment_type))}</>}</p>
         {Boolean(savedEarnings?.length) && <p className="mt-1 text-sm font-semibold tabular-nums">Saved hourly earnings: {formatCurrency(savedEarnings!.reduce((sum, entry) => sum + Number(entry.amount), 0))}</p>}
         <details className="mt-3 text-sm"><summary className="min-h-11 cursor-pointer py-3 font-semibold text-primary-700">Original source entries</summary>
           <ul className="space-y-2">{rate.source_lines!.map(line => <li key={`${line.source_time_entry_id}:${line.line_key}`} className="break-words rounded-lg bg-neutral-50 p-3">

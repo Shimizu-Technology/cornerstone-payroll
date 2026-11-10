@@ -30,6 +30,13 @@ RSpec.describe "Configured AIRE import categories" do
     expect(preview.send(:find_wage_rate, { key: "aire_ground_instruction", name: "Ground Instruction" }, [ plain, hours ], employee_id: employee.id)).to eq([ plain, "label" ])
   end
 
+  it "estimates a contractor's reported overtime at the contract rate" do
+    category = { payroll_rate_cents: 3000, regular_hours: 1, overtime_hours: 2 }
+
+    expect(preview.send(:payroll_gross_delta_cents, [ category ], OvertimePremium.multiplier("contractor"))).to eq(9000)
+    expect(preview.send(:payroll_gross_delta_cents, [ category ], OvertimePremium.multiplier("hourly"))).to eq(12000)
+  end
+
   it "uses configured Maintenance first, then Regular, and blocks when neither exists" do
     policy = TimeTrackingCategoryMapping.create!(company: company, time_tracking_source: source, source_category_key: "maintenance",
       earning_label: "Maintenance", fallback_earning_label: "Regular", import_enabled: true, reviewed_by: actor,
