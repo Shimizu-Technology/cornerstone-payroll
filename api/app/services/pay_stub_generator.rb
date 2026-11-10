@@ -272,13 +272,23 @@ class PayStubGenerator
 
   def itemized_earning_rate(row)
     return format_currency(row.rate) if row.rate.present?
-    return "—" if row.current.zero? || stored_earning_rows?
 
-    case row.category.to_s
-    when "salary" then "#{format_currency(payroll_item.pay_rate)}/yr"
-    when "contract_fee" then format_currency(payroll_item.pay_rate)
-    else "—"
-    end
+    pay_basis = fallback_pay_basis(row)
+    pay_basis ? printed_rate(payroll_item.pay_rate, pay_basis) : "—"
+  end
+
+  # A reconstructed salary or contract-fee row has no stored rate; the stub
+  # prints the paycheck's own pay rate on its pay basis instead.
+  def fallback_pay_basis(row)
+    return if row.current.zero? || stored_earning_rows?
+
+    { "salary" => "salary", "contract_fee" => "contractor" }[row.category.to_s]
+  end
+
+  def printed_rate(rate, pay_basis)
+    return "—" if rate.nil? && pay_basis.nil?
+
+    pay_basis == "salary" ? "#{format_currency(rate)}/yr" : format_currency(rate)
   end
 
   def stored_earning_rows?
@@ -287,16 +297,20 @@ class PayStubGenerator
 
   # Earning lines as printed, in print order, including YTD-only rows (a zero
   # current amount with earlier pay this year). YTD is nil wherever the PDF
-  # prints "—" because the year cannot be attributed row by row.
+  # prints "—" because the year cannot be attributed row by row. The rate is
+  # the one printed; pay_basis is set where that rate is the paycheck's own
+  # salary ("salary", printed per year) or contract fee ("contractor").
   def statement_earnings
     lines = if (rows = itemized_earnings_rows)
       rows.map do |row|
-        { label: itemized_earning_label(row), hours: row.hours, rate: row.rate, amount: row.current, ytd: row.ytd, category: row.category }
+        pay_basis = fallback_pay_basis(row) unless row.rate.present?
+        { label: itemized_earning_label(row), hours: row.hours, rate: pay_basis ? payroll_item.pay_rate : row.rate,
+          pay_basis: pay_basis, amount: row.current, ytd: row.ytd, category: row.category }
       end
     else
       unitemized_earning_lines
     end
-    lines.map { |line| line.slice(:label, :hours, :rate, :amount, :ytd).merge(kind: statement_earning_kind(line[:category])) }
+    lines.map { |line| line.slice(:label, :hours, :rate, :pay_basis, :amount, :ytd).merge(kind: statement_earning_kind(line[:category])) }
   end
 
   def statement_earning_kind(category)
@@ -312,15 +326,15 @@ class PayStubGenerator
       [
         line[:label],
         line[:hours].nil? ? "—" : format_hours(line[:hours]),
-        line[:rate_text] || (line[:rate].nil? ? "—" : format_currency(line[:rate])),
+        printed_rate(line[:rate], line[:pay_basis]),
         format_currency(line[:amount]),
         line[:ytd].nil? ? "—" : format_currency(line[:ytd])
       ]
     end
   end
 
-  def earning_line(label, hours, rate, amount, category, rate_text: nil, ytd: nil)
-    { label: label, hours: hours, rate: rate, amount: amount, category: category, rate_text: rate_text, ytd: ytd }
+  def earning_line(label, hours, rate, amount, category, pay_basis: nil, ytd: nil)
+    { label: label, hours: hours, rate: rate, pay_basis: pay_basis, amount: amount, category: category, ytd: ytd }
   end
 
   def unitemized_earning_lines
@@ -357,35 +371,35 @@ class PayStubGenerator
       # Regular pay
       if payroll_item.hours_worked.to_f > 0
         earnings_data << earning_line("Regular", payroll_item.hours_worked, payroll_item.pay_rate,
-          payroll_item.hours_worked.to_f * payroll_item.pay_rate, "regular")
+          payroll_item.hours_worked.to_d * payroll_item.pay_rate.to_d, "regular")
       end
 
       # Overtime
       if payroll_item.overtime_hours.to_f > 0
-        earnings_data << earning_line("Overtime (1.5x)", payroll_item.overtime_hours, payroll_item.pay_rate * 1.5,
-          payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5, "overtime")
+        overtime_rate = payroll_item.pay_rate.to_d * BigDecimal("1.5")
+        earnings_data << earning_line("Overtime (1.5x)", payroll_item.overtime_hours, overtime_rate,
+          payroll_item.overtime_hours.to_d * overtime_rate, "overtime")
       end
 
       # Holiday
       if payroll_item.holiday_hours.to_f > 0
         earnings_data << earning_line("Holiday", payroll_item.holiday_hours, payroll_item.pay_rate,
-          payroll_item.holiday_hours.to_f * payroll_item.pay_rate, "holiday")
+          payroll_item.holiday_hours.to_d * payroll_item.pay_rate.to_d, "holiday")
       end
 
       # PTO
       if payroll_item.pto_hours.to_f > 0
         earnings_data << earning_line("PTO", payroll_item.pto_hours, payroll_item.pay_rate,
-          payroll_item.pto_hours.to_f * payroll_item.pay_rate, "pto")
+          payroll_item.pto_hours.to_d * payroll_item.pay_rate.to_d, "pto")
       end
     else
       # Subtract separately displayed taxable additions from the legacy base pay.
-      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
+      ce_total = Array(payroll_item.custom_earnings).sum(0.to_d) { |ce| ce["amount"].to_d } + payroll_item.taxable_payroll_adjustments_total.to_d
       contractor = payroll_item.employee.contractor?
-      earnings_data << earning_line(contractor ? "Contract Fee" : "Salary", nil, nil,
-        payroll_item.gross_pay - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f -
-          payroll_item.service_charge_wages.to_f - ce_total - payroll_item.taxable_payroll_field_entries_total.to_f,
-        contractor ? "contract_fee" : "salary",
-        rate_text: contractor ? format_currency(payroll_item.pay_rate) : "#{format_currency(payroll_item.pay_rate)}/yr")
+      earnings_data << earning_line(contractor ? "Contract Fee" : "Salary", nil, payroll_item.pay_rate,
+        payroll_item.gross_pay.to_d - payroll_item.bonus.to_d - payroll_item.reported_tips.to_d -
+          payroll_item.service_charge_wages.to_d - ce_total - payroll_item.taxable_payroll_field_entries_total.to_d,
+        contractor ? "contract_fee" : "salary", pay_basis: contractor ? "contractor" : "salary")
     end
 
     if correction_earnings.nil?
@@ -411,7 +425,7 @@ class PayStubGenerator
       # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
       Array(payroll_item.custom_earnings).each do |ce|
         label = ce["label"].presence || "Other Earning"
-        amt = ce["amount"].to_f
+        amt = ce["amount"].to_d
         if amt > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
           earnings_data << earning_line(label, nil, nil, amt, "other")
         end
@@ -421,7 +435,7 @@ class PayStubGenerator
         next unless adjustment["treatment"] == "taxable_addition"
 
         label = adjustment["label"].presence || "Taxable Adjustment"
-        amount = adjustment["amount"].to_f
+        amount = adjustment["amount"].to_d
         if amount > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
           earnings_data << earning_line(label, nil, nil, amount, "other")
         end
