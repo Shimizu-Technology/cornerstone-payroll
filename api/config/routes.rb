@@ -26,6 +26,11 @@ Rails.application.routes.draw do
 
       namespace :integrations do
         post "time_payroll/events", to: "aire/events#create"
+        scope "time_payroll/workers/:source_user_uuid", controller: "aire/worker_statements", format: false do
+          get "statements", action: :index
+          get "statements/:id", action: :show, constraints: { id: /\d+/ }
+          get "statements/:id/pdf", action: :pdf, constraints: { id: /\d+/ }
+        end
         namespace :aire do
           post :events, to: "events#create"
         end
