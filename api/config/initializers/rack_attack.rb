@@ -22,6 +22,20 @@ class Rack::Attack
     throttle_ip(request) if request.path.match?(%r{\A/api/(?:v1/)?(?:auth|sessions|invitations)})
   end
 
+  # AIRE proxies every worker from its own servers, so the per-IP API limit is
+  # shared. Also bound each worker's statement reads; PDFs are costlier.
+  WORKER_STATEMENTS_PATH = %r{\A/api/v1/integrations/time_payroll/workers/([^/]+)/statements(?:/\d+(/pdf)?)?/?\z}
+
+  throttle("worker_statements/worker", limit: ENV.fetch("WORKER_STATEMENT_THROTTLE_LIMIT", 60).to_i, period: 1.minute) do |request|
+    match = WORKER_STATEMENTS_PATH.match(request.path)
+    "#{throttle_ip(request)}:#{match[1].downcase}" if match
+  end
+
+  throttle("worker_statements/pdf", limit: ENV.fetch("WORKER_STATEMENT_PDF_THROTTLE_LIMIT", 20).to_i, period: 1.minute) do |request|
+    match = WORKER_STATEMENTS_PATH.match(request.path)
+    "#{throttle_ip(request)}:#{match[1].downcase}" if match && match[2]
+  end
+
   self.throttled_responder = lambda do |request|
     match_data = request.env["rack.attack.match_data"] || {}
     retry_after = match_data[:period].to_i
