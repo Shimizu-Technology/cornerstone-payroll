@@ -32,13 +32,25 @@ class ClientPortalThread < ApplicationRecord
     [ read_baseline_message_id, read_receipts.find_by(user_id: user.id)&.last_displayed_message_id || 0 ].max
   end
 
-  def mark_read_for!(user, last_displayed_message_id:)
+  # The cursor moves only through messages the user was shown. An unshown
+  # message from someone else stops it, so that message stays unread.
+  def mark_read_for!(user, displayed_message_ids:)
     with_lock do
-      message = messages.find(last_displayed_message_id)
-      receipt = read_receipts.find_or_initialize_by(user: user)
-      return false if message.id <= read_cursor_for(user)
+      shown = displayed_message_ids.map(&:to_i).to_set
+      raise ActiveRecord::RecordNotFound, "Message not in this conversation" if messages.where(id: shown.to_a).count != shown.size
 
-      receipt.update!(last_displayed_message_id: message.id, opened_at: Time.current)
+      cursor = read_cursor_for(user)
+      reached = cursor
+      messages.where("id > ?", cursor).order(:id).pluck(:id, :author_id, :created_at).each do |id, author_id, created_at|
+        counts_as_unread = author_id != user.id && created_at >= user.created_at
+        break if counts_as_unread && !shown.include?(id)
+
+        reached = id
+      end
+      return false if reached <= cursor
+
+      receipt = read_receipts.find_or_initialize_by(user: user)
+      receipt.update!(last_displayed_message_id: reached, opened_at: Time.current)
       update!(self.class.staff_user?(user) ? { staff_last_read_at: Time.current } : { client_last_read_at: Time.current })
       true
     end

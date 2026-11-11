@@ -103,6 +103,14 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     const response = await api.get(id);
     return threadFetchVersions.current.get(id) === version ? response : null;
   }, [api]);
+  // List pages also carry an unread count. Apply one only if no count request
+  // started after the page was requested, and retire any older one in flight.
+  const applyPageUnreadCount = useCallback((requestedAt: number, count: number | undefined): void => {
+    if (requestedAt !== unreadFetchVersion.current) return;
+    unreadFetchVersion.current += 1;
+    setUnreadCount(count ?? null);
+  }, []);
+
   const refreshUnreadCount = useCallback(async (): Promise<void> => {
     const generation = dataGeneration.current;
     const version = ++unreadFetchVersion.current;
@@ -153,6 +161,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const loadThreads = useCallback(async () => {
     if (!companyId || unavailableRef.current) return;
     const generation = dataGeneration.current;
+    const unreadRequestedAt = unreadFetchVersion.current;
     try {
       setLoading(true);
       setError(null);
@@ -161,7 +170,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       const companyThreads = response.data.filter(thread => thread.company_id === companyId);
       setThreads(companyThreads);
       setThreadsMeta(response.meta ?? null);
-      setUnreadCount(response.meta?.unread_count ?? null);
+      applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
       resetThreadCounts(companyThreads);
       setLoadMoreError(null);
       setSelectedId((current) => current || response.data.find(thread => thread.company_id === companyId)?.id || null);
@@ -170,7 +179,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     } finally {
       if (generation === dataGeneration.current && !unavailableRef.current) setLoading(false);
     }
-  }, [api, companyId, resetThreadCounts, setError]);
+  }, [api, applyPageUnreadCount, companyId, resetThreadCounts, setError]);
 
   useEffect(() => {
     void loadThreads();
@@ -181,6 +190,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     const generation = dataGeneration.current;
     // Live conversations that arrived before this request are in its total_count.
     const countedByRequest = [...liveNewThreadIdsRef.current];
+    const unreadRequestedAt = unreadFetchVersion.current;
     try {
       setLoadingMore(true);
       setLoadMoreError(null);
@@ -192,7 +202,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       updateLiveNewThreadIds(ids => ids.filter(id => !nowCounted.has(id)));
       setThreads((current) => appendUniqueById(current, pageThreads));
       setThreadsMeta(response.meta ?? null);
-      setUnreadCount(response.meta?.unread_count ?? null);
+      applyPageUnreadCount(unreadRequestedAt, response.meta?.unread_count);
     } catch (err) {
       if (generation === dataGeneration.current) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more conversations');
     } finally {

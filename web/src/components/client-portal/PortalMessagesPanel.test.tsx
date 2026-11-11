@@ -284,3 +284,25 @@ it('refreshes the personal badge without loading conversation lists on a broadca
   expect(api.list.mock.calls.length).toBe(lists);
   expect(api.unreadCount).toHaveBeenCalledOnce();
 });
+
+it('keeps a newer badge count when an older Load more page finishes last', async () => {
+  const meta = (page: number) => ({ current_page: page, total_pages: 2, total_count: 2, per_page: 1, unread_count: 1 });
+  const first = { ...thread(2, 'Newest conversation'), id: 2 };
+  let finishPage!: (value: Awaited<ReturnType<ThreadsApi['list']>>) => void;
+  api.list.mockImplementation((params) => params?.page === 2
+    ? new Promise(resolve => { finishPage = resolve; })
+    : Promise.resolve({ data: [first], meta: meta(1) }));
+  api.get.mockResolvedValue({ data: first });
+  render(view());
+  await screen.findByText('1 unread');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+  await waitFor(() => expect(api.list).toHaveBeenLastCalledWith({ page: 2 }));
+  api.unreadCount.mockResolvedValue({ data: { unread_count: 0 } });
+  await act(async () => mocks.callbacks[0].onThread({ thread: first }));
+  await screen.findByText('0 unread');
+
+  await act(async () => finishPage({ data: [{ ...thread(2, 'Older conversation'), id: 1 }], meta: meta(2) }));
+  await screen.findByText('Older conversation');
+  expect(screen.getByText('0 unread')).toBeTruthy();
+});
