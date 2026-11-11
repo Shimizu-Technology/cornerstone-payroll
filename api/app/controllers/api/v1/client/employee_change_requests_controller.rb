@@ -23,7 +23,9 @@ module Api
             )
           end
 
-          render json: { data: requests.map { |request| serialize_change_request(request) } }
+          requests = bounded_page(requests)
+
+          render json: { data: requests.map { |request| serialize_change_request(request) }, meta: bounded_page_meta(requests) }
         end
 
         def show

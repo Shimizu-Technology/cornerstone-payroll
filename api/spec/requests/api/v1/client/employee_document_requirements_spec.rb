@@ -28,6 +28,8 @@ RSpec.describe "Api::V1::Client::EmployeeDocumentRequirements", type: :request d
   end
 
   before do
+    CompanyAssignment.create!(user: client_user, company: company)
+    allow_any_instance_of(Api::V1::Client::EmployeeDocumentRequirementsController).to receive(:current_user).and_return(client_user)
     allow_any_instance_of(Api::V1::Client::EmployeeDocumentRequirementsController).to receive(:current_company_id).and_return(company.id)
   end
 

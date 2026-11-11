@@ -11,6 +11,7 @@ class Employee < ApplicationRecord
   PAYMENT_DELIVERY_METHODS = %w[paper_check direct_deposit].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
+  CONTRACTOR_ONLY_ATTRIBUTES = %i[business_name contractor_ein contractor_type contractor_pay_type w9_on_file].freeze
   MIN_SUPPORTED_W4_FORM_VERSION = 2020
   LEGACY_SOCIAL_SECURITY_RATE = BigDecimal("0.062")
   YTD_AGGREGATE_SOURCE_COLUMNS = {
@@ -125,6 +126,12 @@ class Employee < ApplicationRecord
   encrypts :ssn_encrypted, deterministic: true
   encrypts :bank_routing_number_encrypted
   encrypts :bank_account_number_encrypted
+  # A business contractor's EIN is a tax identifier, protected like the SSN.
+  # Plaintext reads stay supported only while the in-place backfill
+  # (EncryptEmployeeContractorEins) rolls out; EncryptedDataReadiness fails
+  # until no plaintext EIN remains, after which this tolerance can be removed.
+  encrypts :contractor_ein, deterministic: true, support_unencrypted_data: true
+  normalizes :contractor_ein, with: ->(value) { value.to_s.strip.presence }
 
   validates :w4_source_reference, length: { maximum: 255 }, allow_nil: true
   validates :first_name, presence: true
