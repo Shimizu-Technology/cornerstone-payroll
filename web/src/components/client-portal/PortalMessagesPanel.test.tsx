@@ -211,3 +211,24 @@ it('keeps the thread response archive tombstone when the document list is stale'
   expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
 });
+
+it('re-reads the open conversation after unarchive so the restored file can be attached again', async () => {
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-12T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const restored = { ...archived, archived_at: null };
+  const messageWith = (document: typeof archived) => ({ ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document }] } as ClientPortalThread);
+  api.list.mockResolvedValue({ data: [messageWith(archived)] });
+  api.get.mockResolvedValue({ data: messageWith(archived) });
+  const rendered = render(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />);
+  expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
+  const reads = api.get.mock.calls.length;
+
+  api.get.mockResolvedValue({ data: messageWith(restored) });
+  rendered.rerender(<PortalMessagesPanel api={api} documents={[restored]} audienceLabel="client" description="Client messages" />);
+  await waitFor(() => expect(screen.queryByText('File archived: Payroll hours (hours.csv)')).toBeNull());
+  expect(api.get.mock.calls.length).toBe(reads + 1);
+  expect(screen.getAllByRole('option', { name: 'Payroll hours (hours.csv)' }).length).toBeGreaterThan(0);
+
+  // An unchanged list does not re-read the conversation.
+  rendered.rerender(<PortalMessagesPanel api={api} documents={[{ ...restored }]} audienceLabel="client" description="Client messages" />);
+  expect(api.get.mock.calls.length).toBe(reads + 1);
+});

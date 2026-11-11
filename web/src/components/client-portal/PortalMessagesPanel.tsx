@@ -237,6 +237,32 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     };
   }, [api, companyId, selectedId, setError]);
 
+  // A changed archive marker in the documents list follows an archive or
+  // unarchive, so re-read the open conversation. Its own markers stay
+  // authoritative over list data that has not changed.
+  const documentArchiveSignature = useMemo(
+    () => documents.map(document => `${document.id}:${document.archived_at ?? ''}`).join(','),
+    [documents]
+  );
+  const seenArchiveSignature = useRef(documentArchiveSignature);
+  useEffect(() => {
+    if (seenArchiveSignature.current === documentArchiveSignature) return;
+    seenArchiveSignature.current = documentArchiveSignature;
+    if (!selectedId || unavailableRef.current) return;
+
+    let active = true;
+    api.get(selectedId)
+      .then((response) => {
+        if (!active || unavailableRef.current || response.data.company_id !== companyId) return;
+        setSelectedThread(current => (current?.id === response.data.id ? response.data : current));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [api, companyId, documentArchiveSignature, selectedId]);
+
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (unavailableRef.current) return;
