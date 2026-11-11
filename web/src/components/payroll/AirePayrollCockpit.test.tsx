@@ -668,6 +668,24 @@ describe('AirePayrollCockpit', () => {
     await waitFor(() => expect(onSourceChanged).toHaveBeenCalledOnce());
   });
 
+  it('labels a shift time tracking auto-approved instead of crediting an administrator', async () => {
+    const data = fixtures();
+    const approvedState = { ...timeEntry.state, approval_status: 'approved', payable_now: true, payroll_disposition: 'included', payroll_exclusion_reasons: [] };
+    data.entries.time_entries = [
+      { ...timeEntry, state: approvedState,
+        approval: { actor: null, auto_approved: true, occurred_at: '2026-10-14T09:10:00Z', note: 'Auto-approved: ordinary shift' } },
+      { ...timeEntry, id: '43', employee: { ...timeEntry.employee, name: 'Tasi Reyes' }, state: approvedState,
+        approval: { actor: null, auto_approved: false, occurred_at: '2026-10-14T09:10:00Z', note: null } },
+    ];
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    const autoLine = await screen.findByText(/^Auto-approved · /);
+    expect(autoLine.textContent).not.toContain('time tracking administrator');
+    expect(autoLine.textContent).not.toContain('Auto-approved: ordinary shift');
+    expect(screen.getAllByText(/^Time approved by time tracking administrator · /)).toHaveLength(1);
+  });
+
   it('shows the payment hold when historical payment confirmation is pending', async () => {
     const data = fixtures();
     data.entries.time_entries = [{ ...timeEntry, state: { ...timeEntry.state,
