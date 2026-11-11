@@ -349,7 +349,11 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         <Badge variant={approvalTone(entry)}>{statusLabel}</Badge>
         {showLifecycle && entry.lifecycle && <Badge variant={lifecycleTone(entry.lifecycle.status)}>{entry.lifecycle.label}</Badge>}
         {entry.state.missing_punch && <Badge variant="danger">Missing punch</Badge>}
-        {entry.approval?.occurred_at && (
+        {entry.approval?.auto_approved ? (
+          <p className="basis-full text-xs leading-5 text-neutral-500">
+            Auto-approved{entry.approval.occurred_at ? ` · ${formatGuamDateTime(entry.approval.occurred_at)}` : ''}
+          </p>
+        ) : entry.approval?.occurred_at && (
           <p className="basis-full text-xs leading-5 text-neutral-500">
             Time {entry.state.approval_status} by {entry.approval.actor?.name || 'time tracking administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
             {entry.approval.note ? ` · ${entry.approval.note}` : ''}
