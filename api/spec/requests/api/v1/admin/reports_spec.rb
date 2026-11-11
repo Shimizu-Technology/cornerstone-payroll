@@ -2641,7 +2641,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(response).to have_http_status(:ok), response.body
       expect(response.headers.fetch("Content-Disposition")).to include("quickbooks_payroll_register")
-      pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
       expect(pdf_text).to include("QuickBooks import")
       expect(pdf_text).to include("cannot be edited or recalculated")
 
