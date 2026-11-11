@@ -18,6 +18,9 @@ class StaffRolePolicy
     manage_filing_review: %w[super_admin org_admin admin manager accountant],
     view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
+    # Lock now or move an AIRE pay period's lock time. Deliberately narrower
+    # than client configuration: platform and organization admins only.
+    manage_time_tracking_lock: %w[super_admin org_admin],
     manage_client_administration: %w[super_admin org_admin admin],
     manage_own_aire_account_link: %w[super_admin org_admin admin manager accountant],
     manage_historical_time_reconciliation: %w[super_admin org_admin admin manager accountant],
@@ -39,6 +42,7 @@ class StaffRolePolicy
     manage_filing_review: "Filing review access required",
     view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager, admin, or Client management access required",
+    manage_time_tracking_lock: "Only organization admins can change the time tracking lock time",
     manage_client_administration: "Admin access required or Client management for this client",
     manage_own_aire_account_link: "Payroll staff access required to connect your own AIRE account",
     manage_historical_time_reconciliation: "Historical time reconciliation access required",
@@ -118,6 +122,7 @@ class StaffRolePolicy
     "api/v1/admin/aire_payroll_calendars#refresh" => :payroll_operations,
     "api/v1/admin/aire_payroll_calendars#publish" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_calendars#retry_delivery" => :manage_client_configuration,
+    "api/v1/admin/aire_payroll_calendars#change_cutoff" => :manage_time_tracking_lock,
     "api/v1/admin/aire_payroll_cockpits#approve_time_entry" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#approve_time_entry_overtime" => :manage_client_configuration,
     "api/v1/admin/aire_payroll_cockpits#correct_time_entry" => :manage_client_configuration,

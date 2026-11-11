@@ -840,3 +840,14 @@ FOR EACH ROW EXECUTE FUNCTION protect_aire_history_review();
 DROP TRIGGER IF EXISTS aire_history_review_prevent_truncate ON aire_history_reviews;
 CREATE TRIGGER aire_history_review_prevent_truncate BEFORE TRUNCATE ON aire_history_reviews
 FOR EACH STATEMENT EXECUTE FUNCTION protect_aire_history_review();
+-- 20261111000000_create_aire_payroll_cutoff_overrides.rb
+CREATE OR REPLACE FUNCTION protect_aire_payroll_cutoff_override()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'AIRE payroll cutoff overrides are append-only';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS aire_payroll_cutoff_overrides_append_only ON aire_payroll_cutoff_overrides;
+CREATE TRIGGER aire_payroll_cutoff_overrides_append_only
+BEFORE UPDATE OR DELETE ON aire_payroll_cutoff_overrides
+FOR EACH ROW EXECUTE FUNCTION protect_aire_payroll_cutoff_override();

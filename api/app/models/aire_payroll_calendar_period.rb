@@ -32,6 +32,16 @@ class AirePayrollCalendarPeriod < ApplicationRecord
     publications.where(delivery_status: "delivered").reorder(schedule_version: :desc).first
   end
 
+  # A newer publication AIRE has not confirmed: still being delivered, or
+  # refused. Until AIRE confirms it, the delivered publication is in effect.
+  def undelivered_publication
+    latest = latest_publication
+    return if latest.nil? || latest.delivered?
+
+    applied = latest_delivered_publication
+    latest if applied.nil? || latest.schedule_version > applied.schedule_version
+  end
+
   def latest_verified_event
     payroll_events.verified.order(occurred_at: :desc, id: :desc).first
   end

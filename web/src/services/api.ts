@@ -1373,6 +1373,11 @@ export const payPeriodsApi = {
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/refresh`
     ),
+  changeAireCutoff: (id: number, body: { lock_action: 'lock_now' | 'change' | 'reset'; reason: string; cutoff_at?: string; request_id: string }) =>
+    api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState; idempotent: boolean }>(
+      `/admin/pay_periods/${id}/aire_payroll_calendar/change_cutoff`,
+      body
+    ),
   retryAireCalendarDelivery: (id: number) =>
     api.post<{ aire_payroll_calendar: import('@/types').AirePayrollCalendarState }>(
       `/admin/pay_periods/${id}/aire_payroll_calendar/retry_delivery`

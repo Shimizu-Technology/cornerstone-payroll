@@ -19,6 +19,7 @@ import type { AirePayrollCalendarState, AirePayrollRecord, PayPeriodStatus } fro
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { AireLockTimeControl } from './AireLockTimeControl';
 
 type Props = {
   payPeriodId: number;
@@ -26,6 +27,8 @@ type Props = {
   payPeriodStatus?: PayPeriodStatus;
   linkedRecord?: Pick<AirePayrollRecord, 'source_cutoff_at'> | null;
   onRefresh: () => Promise<void> | void;
+  /** False when the caller already shows the lock time outside this card. */
+  showLockTime?: boolean;
 };
 
 const stateLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
@@ -53,7 +56,7 @@ function statusTone(state: AirePayrollCalendarState['cutoff_state']) {
   return 'default' as const;
 }
 
-export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, linkedRecord, onRefresh }: Props) {
+export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, linkedRecord, onRefresh, showLockTime = true }: Props) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
@@ -154,6 +157,10 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
             )}
           </div>
         </div>
+
+        {showLockTime && !recordedWithoutSchedule && !batch && (
+          <AireLockTimeControl payPeriodId={payPeriodId} calendar={calendar} companyId={scopeCompanyId} now={now} onChanged={onRefresh} />
+        )}
 
         {!manualLock && !recordedWithoutSchedule && ['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
           <p className="font-semibold">Cutoff reached — waiting for time tracking to lock the hours</p>

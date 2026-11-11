@@ -5,6 +5,7 @@ module Api
     module Admin
       class AirePayrollCalendarsController < BaseController
         include ConnectedPayrollControl
+        UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
         before_action :require_connected_payroll!, except: :show
         before_action :set_pay_period
 
@@ -49,6 +50,26 @@ module Api
           end
           AirePayrollCalendarPublication.dispatch_one!(publication.id)
           render json: { aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period.reload) }
+        end
+
+        def change_cutoff
+          @pay_period.company.with_lock do
+            revalidate_current_company_write_access!(company: @pay_period.company, capability: :manage_time_tracking_lock)
+          end
+          result = AirePayrollCalendar::CutoffChange.new(
+            pay_period: @pay_period,
+            action: params[:lock_action],
+            cutoff_at: params[:cutoff_at],
+            reason: params[:reason],
+            actor: current_user,
+            request_id: params[:request_id].to_s.match?(UUID_FORMAT) ? params[:request_id] : nil
+          ).call
+          render json: {
+            aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period.reload),
+            idempotent: result.idempotent
+          }, status: result.idempotent ? :ok : :created
+        rescue AirePayrollCalendar::CutoffChange::Error => e
+          render json: { error: e.message }, status: e.status
         end
 
         private

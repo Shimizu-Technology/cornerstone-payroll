@@ -1,0 +1,32 @@
+{
+  "schema_version": "2.0",
+  "start_date": "2026-11-01",
+  "end_date": "2026-11-15",
+  "pay_date": "2026-11-30",
+  "cutoff_at": "2026-11-21T12:00:00+10:00",
+  "time_zone": "Pacific/Guam",
+  "overtime_policy": {
+    "schema_version": "2.0",
+    "calculation": "weekly_only",
+    "weekly_threshold_hours": 40.0,
+    "workweek_start": "sunday",
+    "time_zone": "Pacific/Guam"
+  },
+  "cutoff_source": "override",
+  "policy_cutoff_at": "2026-11-22T17:00:00+10:00",
+  "cutoff_override": {
+    "override_id": "6f1d4c1e-6a52-4a7e-9f3e-1d2b3c4d5e6f",
+    "action": "change",
+    "reason": "Thanksgiving payroll run",
+    "set_at": "2026-11-18T09:00:00+10:00",
+    "set_by": { "name": "Chels", "system": "cornerstone_payroll", "role": "org_admin" },
+    "previous_cutoff_at": "2026-11-22T17:00:00+10:00"
+  },
+  "lock_mode": "scheduled",
+  "cutoff_enforcement_starts_on": "2026-10-16",
+  "cutoff_rule": "after_previous_regular_payday",
+  "cutoff_days": 7,
+  "previous_regular_pay_date": "2026-11-15",
+  "schedule_version": 2,
+  "publication_id": "0b7e2f4a-3c1d-4e5f-8a9b-1c2d3e4f5a6b"
+}

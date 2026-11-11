@@ -743,7 +743,58 @@ export type AirePayrollCutoffState =
   | 'batch_rejected'
   | 'batch_verified';
 
+export interface AireCutoffOverride {
+  override_id: string;
+  action: 'lock_now' | 'change' | 'reset';
+  reason: string;
+  set_at: string;
+  set_by_name: string | null;
+  requested_via: 'cornerstone_payroll' | 'aire_services';
+  previous_cutoff_at: string;
+  cutoff_at?: string;
+}
+
+/** State-only availability; the operator's permission is checked separately. */
+export interface AireCutoffControl {
+  available: boolean;
+  lock_now_available: boolean;
+  reset_available: boolean;
+  earliest_at: string;
+  latest_at: string;
+  lock_now_available_at: string;
+  unavailable_reason: string | null;
+}
+
+/** A newer lock time Cornerstone published that AIRE hasn't applied: still on its way, or refused. */
+export interface AireCutoffDelivery {
+  state: 'pending' | 'rejected';
+  schedule_version: number;
+  cutoff_at: string;
+  cutoff_source: 'policy' | 'override';
+  action: 'lock_now' | 'change' | null;
+  error: string | null;
+  last_delivery_attempt_at: string | null;
+}
+
+/** Who changed the lock AIRE is running on. */
+export interface AireAppliedCutoffOverride {
+  action: 'lock_now' | 'change';
+  reason: string;
+  set_by_name: string | null;
+  requested_via: 'cornerstone_payroll' | 'aire_services' | null;
+  policy_cutoff_at: string | null;
+}
+
 export interface AirePayrollCalendarState {
+  /** The lock time AIRE has confirmed. Until a newer change is confirmed, this is the one in effect. */
+  applied_cutoff_at?: string | null;
+  applied_cutoff_override?: AireAppliedCutoffOverride | null;
+  cutoff_delivery?: AireCutoffDelivery | null;
+  cutoff_source?: 'policy' | 'override';
+  policy_cutoff_at?: string | null;
+  cutoff_override?: AireCutoffOverride | null;
+  cutoff_history?: AireCutoffOverride[];
+  cutoff_control?: AireCutoffControl;
   connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
   enabled: boolean;
   source_id: number;
