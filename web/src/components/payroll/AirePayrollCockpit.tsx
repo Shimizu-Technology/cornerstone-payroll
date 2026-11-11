@@ -351,8 +351,12 @@ function TimecardRow({ entry, canCommand, onReview, onCorrect }: {
         {entry.state.missing_punch && <Badge variant="danger">Missing punch</Badge>}
         {entry.approval?.occurred_at && (
           <p className="basis-full text-xs leading-5 text-neutral-500">
-            Time {entry.state.approval_status} by {entry.approval.actor?.name || 'time tracking administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
-            {entry.approval.note ? ` · ${entry.approval.note}` : ''}
+            {entry.approval.auto_approved
+              ? `Auto-approved · ${formatGuamDateTime(entry.approval.occurred_at)}`
+              : <>
+                Time {entry.state.approval_status} by {entry.approval.actor?.name || 'time tracking administrator'} · {formatGuamDateTime(entry.approval.occurred_at)}
+                {entry.approval.note ? ` · ${entry.approval.note}` : ''}
+              </>}
           </p>
         )}
         {entry.overtime_approval?.occurred_at && (
