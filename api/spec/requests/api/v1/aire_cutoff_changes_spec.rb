@@ -24,7 +24,7 @@ RSpec.describe "AIRE lock-time changes", type: :request do
         "needs_revision" => false)
       expect(state.fetch("cutoff_control")).to include(
         "available" => true, "lock_now_available" => true, "reset_available" => false,
-        "earliest_at" => "2026-10-17T09:00:00+10:00", "latest_at" => "2026-10-29T23:59:00+10:00",
+        "earliest_at" => "2026-10-17T09:15:00+10:00", "latest_at" => "2026-10-29T23:59:00+10:00",
         "lock_now_available_at" => "2026-10-16T00:00:00+10:00", "unavailable_reason" => nil
       )
 
@@ -36,8 +36,12 @@ RSpec.describe "AIRE lock-time changes", type: :request do
         "policy_cutoff_at" => "2026-10-22T17:00:00+10:00", "needs_revision" => false)
       expect(state.fetch("cutoff_override")).to include("action" => "change", "reason" => "Payday holiday",
         "set_by_name" => "Chels", "requested_via" => "cornerstone_payroll")
-      expect(state.fetch("cutoff_control")).to include("reset_available" => true)
       expect(state.fetch("publication")).to include("schedule_version" => 2, "delivery_status" => "pending")
+      # AIRE still runs on the delivered time until it confirms the change.
+      expect(state).to include("applied_cutoff_at" => "2026-10-22T17:00:00+10:00")
+      expect(state.fetch("cutoff_delivery")).to include("state" => "pending", "schedule_version" => 2, "cutoff_at" => "2026-10-25T17:00:00+10:00")
+      expect(state.fetch("cutoff_control")).to include("available" => false, "reset_available" => false,
+        "unavailable_reason" => "Waiting for AIRE to confirm the last change")
       expect(state.fetch("cutoff_history").length).to eq(1)
     end
 

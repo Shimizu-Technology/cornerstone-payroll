@@ -45,7 +45,8 @@ RSpec.describe "AIRE lock-time publication contract" do
   after { travel_back }
 
   it "publishes exactly the pinned override payload" do
-    AirePayrollCalendar::Publisher.new(pay_period: pay_period, source: source, actor: chels).call
+    AirePayrollCalendar::Publisher.new(pay_period: pay_period, source: source, actor: chels).call.publication
+      .update_columns(delivery_status: "delivered", delivered_at: Time.current, next_delivery_attempt_at: nil)
     result = AirePayrollCalendar::CutoffChange.new(
       pay_period: pay_period, action: "change", cutoff_at: "2026-11-21T12:00:00+10:00",
       reason: "Thanksgiving payroll run", actor: chels

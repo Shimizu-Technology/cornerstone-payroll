@@ -11,6 +11,12 @@ module AirePayrollCalendar
   # - change: a future time no earlier than the start of the day after the
   #   period ends and no later than 11:59 PM two days before payday;
   # - reset: back to the policy cutoff, while that time is still ahead.
+  #
+  # A change and a reset must land at least MIN_LEAD ahead, and no change is
+  # taken once the lock AIRE has applied is under MIN_LEAD away, so delivery
+  # has time to reach AIRE before either time passes. While a newer version is
+  # still being delivered, further changes wait for it; once AIRE refuses one,
+  # a new change supersedes it.
   class CutoffChange
     class Error < StandardError
       attr_reader :status
@@ -22,6 +28,7 @@ module AirePayrollCalendar
     end
 
     AIRE_ADMIN_ROLES = %w[owner admin].freeze
+    MIN_LEAD = 15.minutes
 
     Result = Data.define(:override, :publication, :idempotent)
 
@@ -54,9 +61,9 @@ module AirePayrollCalendar
 
         contract = source.connector.calendar_contract(@pay_period)
         current = contract.payload
-        validate_state!(calendar_period, current)
+        applied = validate_state!(calendar_period, source, current)
         policy_cutoff_at = contract.policy_cutoff_at
-        cutoff_at = target_cutoff_at(current, policy_cutoff_at)
+        cutoff_at = target_cutoff_at(current, policy_cutoff_at, applied)
 
         override = AirePayrollCutoffOverride.create!(
           company: @pay_period.company,
@@ -64,7 +71,7 @@ module AirePayrollCalendar
           aire_payroll_calendar_period: calendar_period,
           action: @action,
           cutoff_at: cutoff_at,
-          previous_cutoff_at: Time.iso8601(current.fetch("cutoff_at")),
+          previous_cutoff_at: applied.cutoff_at,
           policy_cutoff_at: policy_cutoff_at,
           reason: @reason,
           requested_via: @source_actor ? "aire_services" : "cornerstone_payroll",
@@ -73,7 +80,8 @@ module AirePayrollCalendar
           request_id: @request_id
         )
         publication = Publisher.new(
-          pay_period: @pay_period, source: source, actor: @actor, now: @now, integration_authorized: @source_actor.present?
+          pay_period: @pay_period, source: source, actor: @actor, now: @now, integration_authorized: @source_actor.present?,
+          supersede_rejected: true
         ).publish!.publication
         record_audit!(override, publication)
         Result.new(override: override, publication: publication, idempotent: false)
@@ -92,7 +100,27 @@ module AirePayrollCalendar
     def self.bounds(pay_period, now: Time.current)
       earliest = Contract.earliest_override_at(pay_period)
       latest = Contract.latest_override_at(pay_period)
-      { earliest_at: [ earliest, now ].max.in_time_zone(Contract::TIME_ZONE), latest_at: latest, lock_now_available_at: earliest }
+      {
+        earliest_at: [ earliest, earliest_change_at(now) ].max.in_time_zone(Contract::TIME_ZONE),
+        latest_at: latest,
+        lock_now_available_at: earliest
+      }
+    end
+
+    # AIRE's regular batch for this period reached Payroll, even if its
+    # finalization event or publication bookkeeping has not.
+    def self.finalized_import?(pay_period, source)
+      TimeTrackingImport.where(pay_period_id: pay_period.id, time_tracking_source_id: source.id)
+        .where.not(external_batch_id: nil)
+        .where("raw_payload->>'purpose' IS DISTINCT FROM 'supplemental'")
+        .exists?
+    end
+
+    # The first whole minute at least MIN_LEAD from now.
+    def self.earliest_change_at(now)
+      lead = now + MIN_LEAD
+      rounded = lead.change(sec: 0, usec: 0)
+      rounded < lead ? rounded + 1.minute : rounded
     end
 
     private
@@ -102,7 +130,8 @@ module AirePayrollCalendar
 
       override = AirePayrollCutoffOverride.find_by(request_id: @request_id)
       return unless override
-      unless override.pay_period_id == @pay_period.id && override.action == @action && override.reason == @reason
+      same_time = @action != "change" || override.cutoff_at == requested_change_time
+      unless override.pay_period_id == @pay_period.id && override.action == @action && override.reason == @reason && same_time
         raise Error.new("This request ID was already used for a different lock-time change", status: :conflict)
       end
 
@@ -131,22 +160,31 @@ module AirePayrollCalendar
       end
     end
 
-    def validate_state!(calendar_period, current)
+    # Returns the publication AIRE has applied; its cutoff is the one in effect.
+    def validate_state!(calendar_period, source, current)
       raise Error, "Only scheduled locks can change their lock time" unless current.fetch("lock_mode", "scheduled") == "scheduled"
-      if calendar_period.payroll_events.exists?
+      if calendar_period.payroll_events.exists? || self.class.finalized_import?(@pay_period, source)
         raise Error.new("Time tracking already locked this period", status: :conflict)
       end
-      latest = calendar_period.latest_publication
-      current_cutoff = Time.iso8601(current.fetch("cutoff_at"))
-      published_cutoff = latest&.cutoff_at
-      if [ current_cutoff, published_cutoff ].compact.min <= @now
-        raise Error.new("This period's lock time has already passed", status: :conflict)
+      applied = calendar_period.latest_delivered_publication
+      unless applied
+        raise Error.new("AIRE hasn't confirmed this period's schedule yet. Try again once it has.", status: :conflict)
+      end
+      raise Error.new("This period's lock time has already passed", status: :conflict) if applied.cutoff_at <= @now
+      if applied.cutoff_at < @now + MIN_LEAD
+        raise Error.new("AIRE locks this period in under 15 minutes, so its lock time can no longer change", status: :conflict)
+      end
+      undelivered = calendar_period.undelivered_publication
+      if undelivered && !undelivered.rejected?
+        raise Error.new("The previous lock-time change is still being delivered to AIRE. Try again once AIRE confirms it.", status: :conflict)
       end
       raise Error, "It is too close to payday to change the lock time" if Contract.latest_override_at(@pay_period) <= @now
+
+      applied
     end
 
-    def target_cutoff_at(current, policy_cutoff_at)
-      current_cutoff = Time.iso8601(current.fetch("cutoff_at"))
+    def target_cutoff_at(current, policy_cutoff_at, applied)
+      superseding = applied.schedule_version < current_schedule_version(applied)
       case @action
       when "lock_now"
         earliest = Contract.earliest_override_at(@pay_period)
@@ -156,19 +194,31 @@ module AirePayrollCalendar
 
         @now.in_time_zone(Contract::TIME_ZONE).change(usec: 0)
       when "change"
-        time = parse_time(@requested_cutoff_at)
+        time = requested_change_time
         raise Error, "Choose a time after the period ends" if time < Contract.earliest_override_at(@pay_period)
         raise Error, "Choose a time at least two days before payday" if time > Contract.latest_override_at(@pay_period)
-        raise Error, "Choose a time in the future" unless time > @now
-        raise Error, "That is already the lock time" if time == current_cutoff
+        raise Error, "Choose a time at least 15 minutes from now" if time < @now + MIN_LEAD
+        raise Error, "That is already the lock time" if time == applied.cutoff_at && !superseding
 
         time
       when "reset"
-        raise Error, "This period already uses the default lock time" unless current["cutoff_source"] == "override"
-        raise Error, "The default lock time has already passed. Use Lock now instead." unless policy_cutoff_at > @now
+        # AIRE may still hold an override that a refused reset tried to clear.
+        uses_override = current["cutoff_source"] == "override" || (superseding && applied.payload["cutoff_source"] == "override")
+        raise Error, "This period already uses the default lock time" unless uses_override
+        unless policy_cutoff_at >= @now + MIN_LEAD
+          raise Error, "The default lock time is less than 15 minutes away. Use Lock now instead."
+        end
 
         policy_cutoff_at
       end
+    end
+
+    def current_schedule_version(applied)
+      applied.aire_payroll_calendar_period.latest_publication&.schedule_version || applied.schedule_version
+    end
+
+    def requested_change_time
+      @requested_change_time ||= parse_time(@requested_cutoff_at)
     end
 
     def parse_time(value)

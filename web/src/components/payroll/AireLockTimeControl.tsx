@@ -2,9 +2,9 @@ import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { Clock, Lock, RotateCcw } from 'lucide-react';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useCompany } from '@/contexts/CompanyContext';
-import { formatLockTime, fromGuamInput, lockDistance, toGuamInput } from '@/lib/aire-payroll-calendar';
+import { earliestLockChange, formatLockTime, fromGuamInput, lockDistance, toGuamInput } from '@/lib/aire-payroll-calendar';
 import { payPeriodsApi } from '@/services/api';
-import type { AirePayrollCalendarState } from '@/types';
+import type { AireAppliedCutoffOverride, AireCutoffDelivery, AirePayrollCalendarState } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { HelpTip } from '@/components/ui/help-tip';
@@ -40,10 +40,13 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
   const now = providedNow ?? tick;
   const [dialog, setDialog] = useState<LockAction | null>(null);
   const control = calendar.cutoff_control;
-  if (calendar.lock_mode === 'manual' || !calendar.cutoff_at || !control) return null;
+  // What AIRE runs on. A newer change counts only once AIRE confirms it.
+  const appliedAt = calendar.applied_cutoff_at ?? calendar.cutoff_at;
+  if (calendar.lock_mode === 'manual' || !appliedAt || !control) return null;
 
-  const override = calendar.cutoff_source === 'override' ? calendar.cutoff_override : null;
-  const due = new Date(calendar.cutoff_at).getTime() <= now.getTime();
+  const delivery = calendar.cutoff_delivery ?? null;
+  const applied = appliedOverride(calendar);
+  const due = new Date(appliedAt).getTime() <= now.getTime();
 
   return (
     <div className="border-b border-primary-100 bg-primary-50/40 px-4 py-4">
@@ -56,14 +59,14 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
             </HelpTip>
           </div>
           <p className="mt-1 text-base font-semibold text-neutral-950">
-            {due ? 'Lock time reached' : <>Locks {formatLockTime(calendar.cutoff_at)} <span className="font-normal text-neutral-600">({lockDistance(calendar.cutoff_at, now)})</span></>}
+            {due ? 'Lock time reached' : <>Locks {formatLockTime(appliedAt)} <span className="font-normal text-neutral-600">({lockDistance(appliedAt, now)})</span></>}
           </p>
-          {override && (
+          {applied && (
             <p className="mt-1 break-words text-sm text-neutral-700">
-              Changed by {override.set_by_name || 'an admin'}{override.requested_via === 'aire_services' ? ' in AIRE' : ''}: {override.reason}
+              Changed by {applied.set_by_name || 'an admin'}{applied.requested_via === 'aire_services' ? ' in AIRE' : ''}: {applied.reason}
             </p>
           )}
-          {override && calendar.policy_cutoff_at && <p className="mt-1 text-xs text-neutral-500">Default was {formatLockTime(calendar.policy_cutoff_at)}.</p>}
+          {applied?.policy_cutoff_at && <p className="mt-1 text-xs text-neutral-500">Default was {formatLockTime(applied.policy_cutoff_at)}.</p>}
         </div>
         {canChangeLock && control.available && (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
@@ -83,7 +86,10 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
           </div>
         )}
       </div>
-      {canChangeLock && !control.available && control.unavailable_reason && !due && (
+      {delivery && (
+        <DeliveryNote delivery={delivery} canReplace={canChangeLock && control.available} />
+      )}
+      {canChangeLock && !control.available && control.unavailable_reason && !due && !delivery && (
         <p className="mt-2 text-xs text-neutral-600">{control.unavailable_reason}.</p>
       )}
       {dialog && (
@@ -91,6 +97,8 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
           action={dialog}
           payPeriodId={payPeriodId}
           calendar={calendar}
+          appliedAt={appliedAt}
+          now={now}
           onClose={() => setDialog(null)}
           onDone={async () => { setDialog(null); await onChanged(); }}
         />
@@ -99,29 +107,68 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
   );
 }
 
-function LockTimeDialog({ action, payPeriodId, calendar, onClose, onDone }: {
+/** Older API responses have no applied_cutoff_override; their current override is the applied one. */
+function appliedOverride(calendar: AirePayrollCalendarState): AireAppliedCutoffOverride | null {
+  if (calendar.applied_cutoff_override !== undefined) return calendar.applied_cutoff_override;
+  const override = calendar.cutoff_source === 'override' ? calendar.cutoff_override : null;
+  if (!override || override.action === 'reset') return null;
+  return { action: override.action, reason: override.reason, set_by_name: override.set_by_name, requested_via: override.requested_via, policy_cutoff_at: calendar.policy_cutoff_at ?? null };
+}
+
+function deliveryTarget(delivery: AireCutoffDelivery): string {
+  if (delivery.action === 'lock_now') return 'Lock now';
+  if (delivery.cutoff_source === 'policy') return `the reset to ${formatLockTime(delivery.cutoff_at)}`;
+  return `the change to ${formatLockTime(delivery.cutoff_at)}`;
+}
+
+function DeliveryNote({ delivery, canReplace }: { delivery: AireCutoffDelivery; canReplace: boolean }): ReactElement {
+  if (delivery.state === 'pending') {
+    return (
+      <p role="status" className="mt-3 rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm text-neutral-800">
+        <span className="font-semibold">Waiting for AIRE to confirm {deliveryTarget(delivery)}.</span> Until it does, AIRE keeps the lock time above.
+      </p>
+    );
+  }
+  return (
+    <div role="status" className="mt-3 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-950">
+      <p className="font-semibold">AIRE rejected {deliveryTarget(delivery)}{delivery.error ? `: ${delivery.error}` : '.'}</p>
+      <p className="mt-1">The lock time above is still in effect.{canReplace ? ' Lock now or choose a new time to replace the rejected change.' : ''}</p>
+    </div>
+  );
+}
+
+function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, onClose, onDone }: {
   action: LockAction;
   payPeriodId: number;
   calendar: AirePayrollCalendarState;
+  appliedAt: string;
+  now: Date;
   onClose: () => void;
   onDone: () => Promise<void>;
 }): ReactElement {
   const control = calendar.cutoff_control!;
-  const [cutoffInput, setCutoffInput] = useState(() => toGuamInput(calendar.cutoff_at!));
+  // The server's earliest time ages while the page is open; never offer less than 15 minutes ahead.
+  const serverMin = toGuamInput(control.earliest_at);
+  const leadMin = toGuamInput(earliestLockChange(now).toISOString());
+  const min = leadMin > serverMin ? leadMin : serverMin;
+  const max = toGuamInput(control.latest_at);
+  const current = toGuamInput(appliedAt);
+  const [cutoffInput, setCutoffInput] = useState(() => (current < min ? min : current > max ? max : current));
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requestId] = useState(() => crypto.randomUUID());
-  const min = toGuamInput(control.earliest_at);
-  const max = toGuamInput(control.latest_at);
   const chosen = action === 'change' ? fromGuamInput(cutoffInput) : null;
-  const defaultCutoff = calendar.policy_cutoff_at || calendar.cutoff_at!;
+  const defaultCutoff = calendar.policy_cutoff_at || appliedAt;
+  const minLabel = formatLockTime(fromGuamInput(min)!);
+  // Saving the time AIRE already has would be refused; a refused change can be replaced by it.
+  const unchanged = action === 'change' && cutoffInput === current && calendar.cutoff_delivery?.state !== 'rejected';
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!reason.trim()) { setError('Enter a reason for the change.'); return; }
     if (action === 'change' && (!chosen || cutoffInput < min || cutoffInput > max)) {
-      setError(`Choose a time between ${formatLockTime(control.earliest_at)} and ${formatLockTime(control.latest_at)}.`);
+      setError(`Choose a time between ${minLabel} and ${formatLockTime(control.latest_at)}.`);
       return;
     }
     setBusy(true);
@@ -148,9 +195,9 @@ function LockTimeDialog({ action, payPeriodId, calendar, onClose, onDone }: {
           <DialogHeader>
             <DialogTitle>{TITLES[action]}</DialogTitle>
             <DialogDescription>
-              {action === 'lock_now' && `AIRE locks this period's hours right away instead of ${formatLockTime(calendar.cutoff_at!)}.`}
+              {action === 'lock_now' && `AIRE locks this period's hours right away instead of ${formatLockTime(appliedAt)}.`}
               {action === 'reset' && `The lock goes back to ${formatLockTime(defaultCutoff)}.`}
-              {action === 'change' && `Now: ${formatLockTime(calendar.cutoff_at!)}. Default: ${formatLockTime(defaultCutoff)}.`}
+              {action === 'change' && `Now: ${formatLockTime(appliedAt)}. Default: ${formatLockTime(defaultCutoff)}.`}
             </DialogDescription>
           </DialogHeader>
           <p className="mt-3 rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-950">{LATE_HOURS}</p>
@@ -161,7 +208,7 @@ function LockTimeDialog({ action, payPeriodId, calendar, onClose, onDone }: {
                 onChange={(event) => setCutoffInput(event.target.value)} aria-describedby="aire-lock-range"
                 className="mt-1 block min-h-11 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-base text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200" />
               <span id="aire-lock-range" className="mt-1 block text-xs font-normal text-neutral-500">
-                Between {formatLockTime(control.earliest_at)} and {formatLockTime(control.latest_at)} (two days before payday).
+                {unchanged ? 'Choose a new time to save. ' : ''}Between {minLabel} (at least 15 minutes from now) and {formatLockTime(control.latest_at)} (two days before payday).
               </span>
             </label>
           )}
@@ -173,7 +220,7 @@ function LockTimeDialog({ action, payPeriodId, calendar, onClose, onDone }: {
           {error && <p role="alert" className="mt-3 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-800">{error}</p>}
           <DialogFooter className="mt-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button type="submit" loading={busy} loadingLabel="Saving…">{CONFIRM[action]}</Button>
+            <Button type="submit" loading={busy} loadingLabel="Saving…" disabled={unchanged}>{CONFIRM[action]}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

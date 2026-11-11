@@ -90,3 +90,9 @@ export function toGuamInput(iso: string): string {
 export function fromGuamInput(value: string): string | null {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? `${value}:00+10:00` : null;
 }
+
+/** The first whole minute at least 15 minutes after now, as Cornerstone requires for a new lock time. */
+export function earliestLockChange(now: Date): Date {
+  const lead = now.getTime() + 15 * 60_000;
+  return new Date(Math.ceil(lead / 60_000) * 60_000);
+}

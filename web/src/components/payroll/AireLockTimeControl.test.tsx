@@ -16,7 +16,7 @@ const calendar = {
   cutoff_state: 'scheduled', lock_mode: 'scheduled', cutoff_at: '2026-11-22T17:00:00+10:00', cutoff_source: 'policy',
   policy_cutoff_at: '2026-11-22T17:00:00+10:00', cutoff_override: null,
   cutoff_control: {
-    available: true, lock_now_available: true, reset_available: false, earliest_at: '2026-11-19T09:00:00+10:00',
+    available: true, lock_now_available: true, reset_available: false, earliest_at: '2026-11-19T09:15:00+10:00',
     latest_at: '2026-11-28T23:59:00+10:00', lock_now_available_at: '2026-11-16T00:00:00+10:00', unavailable_reason: null,
   },
 } as AirePayrollCalendarState;
@@ -79,14 +79,17 @@ describe('AireLockTimeControl', () => {
 
     await user.click(screen.getByRole('button', { name: /Change lock time/ }));
     const input = screen.getByLabelText(/New lock time/) as HTMLInputElement;
-    expect(input.min).toBe('2026-11-19T09:00');
+    expect(input.min).toBe('2026-11-19T09:15');
+    // Starts at the lock AIRE has, which can't be saved unchanged.
+    expect(input.value).toBe('2026-11-22T17:00');
+    expect((screen.getByRole('button', { name: 'Save lock time' }) as HTMLButtonElement).disabled).toBe(true);
     expect(input.max).toBe('2026-11-28T23:59');
     await user.type(screen.getByLabelText(/Reason/), 'Payday moved');
 
     await user.clear(input);
     await user.type(input, '2026-11-29T09:00');
     await user.click(screen.getByRole('button', { name: 'Save lock time' }));
-    expect(screen.getByRole('alert').textContent).toBe('Choose a time between Thu, Nov 19 at 9:00 AM and Sat, Nov 28 at 11:59 PM.');
+    expect(screen.getByRole('alert').textContent).toBe('Choose a time between Thu, Nov 19 at 9:15 AM and Sat, Nov 28 at 11:59 PM.');
 
     await user.clear(input);
     await user.type(input, '2026-11-25T17:00');
@@ -94,6 +97,45 @@ describe('AireLockTimeControl', () => {
     await waitFor(() => expect(mocks.change).toHaveBeenCalledWith(42, expect.objectContaining({ lock_action: 'change', cutoff_at: '2026-11-25T17:00:00+10:00' })));
     expect((await screen.findByRole('alert')).textContent).toBe('Choose a time at least two days before payday');
     expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('keeps the minimum 15 minutes ahead even when the server bound has aged', async () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    render(<AireLockTimeControl payPeriodId={42} calendar={calendar} companyId={1} now={new Date('2026-11-19T09:40:30+10:00')} onChanged={vi.fn()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Change lock time/ }));
+    expect((screen.getByLabelText(/New lock time/) as HTMLInputElement).min).toBe('2026-11-19T09:56');
+    expect(screen.getByText(/Between Thu, Nov 19 at 9:56 AM \(at least 15 minutes from now\)/)).toBeTruthy();
+  });
+
+  it('shows the lock AIRE has while a newer change is still being delivered', () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    renderControl({
+      ...calendar, cutoff_at: '2026-11-24T17:00:00+10:00', cutoff_source: 'override',
+      cutoff_override: { override_id: 'o2', action: 'change', reason: 'Holiday', set_at: '2026-11-19T08:59:00+10:00', set_by_name: 'Chels', requested_via: 'cornerstone_payroll', previous_cutoff_at: '2026-11-22T17:00:00+10:00' },
+      applied_cutoff_at: '2026-11-22T17:00:00+10:00', applied_cutoff_override: null,
+      cutoff_delivery: { state: 'pending', schedule_version: 2, cutoff_at: '2026-11-24T17:00:00+10:00', cutoff_source: 'override', action: 'change', error: null, last_delivery_attempt_at: null },
+      cutoff_control: { ...calendar.cutoff_control!, available: false, lock_now_available: false, unavailable_reason: 'Waiting for AIRE to confirm the last change' },
+    });
+    expect(screen.getByText('Locks Sun, Nov 22 at 5:00 PM')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('Waiting for AIRE to confirm the change to Tue, Nov 24 at 5:00 PM. Until it does, AIRE keeps the lock time above.');
+    expect(screen.queryByText(/Changed by/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Lock now|Change lock time/ })).toBeNull();
+  });
+
+  it("says AIRE rejected a change and lets an admin replace it", () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    renderControl({
+      ...calendar, cutoff_at: '2026-11-19T09:03:00+10:00', cutoff_source: 'override',
+      applied_cutoff_at: '2026-11-21T12:00:00+10:00',
+      applied_cutoff_override: { action: 'change', reason: 'Thanksgiving payroll run', set_by_name: 'Leon', requested_via: 'aire_services', policy_cutoff_at: '2026-11-22T17:00:00+10:00' },
+      cutoff_delivery: { state: 'rejected', schedule_version: 3, cutoff_at: '2026-11-19T09:03:00+10:00', cutoff_source: 'override', action: 'change', error: 'cutoff_at must be in the future when published', last_delivery_attempt_at: '2026-11-19T09:05:00+10:00' },
+    });
+    expect(screen.getByText('Locks Sat, Nov 21 at 12:00 PM')).toBeTruthy();
+    expect(screen.getByText('Changed by Leon in AIRE: Thanksgiving payroll run')).toBeTruthy();
+    const note = screen.getByRole('status');
+    expect(note.textContent).toContain('AIRE rejected the change to Thu, Nov 19 at 9:03 AM: cutoff_at must be in the future when published');
+    expect(note.textContent).toContain('The lock time above is still in effect. Lock now or choose a new time to replace the rejected change.');
+    expect(screen.getByRole('button', { name: /Change lock time/ })).toBeTruthy();
   });
 
   it('explains why an admin cannot change it and stays out of manual calendars', () => {

@@ -51,6 +51,19 @@ RSpec.shared_context "aire cutoff change fixture" do
     publication
   end
 
+  # Records that AIRE applied a publication.
+  def confirm_delivery!(publication)
+    publication.update_columns(delivery_status: "delivered", delivered_at: Time.current, next_delivery_attempt_at: nil)
+    publication
+  end
+
+  # Records that AIRE answered and refused a publication.
+  def reject_delivery!(publication, message = "cutoff_at must be in the future when published", status: 422)
+    publication.update_columns(delivery_status: "failed", delivery_attempts: 1, last_response_status: status,
+      last_error: "TimeTracking::Client::Error: #{message}", next_delivery_attempt_at: nil)
+    publication
+  end
+
   def aire_actor(role: "admin", name: "Chels Admin")
     { "system" => "aire_services", "user_id" => 2, "name" => name, "email" => "chels@example.com", "role" => role }
   end

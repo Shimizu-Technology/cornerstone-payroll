@@ -11,12 +11,15 @@ module AirePayrollCalendar
 
     # integration_authorized: the caller already authenticated an AIRE admin
     # through the source credential (see CutoffChange); no Cornerstone user.
-    def initialize(pay_period:, source:, actor:, now: Time.current, integration_authorized: false)
+    # supersede_rejected: publish a new version even when AIRE refused one with
+    # the same contract (a repeated reset changes no contract field).
+    def initialize(pay_period:, source:, actor:, now: Time.current, integration_authorized: false, supersede_rejected: false)
       @pay_period = pay_period
       @source = source
       @actor = actor
       @now = now
       @integration_authorized = integration_authorized
+      @supersede_rejected = supersede_rejected
     end
 
     def call
@@ -46,7 +49,9 @@ module AirePayrollCalendar
       conflict_attempts = 0
 
       begin
-        PayPeriod.transaction do
+        # A savepoint, so a unique-key race inside CutoffChange's transaction
+        # rolls back only this attempt and the retry runs on a usable connection.
+        PayPeriod.transaction(requires_new: true) do
           @pay_period.lock!
           @source.lock!
           unless @integration_authorized || StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @pay_period.company)
@@ -59,14 +64,16 @@ module AirePayrollCalendar
           latest = calendar_period.publications.lock.reorder(schedule_version: :desc).first
           contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
-          if latest && same_contract?(latest.payload, contract_fields)
+          if latest && same_contract?(latest.payload, contract_fields) && !(@supersede_rejected && latest.rejected?)
             return Result.new(calendar_period: calendar_period, publication: latest, created: false)
           end
           if contract_fields["lock_mode"] != "manual" && Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now &&
              !self.class.lock_now_deliverable?(contract_fields, @now)
             raise ConflictError, "This period's time tracking cutoff has already passed. Create a correction or supplemental run instead."
           end
-          if latest && latest.delivered? && latest.cutoff_at <= @now
+          # Judge by the cutoff AIRE applied, even when a newer version is pending or refused.
+          applied = latest&.delivered? ? latest : calendar_period.latest_delivered_publication
+          if applied && applied.cutoff_at <= @now
             raise ConflictError, "This time tracking cutoff has passed, so its published dates cannot be changed. Create a correction or supplemental run instead."
           end
 
