@@ -75,8 +75,10 @@ class ClientDocument < ApplicationRecord
       employee_document_requirement_events.exists? || payroll_filing_events.exists?
   end
 
-  def ensure_usable_for!(purpose)
-    raise ClientDocumentScanner::Blocked, "This file has been archived. Contact Cornerstone if you need it." if archived?
+  def ensure_usable_for!(purpose, staff_read: false)
+    if archived? && !(staff_read && %i[download preview].include?(purpose))
+      raise ClientDocumentScanner::Blocked, "This file has been archived. Contact Cornerstone if you need it."
+    end
 
     ClientDocumentScanner.ensure_allowed!(self, purpose: purpose)
   end
@@ -111,8 +113,8 @@ class ClientDocument < ApplicationRecord
     ORIGINAL_INLINE_PREVIEW_EXTENSIONS.include?(file_extension)
   end
 
-  def preview_available?
-    !archived? && (preview_ready? || preview_served_from_original?)
+  def preview_available?(staff_read: false)
+    (staff_read || !archived?) && (preview_ready? || preview_served_from_original?)
   end
 
   def preview_filename

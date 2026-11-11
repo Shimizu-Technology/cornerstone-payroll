@@ -66,10 +66,22 @@ RSpec.describe ClientDocumentPreviewGenerator do
     end
 
     it "checks the scanner before downloading or invoking converters" do
-      allow(document).to receive(:ensure_usable_for!).with(:preview).and_raise(ClientDocumentScanner::Blocked, "Safety check pending")
+      allow(document).to receive(:ensure_usable_for!).with(:preview, staff_read: false).and_raise(ClientDocumentScanner::Blocked, "Safety check pending")
       expect(storage).not_to receive(:download)
       expect(ClientDocumentConverterProcess).not_to receive(:capture)
       expect { generator.generate! }.to raise_error(ClientDocumentScanner::Blocked)
+    end
+
+    it "generates archived Office previews only for staff while preserving the scanner gate" do
+      document.update!(archived_at: Time.current, archived_by: document.uploaded_by)
+      expect { generator.generate! }.to raise_error(ClientDocumentScanner::Blocked, /archived/)
+      staff_generator = described_class.new(document: document, storage: storage, staff_read: true)
+      allow(staff_generator).to receive(:libreoffice_binary).and_return("soffice")
+      allow(staff_generator).to receive(:optimize_spreadsheet_layout!)
+      expect { staff_generator.generate! }.not_to raise_error
+      expect(document.reload).to be_preview_ready
+      document.update!(scan_status: "infected")
+      expect { staff_generator.generate! }.to raise_error(ClientDocumentScanner::Blocked, /safety check/)
     end
 
     it "keeps the previous preview key when persisting the new preview metadata fails" do

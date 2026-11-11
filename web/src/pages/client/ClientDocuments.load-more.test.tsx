@@ -100,3 +100,16 @@ it('shows archive feedback and disables actions for retained files after refresh
   }
   vi.restoreAllMocks();
 });
+
+it('uploads 30 selected images in bounded batches', async () => {
+  const user = userEvent.setup();
+  mocks.upload.mockResolvedValue({ data: [] });
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement,
+    Array.from({ length: 30 }, (_, i) => new File(['image'], `timesheet-${i}.jpg`, { type: 'image/jpeg' })));
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  expect(await screen.findByText('30 documents uploaded successfully')).toBeTruthy();
+  expect(mocks.upload).toHaveBeenCalledTimes(3);
+  for (const [payload] of mocks.upload.mock.calls) expect(payload.getAll('files[]')).toHaveLength(10);
+});

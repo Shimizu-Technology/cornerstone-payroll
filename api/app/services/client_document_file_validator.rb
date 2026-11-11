@@ -10,6 +10,8 @@ require "timeout"
 class ClientDocumentFileValidator
   MAX_ZIP_ENTRIES = 1_000
   MAX_EXPANDED_BYTES = 100.megabytes
+  MAX_EMBEDDING_DEPTH = 3
+  MAX_ZIP_PADDING = 4.kilobytes
   TYPES = {
     "pdf" => "application/pdf", "png" => "image/png", "jpg" => "image/jpeg", "jpeg" => "image/jpeg",
     "webp" => "image/webp", "txt" => "text/plain", "csv" => "text/csv",
@@ -68,67 +70,93 @@ class ClientDocumentFileValidator
     # Browsers commonly send these ambiguous MIME values for CSV/TXT/Office.
     # They never decide the stored type: the byte/container checks above do.
     compatible = [ @content_type, "", "application/octet-stream" ]
-    compatible += [ "text/plain", "application/vnd.ms-excel" ] if @extension == "csv"
+    compatible += [ "text/plain", "application/vnd.ms-excel", "application/csv", "text/x-csv" ] if @extension == "csv"
     mismatch! unless compatible.include?(declared)
   end
 
   def validate_text!(bytes, detected)
-    text = bytes.dup.force_encoding(Encoding::UTF_8)
-    mismatch! unless text.valid_encoding? && !text.match?(/[\x00-\x08\x0B\x0C\x0E-\x1F]/)
+    text = decode_text(bytes)
+    mismatch! if text.match?(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/)
     mismatch! unless [ "text/plain", "text/csv", "application/octet-stream" ].include?(detected)
     mismatch! if text.start_with?("#!")
     return unless @extension == "csv"
 
-    CSV.new(text.delete_prefix("\uFEFF"), field_size_limit: 1.megabyte).each do |row|
+    CSV.new(text.delete_prefix("\uFEFF"), liberal_parsing: true, field_size_limit: 1.megabyte).each do |row|
       raise InvalidFile, "has too many columns. Please split the CSV into smaller files." if row.size > 1_000
     end
   rescue CSV::MalformedCSVError
-    raise InvalidFile, "is not a readable CSV. Please export it again as a UTF-8 CSV."
+    raise InvalidFile, "is not a readable CSV. Please export it again as CSV or XLSX."
   end
 
-  def validate_office_zip!(bytes)
+  def decode_text(bytes)
+    encoding = if bytes.start_with?("\xFF\xFE".b)
+      Encoding::UTF_16LE
+    elsif bytes.start_with?("\xFE\xFF".b)
+      Encoding::UTF_16BE
+    elsif bytes.dup.force_encoding(Encoding::UTF_8).valid_encoding?
+      Encoding::UTF_8
+    else
+      Encoding::Windows_1252
+    end
+    bytes.dup.force_encoding(encoding).encode(Encoding::UTF_8).delete_prefix("\uFEFF")
+  rescue EncodingError
+    mismatch!
+  end
+
+  def validate_office_zip!(bytes, extension: @extension, depth: 0, budget: { entries: 0, expanded: 0 })
+    raise InvalidFile, "contains too many nested Office files. Please export as PDF." if depth > MAX_EMBEDDING_DEPTH
     mismatch! unless bytes.start_with?("PK\x03\x04".b)
-    validate_zip_directory!(bytes)
+    bytes = validate_zip_directory!(bytes)
     Zip::File.open_buffer(StringIO.new(bytes)) do |zip|
-      raise InvalidFile, "contains too many items. Please export a smaller Office file." if zip.entries.size > MAX_ZIP_ENTRIES
-      expanded = 0
+      budget[:entries] += zip.entries.size
+      raise InvalidFile, "contains too many items. Please export a smaller Office file." if budget[:entries] > MAX_ZIP_ENTRIES
       names = []
       metadata = {}
       zip.each do |entry|
         name = entry.name
         mismatch! if entry.encrypted? || name.start_with?("/", "\\") || name.split(/[\\\/]/).include?("..") || names.include?(name.downcase)
         names << name.downcase
-        if name.match?(/vba|macro|activex|embeddings|encryptedpackage/i)
+        if name.match?(/vba|macro|activex|encryptedpackage/i)
           raise InvalidFile, "contains macros or embedded programs. Please export a macro-free file or PDF."
         end
-        if entry.size > MAX_EXPANDED_BYTES || expanded + entry.size > MAX_EXPANDED_BYTES
+        if entry.size > MAX_EXPANDED_BYTES || budget[:expanded] + entry.size > MAX_EXPANDED_BYTES
           raise InvalidFile, "expands to more than 100 MB. Please export a smaller Office file."
         end
         next if entry.directory?
 
-        capture = [ "[Content_Types].xml", "word/document.xml", "xl/workbook.xml" ].include?(name)
+        embedded = name.split(/[\\\/]/).any? { |part| part.casecmp?("embeddings") }
+        embedded_extension = File.extname(name).delete(".").downcase
+        if embedded && !%w[xlsx docx pptx].include?(embedded_extension)
+          raise InvalidFile, "contains macros or embedded programs. Please export a macro-free file or PDF."
+        end
+        capture = [ "[Content_Types].xml", "word/document.xml", "xl/workbook.xml", "ppt/presentation.xml" ].include?(name)
         data = +"".b
         entry.get_input_stream do |stream|
           while (chunk = stream.read(64.kilobytes)) && !chunk.empty?
-            expanded += chunk.bytesize
-            raise InvalidFile, "expands to more than 100 MB. Please export a smaller Office file." if expanded > MAX_EXPANDED_BYTES
-            if capture
-              raise InvalidFile, "contains an Office section that is too large to preview. Please export a smaller file." if data.bytesize + chunk.bytesize > 5.megabytes
+            budget[:expanded] += chunk.bytesize
+            raise InvalidFile, "expands to more than 100 MB. Please export a smaller Office file." if budget[:expanded] > MAX_EXPANDED_BYTES
+            if capture || embedded
+              raise InvalidFile, "contains an Office section that is too large to preview. Please export a smaller file." if capture && data.bytesize + chunk.bytesize > 5.megabytes
               data << chunk
             end
           end
         end
+        validate_office_zip!(data, extension: embedded_extension, depth: depth + 1, budget: budget) if embedded
         metadata[name] = data if capture
       end
-      main = @extension == "docx" ? "word/document.xml" : "xl/workbook.xml"
+      main, root_name, main_type = {
+        "docx" => [ "word/document.xml", "document", "wordprocessingml.document" ],
+        "xlsx" => [ "xl/workbook.xml", "workbook", "spreadsheetml.sheet" ],
+        "pptx" => [ "ppt/presentation.xml", "presentation", "presentationml.presentation" ]
+      }.fetch(extension)
       mismatch! unless names.include?("_rels/.rels") && metadata.key?(main)
       types = safe_xml(metadata.fetch("[Content_Types].xml", ""))
       overrides = types.xpath("//*[local-name()='Override']")
       mismatch! if overrides.any? { |node| node["ContentType"].to_s.match?(/macro|vba|activeX/i) }
-      expected = @extension == "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+      expected = "application/vnd.openxmlformats-officedocument.#{main_type}.main+xml"
       mismatch! unless overrides.any? { |node| node["PartName"] == "/#{main}" && node["ContentType"] == expected }
       root = safe_xml(metadata.fetch(main)).root
-      mismatch! unless root&.name == (@extension == "docx" ? "document" : "workbook")
+      mismatch! unless root&.name == root_name
     end
   end
 
@@ -142,7 +170,11 @@ class ClientDocumentFileValidator
       raise InvalidFile, "contains too many items. Please export a smaller Office file."
     end
     mismatch! unless disk.zero? && directory_disk.zero? && disk_count == total_count &&
-      directory_offset + directory_bytes == offset && offset + 22 + comment_bytes == bytes.bytesize
+      directory_offset + directory_bytes == offset
+    archive_end = offset + 22 + comment_bytes
+    padding = bytes.bytesize - archive_end
+    mismatch! unless padding.between?(0, MAX_ZIP_PADDING) && bytes.byteslice(archive_end, padding).match?(/\A[\x00\x09\x0A\x0D\x20]*\z/n)
+    bytes.byteslice(0, archive_end)
   end
 
   def safe_xml(bytes)
@@ -171,6 +203,12 @@ class ClientDocumentFileValidator
   end
 
   def validate_legacy_office!(bytes)
+    if @extension == "xls" && !bytes.start_with?([ 0xD0, 0xCF, 0x11, 0xE0 ].pack("C*"))
+      text = decode_text(bytes)
+      unless text.match?(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/)
+        raise InvalidFile, "This file is a web page or text file named .xls. Please export as .xlsx, .csv or PDF."
+      end
+    end
     mismatch! unless bytes.start_with?([ 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 ].pack("C*"))
     Timeout.timeout(5) do
       Ole::Storage.open(StringIO.new(bytes)) do |ole|

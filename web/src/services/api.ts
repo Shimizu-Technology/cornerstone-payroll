@@ -4532,6 +4532,8 @@ export const adminClientDocumentsApi = {
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
+  unarchive: (id: number) =>
+    api.post<{ data: ClientDocument; message: string }>(`/admin/client_documents/${id}/unarchive`),
   delete: (id: number) =>
     api.delete<{ data: ClientDocument; message: string } | undefined>(`/admin/client_documents/${id}`),
 };
