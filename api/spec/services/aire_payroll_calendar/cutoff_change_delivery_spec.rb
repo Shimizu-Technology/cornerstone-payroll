@@ -87,6 +87,26 @@ RSpec.describe AirePayrollCalendar::Delivery, "with an admin lock time" do
     expect(stale.reload).to have_attributes(next_delivery_attempt_at: nil, last_error: "Superseded by schedule version 3")
   end
 
+  it "does not send a refused version that a change replaced after the retry claimed it" do
+    stale = lock_now!
+    reject_delivery!(stale, "Lock now came after manual payroll claims", status: 409)
+    stale.update_columns(next_delivery_attempt_at: Time.current)
+    delivery = described_class.new(publication_id: stale.id, now: 1.minute.from_now, client_factory: ->(*) { client })
+    # The change held the source lock while the retry claimed the publication,
+    # and committed before the retry took the source lock.
+    allow(delivery).to receive(:claim!).and_wrap_original do |claim|
+      claim.call.tap do
+        AirePayrollCalendar::CutoffChange.new(pay_period: pay_period, action: "change", cutoff_at: "2026-10-25T10:30:00+10:00",
+          reason: "Lock Saturday instead", actor: org_admin).call
+      end
+    end
+
+    expect(client).not_to receive(:publish_payroll_calendar_period)
+    expect(delivery.call[:status]).to eq("superseded")
+    expect(stale.reload).to have_attributes(delivery_status: "failed", next_delivery_attempt_at: nil,
+      last_error: "Superseded by schedule version 3")
+  end
+
   it "does not reschedule a replaced version when an attempt already in flight fails afterwards" do
     stale = lock_now!
     reject_delivery!(stale, "Lock now came after manual payroll claims", status: 409)
