@@ -1,6 +1,7 @@
-import { useState, type FormEvent, type ReactElement } from 'react';
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { Clock, Lock, RotateCcw } from 'lucide-react';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { useCompany } from '@/contexts/CompanyContext';
 import { formatLockTime, fromGuamInput, lockDistance, toGuamInput } from '@/lib/aire-payroll-calendar';
 import { payPeriodsApi } from '@/services/api';
 import type { AirePayrollCalendarState } from '@/types';
@@ -14,8 +15,10 @@ type LockAction = 'lock_now' | 'change' | 'reset';
 type Props = {
   payPeriodId: number;
   calendar: AirePayrollCalendarState;
-  companyId: number | null;
-  now: Date;
+  /** Defaults to the active company when the caller has no scoped company. */
+  companyId?: number | null;
+  /** Defaults to a clock that ticks each minute. */
+  now?: Date;
   onChanged: () => Promise<void> | void;
 };
 
@@ -24,8 +27,17 @@ const TITLES: Record<LockAction, string> = { lock_now: 'Lock hours now?', change
 const CONFIRM: Record<LockAction, string> = { lock_now: 'Lock now', change: 'Save lock time', reset: 'Reset to default' };
 
 /** The AIRE lock time for one pay period. Cornerstone is the source of truth and republishes every change to AIRE. */
-export function AireLockTimeControl({ payPeriodId, calendar, companyId, now, onChanged }: Props): ReactElement | null {
-  const canChangeLock = useSelectedCompanyCapability('manage_time_tracking_lock', companyId);
+export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: providedNow, onChanged }: Props): ReactElement | null {
+  const { activeCompanyId } = useCompany();
+  const [scopeCompanyId] = useState(companyId ?? activeCompanyId);
+  const canChangeLock = useSelectedCompanyCapability('manage_time_tracking_lock', scopeCompanyId);
+  const [tick, setTick] = useState(() => new Date());
+  useEffect(() => {
+    if (providedNow) return;
+    const timer = window.setInterval(() => setTick(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [providedNow]);
+  const now = providedNow ?? tick;
   const [dialog, setDialog] = useState<LockAction | null>(null);
   const control = calendar.cutoff_control;
   if (calendar.lock_mode === 'manual' || !calendar.cutoff_at || !control) return null;

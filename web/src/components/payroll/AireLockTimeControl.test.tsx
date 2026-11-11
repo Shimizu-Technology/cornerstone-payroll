@@ -8,6 +8,7 @@ import type { AirePayrollCalendarState } from '@/types';
 const mocks = vi.hoisted(() => ({ capabilities: new Set<string>(), change: vi.fn() }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: (capability: string) => mocks.capabilities.has(capability) }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: { changeAireCutoff: mocks.change } }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1 }) }));
 
 const now = new Date('2026-11-19T09:00:00+10:00');
 const calendar = {
