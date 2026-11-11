@@ -675,8 +675,9 @@ module Api
             .where("pay_periods.start_date > ?", @pay_period.end_date)
             .order("pay_periods.start_date ASC, pay_periods.id ASC")
             .filter_map do |calendar_period|
-              publication = calendar_period.latest_publication
-              next unless publication&.delivered?
+              # AIRE knows the period once any version is delivered; a newer
+              # change still on its way doesn't remove it as a destination.
+              next unless calendar_period.publications.any?(&:delivered?)
               next if calendar_period.payroll_events.any?(&:verified?)
 
               pay_period = calendar_period.pay_period

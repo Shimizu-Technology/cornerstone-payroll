@@ -73,10 +73,18 @@ Who can change it:
 
 Actions and bounds (Pacific/Guam):
 
-- **Lock now** sets the cutoff to the current second. It is available only after the period's last day and while the current lock time is ahead. AIRE accepts it up to 30 minutes late and finalizes at once; Cornerstone keeps retrying its delivery for that window.
-- **Change lock time** takes a future time from 00:00 on the day after the period ends through 23:59 two days before payday. Seconds are dropped.
-- **Reset to default** returns to the policy cutoff while that time is still ahead.
-- All three need a reason (500 characters at most) and apply only to scheduled locks that time tracking has not locked. Hours clocked or approved after the lock go to the next period as late hours.
+- **Lock now** sets the cutoff to the current second. It is available only after the period's last day. AIRE accepts it up to 30 minutes late and finalizes at once, unless a manual paycheck, late-hours payment or settlement change for the period's hours was recorded after that second; then AIRE refuses it and Lock now can be pressed again.
+- **Change lock time** takes a time at least 15 minutes ahead, from 00:00 on the day after the period ends through 23:59 two days before payday. Seconds are dropped.
+- **Reset to default** returns to the policy cutoff while that time is at least 15 minutes ahead.
+- All three need a reason (500 characters at most) and apply only to scheduled locks that time tracking has not locked: no finalization event and no imported regular batch for the period and source. Hours clocked or approved after the lock go to the next period as late hours.
+
+Delivery and recovery:
+
+- The lock in effect is the latest publication AIRE confirmed (`applied_cutoff_at`). No change is taken once that lock is under 15 minutes away, so delivery has time to land before either time passes. "Already passed" is judged by that publication too.
+- While a newer publication is still on its way, further changes get 409 "still being delivered". The pay-run strip shows "Waiting for AIRE to confirm …" under the lock in effect (`cutoff_delivery.state: "pending"`).
+- If AIRE answers 409 or 422, the publication is refused (`cutoff_delivery.state: "rejected"`, with AIRE's message). A new change, Lock now or reset then supersedes it as the next schedule version. AIRE accepts any version above its current one, so a skipped version doesn't block later ones.
+- A publication sent while AIRE could accept it keeps retrying after its cutoff, because AIRE may have applied it and lost the response; AIRE replays a known `publication_id` before any time check. Retrying stops once AIRE refuses it after the cutoff or confirms a newer version.
+- The old cockpit "Lock time tracking cutoff" command stays for manual-lock periods. For scheduled periods it appears only when the lock is due or needs attention, as "Finish locking hours".
 
 The pay-run page shows the lock time under the source checkpoint, with who changed it and why. The receiver and verifier compare against the published cutoff, so batches from an overridden lock verify normally.
 

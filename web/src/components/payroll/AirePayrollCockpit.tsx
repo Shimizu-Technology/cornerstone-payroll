@@ -811,7 +811,14 @@ function AirePayrollCockpitWorkspace({
     : loading || !overview ? 'Wait for the source review to finish loading.'
       : !canCommand ? 'Connect your time tracking account and obtain permission to lock this payroll.'
         : !periodCanFinalize ? `The scheduled cutoff can be locked on ${formatGuamDateTime(overview.payroll_period.cutoff_at)}.` : undefined;
-  const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.finalized_batch);
+  // Scheduled periods lock themselves (AIRE lock time strip above). This command
+  // stays for manual locks, and for finishing a scheduled lock that is due or
+  // needs attention when AIRE's finalizer hasn't completed it.
+  const scheduledLockRecovery = !manualLock && calendar.lock_mode !== 'manual' && periodCanFinalize;
+  const showLockCommand = manualLock || calendar.lock_mode === 'manual' || periodCanFinalize;
+  const lockCommandLabel = scheduledLockRecovery ? 'Finish locking hours' : 'Lock time tracking cutoff';
+  // A newer change still on its way doesn't unpublish the period AIRE already has.
+  const cockpitPublished = calendar.publication?.delivery_status === 'delivered' || Boolean(calendar.applied_cutoff_at) || Boolean(calendar.finalized_batch);
   const verifiedBatch = calendar.finalized_batch?.verification_status === 'verified'
     ? calendar.finalized_batch
     : null;
@@ -861,10 +868,10 @@ function AirePayrollCockpitWorkspace({
         sourceCoverageAction={sourceCoverageAction}
         canReviewTimecards={Boolean(supportsCockpit && calendar.external_pay_period_id && cockpitPublished)}
         loading={loading}
-        lockAction={supportsCockpit && calendar.external_pay_period_id && cockpitPublished && !periodLocked ? (
+        lockAction={supportsCockpit && calendar.external_pay_period_id && cockpitPublished && !periodLocked && showLockCommand ? (
           <Button type="button" variant="outline" onClick={openFinalize} title={lockDisabledReason}
             disabled={!canCommand || !periodCanFinalize || busy || loading} className="max-sm:w-full sm:shrink-0">
-            <LockKeyhole className="mr-2 h-4 w-4" aria-hidden="true" />Lock time tracking cutoff
+            <LockKeyhole className="mr-2 h-4 w-4" aria-hidden="true" />{lockCommandLabel}
           </Button>
         ) : undefined}
         onReview={onReviewFinalizedBatch}
@@ -948,10 +955,10 @@ function AirePayrollCockpitWorkspace({
                   <Button type="button" size="sm" variant="secondary" onClick={() => void refreshCalendarAndSource()} disabled={loading || busy}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh time tracking
                   </Button>
-                  {!checkpoint && overview?.payroll_period.status !== 'finalized' && (
+                  {!checkpoint && overview?.payroll_period.status !== 'finalized' && showLockCommand && (
                     <Button type="button" size="sm" onClick={openFinalize} aria-describedby="payroll-lock-policy" disabled={!canCommand || !periodCanFinalize || busy || loading}>
                       <LockKeyhole className="mr-2 h-4 w-4" />
-                      Lock time tracking cutoff
+                      {lockCommandLabel}
                     </Button>
                   )}
                 </div>
