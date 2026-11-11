@@ -167,4 +167,47 @@ it('keeps a named file-archived tombstone and excludes archived files from attac
   render(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />);
   expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
+});
+
+it.each(['archived', 'pending', 'infected', 'error', 'removed'])('clears both attachment selections when a document becomes %s', async (state) => {
+  const document = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', scan_status: 'clean' } as import('@/services/api').ClientDocument;
+  const conversation = thread(2, 'Payroll files');
+  api.list.mockResolvedValue({ data: [conversation] });
+  api.get.mockResolvedValue({ data: conversation });
+  const panel = (documents: import('@/services/api').ClientDocument[]) => <PortalMessagesPanel api={api} documents={documents} audienceLabel="client" description="Client messages" />;
+  const rendered = render(panel([document]));
+  await screen.findByPlaceholderText('Reply client');
+  const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+  selects.forEach(select => fireEvent.change(select, { target: { value: '9' } }));
+  // A refresh which keeps this document usable must preserve both selections.
+  rendered.rerender(panel([{ ...document }]));
+  selects.forEach(select => expect(select.value).toBe('9'));
+  const next = state === 'removed' ? [] : [{ ...document, ...(state === 'archived' ? { archived_at: '2026-11-12T00:00:00Z' } : { scan_status: state as 'pending' | 'infected' | 'error' }) }];
+  rendered.rerender(panel(next));
+  await waitFor(() => selects.forEach(select => expect(select.value).toBe('')));
+  if (['pending', 'infected', 'error'].includes(state)) {
+    const options = screen.getAllByRole('option', { name: /Safety check unavailable/ }) as HTMLOptionElement[];
+    expect(options).toHaveLength(2);
+    options.forEach(option => expect(option.disabled).toBe(true));
+  }
+  fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'New message' } });
+  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Reply text' } });
+  api.create.mockResolvedValue({ data: conversation });
+  api.createMessage.mockResolvedValue({ data: {} as import('@/services/api').ClientPortalMessage });
+  fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
+  await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ document_id: undefined })));
+  // Start conversation completion clears its draft, but must not restore a stale reply attachment.
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(api.createMessage).toHaveBeenCalledWith(2, expect.objectContaining({ document_id: undefined })));
+});
+
+it('keeps the thread response archive tombstone when the document list is stale', async () => {
+  const stale = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: null } as import('@/services/api').ClientDocument;
+  const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: { ...stale, archived_at: '2026-11-12T00:00:00Z' } }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] });
+  api.get.mockResolvedValue({ data: conversation });
+  render(<PortalMessagesPanel api={api} documents={[stale]} audienceLabel="client" description="Client messages" />);
+  expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
 });

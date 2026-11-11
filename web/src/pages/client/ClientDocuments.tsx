@@ -138,7 +138,9 @@ export function ClientDocuments() {
         ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
       }, clientDocumentsApi.upload,
         (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
-      setForm((current) => ({ ...current, files: result.failures.map((failure) => failure.file) }));
+      setForm((current) => result.failures.length
+        ? { ...current, files: result.failures.map((failure) => failure.file) }
+        : { title: '', category: 'misc', employee_id: '', notes: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (result.uploaded.length) {
         setSuccess(result.uploaded.length === 1 ? 'Document uploaded successfully' : `${result.uploaded.length} documents uploaded successfully`);

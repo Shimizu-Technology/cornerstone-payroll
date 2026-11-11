@@ -12,6 +12,14 @@ class ClientDocumentFileValidator
   MAX_EXPANDED_BYTES = 100.megabytes
   MAX_EMBEDDING_DEPTH = 3
   MAX_ZIP_PADDING = 4.kilobytes
+  PROGRAM_EXTENSIONS = %w[exe dll com scr msi msp bat cmd ps1 psm1 sh bash zsh fish py pyc pyo rb pl php js mjs cjs vbs vbe wsf wsh hta jar class app dmg deb rpm].freeze
+  PROGRAM_SIGNATURES = [ "MZ", "\x7FELF", "#!", "\xFE\xED\xFA\xCE", "\xCE\xFA\xED\xFE",
+    "\xFE\xED\xFA\xCF", "\xCF\xFA\xED\xFE", "\xCA\xFE\xBA\xBE", "\xBE\xBA\xFE\xCA",
+    "\xCA\xFE\xBA\xBF", "\xBF\xBA\xFE\xCA" ].map(&:b).freeze
+  HYPERLINK_RELATIONSHIPS = %w[
+    http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink
+    http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink
+  ].freeze
   TYPES = {
     "pdf" => "application/pdf", "png" => "image/png", "jpg" => "image/jpeg", "jpeg" => "image/jpeg",
     "webp" => "image/webp", "txt" => "text/plain", "csv" => "text/csv",
@@ -126,21 +134,28 @@ class ClientDocumentFileValidator
 
         embedded = name.split(/[\\\/]/).any? { |part| part.casecmp?("embeddings") }
         embedded_extension = File.extname(name).delete(".").downcase
-        if embedded && !%w[xlsx docx pptx].include?(embedded_extension)
+        if PROGRAM_EXTENSIONS.include?(embedded_extension) || (embedded && !%w[xlsx docx pptx].include?(embedded_extension))
           raise InvalidFile, "contains macros or embedded programs. Please export a macro-free file or PDF."
         end
-        capture = [ "[Content_Types].xml", "word/document.xml", "xl/workbook.xml", "ppt/presentation.xml" ].include?(name)
+        relationships = name.downcase.end_with?(".rels")
+        capture = relationships || [ "[Content_Types].xml", "word/document.xml", "xl/workbook.xml", "ppt/presentation.xml" ].include?(name)
         data = +"".b
+        prefix = +"".b
         entry.get_input_stream do |stream|
           while (chunk = stream.read(64.kilobytes)) && !chunk.empty?
             budget[:expanded] += chunk.bytesize
             raise InvalidFile, "expands to more than 100 MB. Please export a smaller Office file." if budget[:expanded] > MAX_EXPANDED_BYTES
+            prefix << chunk.byteslice(0, 4 - prefix.bytesize) if prefix.bytesize < 4
+            if PROGRAM_SIGNATURES.any? { |signature| prefix.start_with?(signature) }
+              raise InvalidFile, "contains embedded programs. Please export a macro-free file or PDF."
+            end
             if capture || embedded
               raise InvalidFile, "contains an Office section that is too large to preview. Please export a smaller file." if capture && data.bytesize + chunk.bytesize > 5.megabytes
               data << chunk
             end
           end
         end
+        validate_relationships!(data) if relationships
         validate_office_zip!(data, extension: embedded_extension, depth: depth + 1, budget: budget) if embedded
         metadata[name] = data if capture
       end
@@ -157,6 +172,15 @@ class ClientDocumentFileValidator
       mismatch! unless overrides.any? { |node| node["PartName"] == "/#{main}" && node["ContentType"] == expected }
       root = safe_xml(metadata.fetch(main)).root
       mismatch! unless root&.name == root_name
+    end
+  end
+
+  def validate_relationships!(bytes)
+    safe_xml(bytes).xpath("//*[local-name()='Relationship']").each do |relationship|
+      next unless relationship["TargetMode"].to_s.casecmp?("External")
+      next if HYPERLINK_RELATIONSHIPS.include?(relationship["Type"])
+
+      raise InvalidFile, "contains external resources. Embed images and linked content before uploading, or export as PDF."
     end
   end
 

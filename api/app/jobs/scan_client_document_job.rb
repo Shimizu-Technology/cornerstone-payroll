@@ -6,6 +6,8 @@ class ScanClientDocumentJob < ApplicationJob
 
   def perform(document_id)
     document = ClientDocument.find(document_id)
+    return unless document.scan_status == "pending"
+
     ClientDocumentScanner.scan!(document)
     if document.scan_status == "clean" && document.preview_generation_required? && !document.archived?
       GenerateClientDocumentPreviewJob.perform_later(document.id)

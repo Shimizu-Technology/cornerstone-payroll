@@ -1,3 +1,5 @@
+import { getActiveCompanyId } from '@/services/api';
+
 // Both document endpoints enforce 10 files / 50 MiB per atomic request.
 const MAX_FILES = 10;
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -6,9 +8,10 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export async function uploadDocumentBatches(
   files: File[],
   fields: Record<string, string>,
-  upload: (payload: FormData) => Promise<unknown>,
+  upload: (payload: FormData, companyId: number) => Promise<unknown>,
   onProgress: (completed: number, total: number) => void,
-) {
+): Promise<{ uploaded: File[]; failures: { file: File; message: string }[] }> {
+  const companyId = getActiveCompanyId();
   const uploaded: File[] = [];
   const failures: { file: File; message: string }[] = [];
   const batches: File[][] = [];
@@ -33,7 +36,8 @@ export async function uploadDocumentBatches(
     const payload = new FormData();
     group.forEach((file) => payload.append('files[]', file));
     Object.entries(fields).forEach(([key, value]) => payload.append(key, value));
-    await upload(payload);
+    if (!companyId) throw new Error('Select a company before uploading documents.');
+    await upload(payload, companyId);
     uploaded.push(...group);
   };
   progress();

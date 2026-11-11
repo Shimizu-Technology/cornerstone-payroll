@@ -1,5 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { uploadDocumentBatches } from './document-upload-batches';
+import { getActiveCompanyId } from '@/services/api';
+vi.mock('@/services/api', () => ({ getActiveCompanyId: vi.fn(() => 7) }));
 
 const image = (name: string, size = 10) => {
   const file = new File(['image'], name, { type: 'image/jpeg' });
@@ -49,4 +51,26 @@ it('keeps 30 large rejected photos within 45 requests, below the 60/minute allow
   const result = await uploadDocumentBatches(files, {}, upload, vi.fn());
   expect(upload).toHaveBeenCalledTimes(45);
   expect(result.failures).toHaveLength(30);
+});
+
+it('pins every batch and validation retry to the company that started the upload', async () => {
+  vi.mocked(getActiveCompanyId).mockReturnValue(7);
+  const upload = vi.fn(async (payload: FormData, companyId: number) => {
+    expect(companyId).toBe(7);
+    vi.mocked(getActiveCompanyId).mockReturnValue(8);
+    if (payload.getAll('files[]').length > 1) throw Object.assign(new Error('Invalid group'), { status: 422 });
+  });
+  const files = Array.from({ length: 11 }, (_, i) => image(`${i}.jpg`));
+  const result = await uploadDocumentBatches(files, {}, upload, vi.fn());
+  expect(result.uploaded).toEqual(files);
+  expect(upload).toHaveBeenCalledTimes(12);
+  vi.mocked(getActiveCompanyId).mockReturnValue(7);
+});
+
+it('does not send unscoped uploads when no company is selected', async () => {
+  vi.mocked(getActiveCompanyId).mockReturnValueOnce(null);
+  const upload = vi.fn();
+  const result = await uploadDocumentBatches([image('a.jpg')], {}, upload, vi.fn());
+  expect(upload).not.toHaveBeenCalled();
+  expect(result.failures[0].message).toContain('Select a company');
 });
