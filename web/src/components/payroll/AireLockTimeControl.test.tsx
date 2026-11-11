@@ -184,6 +184,35 @@ describe('AireLockTimeControl', () => {
     expect(screen.getByRole('alert').textContent).toBe('The lock time must be at least 15 minutes from now, so the earliest is now Thu, Nov 19 at 9:17 AM. Check the new time and save again.');
     expect(input.value).toBe('2026-11-19T09:17');
     expect(mocks.change).not.toHaveBeenCalled();
+
+    mocks.change.mockResolvedValue({ aire_payroll_calendar: calendar, idempotent: false });
+    await user.click(screen.getByRole('button', { name: 'Save lock time' }));
+    await waitFor(() => expect(mocks.change).toHaveBeenCalledWith(42, expect.objectContaining({
+      lock_action: 'change',
+      cutoff_at: '2026-11-19T09:17:00+10:00',
+    })));
+  });
+
+  it('does not send a time once the 15-minute minimum passes the latest allowed time', async () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    const closing = { ...calendar, cutoff_control: { ...calendar.cutoff_control!, latest_at: '2026-11-19T09:20:00+10:00' } };
+    const props = { payPeriodId: 42, companyId: 1, onChanged: vi.fn() };
+    const { rerender } = render(<AireLockTimeControl {...props} calendar={closing} now={now} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Change lock time/ }));
+    await user.type(screen.getByLabelText(/Reason/), 'Lock early');
+
+    // Six minutes later the earliest allowed minute, 9:21, is past the latest, 9:20.
+    rerender(<AireLockTimeControl {...props} calendar={closing} now={new Date('2026-11-19T09:06:00+10:00')} />);
+    await user.click(screen.getByRole('button', { name: 'Save lock time' }));
+    expect(screen.getByRole('alert').textContent).toBe('No lock time is left to choose: it must be at least 15 minutes from now and no later than Thu, Nov 19 at 9:20 AM. Use Lock now instead.');
+    expect(mocks.change).not.toHaveBeenCalled();
+
+    const noLockNow = { ...closing, cutoff_control: { ...closing.cutoff_control, lock_now_available: false } };
+    rerender(<AireLockTimeControl {...props} calendar={noLockNow} now={new Date('2026-11-19T09:06:00+10:00')} />);
+    await user.click(screen.getByRole('button', { name: 'Save lock time' }));
+    expect(screen.getByRole('alert').textContent).toBe('No lock time is left to choose: it must be at least 15 minutes from now and no later than Thu, Nov 19 at 9:20 AM.');
+    expect(mocks.change).not.toHaveBeenCalled();
   });
 
   it('explains why an admin cannot change it and stays out of manual calendars', () => {

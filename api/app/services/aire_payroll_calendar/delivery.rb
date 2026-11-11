@@ -18,6 +18,11 @@ module AirePayrollCalendar
 
       period = publication.aire_payroll_calendar_period
       period.time_tracking_source.with_lock do
+        # A lock-time change can replace this version after the claim and
+        # before this lock; nothing can replace it while the lock is held.
+        superseded = supersede_replaced!(publication.reload)
+        next superseded if superseded
+
         response = @client_factory.call(period.time_tracking_source).publish_payroll_calendar_period(
           external_pay_period_id: period.external_pay_period_id,
           payload: publication.payload,
@@ -43,15 +48,8 @@ module AirePayrollCalendar
         ).find(@publication_id)
         return { publication_id: publication.id, status: "delivered" } if publication.delivered?
         return { publication_id: publication.id, status: "skipped" } if publication.next_delivery_attempt_at&.>(@now)
-        if (newer = superseded_by(publication))
-          publication.update!(
-            delivery_status: "failed",
-            delivery_enqueued_until: nil,
-            next_delivery_attempt_at: nil,
-            last_error: "Superseded by schedule version #{newer.schedule_version}#{', which AIRE confirmed' if newer.delivered?}"
-          )
-          return { publication_id: publication.id, status: "superseded" }
-        end
+        superseded = supersede_replaced!(publication)
+        return superseded if superseded
 
         unless publication.aire_payroll_calendar_period.time_tracking_source.historical_reconciliation_complete?
           publication.update!(
@@ -71,6 +69,20 @@ module AirePayrollCalendar
         @attempt_claimed = true
         publication
       end
+    end
+
+    # Stops delivering a version a newer one replaces (see superseded_by).
+    def supersede_replaced!(publication)
+      newer = superseded_by(publication)
+      return unless newer
+
+      publication.update!(
+        delivery_status: "failed",
+        delivery_enqueued_until: nil,
+        next_delivery_attempt_at: nil,
+        last_error: "Superseded by schedule version #{newer.schedule_version}#{', which AIRE confirmed' if newer.delivered?}"
+      )
+      { publication_id: publication.id, status: "superseded" }
     end
 
     def validate_response!(period, publication, source_state)

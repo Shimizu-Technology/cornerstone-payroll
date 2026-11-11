@@ -180,7 +180,11 @@ function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, current
     if (!reason.trim()) { setError('Enter a reason for the change.'); return; }
     // The minimum moves on while the dialog is open; Cornerstone would refuse a time that slipped under it.
     const freshMin = toGuamInput(earliestLockChange(currentTime()).toISOString());
-    if (action === 'change' && chosen && cutoffInput < freshMin && freshMin <= max) {
+    if (action === 'change' && freshMin > max) {
+      setError(`No lock time is left to choose: it must be at least 15 minutes from now and no later than ${formatLockTime(control.latest_at)}.${control.lock_now_available ? ' Use Lock now instead.' : ''}`);
+      return;
+    }
+    if (action === 'change' && chosen && cutoffInput < freshMin) {
       setCutoffInput(freshMin);
       setError(`The lock time must be at least 15 minutes from now, so the earliest is now ${formatLockTime(fromGuamInput(freshMin)!)}. Check the new time and save again.`);
       return;
