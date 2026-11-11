@@ -204,11 +204,12 @@ export function AdminClientDocumentsPage() {
   };
 
   const deleteDocument = async (document: ClientDocument) => {
-    if (!window.confirm(`Delete "${document.title}"?`)) return;
+    if (!window.confirm(`Delete "${document.title}"? Files used in messages or evidence will be archived and kept.`)) return;
     setError(null);
 
     try {
-      await adminClientDocumentsApi.delete(document.id);
+      const result = await adminClientDocumentsApi.delete(document.id);
+      setSuccess(result?.message || 'Document deleted');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
@@ -299,6 +300,7 @@ export function AdminClientDocumentsPage() {
                   onChange={(event) => setUploadForm((current) => ({ ...current, files: Array.from(event.target.files || []) }))}
                   className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
                 />
+                <p className="mt-2 text-sm text-neutral-500">Up to 10 files, 25 MB each, 50 MB total. Macros are not supported.</p>
                 {selectedFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedFiles.map((file) => (
@@ -364,6 +366,7 @@ export function AdminClientDocumentsPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="break-words font-semibold text-neutral-950">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="mt-1 break-all text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
@@ -375,15 +378,15 @@ export function AdminClientDocumentsPage() {
                             <p className="mt-3 whitespace-pre-wrap rounded-xl bg-neutral-50 p-3 text-sm text-neutral-600">{document.notes}</p>
                           )}
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" onClick={() => void previewDocumentFile(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void previewDocumentFile(document)}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => void downloadDocument(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void downloadDocument(document)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void deleteDocument(document)}>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </Button>
@@ -412,6 +415,7 @@ export function AdminClientDocumentsPage() {
                       <TableCell>
                         <div>
                           <p className="font-medium text-gray-900">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="text-xs text-gray-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                         </div>
                       </TableCell>
@@ -422,15 +426,15 @@ export function AdminClientDocumentsPage() {
                       <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void previewDocumentFile(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void previewDocumentFile(document)}>
                             <Eye className="mr-2 h-4 w-4" />
                             Preview
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => void downloadDocument(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void downloadDocument(document)}>
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void deleteDocument(document)}>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </Button>

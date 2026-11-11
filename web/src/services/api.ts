@@ -4238,6 +4238,9 @@ export interface ClientDocument {
   visible_to_client: boolean;
   shared_by_staff: boolean;
   created_at: string;
+  archived_at?: string | null;
+  archived_by_id?: number | null;
+  scan_status?: 'not_scanned' | 'pending' | 'clean' | 'infected' | 'error';
   preview_status: 'pending' | 'processing' | 'ready' | 'failed' | 'not_required';
   preview_available: boolean;
   preview_generated_at?: string | null;
@@ -4497,7 +4500,7 @@ export const clientDocumentsApi = {
   download: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/download`),
   delete: (id: number) =>
-    api.delete<void>(`/client/documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/client/documents/${id}`),
 };
 
 export const clientEmployeeDocumentRequirementsApi = {
@@ -4530,7 +4533,7 @@ export const adminClientDocumentsApi = {
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
   delete: (id: number) =>
-    api.delete<void>(`/admin/client_documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/admin/client_documents/${id}`),
 };
 
 export const adminEmployeeDocumentRequirementsApi = {

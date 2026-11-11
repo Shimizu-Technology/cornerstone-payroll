@@ -1,0 +1,25 @@
+# Portal file safety and attachment retention (PR 1a)
+
+Clients and staff use the same server validator. It identifies bytes without a filename/MIME hint, checks the declared type against that result, and checks Office containers. Each file is limited to 25 MiB; a request accepts at most 10 files and 50 MiB total. OOXML accepts at most 1,000 entries and 100 MiB of actual decompressed data, with 5 MiB metadata sections. CSV/TXT must be readable UTF-8 text. Macro-enabled Office extensions, VBA/Excel macro content, encrypted files, embedded programs and mismatched containers are rejected. These checks do not establish that a file is malware-free.
+
+Uploads share the app's process-local Rack::Attack counter, keyed after authentication by user ID: 20 upload requests per minute across both namespaces and all companies. Invalid upload attempts count. Like the existing API throttles, this needs a shared cache before scaling to multiple web processes.
+
+`ClientDocumentScanner.adapter` supplies `initial_status`, `scan(document:, storage:)`, and `allowed?(document:, purpose:)`. The no-op adapter leaves both existing and new files `not_scanned` and permits use. An enforcing adapter can start uploads `pending`; the scan job records its result and resumes preview generation after `clean`. Download, preview generation/serving, message attachment creation/change and `ensure_usable_for!(:intake)` all call the same gate. Future portal intake must use that method after resolving the document within the authorized company; no portal-to-intake bridge is added here.
+
+## Required PR 1b rollout gate
+
+Do not describe this release as malware protected or open the MoSa portal handoff pilot on the strength of these checks. PR 1b must deploy a measured, monitored scanner, configure an enforcing adapter that permits only `clean` at all four gates, backfill existing files without marking unscanned bytes clean, and verify infected/unavailable/retry outcomes end to end. Scanner cost and hosting remain Leon's decision. No default production setting is switched in PR 1a.
+
+Each LibreOffice/Python process has a 45-second wall timeout, 30-second CPU limit, 100 MiB per-file output limit, 128 descriptors and capped diagnostic output. Linux also has a 1 GiB address-space limit. The process group is killed on timeout. Conversion failure stays `failed` and can be retried with a unique Office profile; an existing preview storage reference survives a failed regeneration so a later success can clean it. macOS uses `sandbox-exec` to deny IP networking while allowing local Unix IPC needed by LibreOffice; Linux uses `/usr/bin/bwrap --unshare-net` when installed and permitted by the host. Network isolation requires that deployment support; there is no silent sandbox-failure retry outside it. No deployment or host package change is part of this PR.
+
+Deleting a file referenced by a portal message, readiness requirement/history or filing evidence now archives it. It retains bytes, original name/title, message FK, archive actor/time and a named conversation tombstone. Archived files cannot be consumed or attached again. Unreferenced active files retain hard-delete behavior. Model guards and an additive PostgreSQL before-delete guard prevent retained-file destruction; company destruction is rejected before its callbacks can erase references. There is no purge or automatic retention duration.
+
+Downloads and previews in both namespaces send `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and sanitized disposition filenames. Existing company/visibility authorization remains in place.
+
+Execution results and desktop/phone screenshots are recorded in `~/Desktop/ShimizuTechnology/output/payroll-portal-pr1a-20261111/QA.md`. That local browser check uses synthetic fixtures, test-only identity headers and private filesystem storage, and does not certify physical phone input, real Clerk auth, production storage, or a deployed scanner.
+
+## Local verification
+
+On macOS with Ruby 3.3.7, isolated bundle, database and storage: 274 relevant portal/readiness/filing/company examples passed, followed by 70 final safety regressions after the UI fixes. The frontend's 155 test files / 1,567 tests, typecheck and lint passed with one worker. RuboCop inspected 1,702 files without offenses, Brakeman found no warnings, and bundler-audit found no vulnerabilities. Migration down/up and the database-integrity snapshot verified successfully. Impeccable's advisory scan returned no findings.
+
+Four required UI scenarios passed at both 1280×900 and 390×844: PDF/XLSX/CSV upload, spoof rejection with retained selection, client attachment archival/tombstone, and staff rejection/archival. Independent saved-outcome reads verified all six original byte streams, four retained message FKs and both archive actors. A real XLSX preview rendered after the Unix-IPC sandbox repair; both roles' download/preview headers were independently verified. No deployed scanner, physical phone, real Clerk flow, Linux host sandbox or production environment was certified. Full logs and screenshots remain in the local evidence directory above.

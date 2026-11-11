@@ -84,7 +84,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
 
   const documentOptions = useMemo(
-    () => documents.map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
+    () => documents.filter((document) => !document.archived_at).map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
     [documents]
   );
 
@@ -434,7 +434,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 
                 <div className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
-                    <MessageBubble key={message.id} message={message} />
+                    <MessageBubble key={message.id} message={{ ...message, document: documents.find(document => document.id === message.document?.id) || message.document }} />
                   ))}
                 </div>
 
@@ -480,7 +480,9 @@ function MessageBubble({ message }: { message: ClientPortalMessage }) {
       {message.document && (
         <div className="mt-3 flex items-center gap-2 rounded-md border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-800">
           <Paperclip className="h-4 w-4 shrink-0" />
-          <span className="truncate">{message.document.title}</span>
+          <span className="min-w-0 break-all">
+            {message.document.archived_at ? `File archived: ${message.document.title} (${message.document.file_name})` : message.document.title}
+          </span>
         </div>
       )}
     </div>

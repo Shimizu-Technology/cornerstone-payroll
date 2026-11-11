@@ -48,4 +48,19 @@ RSpec.describe "Api::V1::Client::PortalThreads", type: :request do
     expect(Time.zone.parse(data.fetch("last_message_at")).to_i).to eq(created_thread.last_message_at.to_i)
     expect(ClientPortalThreadChannel).to have_received(:broadcast_thread).with(created_thread, event: "thread_created")
   end
+  it "rejects an attachment when the scanner blocks it and permits it after clean" do
+    document = create(:client_document, company: company, uploaded_by: client_user)
+    adapter = double(allowed?: false)
+    allow(ClientDocumentScanner).to receive(:adapter).and_return(adapter)
+    expect do
+      post "/api/v1/client/portal_threads", params: { subject: "Payroll files", document_id: document.id }
+    end.not_to change(ClientPortalMessage, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.dig("details", "client_document").join).to include("safety check")
+    document.update!(scan_status: "clean")
+    allow(adapter).to receive(:allowed?).and_return(true)
+    post "/api/v1/client/portal_threads", params: { subject: "Payroll files", document_id: document.id }
+    expect(response).to have_http_status(:created)
+    expect(response.parsed_body.dig("data", "messages", 0, "document", "id")).to eq(document.id)
+  end
 end

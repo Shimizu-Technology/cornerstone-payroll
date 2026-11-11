@@ -45,11 +45,31 @@ RSpec.describe ClientDocumentPreviewGenerator do
       allow(generator).to receive(:libreoffice_binary).and_return("soffice")
       allow(generator).to receive(:build_preview_key).and_return("client_documents/test/new-preview.pdf")
       allow(generator).to receive(:optimize_spreadsheet_layout!)
-      allow(Open3).to receive(:capture3) do |*_args|
+      allow(ClientDocumentConverterProcess).to receive(:capture) do |*_args|
         output_dir = _args[_args.index("--outdir") + 1]
         File.binwrite(File.join(output_dir, "preview.pdf"), "%PDF-1.4\npreview")
         [ "", "", success_status ]
       end
+    end
+
+    it "fails on converter timeout and can safely retry" do
+      allow(ClientDocumentConverterProcess).to receive(:capture).and_raise(described_class::GenerationFailed, "Preview took too long")
+      expect { generator.generate! }.to raise_error(described_class::GenerationFailed, /too long/)
+      expect(document.reload.preview_status).to eq("failed")
+      expect(document.preview_file_key).to eq("client_documents/test/old-preview.pdf")
+      allow(ClientDocumentConverterProcess).to receive(:capture) do |*args, **_options|
+        File.binwrite(File.join(args[args.index("--outdir") + 1], "preview.pdf"), "%PDF-1.4\npreview")
+        [ "", "", success_status ]
+      end
+      expect { generator.generate! }.not_to raise_error
+      expect(document.reload.preview_status).to eq("ready")
+    end
+
+    it "checks the scanner before downloading or invoking converters" do
+      allow(document).to receive(:ensure_usable_for!).with(:preview).and_raise(ClientDocumentScanner::Blocked, "Safety check pending")
+      expect(storage).not_to receive(:download)
+      expect(ClientDocumentConverterProcess).not_to receive(:capture)
+      expect { generator.generate! }.to raise_error(ClientDocumentScanner::Blocked)
     end
 
     it "keeps the previous preview key when persisting the new preview metadata fails" do

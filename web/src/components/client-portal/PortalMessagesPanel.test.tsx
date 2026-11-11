@@ -158,3 +158,13 @@ it('does not change the total when a live update arrives for a conversation the 
 
   expect(screen.getByText(/Showing/).textContent).toBe('Showing 3 of 5 conversations');
 });
+
+it('keeps a named file-archived tombstone and excludes archived files from attachment choices', async () => {
+  const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
+  const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: archived }] } as ClientPortalThread;
+  api.list.mockResolvedValue({ data: [conversation] });
+  api.get.mockResolvedValue({ data: conversation });
+  render(<PortalMessagesPanel api={api} documents={[archived]} audienceLabel="client" description="Client messages" />);
+  expect(await screen.findByText('File archived: Payroll hours (hours.csv)')).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Payroll hours (hours.csv)' })).toBeNull();
+});
