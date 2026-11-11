@@ -3,33 +3,87 @@
 require "rails_helper"
 
 RSpec.describe ClientPortalThread, type: :model do
-  describe "#mark_read_for!" do
-    it "skips the write when the thread is already read for that side" do
-      company = create(:company)
-      staff = create(:user, company: company, role: "accountant")
-      timestamp = 2.minutes.ago
-      thread = create(:client_portal_thread,
-        company: company,
-        last_message_at: timestamp,
-        staff_last_read_at: timestamp)
+  let(:company) { create(:company) }
+  let(:thread) { create(:client_portal_thread, company: company) }
 
-      expect(thread).not_to receive(:update!)
-
-      thread.mark_read_for!(staff)
+  it "keeps two staff and two clients independent regardless of legacy timestamps" do
+    users = %w[accountant manager client client].map { |role| create(:user, company: company, role: role) }
+    message = create(:client_portal_message, company: company, client_portal_thread: thread, author: nil)
+    users.each { |user| expect(thread.unread_for?(user)).to be(true) }
+    [ users.first, users.third ].each do |user|
+      thread.mark_read_for!(user, displayed_message_ids: [ message.id ])
+      expect(thread.unread_for?(user)).to be(false)
     end
+    expect(thread.unread_for?(users.second)).to be(true)
+    expect(thread.unread_for?(users.fourth)).to be(true)
+    expect(thread.reload.staff_last_read_at).to be_present
+    expect(thread.client_last_read_at).to be_present
+  end
 
-    it "marks unread client threads as read" do
-      company = create(:company)
-      client = create(:user, company: company, role: "client")
-      thread = create(:client_portal_thread,
-        company: company,
-        last_message_at: 1.minute.ago,
-        client_last_read_at: nil)
+  it "starts pre-migration history read without hiding new messages" do
+    user = create(:user, company: company, role: "client")
+    old = create(:client_portal_message, company: company, client_portal_thread: thread)
+    thread.update!(read_baseline_message_id: old.id)
+    expect(thread.unread_for?(user)).to be(false)
+    create(:client_portal_message, company: company, client_portal_thread: thread)
+    expect(thread.unread_for?(user)).to be(true)
+  end
 
-      thread.mark_read_for!(client)
+  it "never moves a cursor backwards and rejects another conversation's message" do
+    user = create(:user, company: company)
+    first = create(:client_portal_message, company: company, client_portal_thread: thread)
+    last = create(:client_portal_message, company: company, client_portal_thread: thread)
+    thread.mark_read_for!(user, displayed_message_ids: [ first.id, last.id ])
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ first.id ])).to be(false)
+    expect(thread.read_cursor_for(user)).to eq(last.id)
+    other = create(:client_portal_message)
+    expect { thread.mark_read_for!(user, displayed_message_ids: [ other.id ]) }.to raise_error(ActiveRecord::RecordNotFound)
+  end
 
-      expect(thread.client_last_read_at).to be_present
-      expect(thread.unread_for?(client)).to be(false)
+  it "stops at an unshown message from someone else and passes over the user's own" do
+    user = create(:user, company: company)
+    unshown = create(:client_portal_message, company: company, client_portal_thread: thread)
+    shown = create(:client_portal_message, company: company, client_portal_thread: thread)
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ shown.id ])).to be(false)
+    expect(thread.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: company.id)).to eq(1)
+
+    own = create(:client_portal_message, company: company, client_portal_thread: thread, author: user)
+    later = create(:client_portal_message, company: company, client_portal_thread: thread)
+    expect(thread.mark_read_for!(user, displayed_message_ids: [ unshown.id, shown.id ])).to be(true)
+    expect(thread.read_cursor_for(user)).to eq(own.id)
+    expect(thread.unread_for?(user)).to be(true)
+    thread.mark_read_for!(user, displayed_message_ids: [ later.id ])
+    expect(thread.unread_for?(user)).to be(false)
+  end
+end
+
+RSpec.describe ClientPortalThread, type: :model do
+  it "excludes own messages in loaded and queried state without hiding other authors" do
+    user = create(:user)
+    thread = create(:client_portal_thread, company: user.company)
+    create(:client_portal_message, client_portal_thread: thread, company: user.company, author: user)
+    [ false, true ].each do |loaded|
+      thread.messages.load if loaded
+      expect(thread.unread_for?(user)).to be(false)
+      expect(described_class.unread_count_for(user, company_id: user.company_id)).to eq(0)
     end
+    create(:client_portal_message, client_portal_thread: thread, company: user.company, author: nil)
+    expect(thread.reload.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: user.company_id)).to eq(1)
+  end
+
+  it "starts history before account creation read and counts later messages" do
+    thread = create(:client_portal_thread)
+    old = create(:client_portal_message, client_portal_thread: thread, company: thread.company)
+    user = create(:user, company: thread.company)
+    expect(thread.unread_for?(user)).to be(false)
+    thread.messages.load
+    expect(thread.unread_for?(user)).to be(false)
+    expect(described_class.unread_count_for(user, company_id: thread.company_id)).to eq(0)
+    create(:client_portal_message, client_portal_thread: thread, company: thread.company)
+    expect(thread.reload.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: thread.company_id)).to eq(1)
+    expect(old.created_at).to be < user.created_at
   end
 end

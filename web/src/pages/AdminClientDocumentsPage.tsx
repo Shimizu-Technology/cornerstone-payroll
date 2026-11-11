@@ -476,6 +476,7 @@ export function AdminClientDocumentsPage() {
       </div>
 
       <DocumentPreviewModal
+          activityApi={adminClientDocumentsApi}
         open={previewOpen}
         onOpenChange={(open) => {
           setPreviewOpen(open);

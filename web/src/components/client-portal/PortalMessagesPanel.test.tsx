@@ -17,9 +17,10 @@ let api: { [Key in keyof ThreadsApi]: Mock<ThreadsApi[Key]> };
 const view = () => <PortalMessagesPanel api={api} documents={[]} audienceLabel="client" description="Client messages" />;
 
 beforeEach(() => {
+  window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.clearAllMocks(); mocks.company = 2; mocks.callbacks.length = 0; mocks.refresh.mockResolvedValue(undefined);
   mocks.subscribe.mockImplementation((_company: number, callbacks: Callbacks) => { mocks.callbacks.push(callbacks); return Promise.resolve(vi.fn()); });
-  api = { list: vi.fn<ThreadsApi['list']>().mockResolvedValue({ data: [] }), get: vi.fn<ThreadsApi['get']>(), create: vi.fn<ThreadsApi['create']>(), update: vi.fn<ThreadsApi['update']>(), createMessage: vi.fn<ThreadsApi['createMessage']>() };
+  api = { unreadCount: vi.fn().mockResolvedValue({ data: { unread_count: 0 } }), activity: vi.fn().mockResolvedValue({ data: [], meta: {} }), markRead: vi.fn(), list: vi.fn<ThreadsApi['list']>().mockResolvedValue({ data: [] }), get: vi.fn<ThreadsApi['get']>(), create: vi.fn<ThreadsApi['create']>(), update: vi.fn<ThreadsApi['update']>(), createMessage: vi.fn<ThreadsApi['createMessage']>() };
 });
 afterEach(cleanup);
 
@@ -159,6 +160,33 @@ it('does not change the total when a live update arrives for a conversation the 
   expect(screen.getByText(/Showing/).textContent).toBe('Showing 3 of 5 conversations');
 });
 
+it('reports send success distinctly when refreshing the saved reply fails', async () => {
+  const current = thread(2, 'Saved conversation');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  api.createMessage.mockResolvedValue({ data: { id: 10, thread_id: 2, body: 'Saved reply', created_at: '2026-11-12T00:00:00Z' } });
+  render(view()); await waitFor(() => expect(api.get).toHaveBeenCalledOnce()); await screen.findByPlaceholderText('Reply client');
+  api.get.mockRejectedValueOnce(new Error('refresh offline'));
+  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Saved reply' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await screen.findByText('Message sent. The conversation could not refresh. Reload to see it.');
+  expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe('');
+  expect(api.createMessage).toHaveBeenCalledOnce();
+});
+
+it('ignores an earlier broadcast fetch that finishes after a newer one', async () => {
+  const current = thread(2, 'Starting conversation');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  render(view()); await screen.findByPlaceholderText('Reply client'); await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
+  let older!: (response: { data: ClientPortalThread }) => void;
+  let newer!: (response: { data: ClientPortalThread }) => void;
+  api.get.mockImplementationOnce(() => new Promise(resolve => { older = resolve; })).mockImplementationOnce(() => new Promise(resolve => { newer = resolve; }));
+  await act(async () => { mocks.callbacks[0].onThread({ thread: current }); mocks.callbacks[0].onThread({ thread: current }); });
+  await act(async () => newer({ data: thread(2, 'Newest broadcast') }));
+  expect(screen.getAllByText('Newest broadcast').length).toBeGreaterThan(0);
+  await act(async () => older({ data: thread(2, 'Stale broadcast') }));
+  expect(screen.queryByText('Stale broadcast')).toBeNull();
+});
+
 it('keeps a named file-archived tombstone and excludes archived files from attachment choices', async () => {
   const archived = { id: 9, title: 'Payroll hours', file_name: 'hours.csv', archived_at: '2026-11-11T00:00:00Z' } as import('@/services/api').ClientDocument;
   const conversation = { ...thread(2, 'Payroll files'), messages: [{ id: 1, thread_id: 2, body: 'For payroll', author_name: 'Client', created_at: '2026-11-11T00:00:00Z', document: archived }] } as ClientPortalThread;
@@ -231,4 +259,50 @@ it('re-reads the open conversation after unarchive so the restored file can be a
   // An unchanged list does not re-read the conversation.
   rendered.rerender(<PortalMessagesPanel api={api} documents={[{ ...restored }]} audienceLabel="client" description="Client messages" />);
   expect(api.get.mock.calls.length).toBe(reads + 1);
+});
+
+it('reuses a conversation retry key after losing the create response', async () => {
+  api.create.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({ data: thread(2, 'Retry topic') });
+  render(view()); await waitFor(() => expect(api.list).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Retry topic' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
+  await screen.findByText('response lost');
+  fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
+  await waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
+  expect(api.create.mock.calls[0][0].idempotency_key).toBeTruthy();
+  expect(api.create.mock.calls[1][0]).toEqual(api.create.mock.calls[0][0]);
+});
+
+it('refreshes the personal badge without loading conversation lists on a broadcast', async () => {
+  const current = thread(2, 'Count only');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  api.unreadCount.mockResolvedValue({ data: { unread_count: 3 } });
+  render(view()); await screen.findByPlaceholderText('Reply client');
+  const lists = api.list.mock.calls.length;
+  await act(async () => mocks.callbacks[0].onThread({ thread: current }));
+  await screen.findByText('3 unread');
+  expect(api.list.mock.calls.length).toBe(lists);
+  expect(api.unreadCount).toHaveBeenCalledOnce();
+});
+
+it('keeps a newer badge count when an older Load more page finishes last', async () => {
+  const meta = (page: number) => ({ current_page: page, total_pages: 2, total_count: 2, per_page: 1, unread_count: 1 });
+  const first = { ...thread(2, 'Newest conversation'), id: 2 };
+  let finishPage!: (value: Awaited<ReturnType<ThreadsApi['list']>>) => void;
+  api.list.mockImplementation((params) => params?.page === 2
+    ? new Promise(resolve => { finishPage = resolve; })
+    : Promise.resolve({ data: [first], meta: meta(1) }));
+  api.get.mockResolvedValue({ data: first });
+  render(view());
+  await screen.findByText('1 unread');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+  await waitFor(() => expect(api.list).toHaveBeenLastCalledWith({ page: 2 }));
+  api.unreadCount.mockResolvedValue({ data: { unread_count: 0 } });
+  await act(async () => mocks.callbacks[0].onThread({ thread: first }));
+  await screen.findByText('0 unread');
+
+  await act(async () => finishPage({ data: [{ ...thread(2, 'Older conversation'), id: 1 }], meta: meta(2) }));
+  await screen.findByText('Older conversation');
+  expect(screen.getByText('0 unread')).toBeTruthy();
 });

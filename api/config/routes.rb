@@ -62,11 +62,15 @@ Rails.application.routes.draw do
           member do
             get :download
             get :preview
+            post :opened
+            get :activity
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
+            get :activity
           end
           resources :messages, only: [ :create ], controller: :portal_messages
         end
@@ -240,12 +244,16 @@ Rails.application.routes.draw do
           member do
             get :download
             get :preview
+            post :opened
+            get :activity
             post :unarchive
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
+            get :activity
           end
           resources :messages, only: [ :create ], controller: :portal_messages
         end

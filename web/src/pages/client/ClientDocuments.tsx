@@ -518,6 +518,7 @@ export function ClientDocuments() {
       </div>
 
       <DocumentPreviewModal
+          activityApi={clientDocumentsApi}
         open={previewOpen}
         onOpenChange={(open) => {
           setPreviewOpen(open);

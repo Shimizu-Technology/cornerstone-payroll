@@ -4,13 +4,14 @@ module Api
   module V1
     module Admin
       class ClientDocumentsController < BaseController
+        include PortalDocumentTracking
         include ClientDocumentUploadRateLimit
         rescue_from ClientDocumentScanner::Blocked do |error|
           render json: { error: error.message }, status: :unprocessable_entity
         end
         before_action :private_document_response!, only: [ :download, :preview ]
 
-        before_action :set_document, only: [ :download, :preview, :destroy, :unarchive ]
+        before_action :set_document, only: [ :download, :preview, :destroy, :unarchive, :opened, :activity ]
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
@@ -27,31 +28,19 @@ module Api
         end
 
         def create
-          result = ClientDocumentUploadService.new(
-            company_id: current_company_id,
-            current_user: current_user,
+          result = AuditedClientDocumentUpload.call(
+            company_id: current_company_id, current_user: current_user,
             params: params
-          ).upload!
-          documents = result.documents
-
-          documents.each do |document|
-            enqueue_preview_generation(document)
-            AuditLog.record!(
-              user: current_user,
-              company_id: current_company_id,
-              action: "admin_client_documents#create",
-              record_type: "client_documents",
-              record_id: document.id,
-              metadata: {
-                title: document.title,
-                category: document.category,
-                visible_to_client: document.visible_to_client
-              },
-              ip_address: request.remote_ip,
-              user_agent: request.user_agent
-            )
+          ) do |uploaded|
+            uploaded.documents.each do |document|
+              PortalActivity.record!(user: current_user, record: document, action: "admin_client_documents#create",
+                metadata: PortalActivity.document_metadata(document),
+                ip_address: request.remote_ip, user_agent: request.user_agent)
+            end
+            audit_requirement_received!(uploaded.document_requirement) if uploaded.document_requirement
           end
-          audit_requirement_received!(result.document_requirement) if result.document_requirement
+          documents = result.documents
+          documents.each { |document| enqueue_preview_generation(document) }
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
@@ -72,6 +61,7 @@ module Api
           data = R2StorageService.new.download(@document.file_key)
           return render json: { error: "File not found" }, status: :not_found unless data
 
+          audit_portal_document!("portal_documents#download")
           send_data data,
             filename: @document.download_filename,
             type: @document.content_type,
@@ -84,6 +74,7 @@ module Api
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
 
+          audit_portal_document!("portal_documents#preview")
           send_data data,
             filename: filename,
             type: content_type,
@@ -93,12 +84,9 @@ module Api
         def unarchive
           @document.with_lock do
             if @document.archived?
-              AuditLog.record!(
-                user: current_user, company_id: current_company_id,
-                action: "admin_client_documents#unarchive", record_type: "client_documents", record_id: @document.id,
-                metadata: { title: @document.title, archived_at: @document.archived_at.iso8601, archived_by_id: @document.archived_by_id },
-                ip_address: request.remote_ip, user_agent: request.user_agent
-              )
+              PortalActivity.record!(user: current_user, record: @document, action: "admin_client_documents#unarchive",
+                metadata: PortalActivity.document_metadata(@document).merge(archived_at: @document.archived_at.iso8601, archived_by_id: @document.archived_by_id),
+                ip_address: request.remote_ip, user_agent: request.user_agent)
               @document.update!(archived_at: nil, archived_by_id: nil)
             end
           end
@@ -106,18 +94,16 @@ module Api
         end
 
         def destroy
-          file_keys = [ @document.preview_file_key, @document.file_key ].compact
-          disposition = @document.archive_or_destroy!(actor: current_user)
-          AuditLog.record!(
-            user: current_user,
-            company_id: current_company_id,
-            action: "admin_client_documents##{disposition == :archived ? 'archive' : 'destroy'}",
-            record_type: "client_documents",
-            record_id: @document.id,
-            metadata: { title: @document.title, category: @document.category },
-            ip_address: request.remote_ip,
-            user_agent: request.user_agent
-          )
+          file_keys = nil
+          disposition = nil
+          @document.with_lock do
+            file_keys = [ @document.preview_file_key, @document.file_key ].compact
+            disposition = @document.archive_or_destroy!(actor: current_user)
+            PortalActivity.record!(user: current_user, record: @document,
+              action: "admin_client_documents##{disposition == :archived ? 'archive' : 'destroy'}",
+              metadata: PortalActivity.document_metadata(@document),
+              ip_address: request.remote_ip, user_agent: request.user_agent)
+          end
           if disposition == :archived
             render json: { data: serialize_document(@document), message: "File archived. It is kept with the messages or evidence that reference it." }
           else
@@ -213,7 +199,8 @@ module Api
             action: "employee_document_requirements#receive",
             record_type: "employee_document_requirements",
             record_id: requirement.id,
-            metadata: { employee_id: requirement.employee_id, requirement_type: requirement.requirement_type },
+            subject_name: requirement.employee.full_name,
+            metadata: { employee_id: requirement.employee_id, employee_name: requirement.employee.full_name, requirement_type: requirement.requirement_type },
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )
