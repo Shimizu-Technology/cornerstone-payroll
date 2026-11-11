@@ -95,3 +95,72 @@ RSpec.describe ClientDocument, type: :model do
     expect(doc.reload).to be_persisted
   end
 end
+
+RSpec.describe "Payroll export compatibility" do
+  def errors(name, bytes, mime = "application/octet-stream")
+    ClientDocument.upload_validation_errors(portal_upload(name, bytes, mime))
+  end
+
+  it "accepts Windows-1252 CSV with Chamorro names" do
+    expect(errors("hours.csv", "Name,Hours\nPeña Åda,40\n".encode("Windows-1252"))).to be_empty
+  end
+
+  it "accepts BOM-marked UTF-16LE CSV from Excel Unicode Text" do
+    expect(errors("hours.csv", "\xFF\xFE".b + "Name\tHours\nPeña,40\n".encode("UTF-16LE").b)).to be_empty
+  end
+
+  it "accepts Windows-1252 TXT" do
+    expect(errors("notes.txt", "Peña Åda\n".encode("Windows-1252"))).to be_empty
+  end
+
+  it "accepts POS CSV with a stray quote" do
+    expect(errors("sales.csv", "Item,Count\n12 inch 5\" pizza,2\n")).to be_empty
+  end
+
+  %w[application/csv text/x-csv].each do |mime|
+    it("accepts CSV declared as #{mime}") { expect(errors("hours.csv", "Name,Hours\nPeña,40\n", mime)).to be_empty }
+  end
+
+  it "allows a DOCX with a native chart's embedded workbook" do
+    expect(errors("chart.docx", office_zip(extension: "docx", extra: { "word/embeddings/Microsoft_Excel_Worksheet.xlsx" => office_zip }))).to be_empty
+  end
+
+  it "rejects embedded OLE, executable and unknown binaries" do
+    %w[oleObject1.bin program.exe unknown.bin].each do |name|
+      expect(errors("chart.docx", office_zip(extension: "docx", extra: { "word/embeddings/#{name}" => "binary" }))).not_to be_empty
+    end
+  end
+
+  it "rejects a macro workbook inside an embedded OOXML package" do
+    macro = office_zip(extra: { "xl/vbaProject.bin" => "macro" })
+    expect(errors("chart.docx", office_zip(extension: "docx", extra: { "word/embeddings/chart.xlsx" => macro }))).not_to be_empty
+  end
+
+  it "bounds embedding recursion and aggregate expansion" do
+    nested = office_zip
+    5.times { nested = office_zip(extra: { "xl/embeddings/child.xlsx" => nested }) }
+    expect(errors("nested.xlsx", nested)).not_to be_empty
+    stub_const("ClientDocumentFileValidator::MAX_EXPANDED_BYTES", 8_000)
+    inner = office_zip(extra: { "xl/data.xml" => "x" * 5_000 })
+    outer = office_zip(extra: { "xl/embeddings/a.xlsx" => inner, "xl/embeddings/b.xlsx" => inner })
+    expect(errors("nested.xlsx", outer).join).to include("expands")
+  end
+
+  it "allows small ZIP padding but rejects large padding or an appended program" do
+    expect(errors("hours.xlsx", office_zip + "\x00" * 128)).to be_empty
+    expect(errors("hours.xlsx", office_zip + "\x00" * 4_097)).not_to be_empty
+    expect(errors("hours.xlsx", office_zip + "MZprogram")).not_to be_empty
+  end
+
+  it "explains HTML and text disguised as XLS" do
+    [ "<html><table><tr><td>Hours</td></tr></table></html>", "Name\tHours\nPeña\t40\n" ].each do |bytes|
+      expect(errors("export.xls", bytes).join).to include("This file is a web page or text file named .xls. Please export as .xlsx, .csv or PDF.")
+    end
+  end
+
+  it "still rejects binary and control characters in every accepted encoding" do
+    [ "a,b\x00\n".b, "Peña\u0001".encode("Windows-1252"), "Peña\u007f".encode("UTF-16LE").b.prepend("\xFF\xFE".b), "MZ\x00program".b ].each do |bytes|
+      expect(errors("bad.csv", bytes)).not_to be_empty
+    end
+  end
+end

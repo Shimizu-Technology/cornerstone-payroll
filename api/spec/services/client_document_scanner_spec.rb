@@ -42,3 +42,15 @@ RSpec.describe ClientDocumentScanner do
     end
   end
 end
+
+RSpec.describe "Non-overridable scanner states" do
+  it "blocks infected, error and pending even with the no-op adapter" do
+    document = create(:client_document)
+    %w[infected error pending].each do |status|
+      document.update!(scan_status: status)
+      ClientDocumentScanner::PURPOSES.each do |purpose|
+        expect { document.ensure_usable_for!(purpose) }.to raise_error(ClientDocumentScanner::Blocked)
+      end
+    end
+  end
+end

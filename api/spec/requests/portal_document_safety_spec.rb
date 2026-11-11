@@ -58,8 +58,14 @@ RSpec.shared_examples "safe portal documents" do |namespace, controller, role|
     expect(documents.map { |doc| doc.fetch("content_type") }).to eq([ "application/pdf", ClientDocumentFileValidator::TYPES["xlsx"], "text/csv" ])
   end
 
+  it "permits the 45 requests needed to isolate invalid files in a 30-file selection" do
+    allow(Rack::Attack.cache).to receive(:count).with("portal-document-uploads/user/#{actor.id}", 60).and_return(45)
+    post base, params: { file: portal_upload("notes.txt", "notes") }
+    expect(response).to have_http_status(:created)
+  end
+
   it "rate limits the authenticated user with Rack::Attack's counter" do
-    allow(Rack::Attack.cache).to receive(:count).with("portal-document-uploads/user/#{actor.id}", 60).and_return(21)
+    allow(Rack::Attack.cache).to receive(:count).with("portal-document-uploads/user/#{actor.id}", 60).and_return(61)
     post base, params: { file: portal_upload("notes.txt", "notes") }
     expect(response).to have_http_status(:too_many_requests)
     expect(response.headers["Retry-After"]).to eq("60")
@@ -125,4 +131,67 @@ end
 
 RSpec.describe "Staff document safety", type: :request do
   include_examples "safe portal documents", "admin/client_documents", Api::V1::Admin::ClientDocumentsController, "admin"
+end
+
+RSpec.describe "Archived evidence access", type: :request do
+  let!(:company) { create(:company) }
+  let!(:staff) { create(:user, company: company, role: "admin") }
+  let!(:client) { create(:user, company: company, role: "client") }
+  let!(:document) { create(:client_document, company: company, uploaded_by: client, archived_at: Time.current, archived_by: client, file_name: "w4.pdf", content_type: "application/pdf") }
+
+  before do
+    [ [ Api::V1::Admin::ClientDocumentsController, staff ], [ Api::V1::Client::DocumentsController, client ] ].each do |controller, actor|
+      allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
+      allow_any_instance_of(controller).to receive(:current_user_id).and_return(actor.id)
+      allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
+    end
+    R2StorageService.new.upload(document.file_key, "%PDF-1.4\n", content_type: "application/pdf")
+  end
+
+  it "lets staff download and preview archived files while clients remain blocked" do
+    %w[download preview].each do |action|
+      get "/api/v1/admin/client_documents/#{document.id}/#{action}"
+      expect(response).to have_http_status(:ok), response.body
+      get "/api/v1/client/documents/#{document.id}/#{action}"
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+    expect { document.ensure_usable_for!(:message_attachment) }.to raise_error(ClientDocumentScanner::Blocked)
+    expect { document.ensure_usable_for!(:intake) }.to raise_error(ClientDocumentScanner::Blocked)
+  end
+
+  it "lets only staff unarchive evidence and audits the original archive actor/time" do
+    original_time = document.archived_at
+    post "/api/v1/admin/client_documents/#{document.id}/unarchive"
+    expect(response).to have_http_status(:ok), response.body
+    expect(document.reload).to have_attributes(archived_at: nil, archived_by_id: nil)
+    audit = AuditLog.find_by!(action: "admin_client_documents#unarchive", record_id: document.id)
+    expect(audit.user_id).to eq(staff.id)
+    expect(audit.metadata).to include("archived_by_id" => client.id)
+    expect(Time.iso8601(audit.metadata.fetch("archived_at"))).to be_within(1.second).of(original_time)
+    expect(R2StorageService.new.download(document.file_key)).to eq("%PDF-1.4\n")
+    post "/api/v1/client/documents/#{document.id}/unarchive"
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "does not let staff bypass an infected state or cross-company unarchive" do
+    document.update!(scan_status: "infected")
+    get "/api/v1/admin/client_documents/#{document.id}/download"
+    expect(response).to have_http_status(:unprocessable_entity)
+    other = create(:client_document, archived_at: Time.current)
+    post "/api/v1/admin/client_documents/#{other.id}/unarchive"
+    expect(response).to have_http_status(:not_found)
+    expect(other.reload).to be_archived
+  end
+end
+
+RSpec.describe "Staff unarchive role boundary", type: :request do
+  it "denies a client using the staff endpoint" do
+    client = create(:user, role: "client")
+    document = create(:client_document, company: client.company, uploaded_by: client, archived_at: Time.current)
+    allow_any_instance_of(Api::V1::Admin::ClientDocumentsController).to receive(:current_user).and_return(client)
+    post "/api/v1/admin/client_documents/#{document.id}/unarchive"
+    expect(response).to have_http_status(:forbidden)
+    expect(document.reload).to be_archived
+    expect(AuditLog.where(action: "admin_client_documents#unarchive", record_id: document.id)).not_to exist
+  end
 end

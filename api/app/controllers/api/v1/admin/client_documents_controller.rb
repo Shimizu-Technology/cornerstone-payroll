@@ -10,7 +10,7 @@ module Api
         end
         before_action :private_document_response!, only: [ :download, :preview ]
 
-        before_action :set_document, only: [ :download, :preview, :destroy ]
+        before_action :set_document, only: [ :download, :preview, :destroy, :unarchive ]
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
@@ -68,7 +68,7 @@ module Api
         end
 
         def download
-          @document.ensure_usable_for!(:download)
+          @document.ensure_usable_for!(:download, staff_read: true)
           data = R2StorageService.new.download(@document.file_key)
           return render json: { error: "File not found" }, status: :not_found unless data
 
@@ -79,7 +79,7 @@ module Api
         end
 
         def preview
-          @document.ensure_usable_for!(:preview)
+          @document.ensure_usable_for!(:preview, staff_read: true)
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
@@ -88,6 +88,21 @@ module Api
             filename: filename,
             type: content_type,
             disposition: "inline"
+        end
+
+        def unarchive
+          @document.with_lock do
+            if @document.archived?
+              AuditLog.record!(
+                user: current_user, company_id: current_company_id,
+                action: "admin_client_documents#unarchive", record_type: "client_documents", record_id: @document.id,
+                metadata: { title: @document.title, archived_at: @document.archived_at.iso8601, archived_by_id: @document.archived_by_id },
+                ip_address: request.remote_ip, user_agent: request.user_agent
+              )
+              @document.update!(archived_at: nil, archived_by_id: nil)
+            end
+          end
+          render json: { data: serialize_document(@document), message: "File unarchived." }
         end
 
         def destroy
@@ -145,7 +160,7 @@ module Api
             archived_by_id: document.archived_by_id,
             scan_status: document.scan_status,
             preview_status: document.preview_status,
-            preview_available: document.preview_available?,
+            preview_available: document.preview_available?(staff_read: true),
             preview_generated_at: document.preview_generated_at,
             preview_content_type: document.preview_content_type,
             preview_error: document.preview_error
@@ -156,7 +171,7 @@ module Api
           return unless document.preview_generation_required?
           return if document.preview_ready?
 
-          ClientDocumentPreviewGenerator.new(document: document).generate!
+          ClientDocumentPreviewGenerator.new(document: document, staff_read: true).generate!
           document.reload
         rescue ClientDocumentPreviewGenerator::GenerationUnavailable, ClientDocumentPreviewGenerator::GenerationFailed => e
           Rails.logger.warn("Admin client document preview generation failed for document #{document.id}: #{e.message}")

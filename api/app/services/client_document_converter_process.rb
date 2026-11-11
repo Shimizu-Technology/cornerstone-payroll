@@ -12,11 +12,13 @@ class ClientDocumentConverterProcess
 
   def self.capture(*command, timeout: TIMEOUT_SECONDS, directory:)
     command = network_sandbox(command, directory)
-    options = { pgroup: true, chdir: directory, rlimit_cpu: 30, rlimit_fsize: MAX_FILE_BYTES, rlimit_nofile: 128 }
-    # RLIMIT_AS is unsupported on macOS. Linux converters also get a 1 GiB
-    # address-space ceiling; the wall/CPU/file limits apply on both systems.
-    options[:rlimit_as] = 1.gigabyte unless RUBY_PLATFORM.include?("darwin")
-    Open3.popen3({ "HOME" => directory, "TMPDIR" => directory }, *command, **options) do |stdin, stdout, stderr, process|
+    options = { pgroup: true, chdir: directory, rlimit_cpu: 30, rlimit_fsize: MAX_FILE_BYTES, rlimit_nofile: 128, unsetenv_others: true }
+    # LibreOffice reserves large virtual mappings at startup. Limit Linux's
+    # data/heap to 1 GiB instead of all virtual address space; CPU, wall time,
+    # output and descriptor limits still apply on both platforms.
+    options[:rlimit_data] = 1.gigabyte unless RUBY_PLATFORM.include?("darwin")
+    environment = { "PATH" => ENV.fetch("PATH", "/usr/bin:/bin"), "HOME" => directory, "TMPDIR" => directory, "LANG" => "C.UTF-8" }
+    Open3.popen3(environment, *command, **options) do |stdin, stdout, stderr, process|
       stdin.close
       readers = [ stdout, stderr ].map do |io|
         Thread.new do

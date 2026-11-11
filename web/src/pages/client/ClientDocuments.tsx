@@ -1,3 +1,4 @@
+import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
@@ -28,7 +29,7 @@ const documentCategories = [
   { value: 'misc', label: 'Miscellaneous' },
 ];
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx';
-const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB each. Upload up to 10 files, 50 MB total. Macros are not supported.';
+const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB each. Select multiple files; larger selections upload in smaller groups. Macros are not supported.';
 
 function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
@@ -37,10 +38,6 @@ function categoryLabel(value: string) {
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function formatUploadSuccessMessage(count: number) {
-  return count === 1 ? 'Document uploaded successfully' : `${count} documents uploaded successfully`;
 }
 
 export function ClientDocuments() {
@@ -53,6 +50,7 @@ export function ClientDocuments() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -133,23 +131,25 @@ export function ClientDocuments() {
       setUploading(true);
       setError(null);
       setSuccess(null);
-      const payload = new FormData();
-      selectedFiles.forEach((file) => payload.append('files[]', file));
-      if (supportsSingleTitle && form.title.trim()) {
-        payload.append('title', form.title.trim());
-      }
-      payload.append('category', form.category);
-      if (form.employee_id) payload.append('employee_id', form.employee_id);
-      if (form.notes.trim()) payload.append('notes', form.notes.trim());
-      const response = await clientDocumentsApi.upload(payload);
-      setForm({ title: '', category: 'misc', employee_id: '', notes: '', files: [] });
+      const result = await uploadDocumentBatches(selectedFiles, {
+        ...(supportsSingleTitle && form.title.trim() ? { title: form.title.trim() } : {}),
+        category: form.category,
+        ...(form.employee_id ? { employee_id: form.employee_id } : {}),
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+      }, clientDocumentsApi.upload,
+        (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
+      setForm((current) => ({ ...current, files: result.failures.map((failure) => failure.file) }));
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setSuccess(response.message || formatUploadSuccessMessage(selectedFileCount));
-      await load();
+      if (result.uploaded.length) {
+        setSuccess(result.uploaded.length === 1 ? 'Document uploaded successfully' : `${result.uploaded.length} documents uploaded successfully`);
+        await load();
+      }
+      if (result.failures.length) setError(result.failures.map((failure) => `${failure.file.name}: ${failure.message}`).join('\n'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload document');
     } finally {
       setUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -252,6 +252,7 @@ export function ClientDocuments() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpload} className="grid gap-5 md:grid-cols-2">
+              <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
                 <Input
@@ -382,6 +383,8 @@ export function ClientDocuments() {
                   {uploading ? `Uploading ${selectedFileCount || ''} file${selectedFileCount === 1 ? '' : 's'}...` : 'Upload Document'}
                 </Button>
               </div>
+              {uploading && <p role="status" aria-live="polite" className="text-sm text-neutral-600">{uploadProgress}</p>}
+              </fieldset>
             </form>
           </CardContent>
         </Card>

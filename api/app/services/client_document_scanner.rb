@@ -15,7 +15,7 @@ class ClientDocumentScanner
 
   def self.ensure_allowed!(document, purpose:)
     raise ArgumentError, "Unknown document use" unless PURPOSES.include?(purpose)
-    return if adapter.allowed?(document: document, purpose: purpose)
+    return if !%w[infected error pending].include?(document.scan_status) && adapter.allowed?(document: document, purpose: purpose)
 
     raise Blocked, "This file is not available yet. Its safety check must finish before it can be used. Please try again later or contact Cornerstone."
   end

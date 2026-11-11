@@ -240,6 +240,7 @@ Rails.application.routes.draw do
           member do
             get :download
             get :preview
+            post :unarchive
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do

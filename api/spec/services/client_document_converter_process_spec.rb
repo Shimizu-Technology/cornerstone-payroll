@@ -46,3 +46,19 @@ RSpec.describe "macOS converter network isolation" do
     end
   end
 end
+
+RSpec.describe "Converter environment isolation" do
+  it "passes only an explicit environment to a real child process" do
+    Dir.mktmpdir do |dir|
+      allow(ClientDocumentConverterProcess).to receive(:network_sandbox) { |command, _directory| command }
+      ENV["PORTAL_CONVERTER_TEST_SECRET"] = "must-not-inherit"
+      out, err, status = ClientDocumentConverterProcess.capture(RbConfig.ruby, "-rjson", "-e", "puts ENV.to_h.to_json", directory: dir)
+      expect(status).to be_success, err
+      environment = JSON.parse(out)
+      expect(environment.keys - [ "__CF_USER_TEXT_ENCODING" ]).to contain_exactly("PATH", "HOME", "TMPDIR", "LANG")
+      expect(environment).to include("HOME" => dir, "TMPDIR" => dir)
+    ensure
+      ENV.delete("PORTAL_CONVERTER_TEST_SECRET")
+    end
+  end
+end

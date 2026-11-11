@@ -13,7 +13,9 @@ module ClientDocumentUploadRateLimit
     # Authentication has already resolved the trusted user here. Rack::Attack's
     # middleware cannot safely key on the unverified Authorization header.
     count = Rack::Attack.cache.count("portal-document-uploads/user/#{current_user.id}", 1.minute)
-    return if count <= 20
+    # Thirty 25 MiB photos need 15 batches and up to 30 individual retries
+    # after validation rejection. Sixty permits those 45 plus 15 corrections.
+    return if count <= 60
 
     response.set_header("Retry-After", "60")
     render json: { error: "You have uploaded too often. Please wait a minute and try again." }, status: :too_many_requests

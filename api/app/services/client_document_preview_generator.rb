@@ -8,13 +8,14 @@ class ClientDocumentPreviewGenerator
   class GenerationUnavailable < StandardError; end
   class GenerationFailed < StandardError; end
 
-  def initialize(document:, storage: R2StorageService.new)
+  def initialize(document:, storage: R2StorageService.new, staff_read: false)
     @document = document
     @storage = storage
+    @staff_read = staff_read
   end
 
   def generate!
-    document.ensure_usable_for!(:preview)
+    document.ensure_usable_for!(:preview, staff_read: @staff_read)
     return unless document.preview_generation_required?
 
     converter = libreoffice_binary
