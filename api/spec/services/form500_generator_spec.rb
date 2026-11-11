@@ -20,4 +20,13 @@ RSpec.describe Form500Generator do
     expect(fields[:total_taxes_dollars]).to eq("125")
     expect(fields[:total_taxes_cents]).to eq("00")
   end
+
+  it "prints an accented employer name on the official form" do
+    company = create(:company, name: "Mañibusan Café Wiśniewska", address_line1: "1 Chalan Santo Papa", city: "Hagåtña")
+    period = create(:pay_period, :committed, company: company)
+    fields = described_class.default_fields(company: company, pay_period: period)
+
+    text = unicode_pdf_text(described_class.new(fields: fields).generate)
+    expect(text).to include("MAÑIBUSAN CAFÉ WIŚNIEWSKA")
+  end
 end

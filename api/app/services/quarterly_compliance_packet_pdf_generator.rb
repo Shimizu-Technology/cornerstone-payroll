@@ -33,7 +33,7 @@ class QuarterlyCompliancePacketPdfGenerator
   end
 
   def summary_pdf
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 40, 42, 46, 42 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 40, 42, 46, 42 ])
     pdf.fill_color "1E3A5F"
     pdf.fill_rectangle [ pdf.bounds.left, pdf.bounds.top ], pdf.bounds.width, 72
     pdf.fill_color "FFFFFF"

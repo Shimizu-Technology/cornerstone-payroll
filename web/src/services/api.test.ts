@@ -438,6 +438,22 @@ describe('API failure feedback across request types', () => {
     vi.mocked(fetch).mockRejectedValueOnce(aborted);
     await expect(apiClient.get('/test')).rejects.toBe(aborted);
   });
+  it('shows the server explanation when a PDF download cannot be built', async () => {
+    const message = "We couldn't create this PDF, and nothing was changed. Try again.";
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: message, code: 'pdf_generation_failed' }), { status: 500 }));
+    await expect(apiClient.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: 4 }))
+      .rejects.toMatchObject({ status: 500, message });
+  });
+  it('does not ask about saved changes when a download fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const offline = apiClient.getBlobWithParams('/client/reports/payroll_register_pdf');
+    await expect(offline).rejects.toMatchObject({ status: 0, message: expect.stringContaining('could not be reached') });
+    await expect(offline).rejects.not.toMatchObject({ message: expect.stringContaining('changes were saved') });
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('<html>proxy</html>', { status: 502 }));
+    const proxy = apiClient.getBlob('/client/reports/ytd_summary_pdf');
+    await expect(proxy).rejects.toMatchObject({ status: 502, message: expect.stringContaining('Nothing was changed') });
+  });
 });
 
 describe('actionable API errors', () => {

@@ -27,7 +27,7 @@ function messages(value: unknown): string[] {
 }
 
 /** Preserve the server's explanation and validation details in every API path. */
-export function apiErrorMessage(data: unknown, status: number): string {
+export function apiErrorMessage(data: unknown, status: number, options: { readOnly?: boolean } = {}): string {
   const payload = record(data);
   const primary = messages(payload.error);
   const errors = Array.isArray(payload.errors) ? messages(payload.errors) : [];
@@ -48,7 +48,9 @@ export function apiErrorMessage(data: unknown, status: number): string {
     429: 'Too many requests were sent. Wait a moment and try again.',
   };
   if (!explanations.length) return fallback[status] || (status >= 500
-    ? 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.'
+    ? (options.readOnly
+      ? 'The server could not prepare this download. Nothing was changed. Try again; if it keeps failing, contact support with the page and action.'
+      : 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.')
     : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
   const message = explanations.join('; ');
   // These outcomes have a definite recovery step regardless of the endpoint.
@@ -97,13 +99,20 @@ function parseContentDispositionFilename(header: string | null): string | undefi
   return undefined;
 }
 
+function isReadOnlyRequest(init?: RequestInit): boolean {
+  return ['GET', 'HEAD'].includes((init?.method || 'GET').toUpperCase());
+}
+
 async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
+    // A read or download changes nothing, so don't ask the user to check for saved changes.
     throw new ApiError(
-      'The connection was interrupted. Check your internet connection and whether your changes were saved before trying again.',
+      isReadOnlyRequest(init)
+        ? 'The server could not be reached. Check your internet connection and try again.'
+        : 'The connection was interrupted. Check your internet connection and whether your changes were saved before trying again.',
       0,
     );
   }
@@ -296,7 +305,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        apiErrorMessage(errorData, response.status),
+        apiErrorMessage(errorData, response.status, { readOnly: true }),
         response.status,
         errorData.details,
         errorData
@@ -361,7 +370,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        apiErrorMessage(errorData, response.status),
+        apiErrorMessage(errorData, response.status, { readOnly: true }),
         response.status,
         errorData.details,
         errorData

@@ -20,7 +20,7 @@ class NonEmployeeCheckVoucherGenerator
   end
 
   def generate
-    Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: 36) do |pdf|
+    PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: 36) do |pdf|
       render_header(pdf)
       render_summary(pdf)
       render_line_items(pdf)

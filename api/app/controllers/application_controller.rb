@@ -7,6 +7,7 @@ class ApplicationController < ActionController::API
   E2E_USER_EMAIL_HEADER = "X-E2E-User-Email"
 
   include ClerkAuthenticatable
+  include PdfGenerationFailureHandling
 
   around_action :reset_current_context, prepend: true
   before_action :set_current_context

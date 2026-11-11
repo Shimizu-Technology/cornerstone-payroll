@@ -43,7 +43,7 @@ class TransmittalLogPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 50, 36, 50 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 50, 36, 50 ])
     render_document(pdf)
     pdf.render
   end

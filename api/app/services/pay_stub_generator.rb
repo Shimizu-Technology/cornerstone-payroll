@@ -33,7 +33,7 @@ class PayStubGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 32, 32, 64, 32 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 32, 32, 64, 32 ])
 
     # Header
     render_header(pdf)
