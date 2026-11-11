@@ -19,6 +19,7 @@ import type { AirePayrollCalendarState, AirePayrollRecord, PayPeriodStatus } fro
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { AireLockTimeControl } from './AireLockTimeControl';
 
 type Props = {
   payPeriodId: number;
@@ -154,6 +155,10 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
             )}
           </div>
         </div>
+
+        {!recordedWithoutSchedule && !batch && (
+          <AireLockTimeControl payPeriodId={payPeriodId} calendar={calendar} companyId={scopeCompanyId} now={now} onChanged={onRefresh} />
+        )}
 
         {!manualLock && !recordedWithoutSchedule && ['due', 'cutoff_due'].includes(calendar.cutoff_state) && <div role="status" className="border-t border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-900">
           <p className="font-semibold">Cutoff reached — waiting for time tracking to lock the hours</p>

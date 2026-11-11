@@ -48,6 +48,7 @@ class PayPeriod < ApplicationRecord
            inverse_of: :promotion_source_pay_period,
            dependent: :restrict_with_error
   has_one :aire_payroll_calendar_period, dependent: :restrict_with_error
+  has_many :aire_payroll_cutoff_overrides, dependent: :restrict_with_error
   has_one :late_hours_run, class_name: "TimeTrackingLateHoursRun", foreign_key: :adjustment_pay_period_id, dependent: :restrict_with_error
   has_many :origin_late_hours_runs, class_name: "TimeTrackingLateHoursRun", foreign_key: :origin_pay_period_id, dependent: :restrict_with_error
   has_many :time_tracking_manual_allocations, dependent: :restrict_with_error

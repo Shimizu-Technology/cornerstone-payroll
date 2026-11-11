@@ -29,33 +29,45 @@ module AirePayrollCalendar
       @source = source
     end
 
+    # Publications made before admin lock times existed carry no cutoff_source;
+    # they used the policy cutoff. Compare payloads through this view so those
+    # publications are not reported as needing an update.
+    def self.comparable(payload)
+      payload.key?("cutoff_source") ? payload : payload.merge("cutoff_source" => "policy")
+    end
+
+    # Earliest admin lock time: the start of the day after the period ends (Guam).
+    def self.earliest_override_at(pay_period)
+      day = pay_period.end_date + 1
+      Time.find_zone!(TIME_ZONE).local(day.year, day.month, day.day)
+    end
+
+    # Latest admin lock time: 11:59 PM two days before payday (Guam).
+    def self.latest_override_at(pay_period)
+      day = pay_period.pay_date - 2
+      Time.find_zone!(TIME_ZONE).local(day.year, day.month, day.day, 23, 59)
+    end
+
     def payload
       validate!
       schedule = pay_schedule
       previous_pay_date = previous_regular_pay_date if schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
-      cutoff_date = if previous_pay_date
-                      previous_pay_date + schedule.time_tracking_cutoff_days
-      else
-                      pay_period.pay_date - schedule.time_tracking_cutoff_days
-      end
-      cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
-      cutoff_at = Time.find_zone!(TIME_ZONE).local(
-        cutoff_date.year,
-        cutoff_date.month,
-        cutoff_date.day,
-        cutoff_hour,
-        cutoff_minute
-      )
       legacy_policy = schedule.time_tracking_cutoff_rule == "before_pay_date" && schedule.time_tracking_cutoff_days == CUTOFF_DAYS_BEFORE
+      override = cutoff_override
       fields = {
         "schema_version" => legacy_policy ? SCHEMA_VERSION : "2.0",
         "start_date" => pay_period.start_date.iso8601,
         "end_date" => pay_period.end_date.iso8601,
         "pay_date" => pay_period.pay_date.iso8601,
-        "cutoff_at" => cutoff_at.iso8601,
+        "cutoff_at" => (override&.cutoff_at&.in_time_zone(TIME_ZONE) || policy_cutoff_at).iso8601,
         "time_zone" => TIME_ZONE,
-        "overtime_policy" => OVERTIME_POLICY.dup
+        "overtime_policy" => OVERTIME_POLICY.dup,
+        "cutoff_source" => override ? "override" : "policy"
       }
+      if override
+        fields["policy_cutoff_at"] = policy_cutoff_at.iso8601
+        fields["cutoff_override"] = override.contract_json
+      end
       unless retained_legacy_scheduled_calendar?
         fields["lock_mode"] = lock_mode
         fields["cutoff_enforcement_starts_on"] = rollout_source.cutoff_enforcement_starts_on.iso8601
@@ -108,6 +120,27 @@ module AirePayrollCalendar
       fail_contract!("The pay date must be after the period end", "pay_date_invalid") unless pay_period.pay_date > pay_period.end_date
 
       true
+    end
+
+    # The cutoff Cornerstone's pay schedule produces before any admin change.
+    def policy_cutoff_at
+      @policy_cutoff_at ||= begin
+        schedule = pay_schedule
+        previous_pay_date = previous_regular_pay_date if schedule.time_tracking_cutoff_rule == "after_previous_regular_payday"
+        cutoff_date = if previous_pay_date
+                        previous_pay_date + schedule.time_tracking_cutoff_days
+        else
+                        pay_period.pay_date - schedule.time_tracking_cutoff_days
+        end
+        cutoff_hour, cutoff_minute = schedule.payroll_cutoff_at_minutes.divmod(60)
+        Time.find_zone!(TIME_ZONE).local(cutoff_date.year, cutoff_date.month, cutoff_date.day, cutoff_hour, cutoff_minute)
+      end
+    end
+
+    def cutoff_override
+      return @cutoff_override if defined?(@cutoff_override)
+
+      @cutoff_override = pay_period.persisted? ? AirePayrollCutoffOverride.current_for(pay_period) : nil
     end
 
     private

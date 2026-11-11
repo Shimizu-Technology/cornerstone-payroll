@@ -74,13 +74,23 @@ module AirePayrollCalendar
                expected.values_at("start_date", "end_date", "pay_date") &&
              same_instant?(source_state["cutoff_at"], expected["cutoff_at"]) &&
              (!expected.key?("overtime_policy") || source_state["overtime_policy"] == expected["overtime_policy"]) &&
-             %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_state[key] == expected[key] }
+             %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_state[key] == expected[key] } &&
+             override_applied?(source_state, expected)
         raise TimeTracking::Client::Error, "AIRE returned calendar state that does not match this publication"
       end
     end
 
     def retry_allowed?(publication)
-      publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now
+      publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now ||
+        Publisher.lock_now_deliverable?(publication.payload, @now)
+    end
+
+    # An AIRE build without admin lock times would store the cutoff as policy.
+    def override_applied?(source_state, expected)
+      return true unless expected["cutoff_source"] == "override"
+
+      source_state["cutoff_source"] == "override" &&
+        source_state.dig("cutoff_override", "override_id") == expected.dig("cutoff_override", "override_id")
     end
 
     def same_instant?(left, right)
