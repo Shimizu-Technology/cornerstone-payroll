@@ -161,6 +161,23 @@ RSpec.describe "Portal personal reads and activity", type: :request do
         expect(storage).to have_received(:delete).once
       end
 
+      it "retains and retries storage cleanup after an audited upload rolls back" do
+        allow(storage).to receive(:delete).and_raise(R2StorageService::UploadError, "temporary outage")
+        allow(AuditLog).to receive(:record!).and_call_original
+        allow(AuditLog).to receive(:record!).with(hash_including(record_type: "client_documents")).and_raise("audit down")
+        expect { post documents_path, params: { file: fixture_file_upload("client_portal_upload.txt", "text/plain") } }.to raise_error("audit down")
+        expect(ClientDocument.count).to eq(0)
+        cleanup = PortalUploadCleanup.sole
+        expect(cleanup.file_key).to be_present
+        PortalUploadCleanupJob.perform_now(cleanup.id)
+        expect(cleanup.reload.completed_at).to be_nil
+        expect(cleanup.last_error_class).to eq("R2StorageService::UploadError")
+        allow(storage).to receive(:delete).and_return(nil)
+        PortalUploadCleanupJob.perform_now
+        expect(cleanup.reload.completed_at).to be_present
+        expect(cleanup.attempts).to eq(2)
+      end
+
       it "names uploaded documents and employee context, and rolls deletion back on audit failure" do
         post documents_path, params: { file: fixture_file_upload("client_portal_upload.txt", "text/plain"), title: "Named hours" }
         expect(response).to have_http_status(:created)

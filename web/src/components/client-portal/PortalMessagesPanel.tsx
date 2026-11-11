@@ -56,6 +56,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   refreshCompanies: () => Promise<void>;
 }) {
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const threadFetchVersions = useRef(new Map<number, number>());
   const retryKey = useRef<{ payload: string; key: string } | null>(null);
   const [threads, setThreads] = useState<ClientPortalThread[]>([]);
   const [threadsMeta, setThreadsMeta] = useState<BoundedListMeta | null>(null);
@@ -93,11 +94,17 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
-  const refreshUnreadCount = useCallback(async () => {
+  const fetchThread = useCallback(async (id: number): Promise<{ data: ClientPortalThread } | null> => {
+    const version = (threadFetchVersions.current.get(id) ?? 0) + 1;
+    threadFetchVersions.current.set(id, version);
+    const response = await api.get(id);
+    return threadFetchVersions.current.get(id) === version ? response : null;
+  }, [api]);
+  const refreshUnreadCount = useCallback(async (): Promise<void> => {
     const response = await api.list();
     if (!unavailableRef.current) setUnreadCount(response.meta?.unread_count ?? null);
   }, [api]);
-  const markDisplayed = useCallback(async (id: number, data: PortalReadDisplay) => {
+  const markDisplayed = useCallback(async (id: number, data: PortalReadDisplay): Promise<void> => {
     const response = await api.markRead(id, data);
     if (unavailableRef.current) return;
     setThreads(current => current.map(thread => thread.id === id ? { ...thread, unread: response.data.unread } : thread));
@@ -186,8 +193,8 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
         setConnected(true);
         // Company broadcasts carry no personal read state or display proof.
         const generation = dataGeneration.current;
-        void api.get(thread.id).then(response => {
-          if (!active || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
+        void fetchThread(thread.id).then(response => {
+          if (!response || !active || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
           noteLiveThread(response.data);
           setThreads(current => upsertThread(current, response.data));
           setSelectedThread(current => current?.id === thread.id ? response.data : current);
@@ -227,7 +234,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       active = false;
       unsubscribe?.();
     };
-  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, api, refreshUnreadCount]);
+  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, fetchThread, refreshUnreadCount]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -236,9 +243,9 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     }
 
     let active = true;
-    api.get(selectedId)
+    fetchThread(selectedId)
       .then((response) => {
-        if (!active || unavailableRef.current || response.data.company_id !== companyId) return;
+        if (!response || !active || unavailableRef.current || response.data.company_id !== companyId) return;
         setSelectedThread(response.data);
         setThreads((current) => upsertThread(current, response.data));
       })
@@ -247,7 +254,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     return () => {
       active = false;
     };
-  }, [api, companyId, selectedId, setError]);
+  }, [fetchThread, companyId, selectedId, setError]);
 
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -289,6 +296,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     }
 
     const generation = dataGeneration.current;
+    let sent = false;
     try {
       setSending(true);
       setError(null);
@@ -296,16 +304,17 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       const identity = JSON.stringify([selectedThread.id, payload]);
       if (retryKey.current?.payload !== identity) retryKey.current = { payload: identity, key: crypto.randomUUID() };
       await api.createMessage(selectedThread.id, { ...payload, idempotency_key: retryKey.current.key });
+      sent = true;
       retryKey.current = null;
       setReply({ body: '', document_id: '' });
       if (generation !== dataGeneration.current || unavailableRef.current) return;
-      const response = await api.get(selectedThread.id);
-      if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
+      const response = await fetchThread(selectedThread.id);
+      if (!response || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
       setReply({ body: '', document_id: '' });
       setSelectedThread(response.data);
       setThreads((current) => upsertThread(current, response.data));
     } catch (err) {
-      if (generation === dataGeneration.current && !unavailableRef.current) setError(err instanceof Error ? err.message : 'Failed to send message');
+      if (generation === dataGeneration.current && !unavailableRef.current) setError(sent ? 'Message sent. The conversation could not refresh. Reload to see it.' : err instanceof Error ? err.message : 'Failed to send message');
     } finally {
       setSending(false);
     }

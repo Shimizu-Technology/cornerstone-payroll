@@ -159,3 +159,30 @@ it('does not change the total when a live update arrives for a conversation the 
 
   expect(screen.getByText(/Showing/).textContent).toBe('Showing 3 of 5 conversations');
 });
+
+it('reports send success distinctly when refreshing the saved reply fails', async () => {
+  const current = thread(2, 'Saved conversation');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  api.createMessage.mockResolvedValue({ data: { id: 10, thread_id: 2, body: 'Saved reply', created_at: '2026-11-12T00:00:00Z' } });
+  render(view()); await waitFor(() => expect(api.get).toHaveBeenCalledOnce()); await screen.findByPlaceholderText('Reply client');
+  api.get.mockRejectedValueOnce(new Error('refresh offline'));
+  fireEvent.change(screen.getByPlaceholderText('Reply client'), { target: { value: 'Saved reply' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await screen.findByText('Message sent. The conversation could not refresh. Reload to see it.');
+  expect((screen.getByPlaceholderText('Reply client') as HTMLTextAreaElement).value).toBe('');
+  expect(api.createMessage).toHaveBeenCalledOnce();
+});
+
+it('ignores an earlier broadcast fetch that finishes after a newer one', async () => {
+  const current = thread(2, 'Starting conversation');
+  api.list.mockResolvedValue({ data: [current] }); api.get.mockResolvedValue({ data: current });
+  render(view()); await screen.findByPlaceholderText('Reply client'); await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
+  let older!: (response: { data: ClientPortalThread }) => void;
+  let newer!: (response: { data: ClientPortalThread }) => void;
+  api.get.mockImplementationOnce(() => new Promise(resolve => { older = resolve; })).mockImplementationOnce(() => new Promise(resolve => { newer = resolve; }));
+  await act(async () => { mocks.callbacks[0].onThread({ thread: current }); mocks.callbacks[0].onThread({ thread: current }); });
+  await act(async () => newer({ data: thread(2, 'Newest broadcast') }));
+  expect(screen.getAllByText('Newest broadcast').length).toBeGreaterThan(0);
+  await act(async () => older({ data: thread(2, 'Stale broadcast') }));
+  expect(screen.queryByText('Stale broadcast')).toBeNull();
+});

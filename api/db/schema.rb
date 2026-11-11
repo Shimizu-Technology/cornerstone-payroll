@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_11_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_11_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3312,6 +3312,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_090000) do
     t.bigint "timecard_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
+  end
+
+  create_table "portal_upload_cleanups", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "file_key", null: false
+    t.integer "attempts", default: 0, null: false
+    t.string "last_error_class"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "file_key" ], name: "index_portal_upload_cleanups_on_file_key", unique: true
+    t.index [ "completed_at" ], name: "index_portal_upload_cleanups_on_completed_at"
   end
 
   create_table "portal_thread_read_receipts", force: :cascade do |t|

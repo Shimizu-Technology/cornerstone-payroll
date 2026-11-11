@@ -12,7 +12,12 @@ class AuditedClientDocumentUpload
     result&.uploaded_keys&.each do |key|
       R2StorageService.new.delete(key)
     rescue R2StorageService::UploadError => error
-      Rails.logger.error("Rolled back portal upload cleanup failed: #{error.class.name}")
+      begin
+        PortalUploadCleanup.find_or_create_by!(company_id: company_id, file_key: key)
+      rescue StandardError => persistence_error
+        Rails.logger.error("Portal upload cleanup intent unavailable for #{key}: #{persistence_error.class.name}")
+      end
+      Rails.logger.error("Rolled back portal upload cleanup scheduled: #{error.class.name}")
     end
     raise
   end
