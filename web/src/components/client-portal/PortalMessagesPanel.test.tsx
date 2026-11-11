@@ -120,3 +120,41 @@ it('pages older conversations with a server total and Load more', async () => {
   expect(api.list).toHaveBeenLastCalledWith({ page: 2 });
   expect(screen.queryByRole('button', { name: 'Load more conversations' })).toBeNull();
 });
+
+const listed = (id: number, subject: string): ClientPortalThread => ({ ...thread(2, subject), id, last_message_at: `2026-10-${10 + id}T00:00:00Z` });
+
+it('counts a live new conversation once, including after the next page already counts it', async () => {
+  const meta = (page: number, total: number) => ({ current_page: page, total_pages: 3, total_count: total, per_page: 2 });
+  api.list.mockImplementation((params) => Promise.resolve(
+    params?.page === 2
+      ? { data: [listed(4, 'Fourth'), listed(3, 'Third')], meta: meta(2, 6) }
+      : { data: [listed(5, 'Fifth'), listed(4, 'Fourth')], meta: meta(1, 5) },
+  ));
+  api.get.mockImplementation((id) => Promise.resolve({ data: listed(id, 'Fifth') }));
+  render(view());
+  expect((await screen.findByText(/Showing/)).textContent).toBe('Showing 2 of 5 conversations');
+  await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
+
+  await act(async () => mocks.callbacks[0].onThread({ thread: listed(6, 'Brand new') }));
+  expect(screen.getByText(/Showing/).textContent).toBe('Showing 3 of 6 conversations');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+  expect(await screen.findByText('Third')).toBeTruthy();
+  expect(screen.getByText(/Showing/).textContent).toBe('Showing 4 of 6 conversations');
+
+  await act(async () => mocks.callbacks[0].onThread({ thread: { ...listed(6, 'Brand new'), last_message_at: '2026-10-30T00:00:00Z' } }));
+  expect(screen.getByText(/Showing/).textContent).toBe('Showing 4 of 6 conversations');
+});
+
+it('does not change the total when a live update arrives for a conversation the server already counted', async () => {
+  api.list.mockResolvedValue({ data: [listed(5, 'Fifth'), listed(4, 'Fourth')], meta: { current_page: 1, total_pages: 3, total_count: 5, per_page: 2 } });
+  api.get.mockImplementation((id) => Promise.resolve({ data: listed(id, 'Fifth') }));
+  render(view());
+  expect((await screen.findByText(/Showing/)).textContent).toBe('Showing 2 of 5 conversations');
+  await waitFor(() => expect(mocks.callbacks).toHaveLength(1));
+
+  await act(async () => mocks.callbacks[0].onThread({ thread: { ...listed(4, 'Fourth'), last_message_at: '2026-10-30T00:00:00Z' } }));
+  await act(async () => mocks.callbacks[0].onThread({ thread: { ...listed(1, 'Oldest, not loaded yet'), last_message_at: '2026-10-31T00:00:00Z' } }));
+
+  expect(screen.getByText(/Showing/).textContent).toBe('Showing 3 of 5 conversations');
+});
