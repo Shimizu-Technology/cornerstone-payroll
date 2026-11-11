@@ -133,7 +133,11 @@ jobs:
       - name: Record AIRE Ruby runtime
         run: echo "AIRE_RUBY_BIN_DIR=$(dirname "$(command -v ruby)")" >> "$GITHUB_ENV"
       - name: Install PostgreSQL client and listener inspection
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client lsof
+        run: |
+          # GitHub's runners sometimes can't resolve the Azure Ubuntu mirror; use the primary archive with retries.
+          sudo sed -i -E 's#mirror\+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#g; s#http://azure\.archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          sudo apt-get update && sudo apt-get install -y postgresql-client lsof
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: payroll/.node-version
