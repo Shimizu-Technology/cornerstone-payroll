@@ -35,6 +35,24 @@ RSpec.describe ClientDocumentFileValidator do
     end
   end
 
+  it "rejects online and network-share targets however they are written" do
+    [ "https://example.com/template.dotm", "file://server/share/a.xlsx", "file:////server/share/a.xlsx",
+      "\\\\server\\share\\a.xlsx", "//server/share/a.xlsx", "%5C%5Cserver%5Cshare%5Ca.xlsx", "mhtml:file://x" ].each do |target|
+      workbook = office_zip(extra: { "xl/_rels/workbook.xml.rels" => relationship("attachedTemplate", target: target) })
+      expect(errors(workbook)).to include("external resources"), target
+    end
+  end
+
+  it "accepts workbook links and templates on the uploader's own disk" do
+    [ "file:///C:\\Users\\mosa\\Templates\\Payroll.dotx", "C:\\Users\\mosa\\Desktop\\Hours.xlsx", "file://localhost/C:/x.xlsx",
+      "/Users/mosa/Desktop/Hours.xlsx", "Hours%20Oct.xlsx", "../Timesheets/Hours.xlsx" ].each do |target|
+      %w[externalLinkPath attachedTemplate].each do |type|
+        workbook = office_zip(extra: { "xl/_rels/workbook.xml.rels" => relationship(type, target: target) })
+        expect(errors(workbook)).to be_empty, "#{type} #{target}"
+      end
+    end
+  end
+
   it "accepts ordinary hyperlinks and internal images" do
     expect(errors(office_zip(extension: "docx", extra: { "word/_rels/document.xml.rels" => relationship("hyperlink") }), extension: "docx")).to be_empty
     expect(errors(office_zip(extra: { "xl/_rels/workbook.xml.rels" => relationship("image", mode: "Internal", target: "media/image1.png") }))).to be_empty

@@ -179,9 +179,21 @@ class ClientDocumentFileValidator
     safe_xml(bytes).xpath("//*[local-name()='Relationship']").each do |relationship|
       next unless relationship["TargetMode"].to_s.casecmp?("External")
       next if HYPERLINK_RELATIONSHIPS.include?(relationship["Type"])
+      # Workbook links and templates on the uploader's own disk are common and
+      # fetch nothing. Online and network-share targets can be fetched on open.
+      next if local_target?(relationship["Target"])
 
       raise InvalidFile, "contains external resources. Embed images and linked content before uploading, or export as PDF."
     end
+  end
+
+  def local_target?(target)
+    path = CGI.unescape(target.to_s.strip).tr("\\", "/").sub(/\Afile:/i, "")
+    path = path.sub(%r{\A//(localhost)?(?=/)}i, "")
+    return false if path.start_with?("//")
+    return true if path.match?(%r{\A/?[a-z]:/}i)
+
+    !path.match?(/\A[a-z][a-z0-9+.\-]+:/i)
   end
 
   def validate_zip_directory!(bytes)
