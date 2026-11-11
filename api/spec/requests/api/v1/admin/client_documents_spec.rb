@@ -84,8 +84,8 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
       delete "/api/v1/admin/client_documents/#{document.id}"
     end.not_to change(ClientDocument, :count)
 
-    expect(response).to have_http_status(:unprocessable_content)
-    expect(response.parsed_body.fetch("error")).to include("linked")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("message")).to include("archived")
     expect(requirement.reload.client_document).to eq(document)
     expect_readiness_storage_to_exist(document)
   end
@@ -109,8 +109,8 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
       delete "/api/v1/admin/client_documents/#{document.id}"
     end.not_to change(ClientDocument, :count)
 
-    expect(response).to have_http_status(:unprocessable_content)
-    expect(response.parsed_body.fetch("error")).to include("linked")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("message")).to include("archived")
     expect(event.reload.client_document).to eq(document)
     expect_readiness_storage_to_exist(document)
   end
@@ -142,8 +142,8 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
 
     expect { delete "/api/v1/admin/client_documents/#{document.id}" }.not_to change(ClientDocument, :count)
 
-    expect(response).to have_http_status(:unprocessable_content)
-    expect(response.parsed_body.fetch("error")).to include("retained compliance evidence")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("message")).to include("archived")
     expect(R2StorageService.new.download(document.file_key)).to be_present
   end
 

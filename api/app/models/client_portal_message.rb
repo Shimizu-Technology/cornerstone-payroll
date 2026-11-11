@@ -8,6 +8,7 @@ class ClientPortalMessage < ApplicationRecord
 
   validates :body, presence: true, unless: -> { client_document_id.present? }
   validate :thread_and_document_belong_to_company
+  around_save :protect_attachment_use
 
   scope :chronological, -> { order(created_at: :asc, id: :asc) }
 
@@ -23,6 +24,22 @@ class ClientPortalMessage < ApplicationRecord
     return unless client_document
 
     errors.add(:client_document, "must belong to the same company") if client_document.company_id != company_id
+  end
+
+  def protect_attachment_use
+    return yield unless client_document && (new_record? || will_save_change_to_client_document_id?)
+
+    client_document.with_lock do
+      unless client_document.visible_to_client?
+        errors.add(:client_document, "must be visible to the client")
+        raise ActiveRecord::RecordInvalid.new(self)
+      end
+      client_document.ensure_usable_for!(:message_attachment)
+      yield
+    end
+  rescue ClientDocumentScanner::Blocked => e
+    errors.add(:client_document, e.message)
+    raise ActiveRecord::RecordInvalid.new(self)
   end
 
   def touch_thread_and_broadcast

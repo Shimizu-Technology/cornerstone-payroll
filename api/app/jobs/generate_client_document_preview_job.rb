@@ -11,9 +11,10 @@ class GenerateClientDocumentPreviewJob < ApplicationJob
     return unless document.preview_generation_required?
     return if document.preview_ready?
 
+    document.ensure_usable_for!(:preview)
     document.update!(preview_status: "processing", preview_error: nil)
     ClientDocumentPreviewGenerator.new(document: document).generate!
-  rescue ClientDocumentPreviewGenerator::GenerationUnavailable, ClientDocumentPreviewGenerator::GenerationFailed => e
+  rescue ClientDocumentScanner::Blocked, ClientDocumentPreviewGenerator::GenerationUnavailable, ClientDocumentPreviewGenerator::GenerationFailed => e
     Rails.logger.warn("Client document preview generation failed for #{document_id}: #{e.message}")
   end
 end

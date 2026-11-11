@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class ClientDocumentUploadService
+  MAX_FILES = 10
+  MAX_TOTAL_BYTES = 50.megabytes
   Result = Struct.new(:documents, :uploaded_keys, :document_requirement, keyword_init: true)
 
   def initialize(company_id:, current_user:, params:)
@@ -14,6 +16,14 @@ class ClientDocumentUploadService
     files = uploaded_files
     raise ArgumentError, "at least one file is required" if files.empty?
 
+    raise ArgumentError, "Choose no more than 10 files at a time." if files.size > MAX_FILES
+    unless files.all? { |file| file.respond_to?(:tempfile) && file.respond_to?(:original_filename) && file.respond_to?(:content_type) }
+      raise ArgumentError, "Please choose files from your device and try again."
+    end
+    if files.sum { |file| file.size.to_i } > MAX_TOTAL_BYTES
+      raise ArgumentError, "These files total more than 50 MB. Please upload them in smaller groups."
+    end
+
     employee = find_employee!
     document_requirement = find_document_requirement!(employee, files)
     validation_errors = validation_errors_for(files)
@@ -23,7 +33,7 @@ class ClientDocumentUploadService
     documents = []
     prepared_uploads = files.map do |file|
       file_key = build_file_key(file.original_filename)
-      content_type = ClientDocument.detected_content_type(file)
+      content_type = @validated_types.fetch(file.object_id)
       @storage.upload(file_key, file.tempfile || file, content_type: content_type)
       uploaded_keys << file_key
       { file: file, file_key: file_key, content_type: content_type }
@@ -48,6 +58,7 @@ class ClientDocumentUploadService
           file_key: prepared_upload.fetch(:file_key),
           content_type: prepared_upload.fetch(:content_type),
           file_size: file.size,
+          scan_status: ClientDocumentScanner.adapter.initial_status,
           notes: @params[:notes],
           preview_status: ClientDocument.initial_preview_status_for(file),
           visible_to_client: visible_to_client?,
@@ -113,10 +124,12 @@ class ClientDocumentUploadService
   end
 
   def validation_errors_for(files)
-    files.flat_map do |file|
-      ClientDocument.upload_validation_errors(file).map do |message|
-        "#{file.original_filename}: #{message}"
-      end
+    @validated_types = {}
+    files.filter_map do |file|
+      @validated_types[file.object_id] = ClientDocumentFileValidator.new(file).validate!
+      nil
+    rescue ClientDocumentFileValidator::InvalidFile => e
+      "#{file.original_filename}: #{e.message}"
     end
   end
 

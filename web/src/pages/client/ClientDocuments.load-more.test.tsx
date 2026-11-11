@@ -5,12 +5,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import { ClientDocuments } from './ClientDocuments';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn() }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
 vi.mock('@/services/api', () => ({
-  clientDocumentsApi: { list: mocks.list },
+  clientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete },
   clientEmployeesApi: { list: mocks.employees },
   clientPortalThreadsApi: {},
 }));
@@ -71,4 +71,32 @@ it('hides the footer when every document fits on one page', async () => {
 
   expect((await screen.findAllByText('Onboarding 1')).length).toBeGreaterThan(0);
   expect(screen.queryByText(/Showing/)).toBeNull();
+});
+
+it('shows the server upload rejection and preserves selected files for correction', async () => {
+  const user = userEvent.setup();
+  mocks.upload.mockRejectedValue(new Error('File notice.pdf does not match its file extension. Please export it again in the correct format.'));
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  const file = new File(['synthetic spoof'], 'notice.pdf', { type: 'application/pdf' });
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, file);
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('does not match its file extension'));
+  expect(screen.getAllByText('notice.pdf').length).toBeGreaterThan(0);
+});
+
+it('shows archive feedback and disables actions for retained files after refresh', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mocks.delete.mockResolvedValue({ message: 'File archived. It is kept with the messages or evidence that reference it.', data: { ...doc(3), archived_at: '2026-11-11T00:00:00Z' } });
+  render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  mocks.list.mockResolvedValue({ data: [{ ...doc(3), archived_at: '2026-11-11T00:00:00Z' }], meta: { ...meta(1), total_pages: 1, total_count: 1 } });
+  await user.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+  await screen.findByText('File archived. It is kept with the messages or evidence that reference it.');
+  expect(screen.getAllByText('File archived · kept as evidence')).toHaveLength(2);
+  for (const button of screen.getAllByRole('button', { name: /^(Preview|Download|Delete)$/ })) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  }
+  vi.restoreAllMocks();
 });

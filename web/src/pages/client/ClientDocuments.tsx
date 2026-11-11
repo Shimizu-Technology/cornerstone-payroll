@@ -28,7 +28,7 @@ const documentCategories = [
   { value: 'misc', label: 'Miscellaneous' },
 ];
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx';
-const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB.';
+const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB each. Upload up to 10 files, 50 MB total. Macros are not supported.';
 
 function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
@@ -189,12 +189,12 @@ export function ClientDocuments() {
   };
 
   const handleDelete = async (document: ClientDocument) => {
-    if (!window.confirm(`Delete "${document.title}"?`)) return;
+    if (!window.confirm(`Delete "${document.title}"? Files used in messages or evidence will be archived and kept.`)) return;
 
     try {
       setError(null);
-      await clientDocumentsApi.delete(document.id);
-      setSuccess('Document deleted');
+      const result = await clientDocumentsApi.delete(document.id);
+      setSuccess(result?.message || 'Document deleted');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
@@ -422,6 +422,7 @@ export function ClientDocuments() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-semibold text-neutral-950">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
@@ -430,15 +431,15 @@ export function ClientDocuments() {
                             <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
                           </div>
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </Button>
@@ -466,6 +467,7 @@ export function ClientDocuments() {
                       <TableCell>
                         <div>
                           <p className="font-medium text-gray-900">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="text-xs text-gray-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                         </div>
                       </TableCell>
@@ -475,15 +477,15 @@ export function ClientDocuments() {
                       <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                             <Eye className="mr-2 h-4 w-4" />
                             Preview
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </Button>

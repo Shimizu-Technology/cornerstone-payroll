@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_11_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -482,6 +482,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.datetime "updated_at", null: false
     t.bigint "uploaded_by_id"
     t.boolean "visible_to_client", default: true, null: false
+    t.string "scan_status", default: "not_scanned", null: false
+    t.datetime "archived_at"
+    t.bigint "archived_by_id"
+    t.index [ "archived_by_id" ], name: "index_client_documents_on_archived_by_id"
     t.index [ "company_id", "category" ], name: "index_client_documents_on_company_id_and_category"
     t.index [ "company_id", "created_at" ], name: "index_client_documents_on_company_id_and_created_at"
     t.index [ "company_id", "preview_status" ], name: "index_client_documents_on_company_id_and_preview_status"
@@ -491,6 +495,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
     t.index [ "file_key" ], name: "index_client_documents_on_file_key", unique: true
     t.index [ "id", "company_id" ], name: "idx_client_documents_readiness_tenant_key", unique: true
     t.index [ "uploaded_by_id" ], name: "index_client_documents_on_uploaded_by_id"
+    t.check_constraint "scan_status::text = ANY (ARRAY['not_scanned'::character varying, 'pending'::character varying, 'clean'::character varying, 'infected'::character varying, 'error'::character varying]::text[])", name: "client_document_scan_status"
   end
 
   create_table "client_portal_messages", force: :cascade do |t|
@@ -4173,6 +4178,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
   add_foreign_key "check_supersession_rollout_approvals", "companies"
   add_foreign_key "check_supersession_rollout_approvals", "users", column: "approved_by_id"
+  add_foreign_key "client_documents", "users", column: "archived_by_id"
   add_foreign_key "client_documents", "companies"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
