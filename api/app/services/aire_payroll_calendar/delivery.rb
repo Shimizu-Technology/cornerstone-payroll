@@ -48,7 +48,7 @@ module AirePayrollCalendar
             delivery_status: "failed",
             delivery_enqueued_until: nil,
             next_delivery_attempt_at: nil,
-            last_error: "Superseded by schedule version #{newer.schedule_version}, which AIRE confirmed"
+            last_error: "Superseded by schedule version #{newer.schedule_version}#{', which AIRE confirmed' if newer.delivered?}"
           )
           return { publication_id: publication.id, status: "superseded" }
         end
@@ -95,21 +95,28 @@ module AirePayrollCalendar
     # scheduled past the cutoff for such a publication, so an earlier attempt
     # means one was in time. A first attempt after the cutoff could not have
     # been applied. Retrying stops when AIRE refuses it after the cutoff, or
-    # once AIRE confirms a newer version.
+    # once it is superseded (see superseded_by).
     def retry_allowed?(publication, rejected: publication.rejected?)
-      return false if superseded_by(publication)
+      return false if superseded_by(publication, rejected: rejected)
       return true if publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now ||
                      Publisher.lock_now_deliverable?(publication.payload, @now)
 
       publication.delivery_attempts > 1 && !rejected
     end
 
-    def superseded_by(publication)
-      AirePayrollCalendarPublication
-        .where(aire_payroll_calendar_period_id: publication.aire_payroll_calendar_period_id, delivery_status: "delivered")
+    # AIRE confirmed a newer version, or a newer version replaces one AIRE
+    # refused or that is no longer scheduled. Publisher clears the schedule of
+    # every older version a lock-time change replaces, so a nil schedule here
+    # also covers a failure recorded after that change committed.
+    def superseded_by(publication, rejected: publication.rejected?)
+      newer = AirePayrollCalendarPublication
+        .where(aire_payroll_calendar_period_id: publication.aire_payroll_calendar_period_id)
         .where("schedule_version > ?", publication.schedule_version)
         .order(schedule_version: :desc)
-        .first
+      confirmed = newer.find_by(delivery_status: "delivered")
+      return confirmed if confirmed
+
+      newer.first if rejected || publication.rejected? || publication.next_delivery_attempt_at.nil?
     end
 
     # An AIRE build without admin lock times would store the cutoff as policy.
