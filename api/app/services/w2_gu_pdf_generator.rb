@@ -30,7 +30,7 @@ class W2GuPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 36, 50, 36 ])
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 36, 36, 50, 36 ])
     render_document(pdf)
   end
 

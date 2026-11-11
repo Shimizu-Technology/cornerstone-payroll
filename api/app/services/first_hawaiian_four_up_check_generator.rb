@@ -96,13 +96,13 @@ class FirstHawaiianFourUpCheckGenerator
   def generate
     raise ArgumentError, "No check entries to render" if entries.empty?
 
-    Prawn::Document.new(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
+    PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       draw_entries(pdf)
     end.render
   end
 
   def alignment_test
-    Prawn::Document.new(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
+    PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       SLOT_COUNT.times do |slot_index|
         slot_bottom = slot_bottom_for(slot_index)
         draw_slot_outline(pdf, slot_bottom, "FHB CHECK SLOT #{slot_index + 1}")

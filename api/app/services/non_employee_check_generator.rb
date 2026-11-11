@@ -85,7 +85,7 @@ class NonEmployeeCheckGenerator
   def stub2_y;  top_check? ? 0                    : SECTION_HEIGHT;    end
 
   def render_document(voided: false)
-    Prawn::Document.new(
+    PdfUnicodeFont.document(
       page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN
     ) do |pdf|
       draw_check_face(pdf, check_y, voided)

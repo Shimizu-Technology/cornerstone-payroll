@@ -27,7 +27,7 @@ class InvoicePdfGenerator
   end
 
   def generate
-    Prawn::Document.new(page_size: "LETTER", margin: [ PAGE_MARGIN, PAGE_MARGIN, PAGE_BOTTOM_MARGIN, PAGE_MARGIN ]) do |pdf|
+    PdfUnicodeFont.document(page_size: "LETTER", margin: [ PAGE_MARGIN, PAGE_MARGIN, PAGE_BOTTOM_MARGIN, PAGE_MARGIN ]) do |pdf|
       letterhead(pdf)
       invoice_title(pdf)
       parties(pdf)

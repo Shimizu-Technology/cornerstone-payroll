@@ -52,7 +52,7 @@ class OfficialPdfOverlay
 
   def build_overlay_pdf(page_count)
     first_size = page_sizes.fetch(0)
-    pdf = Prawn::Document.new(page_size: first_size, margin: 0)
+    pdf = PdfUnicodeFont.document(page_size: first_size, margin: 0)
     pdf.font("Helvetica")
 
     page_count.times do |index|

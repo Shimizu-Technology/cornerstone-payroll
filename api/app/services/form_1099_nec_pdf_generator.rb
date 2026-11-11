@@ -30,9 +30,7 @@ class Form1099NecPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 40, 50, 40 ])
-    pdf.font_families.update("Helvetica" => { normal: "Helvetica", bold: "Helvetica-Bold", italic: "Helvetica-Oblique" })
-    pdf.font "Helvetica"
+    pdf = PdfUnicodeFont.document(page_size: "LETTER", margin: [ 36, 40, 50, 40 ])
 
     render_header(pdf)
     render_payer_info(pdf)

@@ -287,4 +287,41 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       expect(response).to have_http_status(:ok), "expected client #{format} export to succeed"
     end
   end
+
+  describe "PDF exports with accented and non-Latin names" do
+    before do
+      employee.update!(first_name: "Aleksandra", last_name: "Wiśniewska-Kowalczyk")
+      second = create(:employee, company: company, department: department, first_name: "Hương", last_name: "Nguyễn")
+      create(:payroll_item, pay_period: pay_period, employee: second, company: company, gross_pay: 900.0, net_pay: 780.0,
+        withholding_tax: 50.0, social_security_tax: 55.8, employer_social_security_tax: 55.8, medicare_tax: 13.05,
+        employer_medicare_tax: 13.05, total_deductions: 120.0)
+    end
+
+    it "downloads the payroll register, payroll summary and annual totals PDFs" do
+      get "/api/v1/client/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+      expect(response).to have_http_status(:ok), response.body
+      expect(unicode_pdf_text(response.body)).to include("Wiśniewska", "Nguyễn", "Hương")
+
+      get "/api/v1/client/reports/ytd_summary_pdf", params: { year: 2026 }
+      expect(response).to have_http_status(:ok), response.body
+      expect(unicode_pdf_text(response.body)).to include("Wiśniewska", "Nguyễn")
+
+      get "/api/v1/client/reports/annual_payroll_summary_pdf"
+      expect(response).to have_http_status(:ok), response.body
+    end
+
+    it "returns a clear JSON error, not a dropped connection, when a PDF cannot be built" do
+      allow_any_instance_of(PayrollRegisterPdfGenerator).to receive(:generate)
+        .and_raise(Prawn::Errors::IncompatibleStringEncoding, "not Windows-1252")
+
+      get "/api/v1/client/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:internal_server_error)
+      expect(response.media_type).to eq("application/json")
+      expect(response.parsed_body).to eq(
+        "error" => PdfGenerationFailureHandling::MESSAGE, "code" => "pdf_generation_failed"
+      )
+      expect(response.body).not_to include("Windows-1252")
+    end
+  end
 end
