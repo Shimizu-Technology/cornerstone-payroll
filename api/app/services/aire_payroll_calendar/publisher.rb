@@ -11,8 +11,9 @@ module AirePayrollCalendar
 
     # integration_authorized: the caller already authenticated an AIRE admin
     # through the source credential (see CutoffChange); no Cornerstone user.
-    # supersede_rejected: publish a new version even when AIRE refused one with
-    # the same contract (a repeated reset changes no contract field).
+    # supersede_rejected: publish a new version even when AIRE did not apply one
+    # with the same contract (a repeated reset changes no contract field), and
+    # stop delivering every older undelivered version: the new one replaces it.
     def initialize(pay_period:, source:, actor:, now: Time.current, integration_authorized: false, supersede_rejected: false)
       @pay_period = pay_period
       @source = source
@@ -64,7 +65,7 @@ module AirePayrollCalendar
           latest = calendar_period.publications.lock.reorder(schedule_version: :desc).first
           contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
-          if latest && same_contract?(latest.payload, contract_fields) && !(@supersede_rejected && latest.rejected?)
+          if latest && same_contract?(latest.payload, contract_fields) && !(@supersede_rejected && latest.supersedable?(@now))
             return Result.new(calendar_period: calendar_period, publication: latest, created: false)
           end
           if contract_fields["lock_mode"] != "manual" && Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now &&
@@ -92,6 +93,7 @@ module AirePayrollCalendar
             next_delivery_attempt_at: @now
           )
           record_audit!(calendar_period, publication)
+          supersede_undelivered!(calendar_period, publication) if @supersede_rejected
 
           Result.new(calendar_period: calendar_period, publication: publication, created: true)
         end
@@ -101,6 +103,22 @@ module AirePayrollCalendar
 
         raise ConflictError, "Another calendar publication won the concurrent update. Refresh and try again."
       end
+    end
+
+    # A stale version still retrying could otherwise reach AIRE while this one
+    # is delayed, and AIRE would apply the lock time it replaced.
+    def supersede_undelivered!(calendar_period, publication)
+      calendar_period.publications.lock
+        .where(delivery_status: %w[pending failed])
+        .where("schedule_version < ?", publication.schedule_version)
+        .each do |older|
+          older.update!(
+            delivery_status: "failed",
+            delivery_enqueued_until: nil,
+            next_delivery_attempt_at: nil,
+            last_error: "Superseded by schedule version #{publication.schedule_version}"
+          )
+        end
     end
 
     def validate_source!

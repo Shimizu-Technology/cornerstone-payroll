@@ -93,6 +93,17 @@ class AirePayrollCalendarPublication < ApplicationRecord
     delivery_status == "failed" && REJECTED_RESPONSE_STATUSES.include?(last_response_status)
   end
 
+  # Its only attempt came after its cutoff and no retry is scheduled (see
+  # Delivery#retry_allowed?): AIRE could not have applied it.
+  def expired?(now = Time.current)
+    delivery_status == "failed" && !rejected? && next_delivery_attempt_at.nil? && cutoff_at <= now
+  end
+
+  # AIRE did not apply it, so a newer change may replace it.
+  def supersedable?(now = Time.current)
+    rejected? || expired?(now)
+  end
+
   # The error AIRE returned, without the client's exception class prefix.
   def rejection_message
     return unless rejected?

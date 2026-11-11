@@ -86,8 +86,9 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
           </div>
         )}
       </div>
-      {delivery && (
-        <DeliveryNote delivery={delivery} canReplace={canChangeLock && control.available} />
+      {/* Once the lock AIRE has passes, a change that never applied is history. */}
+      {delivery && !due && (
+        <DeliveryNote delivery={delivery} canReplace={canChangeLock && control.available} canLockNow={control.lock_now_available} />
       )}
       {canChangeLock && !control.available && control.unavailable_reason && !due && !delivery && (
         <p className="mt-2 text-xs text-neutral-600">{control.unavailable_reason}.</p>
@@ -99,6 +100,7 @@ export function AireLockTimeControl({ payPeriodId, calendar, companyId, now: pro
           calendar={calendar}
           appliedAt={appliedAt}
           now={now}
+          currentTime={() => providedNow ?? new Date()}
           onClose={() => setDialog(null)}
           onDone={async () => { setDialog(null); await onChanged(); }}
         />
@@ -121,7 +123,7 @@ function deliveryTarget(delivery: AireCutoffDelivery): string {
   return `the change to ${formatLockTime(delivery.cutoff_at)}`;
 }
 
-function DeliveryNote({ delivery, canReplace }: { delivery: AireCutoffDelivery; canReplace: boolean }): ReactElement {
+function DeliveryNote({ delivery, canReplace, canLockNow }: { delivery: AireCutoffDelivery; canReplace: boolean; canLockNow: boolean }): ReactElement {
   if (delivery.state === 'pending') {
     return (
       <p role="status" className="mt-3 rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm text-neutral-800">
@@ -129,20 +131,28 @@ function DeliveryNote({ delivery, canReplace }: { delivery: AireCutoffDelivery; 
       </p>
     );
   }
+  const target = deliveryTarget(delivery);
+  const headline = delivery.state === 'expired'
+    ? `${target.charAt(0).toUpperCase()}${target.slice(1)} didn't reach AIRE in time, so AIRE didn't apply it.`
+    : `AIRE rejected ${target}${delivery.error ? `: ${delivery.error}` : '.'}`;
+  const replaced = delivery.state === 'rejected' ? 'the rejected change' : 'it';
+  const replace = canReplace ? ` ${canLockNow ? 'Lock now or choose' : 'Choose'} a new time to replace ${replaced}.` : '';
   return (
     <div role="status" className="mt-3 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-950">
-      <p className="font-semibold">AIRE rejected {deliveryTarget(delivery)}{delivery.error ? `: ${delivery.error}` : '.'}</p>
-      <p className="mt-1">The lock time above is still in effect.{canReplace ? ' Lock now or choose a new time to replace the rejected change.' : ''}</p>
+      <p className="font-semibold">{headline}</p>
+      <p className="mt-1">The lock time above is still in effect.{replace}</p>
     </div>
   );
 }
 
-function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, onClose, onDone }: {
+function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, currentTime, onClose, onDone }: {
   action: LockAction;
   payPeriodId: number;
   calendar: AirePayrollCalendarState;
   appliedAt: string;
   now: Date;
+  /** The clock at submit; `now` only ticks each minute. */
+  currentTime: () => Date;
   onClose: () => void;
   onDone: () => Promise<void>;
 }): ReactElement {
@@ -161,12 +171,24 @@ function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, onClose
   const chosen = action === 'change' ? fromGuamInput(cutoffInput) : null;
   const defaultCutoff = calendar.policy_cutoff_at || appliedAt;
   const minLabel = formatLockTime(fromGuamInput(min)!);
-  // Saving the time AIRE already has would be refused; a refused change can be replaced by it.
-  const unchanged = action === 'change' && cutoffInput === current && calendar.cutoff_delivery?.state !== 'rejected';
+  // Saving the time AIRE already has would be refused, unless it replaces a change AIRE didn't apply.
+  const replacing = calendar.cutoff_delivery != null && calendar.cutoff_delivery.state !== 'pending';
+  const unchanged = action === 'change' && cutoffInput === current && !replacing;
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!reason.trim()) { setError('Enter a reason for the change.'); return; }
+    // The minimum moves on while the dialog is open; Cornerstone would refuse a time that slipped under it.
+    const freshMin = toGuamInput(earliestLockChange(currentTime()).toISOString());
+    if (action === 'change' && freshMin > max) {
+      setError(`No lock time is left to choose: it must be at least 15 minutes from now and no later than ${formatLockTime(control.latest_at)}.${control.lock_now_available ? ' Use Lock now instead.' : ''}`);
+      return;
+    }
+    if (action === 'change' && chosen && cutoffInput < freshMin) {
+      setCutoffInput(freshMin);
+      setError(`The lock time must be at least 15 minutes from now, so the earliest is now ${formatLockTime(fromGuamInput(freshMin)!)}. Check the new time and save again.`);
+      return;
+    }
     if (action === 'change' && (!chosen || cutoffInput < min || cutoffInput > max)) {
       setError(`Choose a time between ${minLabel} and ${formatLockTime(control.latest_at)}.`);
       return;
