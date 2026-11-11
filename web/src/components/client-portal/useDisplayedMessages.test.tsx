@@ -80,3 +80,23 @@ it('pauses for the actual command palette and resumes when it closes', async () 
   await new Promise(resolve => setTimeout(resolve, 250)); expect(mark).not.toHaveBeenCalled();
   rendered.rerender(view(false)); await waitFor(() => expect(mark).toHaveBeenCalledOnce());
 });
+
+it('reports every message shown so far, so seeing 12, then 11, then 12 again reads both', async () => {
+  const pair = { id: 5, display_token: 'signed-pair', messages: [{ id: 11 }, { id: 12 }] } as ClientPortalThread;
+  function Pair(): ReactElement {
+    const ref = useDisplayedMessages(pair, true, mark);
+    return <div ref={ref}><div data-message-id="11">Earlier</div><div data-message-id="12">Later</div></div>;
+  }
+  const show = (shownIds: number[]): void => act(() => callback([11, 12].map(id => ({
+    target: document.querySelector(`[data-message-id="${id}"]`)!, isIntersecting: shownIds.includes(id), intersectionRatio: shownIds.includes(id) ? 1 : 0,
+  }) as unknown as IntersectionObserverEntry), {} as IntersectionObserver));
+  render(<Pair />);
+
+  show([12]);
+  await waitFor(() => expect(mark).toHaveBeenLastCalledWith(5, { foreground: true, display_token: 'signed-pair', displayed_message_ids: [12] }));
+  show([11]);
+  await waitFor(() => expect(mark).toHaveBeenLastCalledWith(5, { foreground: true, display_token: 'signed-pair', displayed_message_ids: [11, 12] }));
+  show([12]);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(mark).toHaveBeenCalledTimes(2);
+});
