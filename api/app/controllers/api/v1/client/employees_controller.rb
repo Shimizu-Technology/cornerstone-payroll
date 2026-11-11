@@ -5,6 +5,11 @@ module Api
     module Client
       class EmployeesController < BaseController
         SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
+        DEFAULT_PER_PAGE = 25
+        MAX_PER_PAGE = 500
+        AUDIT_FAILURE_MESSAGE = "This change was not saved because its activity record could not be written. Please try again."
+
+        class AuditWriteFailed < StandardError; end
 
         before_action :set_employee, only: [ :show, :update ]
 
@@ -13,7 +18,8 @@ module Api
           employees = apply_filters(employees)
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_w4_elections)
-          employees = employees.page(params[:page]).per(params[:per_page] || 25)
+          per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
+          employees = employees.page(params[:page]).per(per_page)
 
           render json: {
             data: employees.map { |employee| serialize_employee(employee) },
@@ -30,18 +36,14 @@ module Api
         def create
           employee = Employee.new
           require_ssn_confirmation!(employee)
-          result = ClientEmployeeUpdateService.new(
-            employee: employee,
-            attrs: employee_params.to_h,
-            requested_by: current_user,
-            company: current_company
-          ).create!
-
-          audit_employee_action!(
-            action: "client_employees#create",
-            record_id: result.employee.id,
-            metadata: audit_metadata_for(result)
-          )
+          result = with_employee_audit(action: "client_employees#create") do
+            ClientEmployeeUpdateService.new(
+              employee: employee,
+              attrs: employee_params.to_h,
+              requested_by: current_user,
+              company: current_company
+            ).create!
+          end
 
           render json: {
             data: serialize_employee(result.employee),
@@ -56,22 +58,20 @@ module Api
           }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
+        rescue AuditWriteFailed
+          render json: { error: AUDIT_FAILURE_MESSAGE }, status: :service_unavailable
         end
 
         def update
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
-          result = ClientEmployeeUpdateService.new(
-            employee: @employee,
-            attrs: employee_params.to_h,
-            requested_by: current_user,
-            company: current_company
-          ).update!
-
-          audit_employee_action!(
-            action: "client_employees#update",
-            record_id: result.employee.id,
-            metadata: audit_metadata_for(result)
-          )
+          result = with_employee_audit(action: "client_employees#update") do
+            ClientEmployeeUpdateService.new(
+              employee: @employee,
+              attrs: employee_params.to_h,
+              requested_by: current_user,
+              company: current_company
+            ).update!
+          end
 
           render json: {
             data: serialize_employee(result.employee),
@@ -88,6 +88,8 @@ module Api
           }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
+        rescue AuditWriteFailed
+          render json: { error: AUDIT_FAILURE_MESSAGE }, status: :service_unavailable
         end
 
         private
@@ -158,6 +160,10 @@ module Api
             else
               permitted.delete(:ssn)
             end
+
+            # The client only sees the EIN's last four, so a blank value means
+            # "keep the stored EIN", exactly like a blank SSN.
+            permitted.delete(:contractor_ein) if permitted.key?(:contractor_ein) && permitted[:contractor_ein].blank?
           end
         end
 
@@ -229,10 +235,11 @@ module Api
 
         def serialize_employee(employee, include_department: false, include_document_readiness: false)
           data = employee.as_json(
-            except: [ :intake_exception, :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
+            except: [ :intake_exception, :ssn_encrypted, :contractor_ein, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
+          data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {
               id: rate.id,
@@ -339,19 +346,30 @@ module Api
           "Ending in #{digits.last(4)}"
         end
 
-        def audit_employee_action!(action:, record_id:, metadata:)
+        # The employee change and its audit row commit together: if the audit
+        # write fails, the change rolls back and the client sees an error.
+        def with_employee_audit(action:)
+          ActiveRecord::Base.transaction do
+            result = yield
+            record_employee_audit!(action: action, result: result)
+            result
+          end
+        end
+
+        def record_employee_audit!(action:, result:)
           AuditLog.record!(
             user: current_user,
             company_id: current_company_id,
             action: action,
             record_type: "employees",
-            record_id: record_id,
-            metadata: metadata,
+            record_id: result.employee.id,
+            metadata: audit_metadata_for(result),
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )
         rescue StandardError => e
-          Rails.logger.warn("[ClientEmployeesController] Audit log failed: #{e.message}")
+          Rails.logger.error("[ClientEmployeesController] Audit log failed; rolling back #{action}: #{e.class}")
+          raise AuditWriteFailed, e.message
         end
       end
     end
