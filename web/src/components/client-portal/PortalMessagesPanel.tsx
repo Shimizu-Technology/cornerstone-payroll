@@ -84,9 +84,21 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
 
   const documentOptions = useMemo(
-    () => documents.map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
-    [documents]
+    () => documents.filter((document) => !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
+      value: String(document.id),
+      disabled: ['pending', 'infected', 'error'].includes(document.scan_status || ''),
+      label: `${document.title} (${document.file_name})${['pending', 'infected', 'error'].includes(document.scan_status || '') ? ' — Safety check unavailable' : ''}`,
+    })),
+    [documents, selectedThread]
   );
+
+  const attachmentAvailable = (id: string): boolean => !id || documentOptions.some(option => option.value === id && !option.disabled);
+
+  useEffect(() => {
+    const available = new Set(documentOptions.filter(option => !option.disabled).map(option => option.value));
+    setNewThread(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+    setReply(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+  }, [documentOptions]);
 
   const updateLiveNewThreadIds = useCallback((update: (ids: number[]) => number[]): void => {
     liveNewThreadIdsRef.current = update(liveNewThreadIdsRef.current);
@@ -225,6 +237,32 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     };
   }, [api, companyId, selectedId, setError]);
 
+  // A changed archive marker in the documents list follows an archive or
+  // unarchive, so re-read the open conversation. Its own markers stay
+  // authoritative over list data that has not changed.
+  const documentArchiveSignature = useMemo(
+    () => documents.map(document => `${document.id}:${document.archived_at ?? ''}`).join(','),
+    [documents]
+  );
+  const seenArchiveSignature = useRef(documentArchiveSignature);
+  useEffect(() => {
+    if (seenArchiveSignature.current === documentArchiveSignature) return;
+    seenArchiveSignature.current = documentArchiveSignature;
+    if (!selectedId || unavailableRef.current) return;
+
+    let active = true;
+    api.get(selectedId)
+      .then((response) => {
+        if (!active || unavailableRef.current || response.data.company_id !== companyId) return;
+        setSelectedThread(current => (current?.id === response.data.id ? response.data : current));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [api, companyId, documentArchiveSignature, selectedId]);
+
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (unavailableRef.current) return;
@@ -233,6 +271,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(newThread.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     try {
       setSending(true);
@@ -264,6 +306,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(reply.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     try {
       setSending(true);
@@ -356,7 +402,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
               >
                 <option value="">Attach an existing document</option>
                 {documentOptions.map((document) => (
-                  <option key={document.value} value={document.value}>{document.label}</option>
+                  <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                 ))}
               </Select>
               <Button type="submit" disabled={sending || unavailable} className="w-full">
@@ -434,7 +480,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 
                 <div className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
-                    <MessageBubble key={message.id} message={message} />
+                    <MessageBubble key={message.id} message={{ ...message, document: message.document?.archived_at ? message.document : documents.find(document => document.id === message.document?.id) || message.document }} />
                   ))}
                 </div>
 
@@ -449,7 +495,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                     <Select value={reply.document_id} onChange={(event) => setReply((current) => ({ ...current, document_id: event.target.value }))}>
                       <option value="">Attach an existing document</option>
                       {documentOptions.map((document) => (
-                        <option key={document.value} value={document.value}>{document.label}</option>
+                        <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                       ))}
                     </Select>
                     <Button type="submit" disabled={sending || unavailable}>
@@ -480,7 +526,9 @@ function MessageBubble({ message }: { message: ClientPortalMessage }) {
       {message.document && (
         <div className="mt-3 flex items-center gap-2 rounded-md border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-800">
           <Paperclip className="h-4 w-4 shrink-0" />
-          <span className="truncate">{message.document.title}</span>
+          <span className="min-w-0 break-all">
+            {message.document.archived_at ? `File archived: ${message.document.title} (${message.document.file_name})` : message.document.title}
+          </span>
         </div>
       )}
     </div>

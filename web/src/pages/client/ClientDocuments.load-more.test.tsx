@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import { ClientDocuments } from './ClientDocuments';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn() }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
 vi.mock('@/services/api', () => ({
-  clientDocumentsApi: { list: mocks.list },
+  getActiveCompanyId: () => 1,
+  clientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete },
   clientEmployeesApi: { list: mocks.employees },
   clientPortalThreadsApi: {},
 }));
@@ -71,4 +72,76 @@ it('hides the footer when every document fits on one page', async () => {
 
   expect((await screen.findAllByText('Onboarding 1')).length).toBeGreaterThan(0);
   expect(screen.queryByText(/Showing/)).toBeNull();
+});
+
+it('shows the server upload rejection and preserves selected files for correction', async () => {
+  const user = userEvent.setup();
+  mocks.upload.mockRejectedValue(new Error('File notice.pdf does not match its file extension. Please export it again in the correct format.'));
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  const file = new File(['synthetic spoof'], 'notice.pdf', { type: 'application/pdf' });
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, file);
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('does not match its file extension'));
+  expect(screen.getAllByText('notice.pdf').length).toBeGreaterThan(0);
+});
+
+it('shows archive feedback and disables actions for retained files after refresh', async () => {
+  const user = userEvent.setup();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  mocks.delete.mockResolvedValue({ message: 'File archived. It is kept with the messages or evidence that reference it.', data: { ...doc(3), archived_at: '2026-11-11T00:00:00Z' } });
+  render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  mocks.list.mockResolvedValue({ data: [{ ...doc(3), archived_at: '2026-11-11T00:00:00Z' }], meta: { ...meta(1), total_pages: 1, total_count: 1 } });
+  await user.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+  await screen.findByText('File archived. It is kept with the messages or evidence that reference it.');
+  expect(screen.getAllByText('File archived · kept as evidence')).toHaveLength(2);
+  for (const button of screen.getAllByRole('button', { name: /^(Preview|Download|Delete)$/ })) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  }
+  vi.restoreAllMocks();
+});
+
+it('uploads 30 selected images in bounded batches', async () => {
+  const user = userEvent.setup();
+  mocks.upload.mockResolvedValue({ data: [] });
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement,
+    Array.from({ length: 30 }, (_, i) => new File(['image'], `timesheet-${i}.jpg`, { type: 'image/jpeg' })));
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  expect(await screen.findByText('30 documents uploaded successfully')).toBeTruthy();
+  expect(mocks.upload).toHaveBeenCalledTimes(3);
+  for (const [payload] of mocks.upload.mock.calls) expect(payload.getAll('files[]')).toHaveLength(10);
+});
+
+it.each([false, true])('resets metadata only after complete success (failure: %s)', async (fails) => {
+  const user = userEvent.setup();
+  mocks.employees.mockResolvedValue({ data: [{ id: 7, first_name: 'Synthetic', last_name: 'Worker' }] });
+  mocks.upload.mockImplementation(async () => {
+    if (fails) throw new Error('Please retry');
+    return { data: [] };
+  });
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  const title = screen.getByPlaceholderText('Optional document title') as HTMLInputElement;
+  const notes = screen.getByPlaceholderText('Optional notes for payroll team') as HTMLTextAreaElement;
+  const form = title.closest('form')!;
+  const selects = form.querySelectorAll('select');
+  fireEvent.change(title, { target: { value: 'Previous title' } });
+  fireEvent.change(notes, { target: { value: 'Previous notes' } });
+  fireEvent.change(selects[0], { target: { value: 'payroll_source' } });
+  fireEvent.change(selects[1], { target: { value: '7' } });
+  const visibility = form.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+  if (visibility) fireEvent.click(visibility);
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, new File(['synthetic'], 'test.pdf', { type: 'application/pdf' }));
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  if (fails) await screen.findByRole('alert');
+  else await screen.findByText('Document uploaded successfully');
+  expect(title.value).toBe(fails ? 'Previous title' : '');
+  expect(notes.value).toBe(fails ? 'Previous notes' : '');
+  expect(selects[0].value).toBe(fails ? 'payroll_source' : 'misc');
+  expect(selects[1].value).toBe(fails ? '7' : '');
+  if (visibility) expect(visibility.checked).toBe(!fails);
+  expect(screen.queryByText('test.pdf') !== null).toBe(fails);
 });

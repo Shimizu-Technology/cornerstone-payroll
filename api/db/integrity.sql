@@ -851,3 +851,20 @@ DROP TRIGGER IF EXISTS aire_payroll_cutoff_overrides_append_only ON aire_payroll
 CREATE TRIGGER aire_payroll_cutoff_overrides_append_only
 BEFORE UPDATE OR DELETE ON aire_payroll_cutoff_overrides
 FOR EACH ROW EXECUTE FUNCTION protect_aire_payroll_cutoff_override();
+
+-- 20261111120000_add_client_document_safety_and_archival.rb
+CREATE OR REPLACE FUNCTION protect_retained_client_documents() RETURNS trigger AS $$
+BEGIN
+  IF OLD.archived_at IS NOT NULL OR
+    EXISTS (SELECT 1 FROM client_portal_messages WHERE client_document_id = OLD.id) OR
+    EXISTS (SELECT 1 FROM employee_document_requirements WHERE client_document_id = OLD.id) OR
+    EXISTS (SELECT 1 FROM employee_document_requirement_events WHERE client_document_id = OLD.id) OR
+    EXISTS (SELECT 1 FROM payroll_filing_events WHERE evidence_document_id = OLD.id) THEN
+    RAISE EXCEPTION 'Retained portal files must be archived, not deleted';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS retained_client_documents_delete ON client_documents;
+CREATE TRIGGER retained_client_documents_delete BEFORE DELETE ON client_documents
+  FOR EACH ROW EXECUTE FUNCTION protect_retained_client_documents();

@@ -4,7 +4,13 @@ module Api
   module V1
     module Admin
       class ClientDocumentsController < BaseController
-        before_action :set_document, only: [ :download, :preview, :destroy ]
+        include ClientDocumentUploadRateLimit
+        rescue_from ClientDocumentScanner::Blocked do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+        before_action :private_document_response!, only: [ :download, :preview ]
+
+        before_action :set_document, only: [ :download, :preview, :destroy, :unarchive ]
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
@@ -56,12 +62,13 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Employee not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid => e
-          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
+          render json: { error: "Please check the selected files", details: e.record.errors.messages }, status: :unprocessable_entity
         rescue R2StorageService::UploadError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def download
+          @document.ensure_usable_for!(:download, staff_read: true)
           data = R2StorageService.new.download(@document.file_key)
           return render json: { error: "File not found" }, status: :not_found unless data
 
@@ -72,6 +79,7 @@ module Api
         end
 
         def preview
+          @document.ensure_usable_for!(:preview, staff_read: true)
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
@@ -82,35 +90,47 @@ module Api
             disposition: "inline"
         end
 
+        def unarchive
+          @document.with_lock do
+            if @document.archived?
+              AuditLog.record!(
+                user: current_user, company_id: current_company_id,
+                action: "admin_client_documents#unarchive", record_type: "client_documents", record_id: @document.id,
+                metadata: { title: @document.title, archived_at: @document.archived_at.iso8601, archived_by_id: @document.archived_by_id },
+                ip_address: request.remote_ip, user_agent: request.user_agent
+              )
+              @document.update!(archived_at: nil, archived_by_id: nil)
+            end
+          end
+          render json: { data: serialize_document(@document), message: "File unarchived." }
+        end
+
         def destroy
           file_keys = [ @document.preview_file_key, @document.file_key ].compact
-          @document.destroy!
+          disposition = @document.archive_or_destroy!(actor: current_user)
           AuditLog.record!(
             user: current_user,
             company_id: current_company_id,
-            action: "admin_client_documents#destroy",
+            action: "admin_client_documents##{disposition == :archived ? 'archive' : 'destroy'}",
             record_type: "client_documents",
             record_id: @document.id,
             metadata: { title: @document.title, category: @document.category },
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )
-          cleanup_storage_keys(file_keys)
-          head :no_content
-        rescue ActiveRecord::RecordNotDestroyed
-          raise unless retained_evidence?(@document)
-
-          render json: {
-            error: "This file is linked to retained compliance evidence and cannot be deleted. Attach and verify a replacement when needed."
-          }, status: :unprocessable_entity
+          if disposition == :archived
+            render json: { data: serialize_document(@document), message: "File archived. It is kept with the messages or evidence that reference it." }
+          else
+            cleanup_storage_keys(file_keys)
+            head :no_content
+          end
         end
 
         private
 
-        def retained_evidence?(document)
-          document.employee_document_requirements.exists? ||
-            document.employee_document_requirement_events.exists? ||
-            document.payroll_filing_events.exists?
+        def private_document_response!
+          response.set_header("Cache-Control", "private, no-store")
+          response.set_header("X-Content-Type-Options", "nosniff")
         end
 
         def set_document
@@ -136,8 +156,11 @@ module Api
             visible_to_client: document.visible_to_client,
             shared_by_staff: document.shared_by_staff,
             created_at: document.created_at,
+            archived_at: document.archived_at,
+            archived_by_id: document.archived_by_id,
+            scan_status: document.scan_status,
             preview_status: document.preview_status,
-            preview_available: document.preview_available?,
+            preview_available: document.preview_available?(staff_read: true),
             preview_generated_at: document.preview_generated_at,
             preview_content_type: document.preview_content_type,
             preview_error: document.preview_error
@@ -148,7 +171,7 @@ module Api
           return unless document.preview_generation_required?
           return if document.preview_ready?
 
-          ClientDocumentPreviewGenerator.new(document: document).generate!
+          ClientDocumentPreviewGenerator.new(document: document, staff_read: true).generate!
           document.reload
         rescue ClientDocumentPreviewGenerator::GenerationUnavailable, ClientDocumentPreviewGenerator::GenerationFailed => e
           Rails.logger.warn("Admin client document preview generation failed for document #{document.id}: #{e.message}")

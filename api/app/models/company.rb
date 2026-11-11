@@ -15,6 +15,15 @@ class Company < ApplicationRecord
     "backup_snapshot" => "Backup snapshot"
   }.freeze
 
+  before_destroy :protect_retained_portal_documents, prepend: true
+
+  def protect_retained_portal_documents
+    return unless client_documents.any?(&:retained_evidence?)
+
+    errors.add(:base, "This company has retained portal files and cannot be deleted. Archive its files instead.")
+    throw :abort
+  end
+
   belongs_to :organization
   belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
   belongs_to :migration_source_company, class_name: "Company", optional: true

@@ -8,12 +8,14 @@ class ClientDocumentPreviewGenerator
   class GenerationUnavailable < StandardError; end
   class GenerationFailed < StandardError; end
 
-  def initialize(document:, storage: R2StorageService.new)
+  def initialize(document:, storage: R2StorageService.new, staff_read: false)
     @document = document
     @storage = storage
+    @staff_read = staff_read
   end
 
   def generate!
+    document.ensure_usable_for!(:preview, staff_read: @staff_read)
     return unless document.preview_generation_required?
 
     converter = libreoffice_binary
@@ -24,14 +26,16 @@ class ClientDocumentPreviewGenerator
       output_dir = File.join(dir, "out")
       FileUtils.mkdir_p(output_dir)
 
-      stdout, stderr, status = Open3.capture3(
+      stdout, stderr, status = ClientDocumentConverterProcess.capture(
         converter,
+        "-env:UserInstallation=file://#{File.join(dir, 'profile')}",
         "--headless",
         "--convert-to",
         "pdf",
         "--outdir",
         output_dir,
-        source_path
+        source_path,
+        directory: dir
       )
 
       unless status.success?
@@ -40,6 +44,8 @@ class ClientDocumentPreviewGenerator
 
       pdf_path = Dir[File.join(output_dir, "*.pdf")].first
       raise GenerationFailed, "LibreOffice did not produce a PDF preview" unless pdf_path.present? && File.exist?(pdf_path)
+
+      raise GenerationFailed, "Preview is too large" if File.size(pdf_path) > ClientDocumentConverterProcess::MAX_FILE_BYTES
 
       previous_preview_key = document.preview_file_key
       next_preview_key = build_preview_key(document.file_name)
@@ -62,7 +68,7 @@ class ClientDocumentPreviewGenerator
 
       delete_previous_preview!(previous_preview_key, replacement_key: next_preview_key)
     end
-  rescue R2StorageService::DownloadError, R2StorageService::UploadError => e
+  rescue R2StorageService::DownloadError, R2StorageService::UploadError, SystemCallError, IOError => e
     mark_failed!(e.message)
     raise GenerationFailed, e.message
   rescue GenerationUnavailable, GenerationFailed => e
@@ -76,7 +82,11 @@ class ClientDocumentPreviewGenerator
 
   def prepare_source_file(dir)
     source_path = File.join(dir, safe_source_filename)
-    File.binwrite(source_path, storage.download(document.file_key))
+    bytes = storage.download(document.file_key)
+    raise GenerationFailed, "Source file is unavailable" unless bytes
+    raise GenerationFailed, "Source file is too large" if bytes.bytesize > ClientDocument::MAX_FILE_SIZE
+
+    File.binwrite(source_path, bytes)
     optimize_spreadsheet_layout!(source_path) if spreadsheet_extension?
     source_path
   end
@@ -95,12 +105,14 @@ class ClientDocumentPreviewGenerator
   end
 
   def optimize_spreadsheet_layout!(source_path)
-    stdout, stderr, status = Open3.capture3("python3", "-c", spreadsheet_optimization_script, source_path)
+    stdout, stderr, status = ClientDocumentConverterProcess.capture("python3", "-c", spreadsheet_optimization_script, source_path, directory: File.dirname(source_path))
     return if status.success?
 
     Rails.logger.warn(
       "Spreadsheet preview optimization failed for document #{document.id}: #{[ stderr.presence, stdout.presence ].compact.join("\n")}"
     )
+  rescue GenerationFailed
+    raise
   rescue StandardError => e
     Rails.logger.warn("Spreadsheet preview optimization errored for document #{document.id}: #{e.message}")
   end
@@ -131,8 +143,9 @@ class ClientDocumentPreviewGenerator
     return env_binary if env_binary.present? && File.executable?(env_binary)
 
     @libreoffice_binary ||= begin
-      stdout, = Open3.capture2("sh", "-lc", "command -v soffice || command -v libreoffice")
-      stdout.to_s.strip.presence
+      ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).flat_map do |directory|
+        %w[soffice libreoffice].map { |name| File.join(directory, name) }
+      end.find { |path| File.file?(path) && File.executable?(path) }
     end
   end
 
@@ -140,9 +153,7 @@ class ClientDocumentPreviewGenerator
     document.update!(
       preview_status: "failed",
       preview_error: message,
-      preview_generated_at: nil,
-      preview_file_key: nil,
-      preview_content_type: nil
+      preview_generated_at: nil
     )
   rescue StandardError => e
     Rails.logger.warn("Failed to persist preview failure state for document #{document.id}: #{e.message}")
