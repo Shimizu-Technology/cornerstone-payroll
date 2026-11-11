@@ -62,6 +62,34 @@ AIRE sends finalization events to this service endpoint:
 
 The request must include the source's shared secret and an `Idempotency-Key` equal to the event UUID. The receiver accepts only contract version `1.0`, source `aire_services`, event type `payroll_batch.finalized`, the latest delivered publication, and Batch v2 metadata. Repeating the same event and contents is safe. Reusing an event ID for different contents, or sending a second event ID for the same batch, returns `409 Conflict`.
 
+## Admin lock times
+
+Each AIRE pay period locks at the policy cutoff unless an admin changes it. `aire_payroll_cutoff_overrides` is an append-only history on the pay period: effective `cutoff_at`, `reason`, who set it (`set_by` for Cornerstone users, `source_actor` for AIRE admins), when, the previous value, and the policy cutoff. The newest row is current; a `reset` row returns to the policy cutoff. Every change writes `aire_payroll_calendar#cutoff_changed` to the audit log and republishes the period to AIRE in the same transaction, as the next schedule version with `cutoff_source`, `policy_cutoff_at`, and `cutoff_override`. Policy publications carry `cutoff_source: "policy"`; earlier publications without it compare as policy, so they are not flagged for revision. `spec/fixtures/files/aire_cutoff_override_publication.json` pins the payload in both repositories.
+
+Who can change it:
+
+- In Cornerstone, `super_admin` and `org_admin` users with access to the company (`manage_time_tracking_lock`). Legacy `admin`, managers, accountants and other roles can see the lock time but cannot change it.
+- In AIRE, owners and admins. AIRE calls `POST /api/v1/integrations/time_payroll/calendar_periods/:external_pay_period_id/cutoff_change`, authenticated with that period's source secret and an `Idempotency-Key`. The body names the AIRE actor; only `owner` and `admin` roles are accepted.
+
+Actions and bounds (Pacific/Guam):
+
+- **Lock now** sets the cutoff to the current second. It is available only after the period's last day. AIRE accepts it up to 30 minutes late and finalizes at once, unless a manual paycheck, late-hours payment or settlement change for the period's hours was recorded after that second; then AIRE refuses it and Lock now can be pressed again.
+- **Change lock time** takes a time at least 15 minutes ahead, from 00:00 on the day after the period ends through 23:59 two days before payday. Seconds are dropped.
+- **Reset to default** returns to the policy cutoff while that time is at least 15 minutes ahead.
+- All three need a reason (500 characters at most) and apply only to scheduled locks that time tracking has not locked: no finalization event and no imported regular batch for the period and source. Hours clocked or approved after the lock go to the next period as late hours.
+
+Delivery and recovery:
+
+- The lock in effect is the latest publication AIRE confirmed (`applied_cutoff_at`). No change is taken once that lock is under 15 minutes away, so delivery has time to land before either time passes. "Already passed" is judged by that publication too.
+- While a newer publication is still on its way, further changes get 409 "still being delivered". The pay-run strip shows "Waiting for AIRE to confirm …" under the lock in effect (`cutoff_delivery.state: "pending"`).
+- If AIRE answers 409 or 422, the publication is refused (`cutoff_delivery.state: "rejected"`, with AIRE's message). A new change, Lock now or reset then supersedes it as the next schedule version. AIRE accepts any version above its current one, so a skipped version doesn't block later ones.
+- A publication sent while AIRE could accept it keeps retrying after its cutoff, because AIRE may have applied it and lost the response; AIRE replays a known `publication_id` before any time check. Retrying stops once AIRE refuses it after the cutoff or confirms a newer version.
+- The old cockpit "Lock time tracking cutoff" command stays for manual-lock periods. For scheduled periods it appears only when the lock is due or needs attention, as "Finish locking hours".
+
+The pay-run page shows the lock time under the source checkpoint, with who changed it and why. The receiver and verifier compare against the published cutoff, so batches from an overridden lock verify normally.
+
+Deploy AIRE first (it accepts old and new publications), then Cornerstone Payroll.
+
 ## Durable evidence and retries
 
 Calendar publications and inbound events are append-only. Source payloads, checksums, identities, and version links cannot be edited after creation. A delivered publication and a verified event are final.

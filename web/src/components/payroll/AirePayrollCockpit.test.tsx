@@ -453,7 +453,7 @@ describe('AirePayrollCockpit', () => {
     expect(within(screen.getByRole('group', { name: 'Other held time' })).getByText(`${held.toFixed(2)} hrs`)).toBeTruthy();
     expect(within(screen.getByRole('group', { name: 'Total time' })).getByText(`${total.toFixed(2)} hrs`)).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /finish locking hours/i }));
     expect(within(screen.getByRole('dialog')).getByText(new RegExp(`${held.toFixed(2)} other held hours remain outside this payroll for review`))).toBeTruthy();
     expect(within(screen.getByRole('dialog')).getByText(/6.00 reported-payment hours remain excluded while payment evidence is pending; reporting payment does not verify it/)).toBeTruthy();
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
@@ -506,7 +506,7 @@ describe('AirePayrollCockpit', () => {
       expect(within(metric).queryByText('0.00 hrs')).toBeNull();
       expect(within(metric).queryByText('6.00 hrs')).toBeNull();
     }
-    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /finish locking hours/i }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(/Other held hours are unavailable; review source details separately/)).toBeTruthy();
     expect(within(dialog).getByText(/Reported-payment hours are unavailable; review payment evidence separately/)).toBeTruthy();
@@ -1126,7 +1126,7 @@ describe('AirePayrollCockpit', () => {
     expect(screen.queryByText('Time changes require Client management, a Payroll manager, or an admin')).toBeNull();
 
     expect((screen.getByRole('button', { name: 'Approve time' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: /lock time tracking cutoff/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /finish locking hours/i }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('link', { name: /connect my time tracking account/i }).getAttribute('href'))
       .toBe('/app/aire-account-connection?source_id=1&return_to=%2Fcompanies%2F1%2Fpay-periods%2F17');
   });
@@ -1270,7 +1270,7 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /finish locking hours/i }));
     await user.click(screen.getByRole('button', { name: /lock eligible time/i }));
 
     await waitFor(() => expect(apiMocks.finalize).toHaveBeenCalledWith(17, expect.objectContaining({
@@ -1366,7 +1366,7 @@ describe('AirePayrollCockpit', () => {
     render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={onRefresh} />);
     await screen.findByText('Malia Cruz');
 
-    await user.click(screen.getByRole('button', { name: /lock time tracking cutoff/i }));
+    await user.click(screen.getByRole('button', { name: /finish locking hours/i }));
     await user.click(screen.getByRole('button', { name: /lock eligible time/i }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
@@ -1556,7 +1556,7 @@ it('keeps the due-period preview neutral until a locked batch is verified', asyn
   render(<AirePayrollCockpit payPeriodId={17} calendar={{ ...calendar, cutoff_state: 'cutoff_due' }} onRefresh={vi.fn()} />);
   expect(await screen.findByText('Live preview')).toBeTruthy();
   expect(screen.queryByText('Before cutoff')).toBeNull();
-  expect(await screen.findByRole('button', { name: /lock time tracking cutoff/i })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: /finish locking hours/i })).toBeTruthy();
 });
 
 
@@ -1773,7 +1773,7 @@ describe('AirePayrollCockpit compact source checkpoint', () => {
     apiMocks.overview.mockRejectedValueOnce(new Error('Compact source unavailable'));
     await user.click(screen.getByRole('button', { name: 'Refresh time tracking' }));
     expect((await screen.findByText('Compact source unavailable')).closest('details')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Lock time tracking cutoff' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Finish locking hours' }).hasAttribute('disabled')).toBe(true);
   });
 });
 
@@ -1804,6 +1804,28 @@ it('offers the manual Lock directly inside the Hours checkpoint as an outlined a
   expect(screen.getByText('Review timecards, held hours and team').closest('details')?.open).toBe(false);
   await user.click(lock);
   expect(within(screen.getByRole('dialog')).getByText(/freezes the approved hours as they are now/)).toBeTruthy();
+});
+
+it('hides the cockpit lock for a scheduled period before its lock time and offers to finish a due one', async () => {
+  const data = fixtures();
+  data.overview.payroll_period = { ...period, lock_mode: 'scheduled', cutoff_state: 'upcoming' };
+  apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+  const view = render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+  const checkpoint = screen.getByRole('region', { name: 'Source checkpoint' });
+  await waitFor(() => expect(apiMocks.overview).toHaveBeenCalled());
+  await act(async () => { await Promise.resolve(); });
+  expect(within(checkpoint).queryByRole('button', { name: /Lock time tracking cutoff|Finish locking hours/ })).toBeNull();
+  view.unmount();
+
+  for (const cutoffState of ['due', 'attention_required'] as const) {
+    data.overview.payroll_period = { ...period, lock_mode: 'scheduled', cutoff_state: cutoffState };
+    apiMocks.overview.mockResolvedValue({ aire_payroll_cockpit: data.overview });
+    const rendered = render(<AirePayrollCockpit presentation="checkpoint" payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+    const finish = await within(screen.getByRole('region', { name: 'Source checkpoint' })).findByRole('button', { name: 'Finish locking hours' });
+    expect((finish as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Lock time tracking cutoff' })).toBeNull();
+    rendered.unmount();
+  }
 });
 
 it('shows a completed manual Lock in the Hours checkpoint even before calendar verification refreshes', async () => {

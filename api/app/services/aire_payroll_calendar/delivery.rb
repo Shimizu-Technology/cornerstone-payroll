@@ -43,6 +43,15 @@ module AirePayrollCalendar
         ).find(@publication_id)
         return { publication_id: publication.id, status: "delivered" } if publication.delivered?
         return { publication_id: publication.id, status: "skipped" } if publication.next_delivery_attempt_at&.>(@now)
+        if (newer = superseded_by(publication))
+          publication.update!(
+            delivery_status: "failed",
+            delivery_enqueued_until: nil,
+            next_delivery_attempt_at: nil,
+            last_error: "Superseded by schedule version #{newer.schedule_version}, which AIRE confirmed"
+          )
+          return { publication_id: publication.id, status: "superseded" }
+        end
 
         unless publication.aire_payroll_calendar_period.time_tracking_source.historical_reconciliation_complete?
           publication.update!(
@@ -74,13 +83,41 @@ module AirePayrollCalendar
                expected.values_at("start_date", "end_date", "pay_date") &&
              same_instant?(source_state["cutoff_at"], expected["cutoff_at"]) &&
              (!expected.key?("overtime_policy") || source_state["overtime_policy"] == expected["overtime_policy"]) &&
-             %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_state[key] == expected[key] }
+             %w[lock_mode cutoff_enforcement_starts_on].all? { |key| !expected.key?(key) || source_state[key] == expected[key] } &&
+             override_applied?(source_state, expected)
         raise TimeTracking::Client::Error, "AIRE returned calendar state that does not match this publication"
       end
     end
 
-    def retry_allowed?(publication)
-      publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now
+    # A publication sent while AIRE could still accept it keeps retrying after
+    # its cutoff: AIRE may have applied it and lost the response, and it
+    # replays a known publication_id before any time check. Retries are only
+    # scheduled past the cutoff for such a publication, so an earlier attempt
+    # means one was in time. A first attempt after the cutoff could not have
+    # been applied. Retrying stops when AIRE refuses it after the cutoff, or
+    # once AIRE confirms a newer version.
+    def retry_allowed?(publication, rejected: publication.rejected?)
+      return false if superseded_by(publication)
+      return true if publication.payload["lock_mode"] == "manual" || publication.cutoff_at > @now ||
+                     Publisher.lock_now_deliverable?(publication.payload, @now)
+
+      publication.delivery_attempts > 1 && !rejected
+    end
+
+    def superseded_by(publication)
+      AirePayrollCalendarPublication
+        .where(aire_payroll_calendar_period_id: publication.aire_payroll_calendar_period_id, delivery_status: "delivered")
+        .where("schedule_version > ?", publication.schedule_version)
+        .order(schedule_version: :desc)
+        .first
+    end
+
+    # An AIRE build without admin lock times would store the cutoff as policy.
+    def override_applied?(source_state, expected)
+      return true unless expected["cutoff_source"] == "override"
+
+      source_state["cutoff_source"] == "override" &&
+        source_state.dig("cutoff_override", "override_id") == expected.dig("cutoff_override", "override_id")
     end
 
     def same_instant?(left, right)
@@ -112,11 +149,13 @@ module AirePayrollCalendar
         return if publication.delivered?
 
         delay = RETRY_DELAYS.fetch([ publication.delivery_attempts - 1, RETRY_DELAYS.length - 1 ].min)
+        status = error.respond_to?(:response_status) ? error.response_status : nil
+        rejected = AirePayrollCalendarPublication::REJECTED_RESPONSE_STATUSES.include?(status)
         publication.update!(
           delivery_status: "failed",
           delivery_enqueued_until: nil,
-          next_delivery_attempt_at: retry_allowed?(publication) ? @now + delay : nil,
-          last_response_status: error.respond_to?(:response_status) ? error.response_status : nil,
+          next_delivery_attempt_at: retry_allowed?(publication, rejected: rejected) ? @now + delay : nil,
+          last_response_status: status,
           last_error: safe_error(error)
         )
       end

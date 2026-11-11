@@ -3,6 +3,8 @@
 class AirePayrollCalendarPublication < ApplicationRecord
   DELIVERY_STATUSES = %w[pending failed delivered].freeze
   ENQUEUE_RESERVATION = 5.minutes
+  # AIRE answered and refused the publication, so it did not apply it.
+  REJECTED_RESPONSE_STATUSES = [ 409, 422 ].freeze
   BATCH_SIZE = 100
 
   belongs_to :aire_payroll_calendar_period, inverse_of: :publications
@@ -83,6 +85,22 @@ class AirePayrollCalendarPublication < ApplicationRecord
 
   def cutoff_at
     Time.iso8601(payload.fetch("cutoff_at"))
+  end
+
+  # A definitive AIRE refusal, as opposed to a lost response or an outage,
+  # after which AIRE may still have applied the publication.
+  def rejected?
+    delivery_status == "failed" && REJECTED_RESPONSE_STATUSES.include?(last_response_status)
+  end
+
+  # The error AIRE returned, without the client's exception class prefix.
+  def rejection_message
+    return unless rejected?
+
+    source_name = aire_payroll_calendar_period&.time_tracking_source&.name
+    message = last_error.to_s.sub(/\A[\w:]+Error: /, "")
+    message = message.delete_prefix("#{source_name}: ") if source_name
+    message.presence
   end
 
   private

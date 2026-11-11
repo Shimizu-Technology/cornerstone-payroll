@@ -6,36 +6,55 @@ module AirePayrollCalendar
     class ConflictError < Error; end
 
     Result = Data.define(:calendar_period, :publication, :created)
+    # AIRE can deliver a lock-now publication this long after the chosen instant.
+    LOCK_NOW_GRACE = 30.minutes
 
-    def initialize(pay_period:, source:, actor:, now: Time.current)
+    # integration_authorized: the caller already authenticated an AIRE admin
+    # through the source credential (see CutoffChange); no Cornerstone user.
+    # supersede_rejected: publish a new version even when AIRE refused one with
+    # the same contract (a repeated reset changes no contract field).
+    def initialize(pay_period:, source:, actor:, now: Time.current, integration_authorized: false, supersede_rejected: false)
       @pay_period = pay_period
       @source = source
       @actor = actor
       @now = now
+      @integration_authorized = integration_authorized
+      @supersede_rejected = supersede_rejected
     end
 
     def call
       result = publish_transaction!
-      queue_delivery(result.publication.id) if result.created
+      self.class.queue_delivery(result.publication.id, now: @now) if result.created
       result
     end
 
-    private
+    # Publishes inside the caller's transaction. Call queue_delivery after commit.
+    def publish!
+      publish_transaction!
+    end
 
-    def queue_delivery(publication_id)
-      AirePayrollCalendarPublication.dispatch_one!(publication_id, now: @now)
+    def self.queue_delivery(publication_id, now: Time.current)
+      AirePayrollCalendarPublication.dispatch_one!(publication_id, now: now)
     rescue StandardError => e
       Rails.logger.error("Time tracking calendar publication was retained but could not be queued: #{e.class}: #{e.message}")
     end
+
+    def self.lock_now_deliverable?(payload, now)
+      payload.dig("cutoff_override", "action") == "lock_now" && Time.iso8601(payload.fetch("cutoff_at")) >= now - LOCK_NOW_GRACE
+    end
+
+    private
 
     def publish_transaction!
       conflict_attempts = 0
 
       begin
-        PayPeriod.transaction do
+        # A savepoint, so a unique-key race inside CutoffChange's transaction
+        # rolls back only this attempt and the retry runs on a usable connection.
+        PayPeriod.transaction(requires_new: true) do
           @pay_period.lock!
           @source.lock!
-          unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @pay_period.company)
+          unless @integration_authorized || StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @pay_period.company)
             raise Error, "Client configuration access required"
           end
           validate_source!
@@ -45,13 +64,16 @@ module AirePayrollCalendar
           latest = calendar_period.publications.lock.reorder(schedule_version: :desc).first
           contract_fields = @source.connector.calendar_contract(@pay_period).payload
 
-          if latest && same_contract?(latest.payload, contract_fields)
+          if latest && same_contract?(latest.payload, contract_fields) && !(@supersede_rejected && latest.rejected?)
             return Result.new(calendar_period: calendar_period, publication: latest, created: false)
           end
-          if contract_fields["lock_mode"] != "manual" && Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now
+          if contract_fields["lock_mode"] != "manual" && Time.iso8601(contract_fields.fetch("cutoff_at")) <= @now &&
+             !self.class.lock_now_deliverable?(contract_fields, @now)
             raise ConflictError, "This period's time tracking cutoff has already passed. Create a correction or supplemental run instead."
           end
-          if latest && latest.delivered? && latest.cutoff_at <= @now
+          # Judge by the cutoff AIRE applied, even when a newer version is pending or refused.
+          applied = latest&.delivered? ? latest : calendar_period.latest_delivered_publication
+          if applied && applied.cutoff_at <= @now
             raise ConflictError, "This time tracking cutoff has passed, so its published dates cannot be changed. Create a correction or supplemental run instead."
           end
 
@@ -102,7 +124,7 @@ module AirePayrollCalendar
     end
 
     def same_contract?(payload, contract_fields)
-      payload.slice(*contract_fields.keys) == contract_fields
+      Contract.comparable(payload).slice(*contract_fields.keys) == contract_fields
     end
 
     def record_audit!(calendar_period, publication)
@@ -121,6 +143,8 @@ module AirePayrollCalendar
           publication_id: publication.publication_id,
           cutoff_at: publication.payload.fetch("cutoff_at"),
           lock_mode: publication.payload.fetch("lock_mode", "scheduled"),
+          cutoff_source: publication.payload.fetch("cutoff_source", "policy"),
+          cutoff_override_id: publication.payload.dig("cutoff_override", "override_id"),
           cutoff_enforcement_starts_on: publication.payload["cutoff_enforcement_starts_on"]
         }
       )

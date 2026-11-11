@@ -4,7 +4,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 export type ClientCapability =
   | 'manage_client_configuration'
   | 'manage_client_check_settings'
-  | 'manage_client_administration';
+  | 'manage_client_administration'
+  | 'manage_time_tracking_lock';
 
 // Client grants never become global role capabilities. An explicit company
 // response (including an empty list) takes precedence over the auth snapshot.
