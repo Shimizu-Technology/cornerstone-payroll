@@ -74,4 +74,13 @@ RSpec.describe ClientDocumentUploadService do
     expect { service.upload! }.to raise_error(ActiveRecord::RecordNotFound, "Document requirement not found")
     expect(ClientDocument.where(employee: employee)).to be_empty
   end
+  it "retains committed pending uploads when the scan queue is unavailable" do
+    allow(ClientDocumentScanner).to receive(:adapter).and_return(double(initial_status: "pending"))
+    allow(ScanClientDocumentJob).to receive(:perform_later).and_raise(ActiveJob::EnqueueError, "queue unavailable")
+    upload = Rack::Test::UploadedFile.new(fixture_path, "text/plain")
+    result = described_class.new(company_id: company.id, current_user: user, params: { file: upload }).upload!
+    document = result.documents.sole
+    expect(document.reload.scan_status).to eq("pending")
+    expect(R2StorageService.new.download(document.file_key)).to eq(File.binread(fixture_path))
+  end
 end
