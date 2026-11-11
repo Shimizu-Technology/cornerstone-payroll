@@ -136,6 +136,12 @@ RSpec.describe "Payroll export compatibility" do
     expect(errors("chart.docx", office_zip(extension: "docx", extra: { "word/embeddings/chart.xlsx" => macro }))).not_to be_empty
   end
 
+  it "rejects an embedded macro declared through a Default content type under a neutral filename" do
+    types = '<Types><Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'
+    workbook = office_zip(extra: { "[Content_Types].xml" => types, "xl/project.bin" => "binary" })
+    expect(errors("chart.docx", office_zip(extension: "docx", extra: { "word/embeddings/chart.xlsx" => workbook }))).not_to be_empty
+  end
+
   it "bounds embedding recursion and aggregate expansion" do
     nested = office_zip
     5.times { nested = office_zip(extra: { "xl/embeddings/child.xlsx" => nested }) }

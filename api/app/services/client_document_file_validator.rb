@@ -152,7 +152,7 @@ class ClientDocumentFileValidator
       mismatch! unless names.include?("_rels/.rels") && metadata.key?(main)
       types = safe_xml(metadata.fetch("[Content_Types].xml", ""))
       overrides = types.xpath("//*[local-name()='Override']")
-      mismatch! if overrides.any? { |node| node["ContentType"].to_s.match?(/macro|vba|activeX/i) }
+      mismatch! if types.xpath("//*[local-name()='Override' or local-name()='Default']").any? { |node| node["ContentType"].to_s.match?(/macro|vba|activeX/i) }
       expected = "application/vnd.openxmlformats-officedocument.#{main_type}.main+xml"
       mismatch! unless overrides.any? { |node| node["PartName"] == "/#{main}" && node["ContentType"] == expected }
       root = safe_xml(metadata.fetch(main)).root
