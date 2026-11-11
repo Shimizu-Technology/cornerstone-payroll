@@ -743,7 +743,34 @@ export type AirePayrollCutoffState =
   | 'batch_rejected'
   | 'batch_verified';
 
+export interface AireCutoffOverride {
+  override_id: string;
+  action: 'lock_now' | 'change' | 'reset';
+  reason: string;
+  set_at: string;
+  set_by_name: string | null;
+  requested_via: 'cornerstone_payroll' | 'aire_services';
+  previous_cutoff_at: string;
+  cutoff_at?: string;
+}
+
+/** State-only availability; the operator's permission is checked separately. */
+export interface AireCutoffControl {
+  available: boolean;
+  lock_now_available: boolean;
+  reset_available: boolean;
+  earliest_at: string;
+  latest_at: string;
+  lock_now_available_at: string;
+  unavailable_reason: string | null;
+}
+
 export interface AirePayrollCalendarState {
+  cutoff_source?: 'policy' | 'override';
+  policy_cutoff_at?: string | null;
+  cutoff_override?: AireCutoffOverride | null;
+  cutoff_history?: AireCutoffOverride[];
+  cutoff_control?: AireCutoffControl;
   connected_payroll?: { mode: 'enabled' | 'paused'; enabled: boolean; message: string | null };
   enabled: boolean;
   source_id: number;

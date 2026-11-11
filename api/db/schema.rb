@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_04_012000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_11_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -114,6 +114,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_012000) do
     t.check_constraint "delivery_attempts >= 0", name: "aire_calendar_publications_attempts_check"
     t.check_constraint "delivery_status::text = ANY (ARRAY['pending'::character varying::text, 'failed'::character varying::text, 'delivered'::character varying::text])", name: "aire_calendar_publications_status_check"
     t.check_constraint "schedule_version > 0", name: "aire_calendar_publications_version_check"
+  end
+
+  create_table "aire_payroll_cutoff_overrides", force: :cascade do |t|
+    t.string "action", null: false
+    t.bigint "aire_payroll_calendar_period_id", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "cutoff_at", null: false
+    t.uuid "override_id", null: false
+    t.bigint "pay_period_id", null: false
+    t.datetime "policy_cutoff_at", null: false
+    t.datetime "previous_cutoff_at", null: false
+    t.text "reason", null: false
+    t.uuid "request_id"
+    t.string "requested_via", null: false
+    t.bigint "set_by_id"
+    t.jsonb "source_actor"
+    t.index [ "aire_payroll_calendar_period_id" ], name: "idx_aire_cutoff_overrides_calendar_period"
+    t.index [ "company_id" ], name: "index_aire_payroll_cutoff_overrides_on_company_id"
+    t.index [ "override_id" ], name: "index_aire_payroll_cutoff_overrides_on_override_id", unique: true
+    t.index [ "pay_period_id", "created_at", "id" ], name: "idx_aire_cutoff_overrides_pay_period_newest"
+    t.index [ "pay_period_id" ], name: "index_aire_payroll_cutoff_overrides_on_pay_period_id"
+    t.index [ "request_id" ], name: "index_aire_payroll_cutoff_overrides_on_request_id", unique: true, where: "(request_id IS NOT NULL)"
+    t.index [ "set_by_id" ], name: "index_aire_payroll_cutoff_overrides_on_set_by_id"
+    t.check_constraint "action::text <> 'reset'::text OR cutoff_at = policy_cutoff_at", name: "aire_cutoff_overrides_reset_policy"
+    t.check_constraint "action::text = ANY (ARRAY['lock_now'::character varying, 'change'::character varying, 'reset'::character varying]::text[])", name: "aire_cutoff_overrides_action"
+    t.check_constraint "length(btrim(reason)) > 0 AND length(reason) <= 500", name: "aire_cutoff_overrides_reason"
+    t.check_constraint "requested_via::text = 'cornerstone_payroll'::text AND set_by_id IS NOT NULL OR requested_via::text = 'aire_services'::text AND source_actor IS NOT NULL AND jsonb_typeof(source_actor) = 'object'::text", name: "aire_cutoff_overrides_actor"
+    t.check_constraint "requested_via::text = ANY (ARRAY['cornerstone_payroll'::character varying, 'aire_services'::character varying]::text[])", name: "aire_cutoff_overrides_requested_via"
   end
 
   create_table "aire_payroll_entry_acknowledgements", force: :cascade do |t|
@@ -4102,6 +4131,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_04_012000) do
   add_foreign_key "aire_payroll_calendar_periods", "time_tracking_sources", on_delete: :restrict
   add_foreign_key "aire_payroll_calendar_publications", "aire_payroll_calendar_periods", on_delete: :restrict
   add_foreign_key "aire_payroll_calendar_publications", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "aire_payroll_cutoff_overrides", "aire_payroll_calendar_periods", on_delete: :restrict
+  add_foreign_key "aire_payroll_cutoff_overrides", "companies", on_delete: :restrict
+  add_foreign_key "aire_payroll_cutoff_overrides", "pay_periods", on_delete: :restrict
+  add_foreign_key "aire_payroll_cutoff_overrides", "users", column: "set_by_id", on_delete: :restrict
   add_foreign_key "aire_payroll_entry_acknowledgements", "check_events"
   add_foreign_key "aire_payroll_entry_acknowledgements", "payroll_items"
   add_foreign_key "aire_payroll_entry_acknowledgements", "time_tracking_imports"

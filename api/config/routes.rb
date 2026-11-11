@@ -26,6 +26,8 @@ Rails.application.routes.draw do
 
       namespace :integrations do
         post "time_payroll/events", to: "aire/events#create"
+        post "time_payroll/calendar_periods/:external_pay_period_id/cutoff_change",
+             to: "aire/cutoff_changes#create", format: false
         scope "time_payroll/workers/:source_user_uuid", controller: "aire/worker_statements", format: false do
           get "statements", action: :index
           get "statements/:id", action: :show, constraints: { id: /\d+/ }
@@ -308,11 +310,13 @@ Rails.application.routes.draw do
             post :publish
             post :retry_delivery
             post :refresh
+            post :change_cutoff
           end
           resource :time_tracking_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
             post :retry_delivery
             post :refresh
+            post :change_cutoff
           end
           resource :aire_payroll_cockpit, only: [ :show ], controller: :aire_payroll_cockpits do
             get :manual_review
