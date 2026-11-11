@@ -84,9 +84,21 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
 
   const documentOptions = useMemo(
-    () => documents.filter((document) => !document.archived_at).map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
-    [documents]
+    () => documents.filter((document) => !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
+      value: String(document.id),
+      disabled: ['pending', 'infected', 'error'].includes(document.scan_status || ''),
+      label: `${document.title} (${document.file_name})${['pending', 'infected', 'error'].includes(document.scan_status || '') ? ' — Safety check unavailable' : ''}`,
+    })),
+    [documents, selectedThread]
   );
+
+  const attachmentAvailable = (id: string): boolean => !id || documentOptions.some(option => option.value === id && !option.disabled);
+
+  useEffect(() => {
+    const available = new Set(documentOptions.filter(option => !option.disabled).map(option => option.value));
+    setNewThread(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+    setReply(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+  }, [documentOptions]);
 
   const updateLiveNewThreadIds = useCallback((update: (ids: number[]) => number[]): void => {
     liveNewThreadIdsRef.current = update(liveNewThreadIdsRef.current);
@@ -233,6 +245,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(newThread.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     try {
       setSending(true);
@@ -264,6 +280,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(reply.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     try {
       setSending(true);
@@ -356,7 +376,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
               >
                 <option value="">Attach an existing document</option>
                 {documentOptions.map((document) => (
-                  <option key={document.value} value={document.value}>{document.label}</option>
+                  <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                 ))}
               </Select>
               <Button type="submit" disabled={sending || unavailable} className="w-full">
@@ -434,7 +454,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 
                 <div className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
-                    <MessageBubble key={message.id} message={{ ...message, document: documents.find(document => document.id === message.document?.id) || message.document }} />
+                    <MessageBubble key={message.id} message={{ ...message, document: message.document?.archived_at ? message.document : documents.find(document => document.id === message.document?.id) || message.document }} />
                   ))}
                 </div>
 
@@ -449,7 +469,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                     <Select value={reply.document_id} onChange={(event) => setReply((current) => ({ ...current, document_id: event.target.value }))}>
                       <option value="">Attach an existing document</option>
                       {documentOptions.map((document) => (
-                        <option key={document.value} value={document.value}>{document.label}</option>
+                        <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                       ))}
                     </Select>
                     <Button type="submit" disabled={sending || unavailable}>

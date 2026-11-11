@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
@@ -10,6 +10,7 @@ vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
 vi.mock('@/services/api', () => ({
+  getActiveCompanyId: () => 1,
   clientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete },
   clientEmployeesApi: { list: mocks.employees },
   clientPortalThreadsApi: {},
@@ -112,4 +113,35 @@ it('uploads 30 selected images in bounded batches', async () => {
   expect(await screen.findByText('30 documents uploaded successfully')).toBeTruthy();
   expect(mocks.upload).toHaveBeenCalledTimes(3);
   for (const [payload] of mocks.upload.mock.calls) expect(payload.getAll('files[]')).toHaveLength(10);
+});
+
+it.each([false, true])('resets metadata only after complete success (failure: %s)', async (fails) => {
+  const user = userEvent.setup();
+  mocks.employees.mockResolvedValue({ data: [{ id: 7, first_name: 'Synthetic', last_name: 'Worker' }] });
+  mocks.upload.mockImplementation(async () => {
+    if (fails) throw new Error('Please retry');
+    return { data: [] };
+  });
+  const { container } = render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  const title = screen.getByPlaceholderText('Optional document title') as HTMLInputElement;
+  const notes = screen.getByPlaceholderText('Optional notes for payroll team') as HTMLTextAreaElement;
+  const form = title.closest('form')!;
+  const selects = form.querySelectorAll('select');
+  fireEvent.change(title, { target: { value: 'Previous title' } });
+  fireEvent.change(notes, { target: { value: 'Previous notes' } });
+  fireEvent.change(selects[0], { target: { value: 'payroll_source' } });
+  fireEvent.change(selects[1], { target: { value: '7' } });
+  const visibility = form.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+  if (visibility) fireEvent.click(visibility);
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, new File(['synthetic'], 'test.pdf', { type: 'application/pdf' }));
+  await user.click(screen.getByRole('button', { name: 'Upload Document' }));
+  if (fails) await screen.findByRole('alert');
+  else await screen.findByText('Document uploaded successfully');
+  expect(title.value).toBe(fails ? 'Previous title' : '');
+  expect(notes.value).toBe(fails ? 'Previous notes' : '');
+  expect(selects[0].value).toBe(fails ? 'payroll_source' : 'misc');
+  expect(selects[1].value).toBe(fails ? '7' : '');
+  if (visibility) expect(visibility.checked).toBe(!fails);
+  expect(screen.queryByText('test.pdf') !== null).toBe(fails);
 });

@@ -249,8 +249,8 @@ class ApiClient {
     });
   }
 
-  async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
-    const initiatingCompanyId = this.activeCompanyId;
+  async postForm<T>(endpoint: string, formData: FormData, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
+    const initiatingCompanyId = options.companyId !== undefined ? options.companyId : this.activeCompanyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const token = await this.resolveAuthToken();
     const headers: HeadersInit = { ...financeHeaders };
@@ -4493,8 +4493,8 @@ export const employeeLoansApi = {
 export const clientDocumentsApi = {
   list: (params?: { category?: string; employee_id?: number } & BoundedListParams) =>
     api.get<{ data: ClientDocument[]; meta: ClientDocumentListMeta }>('/client/documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/preview`),
   download: (id: number) =>
@@ -4526,8 +4526,8 @@ export const clientPortalThreadsApi = {
 export const adminClientDocumentsApi = {
   list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
     api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
   download: (id: number) =>

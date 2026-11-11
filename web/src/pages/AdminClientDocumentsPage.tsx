@@ -164,7 +164,9 @@ export function AdminClientDocumentsPage() {
         visible_to_client: String(uploadForm.visible_to_client),
       }, adminClientDocumentsApi.upload,
         (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
-      setUploadForm((current) => ({ ...current, files: result.failures.map((failure) => failure.file) }));
+      setUploadForm((current) => result.failures.length
+        ? { ...current, files: result.failures.map((failure) => failure.file) }
+        : { title: '', category: 'misc', employee_id: '', notes: '', visible_to_client: true, files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (result.uploaded.length) {
         setSuccess(result.uploaded.length === 1 ? 'Document shared successfully' : `${result.uploaded.length} documents shared successfully`);
@@ -209,7 +211,7 @@ export function AdminClientDocumentsPage() {
     }
   };
 
-  const unarchiveDocument = async (document: ClientDocument) => {
+  const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
     setError(null);
     try {
       const result = await adminClientDocumentsApi.unarchive(document.id);

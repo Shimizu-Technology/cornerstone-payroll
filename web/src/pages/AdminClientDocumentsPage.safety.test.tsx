@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminClientDocumentsPage } from './AdminClientDocumentsPage';
@@ -10,6 +10,7 @@ vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
 vi.mock('@/services/api', () => ({
+  getActiveCompanyId: () => 1,
   adminClientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete, unarchive: mocks.unarchive },
   employeesApi: { list: mocks.employees }, adminPortalThreadsApi: {},
 }));
@@ -88,4 +89,35 @@ it('reports the failed filename and retains only that file after a mixed batch',
   expect(screen.getByText('Document shared successfully')).toBeTruthy();
   expect(screen.getByText('bad.jpg')).toBeTruthy();
   expect(screen.queryByText('good.jpg')).toBeNull();
+});
+
+it.each([false, true])('resets metadata only after complete success (failure: %s)', async (fails) => {
+  const user = userEvent.setup();
+  mocks.employees.mockResolvedValue({ data: [{ id: 7, first_name: 'Synthetic', last_name: 'Worker' }], meta: { total_pages: 1 } });
+  mocks.upload.mockImplementation(async () => {
+    if (fails) throw new Error('Please retry');
+    return { data: [] };
+  });
+  const { container } = render(<AdminClientDocumentsPage />);
+  await screen.findAllByText('Payroll hours');
+  const title = screen.getByPlaceholderText('Optional document title') as HTMLInputElement;
+  const notes = screen.getByPlaceholderText('Optional note shown with the document') as HTMLTextAreaElement;
+  const form = title.closest('form')!;
+  const selects = form.querySelectorAll('select');
+  fireEvent.change(title, { target: { value: 'Previous title' } });
+  fireEvent.change(notes, { target: { value: 'Previous notes' } });
+  fireEvent.change(selects[0], { target: { value: 'payroll_source' } });
+  fireEvent.change(selects[1], { target: { value: '7' } });
+  const visibility = form.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+  if (visibility) fireEvent.click(visibility);
+  await user.upload(container.querySelector('input[type="file"]') as HTMLInputElement, new File(['synthetic'], 'test.pdf', { type: 'application/pdf' }));
+  await user.click(screen.getByRole('button', { name: 'Share Document' }));
+  if (fails) await screen.findByRole('alert');
+  else await screen.findByText('Document shared successfully');
+  expect(title.value).toBe(fails ? 'Previous title' : '');
+  expect(notes.value).toBe(fails ? 'Previous notes' : '');
+  expect(selects[0].value).toBe(fails ? 'payroll_source' : 'misc');
+  expect(selects[1].value).toBe(fails ? '7' : '');
+  if (visibility) expect(visibility.checked).toBe(!fails);
+  expect(screen.queryByText('test.pdf') !== null).toBe(fails);
 });
