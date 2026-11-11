@@ -26,6 +26,8 @@ function renderControl(state: AirePayrollCalendarState = calendar, onChanged = v
   return onChanged;
 }
 
+const refused = { state: 'rejected', schedule_version: 3, cutoff_at: '2026-11-19T09:03:00+10:00', cutoff_source: 'override', action: 'change', error: 'cutoff_at must be in the future when published', last_delivery_attempt_at: '2026-11-19T09:05:00+10:00' } as const;
+
 afterEach(() => { cleanup(); mocks.capabilities = new Set(); mocks.change.mockReset(); });
 
 describe('AireLockTimeControl', () => {
@@ -136,6 +138,52 @@ describe('AireLockTimeControl', () => {
     expect(note.textContent).toContain('AIRE rejected the change to Thu, Nov 19 at 9:03 AM: cutoff_at must be in the future when published');
     expect(note.textContent).toContain('The lock time above is still in effect. Lock now or choose a new time to replace the rejected change.');
     expect(screen.getByRole('button', { name: /Change lock time/ })).toBeTruthy();
+  });
+
+  it('lets an admin save the lock AIRE has to replace a change it did not apply', async () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    renderControl({ ...calendar, cutoff_delivery: { ...refused, state: 'expired', error: null } });
+    expect(screen.getByRole('status').textContent).toContain("The change to Thu, Nov 19 at 9:03 AM didn't reach AIRE in time, so AIRE didn't apply it.");
+    await userEvent.setup().click(screen.getByRole('button', { name: /Change lock time/ }));
+    expect((screen.getByLabelText(/New lock time/) as HTMLInputElement).value).toBe('2026-11-22T17:00');
+    expect((screen.getByRole('button', { name: 'Save lock time' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('offers only what the admin can still do to replace a refused change', () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    renderControl({ ...calendar, cutoff_delivery: refused, cutoff_control: { ...calendar.cutoff_control!, lock_now_available: false } });
+    expect(screen.getByRole('status').textContent).toContain('The lock time above is still in effect. Choose a new time to replace the rejected change.');
+    cleanup();
+    renderControl({ ...calendar, cutoff_delivery: refused, cutoff_control: { ...calendar.cutoff_control!, available: false, lock_now_available: false, unavailable_reason: 'It is too close to payday to change the lock time' } });
+    const note = screen.getByRole('status').textContent ?? '';
+    expect(note).toContain('AIRE rejected the change to Thu, Nov 19 at 9:03 AM: cutoff_at must be in the future when published');
+    expect(note.endsWith('The lock time above is still in effect.')).toBe(true);
+  });
+
+  it('drops the delivery note once the lock AIRE has is reached', () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    renderControl({ ...calendar, applied_cutoff_at: '2026-11-19T08:00:00+10:00', cutoff_delivery: refused });
+    expect(screen.getByText('Lock time reached')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('moves a time that slipped under the 15-minute minimum before sending it', async () => {
+    mocks.capabilities.add('manage_time_tracking_lock');
+    const props = { payPeriodId: 42, calendar, companyId: 1, onChanged: vi.fn() };
+    const { rerender } = render(<AireLockTimeControl {...props} now={now} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Change lock time/ }));
+    const input = screen.getByLabelText(/New lock time/) as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, '2026-11-19T09:15');
+    await user.type(screen.getByLabelText(/Reason/), 'Lock early');
+
+    // A minute and a half later the earliest allowed minute is 9:17.
+    rerender(<AireLockTimeControl {...props} now={new Date('2026-11-19T09:01:30+10:00')} />);
+    await user.click(screen.getByRole('button', { name: 'Save lock time' }));
+    expect(screen.getByRole('alert').textContent).toBe('The lock time must be at least 15 minutes from now, so the earliest is now Thu, Nov 19 at 9:17 AM. Check the new time and save again.');
+    expect(input.value).toBe('2026-11-19T09:17');
+    expect(mocks.change).not.toHaveBeenCalled();
   });
 
   it('explains why an admin cannot change it and stays out of manual calendars', () => {

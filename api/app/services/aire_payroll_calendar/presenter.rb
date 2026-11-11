@@ -54,7 +54,7 @@ module AirePayrollCalendar
         cutoff_history: cutoff_history,
         applied_cutoff_at: applied_publication(calendar_period)&.payload&.fetch("cutoff_at", nil),
         applied_cutoff_override: serialize_applied_override(applied_publication(calendar_period)),
-        cutoff_delivery: serialize_delivery(calendar_period&.undelivered_publication),
+        cutoff_delivery: serialize_delivery(calendar_period, event),
         cutoff_control: cutoff_control(calendar_period, publication, event, desired)
       }
     end
@@ -94,12 +94,15 @@ module AirePayrollCalendar
       }
     end
 
-    # A newer version AIRE has not applied yet: on its way, or refused.
-    def serialize_delivery(publication)
+    # A newer version AIRE has not applied yet: on its way, refused, or expired
+    # undelivered. Nothing once time tracking locked the period.
+    def serialize_delivery(calendar_period, event)
+      publication = calendar_period&.undelivered_publication
       return nil unless publication
+      return nil if event || CutoffChange.finalized_import?(@pay_period, calendar_period.time_tracking_source)
 
       {
-        state: publication.rejected? ? "rejected" : "pending",
+        state: delivery_state(publication),
         schedule_version: publication.schedule_version,
         cutoff_at: publication.payload["cutoff_at"],
         cutoff_source: Contract.comparable(publication.payload)["cutoff_source"],
@@ -107,6 +110,12 @@ module AirePayrollCalendar
         error: publication.rejection_message,
         last_delivery_attempt_at: publication.last_delivery_attempt_at
       }
+    end
+
+    def delivery_state(publication)
+      return "rejected" if publication.rejected?
+
+      publication.expired?(@now) ? "expired" : "pending"
     end
 
     # State only; the caller's permission is checked by the browser capability
@@ -139,7 +148,7 @@ module AirePayrollCalendar
       return "This period's lock time has passed" if applied.cutoff_at <= @now
       return "AIRE locks this period in under 15 minutes, so the lock time can no longer change" if applied.cutoff_at < @now + CutoffChange::MIN_LEAD
       undelivered = calendar_period.undelivered_publication
-      return "Waiting for AIRE to confirm the last change" if undelivered && !undelivered.rejected?
+      return "Waiting for AIRE to confirm the last change" if undelivered && !undelivered.supersedable?(@now)
       return "It is too close to payday to change the lock time" if bounds[:latest_at] <= @now
 
       nil

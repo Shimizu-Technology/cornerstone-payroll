@@ -84,6 +84,11 @@ Delivery and recovery:
 - While a newer publication is still on its way, further changes get 409 "still being delivered". The pay-run strip shows "Waiting for AIRE to confirm …" under the lock in effect (`cutoff_delivery.state: "pending"`).
 - If AIRE answers 409 or 422, the publication is refused (`cutoff_delivery.state: "rejected"`, with AIRE's message). A new change, Lock now or reset then supersedes it as the next schedule version. AIRE accepts any version above its current one, so a skipped version doesn't block later ones.
 - A publication sent while AIRE could accept it keeps retrying after its cutoff, because AIRE may have applied it and lost the response; AIRE replays a known `publication_id` before any time check. Retrying stops once AIRE refuses it after the cutoff or confirms a newer version.
+- If a publication's only attempt ran after its cutoff and the response was lost, AIRE could not have applied it and it is not retried (`cutoff_delivery.state: "expired"`). Like a refusal, a new change supersedes it.
+- A superseding change stops delivery of every older undelivered version, and a refused version also stops once any newer version exists. A stale version can't reach AIRE while the newer one is delayed.
+- AIRE answers 503 when a late Lock now meets a busy finalization lock. That isn't a refusal, so delivery retries.
+- Lock order: pay period, then time tracking source, then publications. A change takes the source lock before reading what AIRE applied, and delivery holds it while it talks to AIRE.
+- The pay-run note about an undelivered change disappears once time tracking locks the period or the lock in effect passes.
 - The old cockpit "Lock time tracking cutoff" command stays for manual-lock periods. For scheduled periods it appears only when the lock is due or needs attention, as "Finish locking hours".
 
 The pay-run page shows the lock time under the source checkpoint, with who changed it and why. The receiver and verifier compare against the published cutoff, so batches from an overridden lock verify normally.

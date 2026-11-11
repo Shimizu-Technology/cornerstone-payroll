@@ -69,6 +69,35 @@ RSpec.describe AirePayrollCalendar::Delivery, "with an admin lock time" do
     expect(stale.reload).to have_attributes(next_delivery_attempt_at: nil, last_error: "Superseded by schedule version 3, which AIRE confirmed")
   end
 
+  it "stops retrying a refused version once a newer change replaces it, before AIRE confirms the newer one" do
+    stale = lock_now!
+    allow(client).to receive(:publish_payroll_calendar_period)
+      .and_raise(TimeTracking::Client::Error.new("Lock now came after manual payroll claims", response_status: 409))
+    deliver(stale, at: 1.minute.from_now)
+    # Still inside the lock-now grace window, so the refusal is retried.
+    expect(stale.reload).to be_rejected
+    expect(stale.next_delivery_attempt_at).to be_present
+
+    newer = AirePayrollCalendar::CutoffChange.new(pay_period: pay_period, action: "change", cutoff_at: "2026-10-25T10:30:00+10:00",
+      reason: "Lock Saturday instead", actor: org_admin).call.publication
+    expect(newer).not_to be_delivered
+
+    expect(client).not_to receive(:publish_payroll_calendar_period)
+    expect(deliver(stale, at: 2.minutes.from_now)[:status]).to eq("superseded")
+    expect(stale.reload).to have_attributes(next_delivery_attempt_at: nil, last_error: "Superseded by schedule version 3")
+  end
+
+  it "does not reschedule a replaced version when an attempt already in flight fails afterwards" do
+    stale = lock_now!
+    reject_delivery!(stale, "Lock now came after manual payroll claims", status: 409)
+    AirePayrollCalendar::CutoffChange.new(pay_period: pay_period, action: "lock_now", reason: "Again", actor: org_admin).call
+
+    # The attempt claimed before the change committed; its response was lost.
+    described_class.new(publication_id: stale.id, now: 1.minute.from_now)
+      .send(:mark_failed!, TimeTracking::Client::Error.new("Could not securely reach AIRE"))
+    expect(stale.reload.next_delivery_attempt_at).to be_nil
+  end
+
   it "fails delivery when AIRE stored the period without the override" do
     publication = lock_now!
     allow(client).to receive(:publish_payroll_calendar_period).and_return(
