@@ -100,8 +100,8 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
         delete "/api/v1/client/documents/#{linked_document.id}"
       end.not_to change(ClientDocument, :count)
 
-      expect(response).to have_http_status(:unprocessable_content)
-      expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("message")).to include("archived")
       expect(requirement.reload.client_document).to eq(linked_document)
       expect_readiness_storage_to_exist(linked_document)
     end
@@ -124,8 +124,8 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
         delete "/api/v1/client/documents/#{linked_document.id}"
       end.not_to change(ClientDocument, :count)
 
-      expect(response).to have_http_status(:unprocessable_content)
-      expect(response.parsed_body.fetch("error")).to include("linked")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("message")).to include("archived")
       expect(event.reload.client_document).to eq(linked_document)
       expect_readiness_storage_to_exist(linked_document)
     end
@@ -304,7 +304,8 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
 
     it "hides internal preview generator details from client responses" do
       docx = Tempfile.new([ "client-portal-upload", ".docx" ])
-      docx.write("pretend docx payload")
+      docx.binmode
+      docx.write(office_zip(extension: "docx"))
       docx.rewind
       docx_upload = Rack::Test::UploadedFile.new(
         docx.path,

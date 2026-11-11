@@ -15,10 +15,11 @@ import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
 import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread, PortalReadDisplay } from '@/services/api';
 
 type PortalThreadsApi = ResourceActivityApi & {
+  unreadCount: () => Promise<{ data: { unread_count: number } }>;
   list: (params?: { status?: string; page?: number }) => Promise<{ data: ClientPortalThread[]; meta?: BoundedListMeta & { unread_count?: number } }>;
   markRead: (id: number, data: PortalReadDisplay) => Promise<{ data: ClientPortalThread }>;
   get: (id: number) => Promise<{ data: ClientPortalThread }>;
-  create: (data: { subject: string; body?: string; document_id?: number }) => Promise<{ data: ClientPortalThread }>;
+  create: (data: { subject: string; body?: string; document_id?: number; idempotency_key: string }) => Promise<{ data: ClientPortalThread }>;
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) => Promise<{ data: ClientPortalThread }>;
   createMessage: (threadId: number, data: { body?: string; document_id?: number; idempotency_key: string }) => Promise<{ data: ClientPortalMessage }>;
 };
@@ -56,7 +57,9 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   refreshCompanies: () => Promise<void>;
 }) {
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const unreadFetchVersion = useRef(0);
   const threadFetchVersions = useRef(new Map<number, number>());
+  const createRetryKey = useRef<{ payload: string; key: string } | null>(null);
   const retryKey = useRef<{ payload: string; key: string } | null>(null);
   const [threads, setThreads] = useState<ClientPortalThread[]>([]);
   const [threadsMeta, setThreadsMeta] = useState<BoundedListMeta | null>(null);
@@ -101,8 +104,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     return threadFetchVersions.current.get(id) === version ? response : null;
   }, [api]);
   const refreshUnreadCount = useCallback(async (): Promise<void> => {
-    const response = await api.list();
-    if (!unavailableRef.current) setUnreadCount(response.meta?.unread_count ?? null);
+    const generation = dataGeneration.current;
+    const version = ++unreadFetchVersion.current;
+    const response = await api.unreadCount();
+    if (generation === dataGeneration.current && version === unreadFetchVersion.current && !unavailableRef.current) setUnreadCount(response.data.unread_count);
   }, [api]);
   const markDisplayed = useCallback(async (id: number, data: PortalReadDisplay): Promise<void> => {
     const response = await api.markRead(id, data);
@@ -113,9 +118,21 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const messagesContainer = useDisplayedMessages(selectedThread, !unavailable && (desktop || mobileConversationOpen), markDisplayed);
 
   const documentOptions = useMemo(
-    () => documents.map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
-    [documents]
+    () => documents.filter((document) => !document.archived_at && !selectedThread?.messages?.some(message => message.document?.id === document.id && message.document.archived_at)).map((document) => ({
+      value: String(document.id),
+      disabled: ['pending', 'infected', 'error'].includes(document.scan_status || ''),
+      label: `${document.title} (${document.file_name})${['pending', 'infected', 'error'].includes(document.scan_status || '') ? ' — Safety check unavailable' : ''}`,
+    })),
+    [documents, selectedThread]
   );
+
+  const attachmentAvailable = (id: string): boolean => !id || documentOptions.some(option => option.value === id && !option.disabled);
+
+  useEffect(() => {
+    const available = new Set(documentOptions.filter(option => !option.disabled).map(option => option.value));
+    setNewThread(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+    setReply(current => current.document_id && !available.has(current.document_id) ? { ...current, document_id: '' } : current);
+  }, [documentOptions]);
 
   const updateLiveNewThreadIds = useCallback((update: (ids: number[]) => number[]): void => {
     liveNewThreadIdsRef.current = update(liveNewThreadIdsRef.current);
@@ -256,6 +273,32 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     };
   }, [fetchThread, companyId, selectedId, setError]);
 
+  // A changed archive marker in the documents list follows an archive or
+  // unarchive, so re-read the open conversation. Its own markers stay
+  // authoritative over list data that has not changed.
+  const documentArchiveSignature = useMemo(
+    () => documents.map(document => `${document.id}:${document.archived_at ?? ''}`).join(','),
+    [documents]
+  );
+  const seenArchiveSignature = useRef(documentArchiveSignature);
+  useEffect(() => {
+    if (seenArchiveSignature.current === documentArchiveSignature) return;
+    seenArchiveSignature.current = documentArchiveSignature;
+    if (!selectedId || unavailableRef.current) return;
+
+    let active = true;
+    api.get(selectedId)
+      .then((response) => {
+        if (!active || unavailableRef.current || response.data.company_id !== companyId) return;
+        setSelectedThread(current => (current?.id === response.data.id ? response.data : current));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [api, companyId, documentArchiveSignature, selectedId]);
+
   const createThread = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (unavailableRef.current) return;
@@ -264,16 +307,24 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(newThread.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     try {
       setSending(true);
       setError(null);
-      const response = await api.create({
+      const payload = {
         subject: newThread.subject.trim() || 'Portal message',
         body: newThread.body.trim() || undefined,
         document_id: newThread.document_id ? Number(newThread.document_id) : undefined,
-      });
+      };
+      const identity = JSON.stringify({ companyId, ...payload });
+      if (createRetryKey.current?.payload !== identity) createRetryKey.current = { payload: identity, key: crypto.randomUUID() };
+      const response = await api.create({ ...payload, idempotency_key: createRetryKey.current.key });
       if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
+      createRetryKey.current = null;
       setNewThread({ subject: '', body: '', document_id: '' });
       noteLiveThread(response.data);
       setThreads((current) => upsertThread(current, response.data));
@@ -295,6 +346,10 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       return;
     }
 
+    if (!attachmentAvailable(reply.document_id)) {
+      setError('This attachment is no longer available. Choose another document.');
+      return;
+    }
     const generation = dataGeneration.current;
     let sent = false;
     try {
@@ -391,7 +446,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
               >
                 <option value="">Attach an existing document</option>
                 {documentOptions.map((document) => (
-                  <option key={document.value} value={document.value}>{document.label}</option>
+                  <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                 ))}
               </Select>
               <Button type="submit" disabled={sending || unavailable} className="w-full">
@@ -469,7 +524,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 
                 <div ref={messagesContainer} className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
-                    <MessageBubble key={message.id} message={message} />
+                    <MessageBubble key={message.id} message={{ ...message, document: message.document?.archived_at ? message.document : documents.find(document => document.id === message.document?.id) || message.document }} />
                   ))}
                 </div>
 
@@ -485,7 +540,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                     <Select value={reply.document_id} onChange={(event) => setReply((current) => ({ ...current, document_id: event.target.value }))}>
                       <option value="">Attach an existing document</option>
                       {documentOptions.map((document) => (
-                        <option key={document.value} value={document.value}>{document.label}</option>
+                        <option key={document.value} value={document.value} disabled={document.disabled}>{document.label}</option>
                       ))}
                     </Select>
                     <Button type="submit" disabled={sending || unavailable}>
@@ -516,7 +571,9 @@ function MessageBubble({ message }: { message: ClientPortalMessage }) {
       {message.document && (
         <div className="mt-3 flex items-center gap-2 rounded-md border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-primary-800">
           <Paperclip className="h-4 w-4 shrink-0" />
-          <span className="truncate">{message.document.title}</span>
+          <span className="min-w-0 break-all">
+            {message.document.archived_at ? `File archived: ${message.document.title} (${message.document.file_name})` : message.document.title}
+          </span>
         </div>
       )}
     </div>

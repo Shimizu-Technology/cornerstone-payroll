@@ -11,6 +11,7 @@ class ClientPortalThread < ApplicationRecord
     dependent: :destroy,
     inverse_of: :client_portal_thread
 
+  validates :idempotency_key, length: { maximum: 128 }, allow_nil: true
   validates :subject, presence: true
   validates :status, inclusion: { in: STATUSES }
 
@@ -47,15 +48,16 @@ class ClientPortalThread < ApplicationRecord
     return false unless user
 
     cursor ||= read_cursor_for(user)
-    messages.loaded? ? messages.any? { |message| message.id > cursor } : messages.where("id > ?", cursor).exists?
+    messages.loaded? ? messages.any? { |message| message.id > cursor && message.author_id != user.id && message.created_at >= user.created_at } : messages.where("id > ? AND author_id IS DISTINCT FROM ? AND created_at >= ?", cursor, user.id, user.created_at).exists?
   end
 
   def self.unread_count_for(user, company_id:, status: nil)
     scope = where(company_id: company_id)
     scope = scope.where(status: status) if status.present?
-    scope.where(<<~SQL.squish, user.id).count
+    scope.where(<<~SQL.squish, user.id, user.created_at, user.id).count
       EXISTS (SELECT 1 FROM client_portal_messages m
         WHERE m.client_portal_thread_id = client_portal_threads.id
+        AND m.author_id IS DISTINCT FROM ? AND m.created_at >= ?
         AND m.id > GREATEST(client_portal_threads.read_baseline_message_id,
           COALESCE((SELECT r.last_displayed_message_id FROM portal_thread_read_receipts r
             WHERE r.client_portal_thread_id = client_portal_threads.id AND r.user_id = ?), 0)))

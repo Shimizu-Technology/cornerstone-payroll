@@ -48,7 +48,6 @@ export function ResourceActivity({ id, api, revision }: { id: number; api: Resou
       <ol className="space-y-3">{events.map(event => <li key={event.id} className="break-words">
         <p className="text-neutral-800">{event.headline}</p>
         <time className="text-xs text-neutral-500" dateTime={event.created_at}>{new Date(event.created_at).toLocaleString('en-US', { timeZone: 'Pacific/Guam', dateStyle: 'medium', timeStyle: 'short' })}</time>
-        {event.document_version != null && <span className="ml-2 text-xs text-neutral-500">Version {event.document_version}</span>}
       </li>)}</ol>
       {loading && <p role="status">Loading activity…</p>}
       {hasMorePages(meta) && <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void loadMore()}>Load more activity</Button>}

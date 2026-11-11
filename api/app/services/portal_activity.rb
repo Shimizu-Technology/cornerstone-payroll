@@ -2,12 +2,12 @@
 
 # One vocabulary and deliberately small public projection for both audiences.
 class PortalActivity
-  DOCUMENT_ACTIONS = %w[client_documents#create admin_client_documents#create client_documents#destroy admin_client_documents#destroy portal_documents#opened portal_documents#preview portal_documents#download portal_documents#archived].freeze
+  DOCUMENT_ACTIONS = %w[client_documents#create admin_client_documents#create client_documents#destroy admin_client_documents#destroy portal_documents#opened portal_documents#preview portal_documents#download client_documents#archive admin_client_documents#archive admin_client_documents#unarchive].freeze
   THREAD_ACTIONS = %w[client_portal_threads#create client_portal_threads#update client_portal_threads#resolved client_portal_threads#reopened client_portal_threads#opened client_portal_threads#mark_read client_portal_messages#create].freeze
 
   def self.document_metadata(document)
     {
-      title: document.title, document_version: document.id,
+      title: document.title,
       category: document.category, employee_id: document.employee_id,
       employee_name: document.employee&.full_name, visible_to_client: document.visible_to_client
     }
@@ -45,8 +45,7 @@ class PortalActivity
     {
       id: log.id, actor_name: log.actor_name.presence || "System",
       action: log.action, subject_name: log.subject_name,
-      headline: AuditLogPresenter.new(log).headline, created_at: log.created_at,
-      document_version: log.metadata["document_version"]
+      headline: AuditLogPresenter.new(log).headline, created_at: log.created_at
     }
   end
 end

@@ -3,11 +3,13 @@
 require "rails_helper"
 
 RSpec.describe "Portal personal reads and activity", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   %w[client manager].each do |role|
     context "as #{role}" do
       let(:company) { create(:company) }
-      let(:actor) { create(:user, company: company, role: role) }
-      let(:peer) { create(:user, company: company, role: role) }
+      let!(:actor) { create(:user, company: company, role: role) }
+      let!(:peer) { create(:user, company: company, role: role) }
       let(:namespace) { role == "client" ? "client" : "admin" }
       let(:threads_path) { "/api/v1/#{namespace}/portal_threads" }
       let(:documents_path) { "/api/v1/#{namespace}/#{role == 'client' ? 'documents' : 'client_documents'}" }
@@ -40,7 +42,7 @@ RSpec.describe "Portal personal reads and activity", type: :request do
         post "#{threads_path}/#{thread.id}/mark_read", params: payload, as: :json
         expect(response).to have_http_status(:ok)
         expect(thread.unread_for?(actor)).to be(false)
-        expect(thread.unread_for?(peer)).to be(true)
+        expect(thread.unread_for?(peer)).to be(false)
         log = AuditLog.find_by!(action: "client_portal_threads#opened")
         expect(log.subject_name).to eq(thread.subject)
         expect(log.metadata.fetch("displayed_message_ids")).to eq([ message.id ])
@@ -62,6 +64,84 @@ RSpec.describe "Portal personal reads and activity", type: :request do
         allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(peer)
         post "#{threads_path}/#{thread.id}/mark_read", params: payload, as: :json
         expect(response).to have_http_status(:unprocessable_entity)
+      end
+
+      it "rejects malformed and expired display tokens without receipts or opens" do
+        create(:client_portal_message, client_portal_thread: thread, company: company, author: peer)
+        payload = display_payload(thread)
+        [ nil, "bad-token", { malformed: true } ].each do |token|
+          post "#{threads_path}/#{thread.id}/mark_read", params: payload.merge(display_token: token), as: :json
+          expect(response).to have_http_status(:unprocessable_entity)
+        end
+        travel 31.minutes do
+          post "#{threads_path}/#{thread.id}/mark_read", params: payload, as: :json
+          expect(response).to have_http_status(:unprocessable_entity)
+        end
+        expect(PortalThreadReadReceipt.count).to eq(0)
+        expect(AuditLog.where(action: "client_portal_threads#opened")).to be_empty
+        expect(thread.unread_for?(actor)).to be(true)
+      end
+
+      it "returns only an authorized personal unread count without serializing threads" do
+        actor
+        create(:client_portal_message, client_portal_thread: thread, company: company, author: peer)
+        allow(ClientPortalThreadSerializer).to receive(:new).and_raise("must not serialize")
+        get "#{threads_path}/unread_count"
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to eq("data" => { "unread_count" => 1 })
+      end
+
+      it "creates once per author retry key, checks payloads and permits another author" do
+        payload = { subject: "Retry hours", body: "Attached", document_id: document.id, idempotency_key: "create-retry" }
+        post threads_path, params: payload
+        expect(response).to have_http_status(:created)
+        id = response.parsed_body.dig("data", "id")
+        patch "#{threads_path}/#{id}", params: { subject: "Renamed later" }
+        post threads_path, params: payload
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("data", "id")).to eq(id)
+        expect(ClientPortalThread.count).to eq(1)
+        expect(ClientPortalMessage.count).to eq(1)
+        expect(AuditLog.where(action: "client_portal_threads#create").count).to eq(1)
+        post threads_path, params: payload.merge(body: "Changed")
+        expect(response).to have_http_status(:conflict)
+        allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(peer)
+        post threads_path, params: payload
+        expect(response).to have_http_status(:created)
+        expect(ClientPortalThread.count).to eq(2)
+      end
+
+      it "archives retained documents atomically with named activity" do
+        create(:client_portal_message, client_portal_thread: thread, company: company, client_document: document)
+        action = "#{role == 'client' ? 'client_documents' : 'admin_client_documents'}#archive"
+        allow(AuditLog).to receive(:record!).and_call_original
+        allow(AuditLog).to receive(:record!).with(hash_including(action: action)).and_raise("audit down")
+        expect { delete "#{documents_path}/#{document.id}" }.to raise_error("audit down")
+        expect(document.reload.archived_at).to be_nil
+        allow(AuditLog).to receive(:record!).with(hash_including(action: action)).and_call_original
+        delete "#{documents_path}/#{document.id}"
+        expect(response).to have_http_status(:ok)
+        expect(document.reload.archived_at).to be_present
+        log = PortalActivity.feed(document).find_by!(action: action)
+        expect(AuditLogPresenter.new(log).headline).to include("archived", document.title, actor.name)
+        expect(storage).not_to have_received(:delete)
+        if role == "manager"
+          post "#{documents_path}/#{document.id}/unarchive"
+          expect(response).to have_http_status(:ok)
+          expect(document.reload.archived_at).to be_nil
+          log = PortalActivity.feed(document).find_by!(action: "admin_client_documents#unarchive")
+          expect(AuditLogPresenter.new(log).headline).to include("unarchived", document.title, actor.name)
+        end
+      end
+
+      it "maps raised HTTP failures and retains IP and request ID without request data" do
+        allow_any_instance_of(Api::V1.const_get(namespace.camelize)::PortalThreadsController).to receive(:unread_count).and_raise(ActionController::BadRequest)
+        get "#{threads_path}/unread_count", headers: { "X-Request-Id" => "portal-failure-request" }
+        expect(response).to have_http_status(:bad_request)
+        failure = AuditLog.find_by!(action: "portal_access#failed")
+        expect(failure.metadata).to include("status" => 400, "reason" => "request_failed")
+        expect(failure.ip_address).to be_present
+        expect(failure.request_id).to eq("portal-failure-request")
       end
 
       it "rolls a displayed receipt back when its audit fails" do
@@ -124,7 +204,7 @@ RSpec.describe "Portal personal reads and activity", type: :request do
         expect(AuditLog.where(action: "portal_documents#download").count).to eq(2)
         logs = AuditLog.where(record_type: "client_documents")
         expect(logs.pluck(:subject_name).uniq).to eq([ document.title ])
-        expect(logs.map { |log| log.metadata.fetch("document_version") }.uniq).to eq([ document.id ])
+        expect(logs.flat_map { |log| log.metadata.keys }).not_to include("document_version")
         expect(logs.to_json).not_to include("%PDF")
       end
 
@@ -150,6 +230,16 @@ RSpec.describe "Portal personal reads and activity", type: :request do
         end
         expect(failures.to_json).not_to include(other.title, document.title)
         expect(AuditLog.where(action: "portal_documents#preview")).to be_empty
+      end
+
+      it "records the rendered status of controller-handled scan rejections" do
+        document.update!(scan_status: "infected")
+        get "#{documents_path}/#{document.id}/download"
+        expect(response).to have_http_status(:unprocessable_entity)
+        failure = AuditLog.find_by!(action: "portal_access#failed")
+        expect(failure.metadata.fetch("status")).to eq(response.status)
+        expect(failure.ip_address).to be_present
+        expect(failure.request_id).to be_present
       end
 
       it "makes upload + audit atomic and cleans uploaded storage on rollback" do
