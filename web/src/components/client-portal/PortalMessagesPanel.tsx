@@ -8,17 +8,19 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
-import { useAuth } from '@/contexts/AuthContext';
+import { ResourceActivity, type ResourceActivityApi } from './ResourceActivity';
+import { useDisplayedMessages } from './useDisplayedMessages';
 import { useCompany } from '@/contexts/CompanyContext';
 import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
-import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread } from '@/services/api';
+import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread, PortalReadDisplay } from '@/services/api';
 
-type PortalThreadsApi = {
-  list: (params?: { status?: string; page?: number }) => Promise<{ data: ClientPortalThread[]; meta?: BoundedListMeta }>;
+type PortalThreadsApi = ResourceActivityApi & {
+  list: (params?: { status?: string; page?: number }) => Promise<{ data: ClientPortalThread[]; meta?: BoundedListMeta & { unread_count?: number } }>;
+  markRead: (id: number, data: PortalReadDisplay) => Promise<{ data: ClientPortalThread }>;
   get: (id: number) => Promise<{ data: ClientPortalThread }>;
   create: (data: { subject: string; body?: string; document_id?: number }) => Promise<{ data: ClientPortalThread }>;
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) => Promise<{ data: ClientPortalThread }>;
-  createMessage: (threadId: number, data: { body?: string; document_id?: number }) => Promise<{ data: ClientPortalMessage }>;
+  createMessage: (threadId: number, data: { body?: string; document_id?: number; idempotency_key: string }) => Promise<{ data: ClientPortalMessage }>;
 };
 
 type Props = {
@@ -31,7 +33,7 @@ type Props = {
 
 function formatDateTime(value?: string | null) {
   if (!value) return 'No messages yet';
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString('en-US', { timeZone: 'Pacific/Guam' });
 }
 
 function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread) {
@@ -53,7 +55,8 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   companyId: number | null;
   refreshCompanies: () => Promise<void>;
 }) {
-  const { user } = useAuth();
+  const [unreadCount, setUnreadCount] = useState<number | null>(null);
+  const retryKey = useRef<{ payload: string; key: string } | null>(null);
   const [threads, setThreads] = useState<ClientPortalThread[]>([]);
   const [threadsMeta, setThreadsMeta] = useState<BoundedListMeta | null>(null);
   // Ids already included in meta.total_count: rows from list pages, plus live
@@ -82,6 +85,25 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
   const [newThread, setNewThread] = useState({ subject: '', body: '', document_id: '' });
   const [reply, setReply] = useState({ body: '', document_id: '' });
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+
+  const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1024px)');
+    const update = () => setDesktop(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  const refreshUnreadCount = useCallback(async () => {
+    const response = await api.list();
+    if (!unavailableRef.current) setUnreadCount(response.meta?.unread_count ?? null);
+  }, [api]);
+  const markDisplayed = useCallback(async (id: number, data: PortalReadDisplay) => {
+    const response = await api.markRead(id, data);
+    if (unavailableRef.current) return;
+    setThreads(current => current.map(thread => thread.id === id ? { ...thread, unread: response.data.unread } : thread));
+    await refreshUnreadCount();
+  }, [api, refreshUnreadCount]);
+  const messagesContainer = useDisplayedMessages(selectedThread, !unavailable && (desktop || mobileConversationOpen), markDisplayed);
 
   const documentOptions = useMemo(
     () => documents.map((document) => ({ value: String(document.id), label: `${document.title} (${document.file_name})` })),
@@ -115,6 +137,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       const companyThreads = response.data.filter(thread => thread.company_id === companyId);
       setThreads(companyThreads);
       setThreadsMeta(response.meta ?? null);
+      setUnreadCount(response.meta?.unread_count ?? null);
       resetThreadCounts(companyThreads);
       setLoadMoreError(null);
       setSelectedId((current) => current || response.data.find(thread => thread.company_id === companyId)?.id || null);
@@ -145,6 +168,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       updateLiveNewThreadIds(ids => ids.filter(id => !nowCounted.has(id)));
       setThreads((current) => appendUniqueById(current, pageThreads));
       setThreadsMeta(response.meta ?? null);
+      setUnreadCount(response.meta?.unread_count ?? null);
     } catch (err) {
       if (generation === dataGeneration.current) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more conversations');
     } finally {
@@ -160,15 +184,15 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       onThread: ({ thread }) => {
         if (!active || unavailableRef.current) return;
         setConnected(true);
-        setSelectedId((currentSelectedId) => {
-          const latestAuthorId = thread.latest_message?.author_id;
-          const unread = currentSelectedId === thread.id || latestAuthorId === user?.id ? false : true;
-          const threadWithUnread = { ...thread, unread };
-          noteLiveThread(threadWithUnread);
-          setThreads((current) => upsertThread(current, threadWithUnread));
-          setSelectedThread((current) => (current?.id === thread.id ? threadWithUnread : current));
-          return currentSelectedId;
-        });
+        // Company broadcasts carry no personal read state or display proof.
+        const generation = dataGeneration.current;
+        void api.get(thread.id).then(response => {
+          if (!active || generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
+          noteLiveThread(response.data);
+          setThreads(current => upsertThread(current, response.data));
+          setSelectedThread(current => current?.id === thread.id ? response.data : current);
+          void refreshUnreadCount();
+        }).catch(() => setConnected(false));
       },
       onConnected: () => {
         if (!active) return;
@@ -203,7 +227,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       active = false;
       unsubscribe?.();
     };
-  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, user?.id]);
+  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, api, refreshUnreadCount]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -268,10 +292,12 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     try {
       setSending(true);
       setError(null);
-      await api.createMessage(selectedThread.id, {
-        body: reply.body.trim() || undefined,
-        document_id: reply.document_id ? Number(reply.document_id) : undefined,
-      });
+      const payload = { body: reply.body.trim() || undefined, document_id: reply.document_id ? Number(reply.document_id) : undefined };
+      const identity = JSON.stringify([selectedThread.id, payload]);
+      if (retryKey.current?.payload !== identity) retryKey.current = { payload: identity, key: crypto.randomUUID() };
+      await api.createMessage(selectedThread.id, { ...payload, idempotency_key: retryKey.current.key });
+      retryKey.current = null;
+      setReply({ body: '', document_id: '' });
       if (generation !== dataGeneration.current || unavailableRef.current) return;
       const response = await api.get(selectedThread.id);
       if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
@@ -318,7 +344,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle>Portal Messages</CardTitle>
+            <CardTitle>Portal Messages <span className="text-sm font-normal text-neutral-500">{unreadCount === null ? null : `${unreadCount} unread`}</span></CardTitle>
             <CardDescription>{description}</CardDescription>
           </div>
           <div className="flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-600">
@@ -382,7 +408,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="truncate text-sm font-semibold text-neutral-900">{thread.subject}</p>
-                      {thread.unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary-600" />}
+                      {thread.unread && <span aria-label="Unread conversation" className="h-2 w-2 shrink-0 rounded-full bg-primary-600" />}
                     </div>
                     <p className="mt-1 truncate text-xs text-neutral-500">
                       {thread.latest_message?.body || thread.latest_message?.document?.title || 'No message body'}
@@ -432,12 +458,13 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                   )}
                 </div>
 
-                <div className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
+                <div ref={messagesContainer} className="max-h-[520px] space-y-3 overflow-y-auto bg-neutral-50/60 p-4">
                   {(selectedThread.messages || []).map((message) => (
                     <MessageBubble key={message.id} message={message} />
                   ))}
                 </div>
 
+                <ResourceActivity key={selectedThread.id} id={selectedThread.id} api={api} revision={selectedThread.updated_at} />
                 <form onSubmit={sendReply} className="space-y-3 border-t border-neutral-200 p-4">
                   <Textarea
                     value={reply.body}
@@ -471,7 +498,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 
 function MessageBubble({ message }: { message: ClientPortalMessage }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+    <div data-message-id={message.id} className="rounded-lg border border-neutral-200 bg-white px-4 py-3 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-neutral-900">{message.author_name || 'Unknown user'}</p>
         <p className="text-xs text-neutral-500">{formatDateTime(message.created_at)}</p>

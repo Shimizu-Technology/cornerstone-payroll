@@ -25,22 +25,41 @@ class ClientPortalThread < ApplicationRecord
     status == "open"
   end
 
-  def mark_read_for!(user)
-    return unless user
-    return unless unread_for?(user)
+  has_many :read_receipts, class_name: "PortalThreadReadReceipt", dependent: :delete_all
 
-    if staff_user?(user)
-      update!(staff_last_read_at: Time.current)
-    else
-      update!(client_last_read_at: Time.current)
+  def read_cursor_for(user)
+    [ read_baseline_message_id, read_receipts.find_by(user_id: user.id)&.last_displayed_message_id || 0 ].max
+  end
+
+  def mark_read_for!(user, last_displayed_message_id:)
+    with_lock do
+      message = messages.find(last_displayed_message_id)
+      receipt = read_receipts.find_or_initialize_by(user: user)
+      return false if message.id <= read_cursor_for(user)
+
+      receipt.update!(last_displayed_message_id: message.id, opened_at: Time.current)
+      update!(self.class.staff_user?(user) ? { staff_last_read_at: Time.current } : { client_last_read_at: Time.current })
+      true
     end
   end
 
-  def unread_for?(user)
-    return false unless user && last_message_at
+  def unread_for?(user, cursor: nil)
+    return false unless user
 
-    read_at = staff_user?(user) ? staff_last_read_at : client_last_read_at
-    read_at.blank? || read_at < last_message_at
+    cursor ||= read_cursor_for(user)
+    messages.loaded? ? messages.any? { |message| message.id > cursor } : messages.where("id > ?", cursor).exists?
+  end
+
+  def self.unread_count_for(user, company_id:, status: nil)
+    scope = where(company_id: company_id)
+    scope = scope.where(status: status) if status.present?
+    scope.where(<<~SQL.squish, user.id).count
+      EXISTS (SELECT 1 FROM client_portal_messages m
+        WHERE m.client_portal_thread_id = client_portal_threads.id
+        AND m.id > GREATEST(client_portal_threads.read_baseline_message_id,
+          COALESCE((SELECT r.last_displayed_message_id FROM portal_thread_read_receipts r
+            WHERE r.client_portal_thread_id = client_portal_threads.id AND r.user_id = ?), 0)))
+    SQL
   end
 
   def self.staff_user?(user)

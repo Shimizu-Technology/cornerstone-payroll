@@ -11,7 +11,9 @@ class ClientPortalMessage < ApplicationRecord
 
   scope :chronological, -> { order(created_at: :asc, id: :asc) }
 
-  after_create_commit :touch_thread_and_broadcast
+  validates :idempotency_key, length: { maximum: 128 }, allow_nil: true
+  after_create :touch_thread
+  after_create_commit :broadcast_thread
 
   private
 
@@ -25,21 +27,14 @@ class ClientPortalMessage < ApplicationRecord
     errors.add(:client_document, "must belong to the same company") if client_document.company_id != company_id
   end
 
-  def touch_thread_and_broadcast
+  def touch_thread
     timestamp = created_at || Time.current
-    read_updates = if ClientPortalThread.staff_user?(author)
-      { staff_last_read_at: timestamp }
-    else
-      { client_last_read_at: timestamp }
-    end
+    # Legacy consumers retain side timestamps; personal receipts only follow display.
+    read_updates = ClientPortalThread.staff_user?(author) ? { staff_last_read_at: timestamp } : { client_last_read_at: timestamp }
+    client_portal_thread.update!(read_updates.merge(last_message_at: timestamp, updated_at: Time.current))
+  end
 
-    client_portal_thread.update!(
-      read_updates.merge(
-        last_message_at: timestamp,
-        updated_at: Time.current
-      )
-    )
-
+  def broadcast_thread
     ClientPortalThreadChannel.broadcast_thread(client_portal_thread, event: "message_created")
   end
 end

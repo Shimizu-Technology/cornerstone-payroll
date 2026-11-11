@@ -1,3 +1,4 @@
+import { ResourceActivity, type ResourceActivityApi } from '@/components/client-portal/ResourceActivity';
 import { useEffect } from 'react';
 import { Download, FileText, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ export function DocumentPreviewModal({
   payload,
   loading,
   onDownload,
+  activityApi,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -26,14 +28,23 @@ export function DocumentPreviewModal({
   payload: DocumentPreviewPayload | null;
   loading: boolean;
   onDownload: () => void;
+  activityApi?: ResourceActivityApi & { opened: (id: number) => Promise<void> };
 }) {
+  useEffect(() => () => { if (payload?.objectUrl) URL.revokeObjectURL(payload.objectUrl); }, [payload]);
+
   useEffect(() => {
-    return () => {
-      if (payload?.objectUrl) {
-        URL.revokeObjectURL(payload.objectUrl);
-      }
+    if (!open || !document || !activityApi) return;
+    let recorded = false;
+    const record = () => {
+      if (recorded || window.document.visibilityState !== 'visible' || !window.document.hasFocus()) return;
+      recorded = true;
+      void activityApi.opened(document.id).catch(() => { recorded = false; });
     };
-  }, [payload]);
+    record();
+    window.addEventListener('focus', record);
+    window.document.addEventListener('visibilitychange', record);
+    return () => { window.removeEventListener('focus', record); window.document.removeEventListener('visibilitychange', record); };
+  }, [open, document, activityApi]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -101,6 +112,7 @@ export function DocumentPreviewModal({
           )}
         </div>
 
+      {document && activityApi && <ResourceActivity key={document.id} id={document.id} api={activityApi} revision={loading ? 'loading' : 'loaded'} />}
       <DialogFooter className="border-t border-neutral-200 px-4 py-4 sm:justify-between sm:px-6">
           <p className="text-sm text-neutral-500">Use preview for quick review, then download if you need the original file.</p>
           <div className="flex flex-wrap items-center gap-3">
