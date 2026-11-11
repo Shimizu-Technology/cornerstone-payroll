@@ -686,6 +686,17 @@ describe('AirePayrollCockpit', () => {
     expect(screen.getAllByText(/^Time approved by time tracking administrator · /)).toHaveLength(1);
   });
 
+  it('still labels an auto-approved shift when no approval time was sent', async () => {
+    const data = fixtures();
+    const approvedState = { ...timeEntry.state, approval_status: 'approved', payable_now: true, payroll_disposition: 'included', payroll_exclusion_reasons: [] };
+    data.entries.time_entries = [{ ...timeEntry, state: approvedState, approval: { actor: null, auto_approved: true, occurred_at: null, note: null } }];
+    apiMocks.entries.mockResolvedValue(data.entries);
+    render(<AirePayrollCockpit payPeriodId={17} calendar={calendar} onRefresh={vi.fn()} />);
+
+    expect((await screen.findByText(/^Auto-approved$/)).textContent).toBe('Auto-approved');
+    expect(screen.queryByText(/time tracking administrator/)).toBeNull();
+  });
+
   it('shows the payment hold when historical payment confirmation is pending', async () => {
     const data = fixtures();
     data.entries.time_entries = [{ ...timeEntry, state: { ...timeEntry.state,
