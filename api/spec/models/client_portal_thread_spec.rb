@@ -8,7 +8,7 @@ RSpec.describe ClientPortalThread, type: :model do
 
   it "keeps two staff and two clients independent regardless of legacy timestamps" do
     users = %w[accountant manager client client].map { |role| create(:user, company: company, role: role) }
-    message = create(:client_portal_message, company: company, client_portal_thread: thread, author: users.first)
+    message = create(:client_portal_message, company: company, client_portal_thread: thread, author: nil)
     users.each { |user| expect(thread.unread_for?(user)).to be(true) }
     [ users.first, users.third ].each do |user|
       thread.mark_read_for!(user, last_displayed_message_id: message.id)
@@ -38,5 +38,35 @@ RSpec.describe ClientPortalThread, type: :model do
     expect(thread.read_cursor_for(user)).to eq(last.id)
     other = create(:client_portal_message)
     expect { thread.mark_read_for!(user, last_displayed_message_id: other.id) }.to raise_error(ActiveRecord::RecordNotFound)
+  end
+end
+
+RSpec.describe ClientPortalThread, type: :model do
+  it "excludes own messages in loaded and queried state without hiding other authors" do
+    user = create(:user)
+    thread = create(:client_portal_thread, company: user.company)
+    create(:client_portal_message, client_portal_thread: thread, company: user.company, author: user)
+    [ false, true ].each do |loaded|
+      thread.messages.load if loaded
+      expect(thread.unread_for?(user)).to be(false)
+      expect(described_class.unread_count_for(user, company_id: user.company_id)).to eq(0)
+    end
+    create(:client_portal_message, client_portal_thread: thread, company: user.company, author: nil)
+    expect(thread.reload.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: user.company_id)).to eq(1)
+  end
+
+  it "starts history before account creation read and counts later messages" do
+    thread = create(:client_portal_thread)
+    old = create(:client_portal_message, client_portal_thread: thread, company: thread.company)
+    user = create(:user, company: thread.company)
+    expect(thread.unread_for?(user)).to be(false)
+    thread.messages.load
+    expect(thread.unread_for?(user)).to be(false)
+    expect(described_class.unread_count_for(user, company_id: thread.company_id)).to eq(0)
+    create(:client_portal_message, client_portal_thread: thread, company: thread.company)
+    expect(thread.reload.unread_for?(user)).to be(true)
+    expect(described_class.unread_count_for(user, company_id: thread.company_id)).to eq(1)
+    expect(old.created_at).to be < user.created_at
   end
 end

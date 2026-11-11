@@ -1,3 +1,4 @@
+import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
@@ -62,6 +63,7 @@ export function AdminClientDocumentsPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [category, setCategory] = useState('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -154,22 +156,28 @@ export function AdminClientDocumentsPage() {
       setUploading(true);
       setError(null);
       setSuccess(null);
-      const payload = new FormData();
-      selectedFiles.forEach((file) => payload.append('files[]', file));
-      if (supportsSingleTitle && uploadForm.title.trim()) payload.append('title', uploadForm.title.trim());
-      payload.append('category', uploadForm.category);
-      payload.append('visible_to_client', String(uploadForm.visible_to_client));
-      if (uploadForm.employee_id) payload.append('employee_id', uploadForm.employee_id);
-      if (uploadForm.notes.trim()) payload.append('notes', uploadForm.notes.trim());
-      const response = await adminClientDocumentsApi.upload(payload);
-      setSuccess(response.message || 'Document shared successfully');
-      setUploadForm({ title: '', category: 'misc', employee_id: '', notes: '', visible_to_client: true, files: [] });
+      const result = await uploadDocumentBatches(selectedFiles, {
+        ...(supportsSingleTitle && uploadForm.title.trim() ? { title: uploadForm.title.trim() } : {}),
+        category: uploadForm.category,
+        ...(uploadForm.employee_id ? { employee_id: uploadForm.employee_id } : {}),
+        ...(uploadForm.notes.trim() ? { notes: uploadForm.notes.trim() } : {}),
+        visible_to_client: String(uploadForm.visible_to_client),
+      }, adminClientDocumentsApi.upload,
+        (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
+      setUploadForm((current) => result.failures.length
+        ? { ...current, files: result.failures.map((failure) => failure.file) }
+        : { title: '', category: 'misc', employee_id: '', notes: '', visible_to_client: true, files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await load();
+      if (result.uploaded.length) {
+        setSuccess(result.uploaded.length === 1 ? 'Document shared successfully' : `${result.uploaded.length} documents shared successfully`);
+        await load();
+      }
+      if (result.failures.length) setError(result.failures.map((failure) => `${failure.file.name}: ${failure.message}`).join('\n'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to share document');
     } finally {
       setUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -203,12 +211,24 @@ export function AdminClientDocumentsPage() {
     }
   };
 
+  const unarchiveDocument = async (document: ClientDocument): Promise<void> => {
+    setError(null);
+    try {
+      const result = await adminClientDocumentsApi.unarchive(document.id);
+      setSuccess(result.message);
+      await load();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to unarchive document');
+    }
+  };
+
   const deleteDocument = async (document: ClientDocument) => {
-    if (!window.confirm(`Delete "${document.title}"?`)) return;
+    if (!window.confirm(`Delete "${document.title}"? Files used in messages or evidence will be archived and kept.`)) return;
     setError(null);
 
     try {
-      await adminClientDocumentsApi.delete(document.id);
+      const result = await adminClientDocumentsApi.delete(document.id);
+      setSuccess(result?.message || 'Document deleted');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
@@ -247,6 +267,7 @@ export function AdminClientDocumentsPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpload} className="grid gap-4 md:grid-cols-2">
+              <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
                 <Input
@@ -299,6 +320,7 @@ export function AdminClientDocumentsPage() {
                   onChange={(event) => setUploadForm((current) => ({ ...current, files: Array.from(event.target.files || []) }))}
                   className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
                 />
+                <p className="mt-2 text-sm text-neutral-500">Up to 25 MB each. Larger selections upload in smaller groups. Macros are not supported.</p>
                 {selectedFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedFiles.map((file) => (
@@ -323,6 +345,8 @@ export function AdminClientDocumentsPage() {
                   {uploading ? 'Sharing...' : 'Share Document'}
                 </Button>
               </div>
+              {uploading && <p role="status" aria-live="polite" className="text-sm text-neutral-600">{uploadProgress}</p>}
+              </fieldset>
             </form>
           </CardContent>
         </Card>
@@ -364,6 +388,7 @@ export function AdminClientDocumentsPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="break-words font-semibold text-neutral-950">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="mt-1 break-all text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
@@ -383,7 +408,8 @@ export function AdminClientDocumentsPage() {
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void deleteDocument(document)}>
+                            {document.archived_at && <Button variant="outline" size="sm" onClick={() => void unarchiveDocument(document)}>Unarchive</Button>}
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </Button>
@@ -412,6 +438,7 @@ export function AdminClientDocumentsPage() {
                       <TableCell>
                         <div>
                           <p className="font-medium text-gray-900">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="text-xs text-gray-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                         </div>
                       </TableCell>
@@ -430,7 +457,8 @@ export function AdminClientDocumentsPage() {
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void deleteDocument(document)}>
+                          {document.archived_at && <Button variant="outline" size="sm" onClick={() => void unarchiveDocument(document)}>Unarchive</Button>}
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void deleteDocument(document)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </Button>

@@ -249,8 +249,8 @@ class ApiClient {
     });
   }
 
-  async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
-    const initiatingCompanyId = this.activeCompanyId;
+  async postForm<T>(endpoint: string, formData: FormData, options: Pick<RequestOptions, 'companyId'> = {}): Promise<T> {
+    const initiatingCompanyId = options.companyId !== undefined ? options.companyId : this.activeCompanyId;
     const financeHeaders = this.financeHeaders(endpoint);
     const token = await this.resolveAuthToken();
     const headers: HeadersInit = { ...financeHeaders };
@@ -4238,6 +4238,9 @@ export interface ClientDocument {
   visible_to_client: boolean;
   shared_by_staff: boolean;
   created_at: string;
+  archived_at?: string | null;
+  archived_by_id?: number | null;
+  scan_status?: 'not_scanned' | 'pending' | 'clean' | 'infected' | 'error';
   preview_status: 'pending' | 'processing' | 'ready' | 'failed' | 'not_required';
   preview_available: boolean;
   preview_generated_at?: string | null;
@@ -4309,7 +4312,6 @@ export interface PortalActivityEvent {
   subject_name: string;
   headline: string;
   created_at: string;
-  document_version?: number;
 }
 
 export interface PortalReadDisplay {
@@ -4507,8 +4509,8 @@ export const employeeLoansApi = {
 export const clientDocumentsApi = {
   list: (params?: { category?: string; employee_id?: number } & BoundedListParams) =>
     api.get<{ data: ClientDocument[]; meta: ClientDocumentListMeta }>('/client/documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/preview`),
   opened: (id: number): Promise<void> => api.post<void>(`/client/documents/${id}/opened`),
@@ -4516,7 +4518,7 @@ export const clientDocumentsApi = {
   download: (id: number) =>
     api.getBlobWithParams(`/client/documents/${id}/download`),
   delete: (id: number) =>
-    api.delete<void>(`/client/documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/client/documents/${id}`),
 };
 
 export const clientEmployeeDocumentRequirementsApi = {
@@ -4525,11 +4527,12 @@ export const clientEmployeeDocumentRequirementsApi = {
 };
 
 export const clientPortalThreadsApi = {
+  unreadCount: (): Promise<{ data: { unread_count: number } }> => api.get<{ data: { unread_count: number } }>('/client/portal_threads/unread_count'),
   list: (params?: { status?: string } & BoundedListParams) =>
     api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/client/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`),
-  create: (data: { subject: string; body?: string; document_id?: number }) =>
+  create: (data: { subject: string; body?: string; document_id?: number; idempotency_key: string }) =>
     api.post<{ data: ClientPortalThread }>('/client/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`, data),
@@ -4543,16 +4546,18 @@ export const clientPortalThreadsApi = {
 export const adminClientDocumentsApi = {
   list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
     api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
-  upload: (formData: FormData) =>
-    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData),
+  upload: (formData: FormData, companyId?: number) =>
+    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData, { companyId }),
   preview: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
   opened: (id: number): Promise<void> => api.post<void>(`/admin/client_documents/${id}/opened`),
   activity: (id: number, page = 1): Promise<{ data: PortalActivityEvent[]; meta: BoundedListMeta }> => api.get<{ data: PortalActivityEvent[]; meta: BoundedListMeta }>(`/admin/client_documents/${id}/activity`, { page }),
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
+  unarchive: (id: number) =>
+    api.post<{ data: ClientDocument; message: string }>(`/admin/client_documents/${id}/unarchive`),
   delete: (id: number) =>
-    api.delete<void>(`/admin/client_documents/${id}`),
+    api.delete<{ data: ClientDocument; message: string } | undefined>(`/admin/client_documents/${id}`),
 };
 
 export const adminEmployeeDocumentRequirementsApi = {
@@ -4574,11 +4579,12 @@ export const adminEmployeeDocumentRequirementsApi = {
 };
 
 export const adminPortalThreadsApi = {
+  unreadCount: (): Promise<{ data: { unread_count: number } }> => api.get<{ data: { unread_count: number } }>('/admin/portal_threads/unread_count'),
   list: (params?: { status?: string } & BoundedListParams) =>
     api.get<{ data: ClientPortalThread[]; meta: BoundedListMeta }>('/admin/portal_threads', params),
   get: (id: number) =>
     api.get<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`),
-  create: (data: { subject: string; body?: string; document_id?: number }) =>
+  create: (data: { subject: string; body?: string; document_id?: number; idempotency_key: string }) =>
     api.post<{ data: ClientPortalThread }>('/admin/portal_threads', data),
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
     api.patch<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`, data),

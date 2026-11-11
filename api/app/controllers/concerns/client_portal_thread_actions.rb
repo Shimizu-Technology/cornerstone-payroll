@@ -24,18 +24,35 @@ module ClientPortalThreadActions
     }
   end
 
+  def unread_count
+    render json: { data: { unread_count: ClientPortalThread.unread_count_for(current_user, company_id: current_company_id) } }
+  end
+
   def show
     render json: { data: portal_serializer.thread(@thread, include_messages: true) }
   end
 
   def create
+    skip_default_audit_log!
     created_thread = nil
     initial_message = nil
+    replayed = false
+    key = params[:idempotency_key].presence
+    request_payload = { subject: params[:subject].presence || default_thread_subject, body: params[:body].to_s, document_id: params[:document_id].presence&.to_i }
 
-    ClientPortalThread.transaction do
+    # Serialize per author across conversations, including simultaneous retries.
+    current_user.with_lock do
+      created_thread = ClientPortalThread.find_by(company_id: current_company_id, created_by_id: current_user.id, idempotency_key: key) if key
+      if created_thread
+        unless created_thread.creation_payload == request_payload.stringify_keys
+          return render json: { error: "This retry key was used for a different conversation" }, status: :conflict
+        end
+        replayed = true
+        next
+      end
       created_thread = ClientPortalThread.create!(
         company_id: current_company_id,
-        created_by: current_user,
+        created_by: current_user, idempotency_key: key, creation_payload: request_payload,
         subject: params[:subject].presence || default_thread_subject
       )
       initial_message = create_message_for_thread!(created_thread) if params[:body].present? || params[:document_id].present?
@@ -46,9 +63,9 @@ module ClientPortalThreadActions
     end
 
     created_thread.reload if initial_message
-    ClientPortalThreadChannel.broadcast_thread(created_thread, event: "thread_created")
+    ClientPortalThreadChannel.broadcast_thread(created_thread, event: "thread_created") unless replayed
 
-    render json: { data: portal_serializer.thread(created_thread, include_messages: true) }, status: :created
+    render json: { data: portal_serializer.thread(created_thread, include_messages: true) }, status: replayed ? :ok : :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
   end

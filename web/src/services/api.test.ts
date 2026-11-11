@@ -13,7 +13,7 @@ vi.hoisted((): void => {
   });
 });
 
-import { apiClient, companyAssignmentsApi, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, resolveApiUrl, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
+import { adminClientDocumentsApi, clientDocumentsApi, apiClient, companyAssignmentsApi, employeesApi, nonEmployeeChecksApi, payPeriodsApi, payrollItemsApi, payrollLiabilityCenterApi, reportsApi, resolveApiUrl, setAuthToken, setAuthTokenProvider, timeTrackingSourcesApi } from './api';
 
 describe('API URL resolution', (): void => {
   it('resolves a same-origin API path against the current origin', (): void => {
@@ -69,6 +69,15 @@ describe('ApiClient company identity', (): void => {
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
     expect(headers.get('X-Company-Id')).toBe('7');
     expect(headers.get('Authorization')).toBe('Bearer test-token');
+  });
+
+  it('sends the explicit upload company after the active company changes', async (): Promise<void> => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    apiClient.setActiveCompanyId(12);
+    await clientDocumentsApi.upload(new FormData(), 7);
+    await adminClientDocumentsApi.upload(new FormData(), 7);
+    for (const call of fetchMock.mock.calls) expect(new Headers(call[1]?.headers).get('X-Company-Id')).toBe('7');
   });
 
   it('sends explicit organization context for finance requests only', async (): Promise<void> => {

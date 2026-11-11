@@ -67,6 +67,7 @@ Rails.application.routes.draw do
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
             get :activity
@@ -245,9 +246,11 @@ Rails.application.routes.draw do
             get :preview
             post :opened
             get :activity
+            post :unarchive
           end
         end
         resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          get :unread_count, on: :collection
           member do
             post :mark_read
             get :activity
