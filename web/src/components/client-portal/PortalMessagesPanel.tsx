@@ -6,13 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { LoadMoreFooter } from '@/components/ui/load-more';
+import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { subscribeToClientPortalThreads } from '@/services/clientPortalCable';
-import type { ClientDocument, ClientPortalMessage, ClientPortalThread } from '@/services/api';
+import type { BoundedListMeta, ClientDocument, ClientPortalMessage, ClientPortalThread } from '@/services/api';
 
 type PortalThreadsApi = {
-  list: (params?: { status?: string }) => Promise<{ data: ClientPortalThread[] }>;
+  list: (params?: { status?: string; page?: number }) => Promise<{ data: ClientPortalThread[]; meta?: BoundedListMeta }>;
   get: (id: number) => Promise<{ data: ClientPortalThread }>;
   create: (data: { subject: string; body?: string; document_id?: number }) => Promise<{ data: ClientPortalThread }>;
   update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) => Promise<{ data: ClientPortalThread }>;
@@ -53,6 +55,19 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
 }) {
   const { user } = useAuth();
   const [threads, setThreads] = useState<ClientPortalThread[]>([]);
+  const [threadsMeta, setThreadsMeta] = useState<BoundedListMeta | null>(null);
+  // Ids already included in meta.total_count: rows from list pages, plus live
+  // rows a later page response has since counted. A conversation that arrives
+  // live, is not counted, and has an id above every listed id was created after
+  // the list was read, so it is added to the shown total until a page counts it.
+  // A live update to an older, not-yet-loaded conversation (lower id) is
+  // already in total_count and is not added.
+  const countedThreadIds = useRef(new Set<number>());
+  const maxListedThreadId = useRef(0);
+  const [liveNewThreadIds, setLiveNewThreadIds] = useState<number[]>([]);
+  const liveNewThreadIdsRef = useRef<number[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedThread, setSelectedThread] = useState<ClientPortalThread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +88,22 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
     [documents]
   );
 
+  const updateLiveNewThreadIds = useCallback((update: (ids: number[]) => number[]): void => {
+    liveNewThreadIdsRef.current = update(liveNewThreadIdsRef.current);
+    setLiveNewThreadIds(liveNewThreadIdsRef.current);
+  }, []);
+
+  const resetThreadCounts = useCallback((listed: ClientPortalThread[]): void => {
+    countedThreadIds.current = new Set(listed.map(thread => thread.id));
+    maxListedThreadId.current = listed.reduce((max, thread) => Math.max(max, thread.id), 0);
+    updateLiveNewThreadIds(() => []);
+  }, [updateLiveNewThreadIds]);
+
+  const noteLiveThread = useCallback((thread: ClientPortalThread): void => {
+    if (countedThreadIds.current.has(thread.id) || thread.id <= maxListedThreadId.current) return;
+    updateLiveNewThreadIds(ids => (ids.includes(thread.id) ? ids : [...ids, thread.id]));
+  }, [updateLiveNewThreadIds]);
+
   const loadThreads = useCallback(async () => {
     if (!companyId || unavailableRef.current) return;
     const generation = dataGeneration.current;
@@ -81,18 +112,45 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       setError(null);
       const response = await api.list();
       if (generation !== dataGeneration.current || unavailableRef.current) return;
-      setThreads(response.data.filter(thread => thread.company_id === companyId));
+      const companyThreads = response.data.filter(thread => thread.company_id === companyId);
+      setThreads(companyThreads);
+      setThreadsMeta(response.meta ?? null);
+      resetThreadCounts(companyThreads);
+      setLoadMoreError(null);
       setSelectedId((current) => current || response.data.find(thread => thread.company_id === companyId)?.id || null);
     } catch (err) {
       if (generation === dataGeneration.current && !unavailableRef.current) setError(err instanceof Error ? err.message : 'Failed to load messages');
     } finally {
       if (generation === dataGeneration.current && !unavailableRef.current) setLoading(false);
     }
-  }, [api, companyId, setError]);
+  }, [api, companyId, resetThreadCounts, setError]);
 
   useEffect(() => {
     void loadThreads();
   }, [loadThreads, connectionAttempt]);
+
+  const loadMoreThreads = async () => {
+    if (!companyId || !threadsMeta || unavailableRef.current) return;
+    const generation = dataGeneration.current;
+    // Live conversations that arrived before this request are in its total_count.
+    const countedByRequest = [...liveNewThreadIdsRef.current];
+    try {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+      const response = await api.list({ page: threadsMeta.current_page + 1 });
+      if (generation !== dataGeneration.current || unavailableRef.current) return;
+      const pageThreads = response.data.filter(thread => thread.company_id === companyId);
+      const nowCounted = new Set([...countedByRequest, ...pageThreads.map(thread => thread.id)]);
+      nowCounted.forEach(id => countedThreadIds.current.add(id));
+      updateLiveNewThreadIds(ids => ids.filter(id => !nowCounted.has(id)));
+      setThreads((current) => appendUniqueById(current, pageThreads));
+      setThreadsMeta(response.meta ?? null);
+    } catch (err) {
+      if (generation === dataGeneration.current) setLoadMoreError(err instanceof Error ? err.message : 'Failed to load more conversations');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (!companyId) return;
@@ -106,6 +164,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
           const latestAuthorId = thread.latest_message?.author_id;
           const unread = currentSelectedId === thread.id || latestAuthorId === user?.id ? false : true;
           const threadWithUnread = { ...thread, unread };
+          noteLiveThread(threadWithUnread);
           setThreads((current) => upsertThread(current, threadWithUnread));
           setSelectedThread((current) => (current?.id === thread.id ? threadWithUnread : current));
           return currentSelectedId;
@@ -128,6 +187,9 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
         setConnected(false);
         setLoading(false);
         setThreads([]);
+        setThreadsMeta(null);
+        resetThreadCounts([]);
+        setLoadMoreError(null);
         setSelectedId(null);
         setSelectedThread(null);
         setMobileConversationOpen(false);
@@ -141,7 +203,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       active = false;
       unsubscribe?.();
     };
-  }, [companyId, connectionAttempt, loadThreads, user?.id]);
+  }, [companyId, connectionAttempt, loadThreads, noteLiveThread, resetThreadCounts, user?.id]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -182,6 +244,7 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
       });
       if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
       setNewThread({ subject: '', body: '', document_id: '' });
+      noteLiveThread(response.data);
       setThreads((current) => upsertThread(current, response.data));
       setSelectedId(response.data.id);
       setSelectedThread(response.data);
@@ -327,6 +390,17 @@ function PortalMessagesContent({ api, documents, audienceLabel, description, can
                     <p className="mt-1 text-xs text-neutral-400">{formatDateTime(thread.last_message_at || thread.created_at)}</p>
                   </button>
                 ))
+              )}
+              {!loading && (
+                <LoadMoreFooter
+                  shown={threads.length}
+                  total={threadsMeta ? threadsMeta.total_count + liveNewThreadIds.length : threads.length}
+                  noun="conversations"
+                  hasMore={hasMorePages(threadsMeta)}
+                  loading={loadingMore}
+                  error={loadMoreError}
+                  onLoadMore={() => void loadMoreThreads()}
+                />
               )}
             </div>
           </div>
