@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { ClientPortalThread, PortalReadDisplay } from '@/services/api';
 
 // DOM visibility, focus and the server-issued fetched range are all required.
 // Cable/prefetch can update data, but cannot themselves acknowledge a message.
 export function useDisplayedMessages(thread: ClientPortalThread | null, enabled: boolean,
-  markRead: (id: number, data: PortalReadDisplay) => Promise<unknown>) {
+  markRead: (id: number, data: PortalReadDisplay) => Promise<unknown>): RefObject<HTMLDivElement | null> {
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = container.current;
@@ -16,7 +16,7 @@ export function useDisplayedMessages(thread: ClientPortalThread | null, enabled:
     const flush = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (!active || document.visibilityState !== 'visible' || !document.hasFocus() || node.closest('[inert]') || !node.getClientRects().length) return;
+        if (!active || document.visibilityState !== 'visible' || !document.hasFocus() || node.closest('[inert]') || document.querySelector('[role="dialog"][aria-modal="true"]') || !node.getClientRects().length) return;
         const ids = [...visible].sort((a, b) => a - b);
         const key = ids.join(',');
         if (!ids.length || sent.has(key)) return;
@@ -34,9 +34,11 @@ export function useDisplayedMessages(thread: ClientPortalThread | null, enabled:
       flush();
     }, { threshold: [0, 0.5, 1] });
     node.querySelectorAll('[data-message-id]').forEach(element => observer.observe(element));
+    const overlays = new MutationObserver(flush);
+    overlays.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal', 'inert'] });
     window.addEventListener('focus', flush);
     document.addEventListener('visibilitychange', flush);
-    return () => { active = false; observer.disconnect(); clearTimeout(timer); window.removeEventListener('focus', flush); document.removeEventListener('visibilitychange', flush); };
+    return () => { active = false; observer.disconnect(); overlays.disconnect(); clearTimeout(timer); window.removeEventListener('focus', flush); document.removeEventListener('visibilitychange', flush); };
   }, [thread, enabled, markRead]);
   return container;
 }

@@ -78,9 +78,10 @@ module Api
         end
 
         def destroy
-          file_keys = [ @document.preview_file_key, @document.file_key ].compact
+          file_keys = nil
 
           @document.with_lock do
+            file_keys = [ @document.preview_file_key, @document.file_key ].compact
             @document.destroy!
             PortalActivity.record!(user: current_user, record: @document, action: "client_documents#destroy",
               metadata: PortalActivity.document_metadata(@document),

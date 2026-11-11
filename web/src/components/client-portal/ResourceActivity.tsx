@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import type { BoundedListMeta, PortalActivityEvent } from '@/services/api';
@@ -8,6 +8,7 @@ export type ResourceActivityApi = {
 };
 
 export function ResourceActivity({ id, api, revision }: { id: number; api: ResourceActivityApi; revision?: string | number }) {
+  const generation = useRef(0);
   const [expanded, setExpanded] = useState(false);
   const [events, setEvents] = useState<PortalActivityEvent[]>([]);
   const [meta, setMeta] = useState<BoundedListMeta | null>(null);
@@ -15,25 +16,28 @@ export function ResourceActivity({ id, api, revision }: { id: number; api: Resou
   const [loading, setLoading] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    const requestGeneration = ++generation.current;
     if (!expanded) return;
-    let active = true;
+    const active = () => requestGeneration === generation.current;
     setLoading(true);
     setError(null);
     api.activity(id).then(response => {
-      if (active) { setEvents(response.data); setMeta(response.meta); }
-    }).catch(() => { if (active) setError('Activity could not be loaded. Try again.'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      if (active()) { setEvents(response.data); setMeta(response.meta); }
+    }).catch(() => { if (active()) setError('Activity could not be loaded. Try again.'); })
+      .finally(() => { if (active()) setLoading(false); });
+    return () => { generation.current += 1; };
   }, [api, id, expanded, revision, attempt]);
-  const loadMore = async () => {
+  const loadMore = async (): Promise<void> => {
+    const requestGeneration = generation.current;
     setLoading(true);
     setError(null);
     try {
       const response = await api.activity(id, (meta?.current_page ?? 1) + 1);
+      if (requestGeneration !== generation.current) return;
       setEvents(current => appendUniqueById(current, response.data));
       setMeta(response.meta);
-    } catch { setError('Activity could not be loaded. Try again.'); }
-    finally { setLoading(false); }
+    } catch { if (requestGeneration === generation.current) setError('Activity could not be loaded. Try again.'); }
+    finally { if (requestGeneration === generation.current) setLoading(false); }
   };
   return <section className="border-t border-neutral-200 p-4" aria-label="Resource activity">
     <Button type="button" variant="outline" size="sm" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>Activity</Button>

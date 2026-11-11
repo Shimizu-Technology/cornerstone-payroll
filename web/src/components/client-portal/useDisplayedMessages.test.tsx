@@ -1,20 +1,27 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
+import { CommandPalette } from '@/components/layout/CommandPalette';
 import type { ClientPortalThread } from '@/services/api';
 import { useDisplayedMessages } from './useDisplayedMessages';
+vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: false, isSuperAdmin: false, isAccountant: true, isClient: false, hasCapability: () => false }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ companies: [], activeCompany: { id: 1 }, canSwitchCompany: false, switchCompany: vi.fn() }) }));
 let callback: IntersectionObserverCallback;
 const mark = vi.fn().mockResolvedValue({});
 const topic = { id: 4, display_token: 'signed-range', messages: [{ id: 12 }] } as ClientPortalThread;
-function View({ enabled = true, thread = topic }: { enabled?: boolean; thread?: ClientPortalThread }) {
+function View({ enabled = true, thread = topic }: { enabled?: boolean; thread?: ClientPortalThread }): ReactElement {
   const ref = useDisplayedMessages(thread, enabled, mark);
   return <div ref={ref}><div data-message-id="12">Displayed message</div></div>;
 }
-function intersect(visible: boolean) {
+function intersect(visible: boolean): void {
   act(() => callback([{ target: document.querySelector('[data-message-id]')!, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 } as unknown as IntersectionObserverEntry], {} as IntersectionObserver));
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  Element.prototype.scrollIntoView = vi.fn();
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
@@ -65,4 +72,11 @@ it('does not mark a conversation covered by a modal', async () => {
   render(<div inert><View /></div>); intersect(true);
   await new Promise(resolve => setTimeout(resolve, 250));
   expect(mark).not.toHaveBeenCalled();
+});
+
+it('pauses for the actual command palette and resumes when it closes', async () => {
+  const view = (open: boolean) => <><View /><MemoryRouter><CommandPalette open={open} onOpenChange={vi.fn()} /></MemoryRouter></>;
+  const rendered = render(view(true)); intersect(true);
+  await new Promise(resolve => setTimeout(resolve, 250)); expect(mark).not.toHaveBeenCalled();
+  rendered.rerender(view(false)); await waitFor(() => expect(mark).toHaveBeenCalledOnce());
 });
