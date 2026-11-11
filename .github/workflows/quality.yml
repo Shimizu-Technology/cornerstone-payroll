@@ -73,6 +73,9 @@ jobs:
         env:
           POOLER_DIR: ${{ runner.temp }}/pgbouncer
         run: |
+          # GitHub's runners sometimes can't resolve the Azure Ubuntu mirror; use the primary archive with retries.
+          sudo sed -i -E 's#mirror\+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#g; s#http://azure\.archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
           sudo apt-get update && sudo apt-get install -y pgbouncer
           mkdir -p "$POOLER_DIR"
           cat > "$POOLER_DIR/pgbouncer.ini" <<EOF
@@ -115,7 +118,12 @@ jobs:
         env:
           DEPLOYMENT_ENV: production
           VITE_DEPLOYMENT_ENV: production
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium
+        run: |
+          # GitHub's runners sometimes can't resolve the Azure Ubuntu mirror; use the primary archive with retries.
+          sudo sed -i -E 's#mirror\+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#g; s#http://azure\.archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          npx playwright install --with-deps chromium
       - run: npm run test:e2e:public
         env:
           VITE_AUTH_ENABLED: "false"
@@ -161,7 +169,12 @@ jobs:
         working-directory: api
       - run: npm ci
         working-directory: web
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright Chromium
+        run: |
+          # GitHub's runners sometimes can't resolve the Azure Ubuntu mirror; use the primary archive with retries.
+          sudo sed -i -E 's#mirror\+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#g; s#http://azure\.archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          npx playwright install --with-deps chromium
         working-directory: web
       - run: npm run test:e2e:release
         working-directory: web
