@@ -6,10 +6,17 @@ import type { ClientPortalThread, PortalReadDisplay } from '@/services/api';
 export function useDisplayedMessages(thread: ClientPortalThread | null, enabled: boolean,
   markRead: (id: number, data: PortalReadDisplay) => Promise<unknown>): RefObject<HTMLDivElement | null> {
   const container = useRef<HTMLDivElement>(null);
+  // Every message shown in the foreground so far, per conversation. The server
+  // advances the cursor only through a contiguous shown run, so reporting just
+  // the current viewport would strand a message seen before scrolling away.
+  const shownByThread = useRef(new Map<number, Set<number>>());
   useEffect(() => {
     const node = container.current;
     if (!node || !thread?.display_token || !enabled || !window.IntersectionObserver) return;
     const visible = new Set<number>();
+    const shown = shownByThread.current.get(thread.id) ?? new Set<number>();
+    shownByThread.current.set(thread.id, shown);
+    const loaded = new Set((thread.messages || []).map(message => message.id));
     const sent = new Set<string>();
     let timer: ReturnType<typeof setTimeout>;
     let active = true;
@@ -17,9 +24,10 @@ export function useDisplayedMessages(thread: ClientPortalThread | null, enabled:
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (!active || document.visibilityState !== 'visible' || !document.hasFocus() || node.closest('[inert]') || document.querySelector('[role="dialog"][aria-modal="true"]') || !node.getClientRects().length) return;
-        const ids = [...visible].sort((a, b) => a - b);
+        visible.forEach(id => shown.add(id));
+        const ids = [...shown].filter(id => loaded.has(id)).sort((a, b) => a - b);
         const key = ids.join(',');
-        if (!ids.length || sent.has(key)) return;
+        if (!visible.size || !ids.length || sent.has(key)) return;
         sent.add(key);
         void markRead(thread.id, { foreground: true, display_token: thread.display_token!, displayed_message_ids: ids })
           .catch(() => { sent.delete(key); });
