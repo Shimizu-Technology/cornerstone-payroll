@@ -43,7 +43,7 @@ class ClientDocument < ApplicationRecord
   validates :file_size, numericality: { greater_than: 0 }
   validates :preview_status, inclusion: { in: PREVIEW_STATUSES }
 
-  scope :recent_first, -> { order(created_at: :desc) }
+  scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :client_visible, -> { where(visible_to_client: true) }
 
   def self.detected_content_type(file)

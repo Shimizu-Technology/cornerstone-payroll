@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, type RenderResult } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeForm } from './EmployeeForm';
@@ -31,13 +31,13 @@ const business = { ...base, id: 8, first_name: 'Tano', last_name: 'Builders', em
   contractor_type: 'business', contractor_pay_type: 'flat_fee', business_name: 'Tano Builders LLC', ssn_last_four: null,
   contractor_ein_last_four: '4321' };
 
-function view(id: number) {
+function view(id: number): RenderResult {
   return render(<MemoryRouter initialEntries={[`/companies/1/employees/${id}/edit`]}><Routes>
     <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
     <Route path="*" element={<p>Left the form</p>} />
   </Routes></MemoryRouter>);
 }
-function submit() { fireEvent.submit(document.getElementById('employee-form')!); }
+function submit(): void { fireEvent.submit(document.getElementById('employee-form')!); }
 
 beforeEach(() => {
   vi.clearAllMocks();

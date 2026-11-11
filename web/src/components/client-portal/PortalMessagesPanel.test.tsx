@@ -102,3 +102,21 @@ it('keeps sending blocked when refreshing available clients fails', async () => 
   expect((screen.getByRole('button', { name: 'Start Conversation' }) as HTMLButtonElement).disabled).toBe(true);
   expect(mocks.subscribe).toHaveBeenCalledOnce();
 });
+
+it('pages older conversations with a server total and Load more', async () => {
+  const older = (id: number, subject: string) => ({ ...thread(2, subject), id });
+  const meta = (page: number) => ({ current_page: page, total_pages: 2, total_count: 3, per_page: 2 });
+  api.list.mockImplementation((params) => Promise.resolve(
+    params?.page === 2 ? { data: [older(1, 'Oldest conversation')], meta: meta(2) } : { data: [older(3, 'Newest conversation'), older(2, 'Middle conversation')], meta: meta(1) },
+  ));
+  api.get.mockImplementation((id) => Promise.resolve({ data: older(id, 'Selected') }));
+  render(view());
+
+  expect((await screen.findByText(/Showing/)).textContent).toBe('Showing 2 of 3 conversations');
+  expect(screen.queryByText('Oldest conversation')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Load more conversations' }));
+
+  expect(await screen.findByText('Oldest conversation')).toBeTruthy();
+  expect(api.list).toHaveBeenLastCalledWith({ page: 2 });
+  expect(screen.queryByRole('button', { name: 'Load more conversations' })).toBeNull();
+});

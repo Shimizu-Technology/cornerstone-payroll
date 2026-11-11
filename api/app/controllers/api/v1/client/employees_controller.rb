@@ -18,8 +18,7 @@ module Api
           employees = apply_filters(employees)
           employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates, :employee_w4_elections)
-          per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
-          employees = employees.page(params[:page]).per(per_page)
+          employees = employees.page(params[:page]).per(bounded_per_page(default: DEFAULT_PER_PAGE, max: MAX_PER_PAGE))
 
           render json: {
             data: employees.map { |employee| serialize_employee(employee) },

@@ -16,6 +16,14 @@ RSpec.describe "Employee contractor EIN encryption" do
     ActiveRecord::Encryption.without_encryption { employee.update_column(:contractor_ein, value) }
   end
 
+  # Bypasses normalization, which would otherwise turn a blank into NULL.
+  def store_raw(employee, value)
+    ActiveRecord::Base.connection.exec_update(
+      ActiveRecord::Base.sanitize_sql([ "UPDATE employees SET contractor_ein = ? WHERE id = ?", value, employee.id ])
+    )
+    expect(raw_ein(employee)).to eq(value)
+  end
+
   it "stores new EINs encrypted and reads them back" do
     employee = create(:employee, :business_contractor, company: company, contractor_ein: "98-7654321")
 
@@ -69,6 +77,43 @@ RSpec.describe "Employee contractor EIN encryption" do
     expect(ContractorEinEncryption.backfill!).to eq(0)
     expect(raw_ein(straggler)).not_to include("4444444")
     expect(Employee.find(straggler.id).contractor_ein).to eq("98-4444444")
+  end
+
+  it "turns stored blank EINs into NULL so the business contractor still shows as incomplete intake" do
+    blank = create(:employee, :business_contractor, company: company)
+    blank.update_columns(intake_exception: { "deferred_fields" => [ "contractor_ein" ] })
+    store_raw(blank, "")
+    padded = create(:employee, :business_contractor, company: company)
+    store_raw(padded, " \t")
+
+    ActiveRecord::Migration.suppress_messages { EncryptEmployeeContractorEins.new.migrate(:up) }
+
+    expect(raw_ein(blank)).to be_nil
+    expect(raw_ein(padded)).to be_nil
+    expect(Employee.intake_incomplete).to include(blank)
+    expect(ContractorEinEncryption.plaintext_ids).to be_empty
+  end
+
+  it "turns blank EINs into NULL in the rerunnable backfill too" do
+    blank = create(:employee, :business_contractor, company: company)
+    store_raw(blank, "  ")
+
+    expect(ContractorEinEncryption.backfill!).to eq(1)
+    expect(raw_ein(blank)).to be_nil
+    expect(ContractorEinEncryption.plaintext_ids).to be_empty
+  end
+
+  it "does not overwrite an EIN that changed after the backfill read it" do
+    employee = create(:employee, :business_contractor, company: company)
+    store_plaintext(employee, "98-8888888")
+    allow(ContractorEinEncryption).to receive(:stored_eins).and_wrap_original do |original|
+      stale = original.call.to_a
+      Employee.find(employee.id).update_column(:contractor_ein, "98-9999999")
+      stale.each
+    end
+
+    expect(ContractorEinEncryption.backfill!).to eq(0)
+    expect(Employee.find(employee.id).contractor_ein).to eq("98-9999999")
   end
 
   it "fails the encrypted-data readiness gate until no plaintext EIN remains" do
