@@ -40,3 +40,21 @@ RSpec.describe ClientPortalMessage, type: :model do
     expect(message.errors[:client_document]).to include("must belong to the same company")
   end
 end
+
+RSpec.describe "Portal attachment scan gate", type: :model do
+  it "rejects unclean and archived attachments through direct model creation" do
+    company = create(:company)
+    document = create(:client_document, company: company)
+    thread = create(:client_portal_thread, company: company)
+    adapter = double(allowed?: false)
+    allow(ClientDocumentScanner).to receive(:adapter).and_return(adapter)
+    expect do
+      create(:client_portal_message, company: company, client_portal_thread: thread, client_document: document)
+    end.to raise_error(ActiveRecord::RecordInvalid, /safety check/)
+    allow(adapter).to receive(:allowed?).and_return(true)
+    document.update!(archived_at: Time.current)
+    expect do
+      create(:client_portal_message, company: company, client_portal_thread: thread, client_document: document)
+    end.to raise_error(ActiveRecord::RecordInvalid, /archived/)
+  end
+end

@@ -1,3 +1,4 @@
+import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
@@ -28,7 +29,7 @@ const documentCategories = [
   { value: 'misc', label: 'Miscellaneous' },
 ];
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx';
-const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB.';
+const MAX_UPLOAD_NOTE = 'Accepted: PDF, Office docs, spreadsheets, text files, and common images up to 25 MB each. Select multiple files; larger selections upload in smaller groups. Macros are not supported.';
 
 function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
@@ -37,10 +38,6 @@ function categoryLabel(value: string) {
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function formatUploadSuccessMessage(count: number) {
-  return count === 1 ? 'Document uploaded successfully' : `${count} documents uploaded successfully`;
 }
 
 export function ClientDocuments() {
@@ -53,6 +50,7 @@ export function ClientDocuments() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -133,23 +131,27 @@ export function ClientDocuments() {
       setUploading(true);
       setError(null);
       setSuccess(null);
-      const payload = new FormData();
-      selectedFiles.forEach((file) => payload.append('files[]', file));
-      if (supportsSingleTitle && form.title.trim()) {
-        payload.append('title', form.title.trim());
-      }
-      payload.append('category', form.category);
-      if (form.employee_id) payload.append('employee_id', form.employee_id);
-      if (form.notes.trim()) payload.append('notes', form.notes.trim());
-      const response = await clientDocumentsApi.upload(payload);
-      setForm({ title: '', category: 'misc', employee_id: '', notes: '', files: [] });
+      const result = await uploadDocumentBatches(selectedFiles, {
+        ...(supportsSingleTitle && form.title.trim() ? { title: form.title.trim() } : {}),
+        category: form.category,
+        ...(form.employee_id ? { employee_id: form.employee_id } : {}),
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+      }, clientDocumentsApi.upload,
+        (completed, total) => setUploadProgress(`Uploading ${completed} of ${total} files…`));
+      setForm((current) => result.failures.length
+        ? { ...current, files: result.failures.map((failure) => failure.file) }
+        : { title: '', category: 'misc', employee_id: '', notes: '', files: [] });
       if (fileInputRef.current) fileInputRef.current.value = '';
-      setSuccess(response.message || formatUploadSuccessMessage(selectedFileCount));
-      await load();
+      if (result.uploaded.length) {
+        setSuccess(result.uploaded.length === 1 ? 'Document uploaded successfully' : `${result.uploaded.length} documents uploaded successfully`);
+        await load();
+      }
+      if (result.failures.length) setError(result.failures.map((failure) => `${failure.file.name}: ${failure.message}`).join('\n'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload document');
     } finally {
       setUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -189,12 +191,12 @@ export function ClientDocuments() {
   };
 
   const handleDelete = async (document: ClientDocument) => {
-    if (!window.confirm(`Delete "${document.title}"?`)) return;
+    if (!window.confirm(`Delete "${document.title}"? Files used in messages or evidence will be archived and kept.`)) return;
 
     try {
       setError(null);
-      await clientDocumentsApi.delete(document.id);
-      setSuccess('Document deleted');
+      const result = await clientDocumentsApi.delete(document.id);
+      setSuccess(result?.message || 'Document deleted');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete document');
@@ -252,6 +254,7 @@ export function ClientDocuments() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpload} className="grid gap-5 md:grid-cols-2">
+              <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
                 <Input
@@ -382,6 +385,8 @@ export function ClientDocuments() {
                   {uploading ? `Uploading ${selectedFileCount || ''} file${selectedFileCount === 1 ? '' : 's'}...` : 'Upload Document'}
                 </Button>
               </div>
+              {uploading && <p role="status" aria-live="polite" className="text-sm text-neutral-600">{uploadProgress}</p>}
+              </fieldset>
             </form>
           </CardContent>
         </Card>
@@ -422,6 +427,7 @@ export function ClientDocuments() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-semibold text-neutral-950">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Category" value={categoryLabel(document.category)} />
@@ -430,15 +436,15 @@ export function ClientDocuments() {
                             <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
                           </div>
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </Button>
@@ -466,6 +472,7 @@ export function ClientDocuments() {
                       <TableCell>
                         <div>
                           <p className="font-medium text-gray-900">{document.title}</p>
+                          {document.archived_at && <p className="text-sm font-medium text-neutral-600">File archived · kept as evidence</p>}
                           <p className="text-xs text-gray-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
                         </div>
                       </TableCell>
@@ -475,15 +482,15 @@ export function ClientDocuments() {
                       <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                             <Eye className="mr-2 h-4 w-4" />
                             Preview
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                          <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
                           </Button>

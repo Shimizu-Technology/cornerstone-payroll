@@ -48,3 +48,8 @@ production:
     class: CheckPrintGenerationRecoveryJob
     queue: default
     schedule: every 5 minutes
+
+  recover_pending_client_document_scans:
+    class: ClientDocumentScanRecoveryJob
+    queue: default
+    schedule: every 5 minutes
