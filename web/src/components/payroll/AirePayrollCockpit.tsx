@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { AirePayrollCalendarCard } from './AirePayrollCalendarCard';
+import { AireLockTimeControl } from './AireLockTimeControl';
 import { AireFinalizedBatchAction } from './AireFinalizedBatchAction';
 import { AireManualHoursReview } from './AireManualHoursReview';
 import { AireSourceCheckpointSummary } from './AireSourceCheckpointSummary';
@@ -881,9 +882,16 @@ function AirePayrollCockpitWorkspace({
           }
         }}
       />}
+      {checkpoint && !calendar.finalized_batch && !(payPeriodStatus === 'committed' && aireRecord) && (
+        <div className="border-t border-neutral-200">
+          <AireLockTimeControl payPeriodId={payPeriodId} calendar={calendar} onChanged={async () => {
+            if (await onRefresh() !== true) await load();
+          }} />
+        </div>
+      )}
       {checkpoint ? <details ref={sourceDetailsRef} className="border-t border-neutral-200">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-primary-800 sm:px-5">Cutoff and connection details</summary>
-        <AirePayrollCalendarCard payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
+        <AirePayrollCalendarCard showLockTime={false} payPeriodId={payPeriodId} calendar={calendar} payPeriodStatus={payPeriodStatus} linkedRecord={aireRecord} onRefresh={async () => {
           if (await onRefresh() !== true) await load();
         }} />
       </details> : verifiedBatch ? <details className="rounded-2xl border border-neutral-200 bg-white">

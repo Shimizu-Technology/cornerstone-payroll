@@ -27,6 +27,8 @@ type Props = {
   payPeriodStatus?: PayPeriodStatus;
   linkedRecord?: Pick<AirePayrollRecord, 'source_cutoff_at'> | null;
   onRefresh: () => Promise<void> | void;
+  /** False when the caller already shows the lock time outside this card. */
+  showLockTime?: boolean;
 };
 
 const stateLabels: Record<AirePayrollCalendarState['cutoff_state'], string> = {
@@ -54,7 +56,7 @@ function statusTone(state: AirePayrollCalendarState['cutoff_state']) {
   return 'default' as const;
 }
 
-export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, linkedRecord, onRefresh }: Props) {
+export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus, linkedRecord, onRefresh, showLockTime = true }: Props) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [scopeCompanyId] = useState(activeCompanyId);
   const hasConfigurationAccess = useSelectedCompanyCapability('manage_client_configuration', scopeCompanyId);
@@ -156,7 +158,7 @@ export function AirePayrollCalendarCard({ payPeriodId, calendar, payPeriodStatus
           </div>
         </div>
 
-        {!recordedWithoutSchedule && !batch && (
+        {showLockTime && !recordedWithoutSchedule && !batch && (
           <AireLockTimeControl payPeriodId={payPeriodId} calendar={calendar} companyId={scopeCompanyId} now={now} onChanged={onRefresh} />
         )}
 
