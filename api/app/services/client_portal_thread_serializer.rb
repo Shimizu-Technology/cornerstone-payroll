@@ -5,6 +5,11 @@ class ClientPortalThreadSerializer
     @current_user = current_user
   end
 
+  def preload_reads(threads)
+    @read_cursors = PortalThreadReadReceipt.where(user_id: @current_user.id, client_portal_thread_id: threads.map(&:id))
+      .pluck(:client_portal_thread_id, :last_displayed_message_id).to_h
+  end
+
   def thread(thread, include_messages: false)
     thread_messages = include_messages ? messages_for_thread(thread) : nil
 
@@ -19,13 +24,16 @@ class ClientPortalThreadSerializer
       resolved_by_name: thread.resolved_by&.name,
       resolved_at: thread.resolved_at,
       last_message_at: thread.last_message_at,
-      unread: thread.unread_for?(@current_user),
+      unread: thread.unread_for?(@current_user, cursor: @read_cursors && [ thread.read_baseline_message_id, @read_cursors.fetch(thread.id, 0) ].max),
       created_at: thread.created_at,
       updated_at: thread.updated_at,
       latest_message: message(latest_message_for(thread, thread_messages))
     }
 
-    payload[:messages] = thread_messages.map { |msg| message(msg) } if include_messages
+    if include_messages
+      payload[:messages] = thread_messages.map { |msg| message(msg) }
+      payload[:display_token] = PortalDisplayReceipt.issue(thread: thread, user: @current_user, messages: thread_messages) if @current_user
+    end
 
     payload
   end
@@ -47,6 +55,7 @@ class ClientPortalThreadSerializer
 
   def document(document)
     return nil unless document
+    return nil unless document.visible_to_client || @current_user&.staff_member?
 
     {
       id: document.id,

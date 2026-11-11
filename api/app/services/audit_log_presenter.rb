@@ -23,6 +23,23 @@ class AuditLogPresenter
   }.freeze
   VERBS = {
     "authentication#signed_in" => "signed in",
+    "client_documents#create" => "uploaded",
+    "admin_client_documents#create" => "uploaded",
+    "client_documents#destroy" => "deleted",
+    "admin_client_documents#destroy" => "deleted",
+    "portal_documents#opened" => "opened",
+    "portal_documents#preview" => "previewed",
+    "portal_documents#download" => "downloaded",
+    "client_documents#archive" => "archived",
+    "admin_client_documents#archive" => "archived",
+    "admin_client_documents#unarchive" => "unarchived",
+    "client_portal_threads#create" => "started conversation",
+    "client_portal_threads#opened" => "opened conversation",
+    "client_portal_threads#mark_read" => "marked read",
+    "client_portal_threads#resolved" => "resolved conversation",
+    "client_portal_threads#reopened" => "reopened conversation",
+    "client_portal_threads#update" => "updated conversation",
+    "client_portal_messages#create" => "sent a message in",
     "employees#create" => "added",
     "employees#update" => "updated",
     "employees#destroy" => "terminated",
@@ -139,7 +156,7 @@ class AuditLogPresenter
   end
 
   def record_subject
-    log.subject_name.presence || resolved_pay_period_subject || fallback_subject
+    log.subject_name.presence || (log.metadata || {})["title"].presence || (log.metadata || {})["employee_name"].presence || (log.metadata || {})["subject"].presence || resolved_pay_period_subject || fallback_subject
   end
 
   def resolved_pay_period_subject

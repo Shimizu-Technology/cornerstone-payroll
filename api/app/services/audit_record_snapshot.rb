@@ -68,6 +68,9 @@ class AuditRecordSnapshot
       return if record.blank?
       return record.display_name if record.respond_to?(:display_name) && record.display_name.present?
       return record.name if record.respond_to?(:name) && record.name.present?
+      return record.full_name if record.respond_to?(:full_name) && record.full_name.present?
+      return record.title if record.respond_to?(:title) && record.title.present?
+      return record.subject if record.respond_to?(:subject) && record.subject.present?
       return record.email if record.respond_to?(:email) && record.email.present?
       if record.respond_to?(:start_date) && record.respond_to?(:end_date)
         return "#{record.start_date&.strftime('%b %-d, %Y')} – #{record.end_date&.strftime('%b %-d, %Y')}"
